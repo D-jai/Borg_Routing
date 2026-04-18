@@ -48,6 +48,13 @@
 | BRT-DB-016 | Scratch read failed | `src/db/scratch.py::read_scratch_for_level` | SQLite query on the scratch table failed. The database file may be corrupt — check the WAL file. |
 | BRT-DB-017 | Scratch delete failed | `src/db/scratch.py::delete_scratch_for_level` | SQLite delete on the scratch table failed. Check database file permissions. |
 
+## BRT-LOG — Logging Module
+
+| Code | Description | Origin | Hints |
+|------|-------------|--------|-------|
+| BRT-LOG-001 | Invalid event_type value | `src/logging/writer.py::write_event` | Must be one of: `model_call`, `orchestrator_decision`, `child_residue`, `escalation`, `deferral`, `reorchestration`, `error`. |
+| BRT-LOG-002 | Log write failed | `src/logging/writer.py::_write_event_task` | Printed to stderr (never re-raised). Check disk space and database file permissions. This is non-blocking — the caller continues regardless. |
+
 ## BRT-API — API Module
 
 | Code | Description | Origin | Hints |

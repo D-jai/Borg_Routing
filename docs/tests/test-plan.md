@@ -21,6 +21,18 @@
 | TC-ENV-011 | All four valid envelope types accepted | Unit | ✅ Pass |
 | TC-ENV-012 | InboundEnvelope with scratch_writes and scratch_cleanup | Unit | ✅ Pass |
 
+## S2-05 — Log Writer
+
+| ID | Description | Level | Status |
+|----|-------------|-------|--------|
+| TC-LOG-001 | write_event lands in logs table | Unit | ✅ Pass |
+| TC-LOG-002 | payload_in stored with direction='in' | Unit | ✅ Pass |
+| TC-LOG-003 | payload_out stored with direction='out' | Unit | ✅ Pass |
+| TC-LOG-004 | BRT-LOG-001 raised for invalid event_type | Unit | ✅ Pass |
+| TC-LOG-005 | decision dict serialised to JSON | Unit | ✅ Pass |
+| TC-LOG-006 | write_event with only event_type succeeds | Unit | ✅ Pass |
+| TC-LOG-007 | All 7 valid event_types accepted | Unit | ✅ Pass |
+
 ## S2-04 — DB State + Scratch Helpers
 
 | ID | Description | Level | Status |
