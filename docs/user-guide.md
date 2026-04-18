@@ -28,3 +28,37 @@ the rest.
 ### If something goes wrong
 - **"Module not found" on startup** — Make sure you ran `pip install -e ".[dev]"` from the project root folder.
 - **Port 8000 already in use** — Stop the other process or start BORG_ROUTE on a different port: `uvicorn main:app --reload --port 8001`
+
+---
+
+<!-- Added: 2026-04-18 — S1-09: Models UI + Keys UI -->
+## Adding API Keys
+
+To use external AI models (like those on OpenRouter), you need to add an API key.
+
+### How to use it
+1. Open `http://localhost:8000/ui/keys.html` in your browser.
+2. For OpenRouter: enter your key in the OpenRouter row (get one free at openrouter.ai).
+3. Click **Save**. The key is stored in your local `.env` file — it never leaves your machine.
+4. Go to the **Models** page and click **Discover Models** to load the new provider's models.
+
+### If something goes wrong
+- **"All fields are required"** — fill in the Provider Name, Base URL, and API Key before saving.
+- **Key not taking effect** — restart the server after saving a new key.
+
+---
+
+## Discovering Models
+
+BORG_ROUTE can automatically find models running in LM Studio, Ollama, and on OpenRouter.
+
+### How to use it
+1. Start your local model server (LM Studio or Ollama) if you want local models.
+2. Open `http://localhost:8000/ui/models.html`.
+3. Click **Discover Models** at the top.
+4. The table will refresh with all discovered models, including their context length, tier, estimated cost, and throughput.
+5. Click **Benchmark** on any model to measure its actual quality and speed.
+
+### If something goes wrong
+- **No models appear after discovery** — Check that LM Studio is running on ports 1234–1237, or that Ollama is running at `http://localhost:11434`.
+- **OpenRouter models missing** — Make sure you have added an OpenRouter API key on the Keys page.

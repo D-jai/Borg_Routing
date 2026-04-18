@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Chat — BORG_ROUTE</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: sans-serif; background: #0f0f1a; color: #ddd; }
+    nav { background: #1a1a2e; color: #eee; padding: 10px 20px; display: flex; gap: 20px; align-items: center; }
+    nav .brand { font-weight: bold; color: #e94560; font-size: 1.1em; }
+    nav a { color: #eee; text-decoration: none; }
+    nav a:hover { color: #e94560; }
+    nav span.dim { color: #555; }
+    .container { padding: 40px 20px; text-align: center; color: #555; }
+  </style>
+</head>
+<body>
+<nav>
+  <span class="brand">BORG_ROUTE</span>
+  <a href="/ui/chat.html">Chat</a>
+  <a href="/ui/models.html">Models</a>
+  <a href="/ui/keys.html">API Keys</a>
+  <span class="dim">Admin</span>
+  <span class="dim">Dashboard</span>
+</nav>
+<div class="container">
+  <p>Chat UI — coming in Slice 2 (S2-16).</p>
+  <p style="margin-top:10px;font-size:0.85em;">Point any OpenAI-compatible client at <code>http://localhost:8000/v1/chat/completions</code> with <code>model: "borg_route"</code>.</p>
+</div>
+</body>
+</html>

@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Models — BORG_ROUTE</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: sans-serif; background: #0f0f1a; color: #ddd; }
+    nav { background: #1a1a2e; color: #eee; padding: 10px 20px; display: flex; gap: 20px; align-items: center; }
+    nav .brand { font-weight: bold; color: #e94560; font-size: 1.1em; }
+    nav a { color: #eee; text-decoration: none; }
+    nav a:hover { color: #e94560; }
+    nav span.dim { color: #555; }
+    .container { padding: 20px; }
+    h1 { margin-bottom: 16px; font-size: 1.4em; }
+    .toolbar { margin-bottom: 16px; display: flex; gap: 10px; }
+    button { background: #e94560; color: #fff; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; font-size: 0.9em; }
+    button:hover { background: #c73652; }
+    button:disabled { background: #555; cursor: not-allowed; }
+    #status { font-size: 0.85em; color: #aaa; padding: 6px 0; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.85em; }
+    th { background: #1a1a2e; color: #aaa; text-align: left; padding: 8px 10px; border-bottom: 1px solid #333; }
+    td { padding: 8px 10px; border-bottom: 1px solid #222; vertical-align: top; }
+    tr:hover td { background: #1a1a2e; }
+    .badge { display: inline-block; padding: 2px 7px; border-radius: 10px; font-size: 0.75em; margin: 1px; }
+    .badge-local { background: #1a4a2e; color: #6fcf97; }
+    .badge-ext   { background: #2a1a3e; color: #bb86fc; }
+    .badge-tag   { background: #1a2a3e; color: #90caf9; }
+    .cost { font-family: monospace; color: #f9c74f; }
+    .tps  { font-family: monospace; color: #90e0ef; }
+    .btn-sm { background: #333; color: #aaa; padding: 4px 10px; font-size: 0.8em; border-radius: 3px; }
+    .btn-sm:hover { background: #e94560; color: #fff; }
+    .empty { color: #555; text-align: center; padding: 40px; }
+  </style>
+</head>
+<body>
+<nav>
+  <span class="brand">BORG_ROUTE</span>
+  <a href="/ui/chat.html">Chat</a>
+  <a href="/ui/models.html">Models</a>
+  <a href="/ui/keys.html">API Keys</a>
+  <span class="dim">Admin</span>
+  <span class="dim">Dashboard</span>
+</nav>
+<div class="container">
+  <h1>Capability Matrix</h1>
+  <div class="toolbar">
+    <button id="btn-discover" onclick="discover()">Discover Models</button>
+    <span id="status"></span>
+  </div>
+  <table id="model-table">
+    <thead>
+      <tr>
+        <th>Source</th>
+        <th>Model ID</th>
+        <th>Context</th>
+        <th>Tier / Tags</th>
+        <th>Throughput</th>
+        <th>Est. cost / 1k out tokens</th>
+        <th>Actions</th>
+      </tr>
+    </thead>
+    <tbody id="model-body">
+      <tr><td colspan="7" class="empty">Loading…</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<script>
+const INPUT_COST_PER_1K = 1000;   // tokens for cost estimate
+const OUTPUT_COST_PER_1K = 1000;
+
+async function loadModels() {
+  try {
+    const resp = await fetch('/models/matrix');
+    const models = await resp.json();
+    renderTable(models);
+  } catch (e) {
+    document.getElementById('model-body').innerHTML =
+      `<tr><td colspan="7" class="empty">Failed to load models: ${e.message}</td></tr>`;
+  }
+}
+
+function sourceBadge(source) {
+  const cls = source === 'openrouter' || source === 'custom_key' ? 'badge-ext' : 'badge-local';
+  const label = source === 'lmstudio' ? 'LM Studio' : source === 'ollama' ? 'Ollama' : source === 'openrouter' ? 'OpenRouter' : source;
+  return `<span class="badge ${cls}">${label}</span>`;
+}
+
+function tierBadge(task_scores) {
+  if (!task_scores) return '';
+  const max = Math.max(...Object.values(task_scores));
+  if (max >= 9.0) return '<span class="badge" style="background:#3a1a1a;color:#ef5350;">Heavy</span>';
+  if (max >= 7.0) return '<span class="badge" style="background:#1a2a1a;color:#66bb6a;">Mid</span>';
+  return '<span class="badge" style="background:#2a2a1a;color:#ffa726;">Light</span>';
+}
+
+function tagBadges(tags) {
+  return (tags || []).map(t => `<span class="badge badge-tag">${t}</span>`).join(' ');
+}
+
+function estimateCost(model) {
+  const tps = model.throughput_tps || null;
+  const pricing = model.pricing;
+  const TIME_COST_PER_SEC = 0.0083;
+
+  let dollar = 0;
+  if (pricing) {
+    dollar = INPUT_COST_PER_1K * pricing.input_per_token + OUTPUT_COST_PER_1K * pricing.output_per_token;
+  }
+  let time = 0;
+  if (tps && tps > 0) {
+    time = (INPUT_COST_PER_1K + OUTPUT_COST_PER_1K) / tps * TIME_COST_PER_SEC;
+  }
+  const total = dollar + time;
+  return total === 0 ? '—' : `$${total.toFixed(5)}`;
+}
+
+function renderTable(models) {
+  const tbody = document.getElementById('model-body');
+  if (!models || models.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="7" class="empty">No models discovered yet. Click "Discover Models".</td></tr>';
+    return;
+  }
+  tbody.innerHTML = models.map(m => `
+    <tr>
+      <td>${sourceBadge(m.source)}</td>
+      <td style="font-family:monospace;font-size:0.8em;">${m.model_id}</td>
+      <td>${m.context_length ? (m.context_length / 1000).toFixed(0) + 'k' : '—'}</td>
+      <td>${tierBadge(m.task_scores)} ${tagBadges(m.specialty_tags)}</td>
+      <td class="tps">${m.throughput_tps ? m.throughput_tps.toFixed(1) + ' t/s' : '—'}</td>
+      <td class="cost">${estimateCost(m)}</td>
+      <td><button class="btn-sm" onclick="benchmark('${m.model_id}')">Benchmark</button></td>
+    </tr>
+  `).join('');
+}
+
+async function discover() {
+  const btn = document.getElementById('btn-discover');
+  const status = document.getElementById('status');
+  btn.disabled = true;
+  status.textContent = 'Discovering…';
+  try {
+    const resp = await fetch('/models/discover', { method: 'POST' });
+    const data = await resp.json();
+    status.textContent = `Done. ${data.upserted} models upserted.`;
+    await loadModels();
+  } catch (e) {
+    status.textContent = `Error: ${e.message}`;
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function benchmark(modelId) {
+  const status = document.getElementById('status');
+  status.textContent = `Benchmarking ${modelId}…`;
+  try {
+    const resp = await fetch(`/models/benchmark/${encodeURIComponent(modelId)}`, { method: 'POST' });
+    if (!resp.ok) {
+      const err = await resp.json();
+      status.textContent = `Benchmark error: ${err.detail}`;
+      return;
+    }
+    const data = await resp.json();
+    status.textContent = `Benchmark done: score=${data.score}, tps=${data.throughput_tps}`;
+    await loadModels();
+  } catch (e) {
+    status.textContent = `Error: ${e.message}`;
+  }
+}
+
+loadModels();
+</script>
+</body>
+</html>
