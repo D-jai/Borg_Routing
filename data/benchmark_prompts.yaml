@@ -1,0 +1,95 @@
+# Benchmark Prompts — BORG_ROUTE
+# 5 prompts per task_type used during quality + throughput measurement.
+# expected_shape is a rubric: what a score-10 answer looks like.
+# The judge model (heavy tier) scores each response 0-10.
+
+- task_type: reasoning
+  prompts:
+    - prompt: "A bat and ball cost $1.10 together. The bat costs $1.00 more than the ball. How much does the ball cost?"
+      expected_shape: "Correct answer is $0.05 with clear arithmetic reasoning. Full credit requires showing that ball=x, bat=x+1, x+(x+1)=1.10 → x=0.05."
+    - prompt: "If all roses are flowers and some flowers fade quickly, can we conclude that some roses fade quickly? Explain."
+      expected_shape: "Correct answer is NO. Explains that the 'some flowers' may not include roses. Uses syllogism structure."
+    - prompt: "A store runs a 20% discount, then a further 10% discount on the already discounted price. What is the total effective discount?"
+      expected_shape: "Correct answer is 28%. Shows (1-0.2)*(1-0.1)=0.72, effective discount = 28%."
+    - prompt: "Three friends split a restaurant bill equally. After splitting, one friend remembers a $9 coupon. If they redistribute the savings equally, how much does each person get back?"
+      expected_shape: "Correct answer is $3. Each person gets back $9/3=$3. No trick."
+    - prompt: "You have a 3-gallon jug and a 5-gallon jug. How do you measure exactly 4 gallons?"
+      expected_shape: "Correct answer: fill 5-gal, pour into 3-gal until full, discard 3-gal, pour remaining 2-gal into 3-gal, fill 5-gal, pour 1-gal into 3-gal to fill it, leaving 4 gallons in the 5-gal jug."
+
+- task_type: coding
+  prompts:
+    - prompt: "Write a Python function `count_words(text: str) -> dict[str, int]` that returns word frequencies, case-insensitive, ignoring punctuation."
+      expected_shape: "Working Python function. Handles case-insensitivity and punctuation stripping. Includes a brief docstring. No import beyond stdlib."
+    - prompt: "Write a Python function `is_palindrome(s: str) -> bool` that returns True if s is a palindrome, ignoring spaces and case."
+      expected_shape: "Working Python function. One-liner or clear loop. Handles spaces and case. Edge cases: empty string returns True."
+    - prompt: "Write a Python async function `fetch_json(url: str) -> dict` using httpx that fetches a URL and returns the parsed JSON, raising ValueError on non-200 status."
+      expected_shape: "Uses httpx.AsyncClient. Checks status_code. Raises ValueError with status code in message. Includes async/await correctly."
+    - prompt: "Write a SQL query to find the top 5 customers by total order value from tables: orders(id, customer_id, amount) and customers(id, name)."
+      expected_shape: "Correct JOIN. GROUP BY customer_id. SUM(amount). ORDER BY DESC. LIMIT 5. Returns customer name."
+    - prompt: "What is the time complexity of quicksort in the best, average, and worst case? Explain briefly."
+      expected_shape: "Best: O(n log n), Average: O(n log n), Worst: O(n²) when pivot is always min/max. Clear one-line explanation for each."
+
+- task_type: summarize
+  prompts:
+    - prompt: "Summarise this in 2-3 sentences: The Great Barrier Reef is the world's largest coral reef system, composed of over 2,900 individual reefs and 900 islands stretching for over 2,300 kilometres over an area of approximately 344,400 square kilometres. It is located in the Coral Sea, off the coast of Queensland, Australia. The reef supports an enormous diversity of life and was selected as a World Heritage Site in 1981."
+      expected_shape: "Captures: largest coral reef system, Queensland Australia location, biodiversity + World Heritage status. Max 3 sentences."
+    - prompt: "In one sentence, what is machine learning?"
+      expected_shape: "One sentence. Mentions: systems learning from data, making predictions/decisions without explicit programming."
+    - prompt: "Give a 5-word title for this concept: a system where AI agents delegate subtasks to cheaper models based on cost and capability."
+      expected_shape: "5 words exactly. Captures cost-aware delegation or routing concept."
+    - prompt: "What are the three main branches of the US government? Answer in exactly 3 bullet points."
+      expected_shape: "Exactly 3 bullets: Legislative (Congress), Executive (President), Judicial (Supreme Court)."
+    - prompt: "Summarise the Pythagorean theorem for a 10-year-old."
+      expected_shape: "Simple language. Mentions right triangles. a² + b² = c². No jargon."
+
+- task_type: writing
+  prompts:
+    - prompt: "Write a 3-sentence product description for a waterproof bluetooth speaker targeted at hikers."
+      expected_shape: "3 sentences. Mentions: waterproof, bluetooth, outdoor/hiking use. Engaging tone. No filler phrases like 'Introducing...'."
+    - prompt: "Write a short professional email declining a meeting, proposing async communication instead. Max 5 sentences."
+      expected_shape: "Professional tone. Declines politely. Proposes alternative (email/doc/async). ≤5 sentences."
+    - prompt: "Write a haiku about debugging code."
+      expected_shape: "Valid haiku structure: 5-7-5 syllables. Relates to debugging/code. Some creativity."
+    - prompt: "Rewrite this sentence in formal English: 'The thing is totally busted and nobody knows why.'"
+      expected_shape: "Formal vocabulary. Removes 'totally busted' → 'non-functional' or 'inoperative'. Removes 'nobody' → 'no one' or 'the cause remains undetermined'."
+    - prompt: "Write a one-paragraph motivation for learning to code aimed at a 40-year-old career changer."
+      expected_shape: "Encouraging tone. Mentions: career opportunity, learning at any age, problem-solving satisfaction. ~100-150 words."
+
+- task_type: roleplay
+  prompts:
+    - prompt: "You are a pirate captain. A crew member asks why you became a pirate. Respond in character, 3-5 sentences."
+      expected_shape: "In-character voice (pirate dialect/swagger). 3-5 sentences. Specific backstory detail. No meta-commentary."
+    - prompt: "You are a medieval blacksmith. Describe your morning routine in first person, 3-4 sentences."
+      expected_shape: "First person. Period-appropriate details (forge, anvil, iron). 3-4 sentences. No anachronisms."
+    - prompt: "Act as a Socratic tutor. A student says 'I think democracy is the best system.' Ask 3 probing questions without stating your own opinion."
+      expected_shape: "3 questions only. Open-ended. Does not state opinion. Genuinely probing (not leading)."
+    - prompt: "You are an AI assistant that only responds in rhyming couplets. User says: 'What time is it?' Respond accordingly."
+      expected_shape: "Two rhyming lines. Addresses the question. Maintains the format constraint."
+    - prompt: "Play a job interviewer. The candidate says they have 10 years of Python experience. Ask 2 appropriate follow-up questions."
+      expected_shape: "2 specific technical or behavioural follow-up questions. Professional tone. Relevant to 10-year Python experience."
+
+- task_type: agentic
+  prompts:
+    - prompt: "You are given the task: 'Research competitor pricing for our SaaS product.' Break this into 3-5 subtasks with clear outputs for each."
+      expected_shape: "3-5 subtasks. Each has: what to do + what the output is. Subtasks are logically ordered and complete."
+    - prompt: "Given tool list: [search_web, read_url, write_file]. Describe step-by-step how you'd compile a report on the top 5 Python web frameworks."
+      expected_shape: "Uses only the listed tools. Step-by-step. Ends with write_file for the report. 5-8 steps."
+    - prompt: "You just received 50 customer support emails. What decision framework would you use to prioritise which to answer first?"
+      expected_shape: "Mentions: urgency, severity, SLA, customer tier or impact. Structured (list or numbered). Practical."
+    - prompt: "A sub-agent returned this error: 'Model context exceeded. Truncated at 2000 tokens.' What are your next 2 actions as the orchestrator?"
+      expected_shape: "Action 1: retry with compressed/chunked input OR escalate to larger context model. Action 2: log the failure and adjust the plan. Specific and actionable."
+    - prompt: "You need to classify 10,000 emails into 5 buckets. You have a fast cheap model (2B) and a slow expensive one (70B). Describe your routing strategy."
+      expected_shape: "Uses cheap model for bulk classification. Uses expensive model for low-confidence items or edge cases. Mentions confidence threshold or retry logic."
+
+- task_type: extraction
+  prompts:
+    - prompt: "Extract all dates from this text and return them as a JSON array: 'The project launched on March 3rd 2024. The deadline is April 15, 2024. A review was held on 1 Feb 2024.'"
+      expected_shape: "JSON array with 3 dates. All 3 dates present. Standardised format preferred (ISO 8601 or consistent)."
+    - prompt: "From this sentence, extract: person name, action, object. 'Sarah quietly placed the ancient manuscript on the oak table.' Return as JSON."
+      expected_shape: "JSON with fields: person=Sarah, action=placed, object=manuscript (or ancient manuscript). Table is location, not object."
+    - prompt: "Extract all company names from: 'Google partnered with Samsung while Apple announced a deal with TSMC.' Return as a JSON array."
+      expected_shape: "JSON array: [Google, Samsung, Apple, TSMC]. All 4 present. No extras."
+    - prompt: "Given this CSV row: 'Alice,28,Engineer,New York,85000', extract the fields as JSON with keys: name, age, role, city, salary."
+      expected_shape: "Correct JSON. name=Alice, age=28 (integer), role=Engineer, city=New York, salary=85000 (integer)."
+    - prompt: "Extract all action items from: 'John will send the report by Friday. The team needs to review the contract. Lisa is scheduled to call the client Monday morning.'"
+      expected_shape: "3 action items. Each: who + what + when. Structured (list or JSON array)."

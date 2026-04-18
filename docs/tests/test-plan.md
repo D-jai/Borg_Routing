@@ -4,6 +4,17 @@
 
 ---
 
+## S1-07 — Model Benchmark
+
+| ID | Description | Level | Status |
+|----|-------------|-------|--------|
+| TC-REG-050 | _load_prompts loads seed file with all 7 task_types, 5 prompts each | Unit | ✅ Pass |
+| TC-REG-051 | BRT-REG-011 raised on missing prompts file | Unit | ✅ Pass |
+| TC-REG-052 | benchmark_model returns score, throughput_tps, elapsed_sec | Unit (mocked) | ✅ Pass |
+| TC-REG-053 | Score is averaged across all prompts | Unit (mocked) | ✅ Pass |
+| TC-REG-054 | BRT-REG-015 raised when model has no endpoint | Unit | ✅ Pass |
+| TC-REG-055 | benchmark_all updates matrix scores and throughput | Unit (mocked) | ✅ Pass |
+
 ## S1-06 — Model Discovery
 
 | ID | Description | Level | Status |
