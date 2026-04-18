@@ -6,13 +6,28 @@
   <title>Chat — BORG_ROUTE</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: sans-serif; background: #0f0f1a; color: #ddd; }
-    nav { background: #1a1a2e; color: #eee; padding: 10px 20px; display: flex; gap: 20px; align-items: center; }
+    body { font-family: sans-serif; background: #0f0f1a; color: #ddd; display: flex; flex-direction: column; height: 100vh; }
+    nav { background: #1a1a2e; color: #eee; padding: 10px 20px; display: flex; gap: 20px; align-items: center; flex-shrink: 0; }
     nav .brand { font-weight: bold; color: #e94560; font-size: 1.1em; }
     nav a { color: #eee; text-decoration: none; }
     nav a:hover { color: #e94560; }
     nav span.dim { color: #555; }
-    .container { padding: 40px 20px; text-align: center; color: #555; }
+    #chat-area { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 12px; }
+    .msg { max-width: 75%; padding: 10px 14px; border-radius: 8px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; }
+    .msg.user { background: #1e3a5f; align-self: flex-end; }
+    .msg.assistant { background: #1a1a2e; border: 1px solid #333; align-self: flex-start; }
+    .msg.system { background: #1a1a1a; border: 1px solid #444; align-self: center; font-size: 0.85em; color: #888; max-width: 90%; }
+    .run-link { font-size: 0.75em; color: #555; margin-top: 4px; }
+    .run-link a { color: #4080c0; text-decoration: none; }
+    .run-link a:hover { text-decoration: underline; }
+    #input-bar { background: #1a1a2e; border-top: 1px solid #2a2a3e; padding: 12px 20px; display: flex; gap: 10px; flex-shrink: 0; }
+    #input-bar select { background: #0f0f1a; border: 1px solid #333; color: #ccc; padding: 8px; border-radius: 4px; font-size: 0.9em; }
+    #user-input { flex: 1; background: #0f0f1a; border: 1px solid #333; color: #ddd; padding: 10px 14px; border-radius: 4px; font-size: 1em; resize: none; height: 42px; min-height: 42px; max-height: 160px; }
+    #send-btn { background: #e94560; color: white; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer; font-size: 1em; }
+    #send-btn:disabled { background: #555; cursor: not-allowed; }
+    #send-btn:hover:not(:disabled) { background: #c73450; }
+    .spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid #555; border-top-color: #e94560; border-radius: 50%; animation: spin 0.8s linear infinite; vertical-align: middle; margin-right: 6px; }
+    @keyframes spin { to { transform: rotate(360deg); } }
   </style>
 </head>
 <body>
@@ -24,9 +39,96 @@
   <span class="dim">Admin</span>
   <span class="dim">Dashboard</span>
 </nav>
-<div class="container">
-  <p>Chat UI — coming in Slice 2 (S2-16).</p>
-  <p style="margin-top:10px;font-size:0.85em;">Point any OpenAI-compatible client at <code>http://localhost:8000/v1/chat/completions</code> with <code>model: "borg_route"</code>.</p>
+
+<div id="chat-area">
+  <div class="msg system">Connected to BORG_ROUTE. Type a message to begin.</div>
 </div>
+
+<div id="input-bar">
+  <select id="model-select">
+    <option value="borg_route">borg_route (auto)</option>
+    <option value="borg_route:light">borg_route:light</option>
+    <option value="borg_route:mid">borg_route:mid</option>
+    <option value="borg_route:heavy">borg_route:heavy</option>
+    <option value="borg_route:coding">borg_route:coding</option>
+    <option value="borg_route:reasoning">borg_route:reasoning</option>
+    <option value="borg_route:local">borg_route:local</option>
+  </select>
+  <textarea id="user-input" placeholder="Type a message… (Enter to send, Shift+Enter for newline)" rows="1"></textarea>
+  <button id="send-btn">Send</button>
+</div>
+
+<script>
+  const chatArea = document.getElementById('chat-area');
+  const userInput = document.getElementById('user-input');
+  const sendBtn = document.getElementById('send-btn');
+  const modelSelect = document.getElementById('model-select');
+  const thread = [];
+
+  function addMsg(role, content, runId) {
+    const div = document.createElement('div');
+    div.className = 'msg ' + role;
+    div.textContent = content;
+    chatArea.appendChild(div);
+    if (runId) {
+      const link = document.createElement('div');
+      link.className = 'run-link';
+      link.innerHTML = `<a href="/ui/run.html?id=${runId}" target="_blank">View run trace →</a>`;
+      chatArea.appendChild(link);
+    }
+    chatArea.scrollTop = chatArea.scrollHeight;
+    return div;
+  }
+
+  async function sendMessage() {
+    const text = userInput.value.trim();
+    if (!text) return;
+    userInput.value = '';
+    userInput.style.height = '42px';
+
+    addMsg('user', text);
+    thread.push({ role: 'user', content: text });
+
+    sendBtn.disabled = true;
+    const thinkingDiv = addMsg('assistant', '');
+    thinkingDiv.innerHTML = '<span class="spinner"></span>Thinking…';
+
+    try {
+      const resp = await fetch('/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: modelSelect.value,
+          messages: thread,
+          stream: false,
+        }),
+      });
+      const data = await resp.json();
+      const answer = data.choices?.[0]?.message?.content ?? '(empty response)';
+      const runId = data.id?.replace('chatcmpl-', '');
+      thinkingDiv.textContent = answer;
+      if (runId) {
+        const link = document.createElement('div');
+        link.className = 'run-link';
+        link.innerHTML = `<a href="/ui/run.html?id=${runId}" target="_blank">View run trace →</a>`;
+        thinkingDiv.after(link);
+      }
+      thread.push({ role: 'assistant', content: answer });
+    } catch (err) {
+      thinkingDiv.textContent = `Error: ${err.message}`;
+    } finally {
+      sendBtn.disabled = false;
+    }
+  }
+
+  sendBtn.addEventListener('click', sendMessage);
+  userInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+  });
+  userInput.addEventListener('input', () => {
+    userInput.style.height = '42px';
+    userInput.style.height = Math.min(userInput.scrollHeight, 160) + 'px';
+  });
+</script>
 </body>
 </html>

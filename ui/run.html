@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Run Trace — BORG_ROUTE</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: monospace; background: #0f0f1a; color: #ddd; }
+    nav { background: #1a1a2e; color: #eee; padding: 10px 20px; display: flex; gap: 20px; align-items: center; }
+    nav .brand { font-weight: bold; color: #e94560; font-size: 1.1em; font-family: sans-serif; }
+    nav a { color: #eee; text-decoration: none; font-family: sans-serif; }
+    nav a:hover { color: #e94560; }
+    .container { padding: 20px; max-width: 1200px; margin: 0 auto; }
+    h1 { font-size: 1.1em; color: #e94560; margin-bottom: 6px; font-family: sans-serif; }
+    .meta { font-size: 0.8em; color: #666; margin-bottom: 20px; }
+    .meta span { color: #aaa; }
+    h2 { font-size: 0.95em; color: #ccc; margin: 24px 0 8px; font-family: sans-serif; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.78em; }
+    th { background: #1a1a2e; color: #888; padding: 6px 10px; text-align: left; border-bottom: 1px solid #2a2a3e; }
+    td { padding: 5px 10px; border-bottom: 1px solid #1a1a2e; vertical-align: top; word-break: break-all; }
+    tr:hover td { background: #151524; }
+    .badge { display: inline-block; padding: 1px 6px; border-radius: 3px; font-size: 0.75em; }
+    .badge.resolved { background: #1a3a1a; color: #4c4; }
+    .badge.failed { background: #3a1a1a; color: #c44; }
+    .badge.in_flight { background: #1a2a3a; color: #48f; }
+    .badge.pending { background: #2a2a1a; color: #aa8; }
+    .badge.completed { background: #1a3a1a; color: #4c4; }
+    .badge.running { background: #1a2a3a; color: #48f; }
+    .event-row { border-left: 3px solid #333; padding: 6px 10px; margin-bottom: 8px; font-size: 0.78em; background: #111120; }
+    .event-row.orchestrator_decision { border-color: #e94560; }
+    .event-row.child_residue { border-color: #ffa500; }
+    .event-row.model_call { border-color: #4080c0; }
+    .event-time { color: #555; font-size: 0.8em; }
+    .decision { color: #aaa; white-space: pre-wrap; max-height: 120px; overflow-y: auto; }
+    #status { padding: 20px; color: #888; font-family: sans-serif; }
+  </style>
+</head>
+<body>
+<nav>
+  <span class="brand">BORG_ROUTE</span>
+  <a href="/ui/chat.html">Chat</a>
+  <a href="/ui/models.html">Models</a>
+  <a href="/ui/keys.html">API Keys</a>
+</nav>
+
+<div class="container">
+  <div id="status">Loading run trace…</div>
+  <div id="content" style="display:none">
+    <h1>Run Trace</h1>
+    <div class="meta">
+      Run ID: <span id="run-id"></span> &nbsp;|&nbsp;
+      Status: <span id="run-status"></span> &nbsp;|&nbsp;
+      Created: <span id="run-created"></span>
+    </div>
+    <div style="background:#1a1a2e;border-radius:6px;padding:12px 16px;margin-bottom:20px;font-size:0.85em;color:#ccc;white-space:pre-wrap;" id="instruction"></div>
+
+    <h2>Envelopes</h2>
+    <table id="envelope-table">
+      <thead>
+        <tr>
+          <th>Level</th><th>Type</th><th>Skill</th><th>Trigger</th>
+          <th>Model</th><th>Tokens In</th><th>Tokens Out</th><th>Status</th>
+        </tr>
+      </thead>
+      <tbody id="envelope-body"></tbody>
+    </table>
+
+    <h2>Orchestrator Decisions + Events</h2>
+    <div id="events"></div>
+  </div>
+</div>
+
+<script>
+  const params = new URLSearchParams(window.location.search);
+  const runId = params.get('id');
+
+  if (!runId) {
+    document.getElementById('status').textContent = 'No run ID provided. Add ?id=<run_id> to the URL.';
+  } else {
+    fetch(`/runs/${runId}`)
+      .then(r => r.json())
+      .then(data => {
+        document.getElementById('status').style.display = 'none';
+        document.getElementById('content').style.display = 'block';
+
+        const run = data.run || {};
+        document.getElementById('run-id').textContent = run.run_id || runId;
+        document.getElementById('run-status').innerHTML = badge(run.status);
+        document.getElementById('run-created').textContent = run.created_at || '—';
+        document.getElementById('instruction').textContent = run.user_instruction || '—';
+
+        // Envelopes
+        const tbody = document.getElementById('envelope-body');
+        (data.envelopes || []).forEach(env => {
+          const tr = document.createElement('tr');
+          tr.innerHTML = [
+            `<td>${env.level_path || '—'}</td>`,
+            `<td>${env.type || '—'}</td>`,
+            `<td>${env.skill_id || '—'}</td>`,
+            `<td>${env.trigger_reason || '—'}</td>`,
+            `<td>${env.model_id || '—'}</td>`,
+            `<td>${env.tokens_input ?? '—'}</td>`,
+            `<td>${env.tokens_output ?? '—'}</td>`,
+            `<td>${badge(env.status)}</td>`,
+          ].join('');
+          tbody.appendChild(tr);
+        });
+        if (!data.envelopes || data.envelopes.length === 0) {
+          tbody.innerHTML = '<tr><td colspan="8" style="color:#555;padding:10px;">No envelopes yet.</td></tr>';
+        }
+
+        // Events
+        const eventsDiv = document.getElementById('events');
+        (data.events || []).forEach(ev => {
+          const div = document.createElement('div');
+          div.className = 'event-row ' + (ev.event_type || '');
+          let decision = '';
+          if (ev.decision_json) {
+            try { decision = JSON.stringify(JSON.parse(ev.decision_json), null, 2); }
+            catch { decision = ev.decision_json; }
+          }
+          div.innerHTML = `
+            <strong>${ev.event_type || '—'}</strong>
+            <span class="event-time"> ${ev.created_at || ''}</span>
+            ${ev.model_id ? `<span style="color:#555"> · ${ev.model_id}</span>` : ''}
+            ${decision ? `<div class="decision">${htmlEscape(decision)}</div>` : ''}
+          `;
+          eventsDiv.appendChild(div);
+        });
+        if (!data.events || data.events.length === 0) {
+          eventsDiv.innerHTML = '<p style="color:#555;font-size:0.85em;">No events yet.</p>';
+        }
+      })
+      .catch(err => {
+        document.getElementById('status').textContent = `Error loading run: ${err.message}`;
+      });
+  }
+
+  function badge(status) {
+    if (!status) return '—';
+    return `<span class="badge ${status}">${status}</span>`;
+  }
+
+  function htmlEscape(str) {
+    return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  }
+</script>
+</body>
+</html>
