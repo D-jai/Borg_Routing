@@ -180,3 +180,19 @@ gives operators real-time control over model behaviour without restarting the se
 **Demo talking point:** "After 15 turns the system automatically compresses the first 10 into a paragraph summary. The orchestrator reads that summary and the last 5 turns — same reasoning quality, a fraction of the tokens."
 
 **Portfolio/LinkedIn angle:** Demonstrates Progressive Distillation and Cascading Distillation patterns from first principles — memory management built as a first-class architectural concern, not bolted on.
+
+---
+
+<!-- Added: 2026-04-18 — Slice 6: Live UI + Streaming Polish -->
+## Slice 6 — Live UI + Streaming Polish
+
+**What it adds:**
+- **Server-Sent Events run stream:** `GET /runs/{id}/stream` emits real-time envelope status changes as the orchestrator works. Clients get a live feed; no polling needed.
+- **Token-level streaming chat:** `/v1/chat/completions` with `stream=true` now relays real SSE chunks from bypass model endpoints and word-streams orchestrated responses — OpenAI wire-compatible.
+- **Live run trace UI:** `ui/run.html` auto-connects to the SSE stream — envelopes appear as dispatched, apply_to_each counter ticks up in real time, status dot turns green.
+- **Streaming chat UI:** `ui/chat.html` displays tokens progressively as they arrive.
+- **Enhanced dashboard:** cost summary cards, token leaderboard (horizontal bars per model), and a depth tree showing recursive parent→child run relationships.
+
+**Demo talking point:** "Open the run trace and watch the orchestrator work in real time — each envelope appears as it's dispatched, the apply_to_each counter ticks up as subtasks fan out, and the status dot turns red or green the moment the run completes."
+
+**Portfolio/LinkedIn angle:** Production-grade streaming architecture — SSE pub/sub from the DB layer through the API to the browser, all without WebSockets or external message queues.

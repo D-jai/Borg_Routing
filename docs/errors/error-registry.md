@@ -136,6 +136,7 @@
 | BRT-API-010 | Malformed chat completions request | `src/api/chat_completions.py` | The request body is not valid JSON or does not contain required fields (model, messages). Check the request format. |
 | BRT-API-011 | Model not found (bypass mode) | `src/api/chat_completions.py::_bypass_to_model` | The specified model_id is not in the capability matrix. Run discovery first. |
 | BRT-API-012 | Pipeline/bypass execution failed | `src/api/chat_completions.py` | The orchestration pipeline or bypass model call failed. Check the run trace for details. |
+| BRT-API-013 | Bypass streaming relay failed | `src/api/chat_completions.py::_stream_bypass_relay` | The underlying model endpoint returned a non-200 status or disconnected during SSE relay. The error text is injected into the final delta chunk so the client still receives a valid SSE stream. Check the model endpoint is running and supports streaming. |
 | BRT-API-020 | Malformed task request | `src/api/tasks.py::submit_task` | `instruction` is required and must not be empty. |
 | BRT-API-021 | Run not found | `src/api/tasks.py::get_run_state` | The run_id does not exist. Check that the run was submitted first. |
 | BRT-API-022 | Task submission failed | `src/api/tasks.py::submit_task` | Could not create the run record. Check database connectivity. |
@@ -184,6 +185,8 @@
 |------|-------------|--------|-------|
 | BRT-API-026 | Invalid rating value | `src/api/tasks.py::rate_run` | rating must be 1 (thumbs up) or -1 (thumbs down). |
 | BRT-API-027 | Run not found for rating | `src/api/tasks.py::rate_run` | The run_id does not exist or is malformed. Check the run was created before rating it. |
+| BRT-API-028 | Stream run not found | `src/api/tasks.py::stream_run_state` | The run_id does not exist or is not a valid UUID. Submit the task first, then open the stream. |
+| BRT-API-029 | Stream DB error | `src/api/tasks.py::stream_run_state._event_generator` | SQLite error during SSE polling. The event data will contain the error message. Check database connectivity. |
 | BRT-API-040 | Logs fetch failed | `src/api/logs.py::list_logs` | SQLite error while reading logs. Check database connectivity. |
 | BRT-API-041 | Entities fetch failed | `src/api/logs.py::list_entities` | SQLite error while reading log_entities. Check database connectivity. |
 | BRT-API-042 | Cost summary failed | `src/api/logs.py::cost_summary` | SQLite aggregation error. Check database connectivity. |

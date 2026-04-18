@@ -39,6 +39,14 @@
     .stat-card .value { font-size: 1.4em; font-weight: bold; color: #e94560; }
     .stat-card .sub { color: #555; font-size: 0.75em; margin-top: 2px; }
     h2 { font-size: 1em; color: #aaa; margin: 16px 0 8px; }
+    .cost-bar-wrap { background: #111120; border-radius: 3px; height: 8px; flex: 1; overflow: hidden; }
+    .cost-bar-fill { height: 100%; background: #e94560; border-radius: 3px; transition: width 0.3s; }
+    .tree-node { font-family: monospace; font-size: 0.8em; line-height: 1.8; }
+    .tree-node .depth0 { color: #e94560; }
+    .tree-node .depth1 { color: #88aaff; padding-left: 16px; }
+    .tree-node .depth2 { color: #4c4; padding-left: 32px; }
+    .tree-node .depth3 { color: #ffa500; padding-left: 48px; }
+    .tree-node .depthN { color: #aaa; padding-left: 64px; }
   </style>
 </head>
 <body>
@@ -86,7 +94,13 @@
       <h2>Run Outcomes</h2>
       <div class="stat-grid" id="outcome-cards"></div>
 
-      <h2>Cost &amp; Tokens by Model</h2>
+      <h2>Cost Cards by Model</h2>
+      <div class="stat-grid" id="cost-cards"></div>
+
+      <h2>Token Leaderboard</h2>
+      <div id="token-leaderboard" style="margin-bottom:16px;"></div>
+
+      <h2>Cost &amp; Tokens by Model (detail)</h2>
       <table id="cost-table">
         <thead>
           <tr><th>Model</th><th>Calls</th><th>Tokens In</th><th>Tokens Out</th><th>Cost $</th></tr>
@@ -96,6 +110,9 @@
 
       <h2>Feedback</h2>
       <div class="stat-grid" id="feedback-cards"></div>
+
+      <h2>Depth Tree (recent runs with children)</h2>
+      <div id="depth-tree" class="tree-node"></div>
 
       <h2>Outlier Runs (highest token usage)</h2>
       <table id="outlier-table">
@@ -147,12 +164,55 @@
       outcomeCards.appendChild(card);
     });
 
-    // Cost table
+    const byModel = costData.by_model || [];
+    const totalCost = byModel.reduce((s, r) => s + Number(r.total_cost || 0), 0);
+    const totalTokens = byModel.reduce((s, r) => s + (r.total_tokens_in || 0) + (r.total_tokens_out || 0), 0);
+
+    // Cost cards
+    const costCards = document.getElementById('cost-cards');
+    costCards.innerHTML = '';
+    [['Total Cost', `$${totalCost.toFixed(4)}`, '#e94560'],
+     ['Total Tokens', totalTokens.toLocaleString(), '#88aaff'],
+     ['Models Used', byModel.length, '#4c4'],
+     ['Total Calls', byModel.reduce((s,r) => s + (r.call_count||0), 0), '#ffa500']
+    ].forEach(([label, val, color]) => {
+      const card = document.createElement('div');
+      card.className = 'stat-card';
+      card.innerHTML = `<div class="label">${label}</div><div class="value" style="color:${color}">${val}</div>`;
+      costCards.appendChild(card);
+    });
+
+    // Token leaderboard (horizontal bars)
+    const leaderboard = document.getElementById('token-leaderboard');
+    leaderboard.innerHTML = '';
+    const sorted_models = [...byModel].sort((a, b) =>
+      ((b.total_tokens_in||0)+(b.total_tokens_out||0)) - ((a.total_tokens_in||0)+(a.total_tokens_out||0))
+    ).slice(0, 8);
+    const maxTok = sorted_models[0] ? (sorted_models[0].total_tokens_in||0)+(sorted_models[0].total_tokens_out||0) : 1;
+    sorted_models.forEach(r => {
+      const tok = (r.total_tokens_in||0) + (r.total_tokens_out||0);
+      const pct = maxTok > 0 ? (tok / maxTok * 100).toFixed(1) : 0;
+      const row = document.createElement('div');
+      row.style.cssText = 'display:flex;align-items:center;gap:10px;margin-bottom:6px;font-size:0.82em;';
+      row.innerHTML = `
+        <span style="min-width:160px;color:#aaa;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${htmlEscape(r.model_id||'')}">
+          ${htmlEscape((r.model_id||'unknown').slice(0,24))}
+        </span>
+        <div class="cost-bar-wrap"><div class="cost-bar-fill" style="width:${pct}%"></div></div>
+        <span style="color:#888;min-width:60px;text-align:right">${tok.toLocaleString()}</span>
+      `;
+      leaderboard.appendChild(row);
+    });
+    if (sorted_models.length === 0) {
+      leaderboard.innerHTML = '<p style="color:#555;font-size:0.82em;">No model call data yet.</p>';
+    }
+
+    // Cost table (detail)
     const costBody = document.getElementById('cost-body');
     costBody.innerHTML = '';
-    (costData.by_model || []).forEach(r => {
+    byModel.forEach(r => {
       const tr = document.createElement('tr');
-      tr.innerHTML = `<td>${r.model_id||'(unknown)'}</td><td>${r.call_count}</td>
+      tr.innerHTML = `<td>${htmlEscape(r.model_id||'(unknown)')}</td><td>${r.call_count}</td>
         <td>${(r.total_tokens_in||0).toLocaleString()}</td>
         <td>${(r.total_tokens_out||0).toLocaleString()}</td>
         <td>$${Number(r.total_cost||0).toFixed(4)}</td>`;
@@ -170,14 +230,37 @@
       feedbackCards.appendChild(card);
     });
 
-    // Outlier runs (from run_digests via /runs + digest info — use runs sorted by token_count)
-    // We use cost summary per model but for per-run outliers we query run_digests indirectly
-    // via the runs list — digests aren't directly exposed yet, so show top runs by instruction length
-    // as a proxy. (Run digests endpoint will be added in a later slice if needed.)
+    // Depth tree — show runs that have children (parent_run_id links)
+    const depthTree = document.getElementById('depth-tree');
+    depthTree.innerHTML = '';
+    const rootRuns = runs.filter(r => !r.parent_run_id).slice(0, 10);
+    const childMap = {};
+    runs.forEach(r => {
+      if (r.parent_run_id) {
+        (childMap[r.parent_run_id] = childMap[r.parent_run_id] || []).push(r);
+      }
+    });
+    function renderTreeNode(run, depth) {
+      const cls = depth === 0 ? 'depth0' : depth === 1 ? 'depth1' : depth === 2 ? 'depth2' : depth === 3 ? 'depth3' : 'depthN';
+      const prefix = depth === 0 ? '' : '└─ ';
+      const el = document.createElement('div');
+      el.className = cls;
+      el.innerHTML = `${prefix}<a href="/ui/run.html?id=${run.run_id}" style="color:inherit;text-decoration:none;">${(run.run_id||'').slice(0,8)}…</a>`
+        + ` <span style="color:#555">${badge(run.status)}</span>`
+        + ` <span style="color:#666;font-size:0.85em">${htmlEscape((run.user_instruction||'').slice(0,50))}</span>`;
+      depthTree.appendChild(el);
+      (childMap[run.run_id] || []).forEach(child => renderTreeNode(child, depth + 1));
+    }
+    rootRuns.forEach(r => renderTreeNode(r, 0));
+    if (rootRuns.length === 0) {
+      depthTree.innerHTML = '<p style="color:#555;font-size:0.82em;">No runs yet.</p>';
+    }
+
+    // Outlier runs — use instruction length as proxy for complexity
     const outlierBody = document.getElementById('outlier-body');
     outlierBody.innerHTML = '';
-    const sorted = [...runs].sort((a, b) => (b.user_instruction||'').length - (a.user_instruction||'').length).slice(0, 5);
-    sorted.forEach(r => {
+    const sortedRuns = [...runs].sort((a, b) => (b.user_instruction||'').length - (a.user_instruction||'').length).slice(0, 5);
+    sortedRuns.forEach(r => {
       const tr = document.createElement('tr');
       tr.innerHTML = `<td style="font-family:monospace;font-size:0.78em">${(r.run_id||'').slice(0,12)}…</td>
         <td>—</td><td>—</td>

@@ -102,23 +102,62 @@
       const resp = await fetch('/v1/chat/completions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model: modelSelect.value,
-          messages: thread,
-          stream: false,
-        }),
+        body: JSON.stringify({ model: modelSelect.value, messages: thread, stream: true }),
       });
-      const data = await resp.json();
-      const answer = data.choices?.[0]?.message?.content ?? '(empty response)';
-      const runId = data.id?.replace('chatcmpl-', '');
-      thinkingDiv.textContent = answer;
+
+      if (!resp.ok || !resp.body) {
+        const errData = await resp.json().catch(() => ({}));
+        thinkingDiv.textContent = `Error: ${errData.detail?.message || resp.statusText}`;
+        return;
+      }
+
+      thinkingDiv.textContent = '';
+      let fullText = '';
+      let runId = null;
+
+      const reader = resp.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+
+        // Process complete SSE lines
+        const lines = buffer.split('\n');
+        buffer = lines.pop(); // keep incomplete last line
+
+        for (const line of lines) {
+          if (!line.startsWith('data:')) continue;
+          const payload = line.slice(5).trim();
+          if (payload === '[DONE]') continue;
+          let chunk;
+          try { chunk = JSON.parse(payload); } catch { continue; }
+
+          if (!runId && chunk.id) runId = chunk.id.replace('chatcmpl-', '');
+
+          const delta = chunk.choices?.[0]?.delta?.content;
+          if (delta) {
+            fullText += delta;
+            thinkingDiv.textContent = fullText;
+            chatArea.scrollTop = chatArea.scrollHeight;
+          }
+        }
+      }
+
+      if (!fullText) fullText = '(empty response)';
+      thinkingDiv.textContent = fullText;
+
       if (runId) {
         const link = document.createElement('div');
         link.className = 'run-link';
         link.innerHTML = `<a href="/ui/run.html?id=${runId}" target="_blank">View run trace →</a>`;
         thinkingDiv.after(link);
       }
-      thread.push({ role: 'assistant', content: answer });
+
+      thread.push({ role: 'assistant', content: fullText });
+
       if (runId) {
         const ratingBar = document.createElement('div');
         ratingBar.className = 'rating-bar';

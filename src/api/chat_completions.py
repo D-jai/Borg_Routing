@@ -11,12 +11,14 @@ Model aliases:
   {exact model_id}         → bypass orchestration, direct to that model
 
 Streaming: if stream=true, emit SSE with OpenAI-compat data: lines.
+  - Bypass mode: relays actual SSE chunks from the underlying model endpoint.
+  - Orchestration mode: word-level SSE after pipeline completion.
 
 Error codes:
 - BRT-API-010: malformed request body
 - BRT-API-011: model not found (bypass mode)
 - BRT-API-012: pipeline execution failed
-- BRT-API-013: streaming not supported for bypass mode yet
+- BRT-API-013: bypass model streaming relay failed
 """
 import asyncio
 import json
@@ -184,6 +186,73 @@ async def _bypass_to_model(
     return body["choices"][0]["message"]["content"]
 
 
+async def _stream_bypass_relay(
+    matrix: CapabilityMatrix,
+    model_id: str,
+    model_alias: str,
+    messages: list[ChatMessage],
+    run_id: str,
+) -> AsyncIterator[str]:
+    """Relay actual SSE chunks from an underlying model endpoint.
+
+    If the model endpoint does not support streaming, falls back to
+    word-by-word simulation so the caller always gets a valid SSE stream.
+    """
+    model_info = matrix.get(model_id)
+    if not model_info or not model_info.endpoint:
+        # Fallback: non-streaming fetch then simulate
+        try:
+            text = await _bypass_to_model(matrix, model_id, messages)
+        except Exception as exc:
+            err = {"id": f"chatcmpl-{run_id}", "object": "chat.completion.chunk",
+                   "created": int(time.time()), "model": model_alias,
+                   "choices": [{"index": 0, "delta": {"content": f"[BRT-API-013] {exc}"}, "finish_reason": "stop"}]}
+            yield f"data: {json.dumps(err)}\n\ndata: [DONE]\n\n"
+            return
+        async for chunk in _stream_response(text, model_alias, run_id):
+            yield chunk
+        return
+
+    payload = {
+        "model": "default",
+        "messages": [{"role": m.role, "content": m.content} for m in messages],
+        "stream": True,
+    }
+    try:
+        async with httpx.AsyncClient(timeout=120) as client:
+            async with client.stream(
+                "POST", f"{model_info.endpoint}/v1/chat/completions", json=payload
+            ) as resp:
+                if resp.status_code != 200:
+                    # Fallback to non-stream
+                    text = await _bypass_to_model(matrix, model_id, messages)
+                    async for chunk in _stream_response(text, model_alias, run_id):
+                        yield chunk
+                    return
+                async for line in resp.aiter_lines():
+                    if not line:
+                        continue
+                    if line.startswith("data:"):
+                        payload_str = line[5:].strip()
+                        if payload_str == "[DONE]":
+                            yield "data: [DONE]\n\n"
+                            return
+                        # Re-emit with our model alias substituted
+                        try:
+                            chunk = json.loads(payload_str)
+                            chunk["model"] = model_alias
+                            yield f"data: {json.dumps(chunk)}\n\n"
+                        except json.JSONDecodeError:
+                            yield f"data: {payload_str}\n\n"
+    except Exception as exc:
+        err_chunk = {
+            "id": f"chatcmpl-{run_id}", "object": "chat.completion.chunk",
+            "created": int(time.time()), "model": model_alias,
+            "choices": [{"index": 0, "delta": {"content": f"[BRT-API-013] Streaming relay failed: {exc}"}, "finish_reason": "stop"}],
+        }
+        yield f"data: {json.dumps(err_chunk)}\n\ndata: [DONE]\n\n"
+
+
 @router.post("/v1/chat/completions")
 async def chat_completions(request: Request):
     """OpenAI-compatible chat completions endpoint."""
@@ -219,8 +288,13 @@ async def chat_completions(request: Request):
 
     # Bypass mode: exact model_id, not a borg_route alias
     if base_model != "borg_route":
-        # Get the matrix from the app state or load it
         from main import matrix as app_matrix
+        run_id = str(uuid.uuid4())
+        if chat_req.stream:
+            return StreamingResponse(
+                _stream_bypass_relay(app_matrix, base_model, model_alias, chat_req.messages, run_id),
+                media_type="text/event-stream",
+            )
         try:
             response_text = await _bypass_to_model(app_matrix, base_model, chat_req.messages)
         except HTTPException:
@@ -230,14 +304,7 @@ async def chat_completions(request: Request):
                 status_code=502,
                 detail={"error": "BRT-API-012", "message": f"Bypass model failed: {exc}"},
             )
-        run_id = str(uuid.uuid4())
-        resp_body = _build_openai_response(run_id, model_alias, response_text)
-        if chat_req.stream:
-            return StreamingResponse(
-                _stream_response(response_text, model_alias, run_id),
-                media_type="text/event-stream",
-            )
-        return JSONResponse(content=resp_body)
+        return JSONResponse(content=_build_openai_response(run_id, model_alias, response_text))
 
     # Full orchestration via pipeline runner
     try:

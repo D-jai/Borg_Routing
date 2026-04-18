@@ -34,6 +34,10 @@
     .event-time { color: #555; font-size: 0.8em; }
     .decision { color: #aaa; white-space: pre-wrap; max-height: 120px; overflow-y: auto; }
     #status { padding: 20px; color: #888; font-family: sans-serif; }
+    #live-bar { background: #1a1a2e; border: 1px solid #2a2a3e; border-radius: 4px; padding: 8px 14px; margin-bottom: 16px; font-size: 0.82em; display: flex; gap: 20px; align-items: center; }
+    #live-dot { width: 8px; height: 8px; border-radius: 50%; background: #555; display: inline-block; margin-right: 6px; }
+    #live-dot.live { background: #4c4; animation: pulse 1.2s ease-in-out infinite; }
+    @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }
   </style>
 </head>
 <body>
@@ -56,6 +60,12 @@
     </div>
     <div style="background:#1a1a2e;border-radius:6px;padding:12px 16px;margin-bottom:20px;font-size:0.85em;color:#ccc;white-space:pre-wrap;" id="instruction"></div>
 
+    <div id="live-bar">
+      <span><span id="live-dot"></span><span id="live-label">Connecting…</span></span>
+      <span>Envelopes: <strong id="env-count">0</strong></span>
+      <span>apply_to_each: <strong id="ate-count">0</strong></span>
+    </div>
+
     <h2>Envelopes</h2>
     <table id="envelope-table">
       <thead>
@@ -76,9 +86,14 @@
   const params = new URLSearchParams(window.location.search);
   const runId = params.get('id');
 
+  // envelope_id -> <tr> element
+  const envRows = {};
+  let ateCount = 0;
+
   if (!runId) {
     document.getElementById('status').textContent = 'No run ID provided. Add ?id=<run_id> to the URL.';
   } else {
+    // Initial load — populate header and events
     fetch(`/runs/${runId}`)
       .then(r => r.json())
       .then(data => {
@@ -91,63 +106,124 @@
         document.getElementById('run-created').textContent = run.created_at || '—';
         document.getElementById('instruction').textContent = run.user_instruction || '—';
 
-        // Envelopes
-        const tbody = document.getElementById('envelope-body');
-        (data.envelopes || []).forEach(env => {
-          // Extract child_run_id from inbound_payload if type=orchestrate
-          let childRunId = null;
-          if (env.type === 'orchestrate' && env.inbound_payload) {
-            try {
-              const inbound = JSON.parse(env.inbound_payload);
-              childRunId = inbound.output?.child_run_id || null;
-            } catch(e) {}
-          }
-          const childCell = childRunId
-            ? `<a href="/ui/run.html?id=${childRunId}" style="font-family:monospace;font-size:0.78em;color:#88aaff;">${childRunId.slice(0,8)}…</a>`
-            : '—';
-          const tr = document.createElement('tr');
-          tr.innerHTML = [
-            `<td>${env.level_path || '—'}</td>`,
-            `<td>${env.type || '—'}</td>`,
-            `<td>${env.skill_id || '—'}</td>`,
-            `<td>${env.trigger_reason || '—'}</td>`,
-            `<td>${env.model_id || '—'}</td>`,
-            `<td>${env.tokens_input ?? '—'}</td>`,
-            `<td>${env.tokens_output ?? '—'}</td>`,
-            `<td>${badge(env.status)}</td>`,
-            `<td>${childCell}</td>`,
-          ].join('');
-          tbody.appendChild(tr);
-        });
-        if (!data.envelopes || data.envelopes.length === 0) {
-          tbody.innerHTML = '<tr><td colspan="9" style="color:#555;padding:10px;">No envelopes yet.</td></tr>';
-        }
+        // Seed envelope table from initial snapshot
+        (data.envelopes || []).forEach(upsertEnvelopeRow);
 
-        // Events
+        // Events (static — populated once from initial fetch)
         const eventsDiv = document.getElementById('events');
         (data.events || []).forEach(ev => {
-          const div = document.createElement('div');
-          div.className = 'event-row ' + (ev.event_type || '');
-          let decision = '';
-          if (ev.decision_json) {
-            try { decision = JSON.stringify(JSON.parse(ev.decision_json), null, 2); }
-            catch { decision = ev.decision_json; }
-          }
-          div.innerHTML = `
-            <strong>${ev.event_type || '—'}</strong>
-            <span class="event-time"> ${ev.created_at || ''}</span>
-            ${ev.model_id ? `<span style="color:#555"> · ${ev.model_id}</span>` : ''}
-            ${decision ? `<div class="decision">${htmlEscape(decision)}</div>` : ''}
-          `;
-          eventsDiv.appendChild(div);
+          eventsDiv.appendChild(buildEventDiv(ev));
         });
         if (!data.events || data.events.length === 0) {
           eventsDiv.innerHTML = '<p style="color:#555;font-size:0.85em;">No events yet.</p>';
         }
+
+        // Start SSE stream for live updates
+        startStream(run.status);
       })
       .catch(err => {
         document.getElementById('status').textContent = `Error loading run: ${err.message}`;
       });
+  }
+
+  function startStream(initialStatus) {
+    if (initialStatus === 'completed' || initialStatus === 'failed') {
+      setLiveBar(false, initialStatus);
+      return;
+    }
+
+    const es = new EventSource(`/runs/${runId}/stream`);
+    setLiveBar(true, 'live');
+
+    es.onmessage = (e) => {
+      let msg;
+      try { msg = JSON.parse(e.data); } catch { return; }
+
+      if (msg.type === 'envelope_update') {
+        upsertEnvelopeRow(msg.envelope);
+      } else if (msg.type === 'run_terminal') {
+        document.getElementById('run-status').innerHTML = badge(msg.status);
+        setLiveBar(false, msg.status);
+        es.close();
+      } else if (msg.type === 'error') {
+        setLiveBar(false, 'error');
+        es.close();
+      }
+    };
+
+    es.onerror = () => {
+      setLiveBar(false, 'disconnected');
+      es.close();
+    };
+  }
+
+  function upsertEnvelopeRow(env) {
+    const tbody = document.getElementById('envelope-body');
+    const placeholder = tbody.querySelector('td[colspan]');
+    if (placeholder) placeholder.parentElement.remove();
+
+    let childRunId = null;
+    if (env.type === 'orchestrate' && env.inbound_payload) {
+      try {
+        const inbound = JSON.parse(env.inbound_payload);
+        childRunId = inbound.output?.child_run_id || null;
+      } catch(e) {}
+    }
+    const childCell = childRunId
+      ? `<a href="/ui/run.html?id=${childRunId}" style="font-family:monospace;font-size:0.78em;color:#88aaff;">${childRunId.slice(0,8)}…</a>`
+      : '—';
+
+    const cells = [
+      `<td>${env.level_path || '—'}</td>`,
+      `<td>${env.type || '—'}</td>`,
+      `<td>${env.skill_id || '—'}</td>`,
+      `<td>${env.trigger_reason || '—'}</td>`,
+      `<td>${env.model_id || '—'}</td>`,
+      `<td>${env.tokens_input ?? '—'}</td>`,
+      `<td>${env.tokens_output ?? '—'}</td>`,
+      `<td class="status-cell">${badge(env.status)}</td>`,
+      `<td>${childCell}</td>`,
+    ].join('');
+
+    const eid = env.envelope_id;
+    if (envRows[eid]) {
+      envRows[eid].innerHTML = cells;
+    } else {
+      const tr = document.createElement('tr');
+      tr.innerHTML = cells;
+      tbody.appendChild(tr);
+      envRows[eid] = tr;
+      // Update counters
+      document.getElementById('env-count').textContent = Object.keys(envRows).length;
+      if (env.type === 'apply_to_each') {
+        ateCount++;
+        document.getElementById('ate-count').textContent = ateCount;
+      }
+    }
+  }
+
+  function buildEventDiv(ev) {
+    const div = document.createElement('div');
+    div.className = 'event-row ' + (ev.event_type || '');
+    let decision = '';
+    if (ev.decision_json) {
+      try { decision = JSON.stringify(JSON.parse(ev.decision_json), null, 2); }
+      catch { decision = ev.decision_json; }
+    }
+    div.innerHTML = `
+      <strong>${ev.event_type || '—'}</strong>
+      <span class="event-time"> ${ev.created_at || ''}</span>
+      ${ev.model_id ? `<span style="color:#555"> · ${ev.model_id}</span>` : ''}
+      ${decision ? `<div class="decision">${htmlEscape(decision)}</div>` : ''}
+    `;
+    return div;
+  }
+
+  function setLiveBar(isLive, label) {
+    const dot = document.getElementById('live-dot');
+    dot.className = isLive ? 'live' : '';
+    document.getElementById('live-label').textContent =
+      isLive ? 'Live' : (label === 'completed' ? 'Completed' : label === 'failed' ? 'Failed' : label || 'Stopped');
   }
 
   function badge(status) {

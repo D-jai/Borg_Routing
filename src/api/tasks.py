@@ -2,6 +2,7 @@
 
 POST /v1/task           — submit async task, returns run_id immediately (202 Accepted)
 GET  /runs/{id}         — fetch full run state (envelopes, events, digest)
+GET  /runs/{id}/stream  — SSE stream of envelope status changes
 POST /runs/{id}/resume  — re-dispatch failed/in-flight envelopes
 GET  /runs              — list recent runs (dashboard support)
 
@@ -12,6 +13,8 @@ Error codes:
 - BRT-API-023: run fetch failed
 - BRT-API-024: resume failed
 - BRT-API-025: run list failed
+- BRT-API-028: stream run not found
+- BRT-API-029: stream DB error
 """
 import asyncio
 import json
@@ -19,7 +22,7 @@ from typing import Optional
 
 import aiosqlite
 from fastapi import APIRouter, BackgroundTasks, HTTPException
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
 from src.db.schema import DB_PATH
@@ -158,6 +161,79 @@ async def get_run_state(run_id: str) -> JSONResponse:
         "envelopes": envelopes,
         "events": events,
     })
+
+
+@router.get("/runs/{run_id}/stream")
+async def stream_run_state(run_id: str) -> StreamingResponse:
+    """Stream envelope status changes as Server-Sent Events.
+
+    Emits ``data: {json}\\n\\n`` for each new or changed envelope.
+    Closes automatically when the run reaches a terminal state or after 90 s.
+
+    Event shapes:
+    - ``{"type": "envelope_update", "envelope": {...}}``
+    - ``{"type": "run_terminal",    "status": "completed"|"failed", "run_id": "..."}``
+    - ``{"type": "error",           "error": "BRT-API-029", "message": "..."}``
+
+    Error codes: BRT-API-028 (run not found), BRT-API-029 (stream DB error).
+    """
+    import uuid as _uuid
+
+    try:
+        run_uuid = _uuid.UUID(run_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail={"error": "BRT-API-028", "message": f"Invalid run_id format: {run_id}"},
+        )
+
+    try:
+        await get_run(run_uuid, db_path=DB_PATH)
+    except ValueError:
+        raise HTTPException(
+            status_code=404,
+            detail={"error": "BRT-API-028", "message": f"Run '{run_id}' not found"},
+        )
+
+    async def _event_generator():
+        seen: dict[str, str] = {}  # envelope_id -> last emitted status
+        loop = asyncio.get_event_loop()
+        deadline = loop.time() + 90.0
+
+        try:
+            while loop.time() < deadline:
+                try:
+                    run = await get_run(run_uuid, db_path=DB_PATH)
+                    envelopes = await get_envelopes(run_uuid, db_path=DB_PATH)
+                except Exception as exc:
+                    yield (
+                        f"data: {json.dumps({'type': 'error', 'error': 'BRT-API-029', 'message': str(exc)})}\n\n"
+                    )
+                    return
+
+                for env in envelopes:
+                    eid = env["envelope_id"]
+                    new_status = env.get("status", "")
+                    if seen.get(eid) != new_status:
+                        seen[eid] = new_status
+                        yield f"data: {json.dumps({'type': 'envelope_update', 'envelope': env})}\n\n"
+
+                run_status = run.get("status", "")
+                if run_status in ("completed", "failed"):
+                    yield (
+                        f"data: {json.dumps({'type': 'run_terminal', 'status': run_status, 'run_id': run_id})}\n\n"
+                    )
+                    return
+
+                await asyncio.sleep(0.5)
+        except asyncio.CancelledError:
+            return
+
+    return StreamingResponse(
+        _event_generator(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @router.post("/runs/{run_id}/resume", status_code=202)

@@ -236,3 +236,27 @@ summary = await compress_inactive_turns(
 ## Dashboard
 
 The Dashboard at `http://localhost:8000/ui/dashboard.html` shows all runs with their status, parent link, and creation time. Click **Trace** to open the full run trace for any run.
+
+The **Stats** tab now shows:
+- **Cost Cards** — total cost, total tokens, number of models used, and total calls at a glance.
+- **Token Leaderboard** — horizontal bar chart showing token consumption per model (top 8).
+- **Depth Tree** — visual tree of runs and their child runs, so you can see recursive orchestration at a glance.
+- **Outlier Runs** — the five most complex runs by instruction length.
+
+---
+
+<!-- Added: 2026-04-18 — S6-01..S6-04: Live streaming -->
+## Live Run Trace
+
+When you open a run trace (`/ui/run.html?id=<run_id>`) while a run is still in progress, the page automatically connects to the live event stream. You will see:
+
+- A **green pulsing dot** labelled "Live" in the top bar while the stream is active.
+- Envelope rows appearing and updating in real time as the orchestrator dispatches tasks.
+- An **apply_to_each counter** showing how many parallel subtasks have been launched.
+- The dot changes to "Completed" or "Failed" when the run finishes and the stream closes.
+
+No page refresh is needed — everything updates automatically.
+
+## Streaming Chat
+
+The Chat page (`/ui/chat.html`) now streams tokens progressively as the model generates them. Text appears word by word instead of waiting for the full response. The **View run trace** link still appears after each reply, and the rating buttons (👍/👎) work as before.
