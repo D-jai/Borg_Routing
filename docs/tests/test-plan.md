@@ -21,6 +21,19 @@
 | TC-ENV-011 | All four valid envelope types accepted | Unit | ✅ Pass |
 | TC-ENV-012 | InboundEnvelope with scratch_writes and scratch_cleanup | Unit | ✅ Pass |
 
+## S2-09 — apply_to_each
+
+| ID | Description | Level | Status |
+|----|-------------|-------|--------|
+| TC-APE-001 | 10 items, all succeed → results has 10 entries | Unit (mocked) | ✅ Pass |
+| TC-APE-002 | 2/5 failures → failures[], not raised | Unit (mocked) | ✅ Pass |
+| TC-APE-003 | BRT-APE-001 raised when items not resolvable | Unit | ✅ Pass |
+| TC-APE-004 | BRT-APE-003 raised for invalid concurrency_limit | Unit | ✅ Pass |
+| TC-APE-005 | BRT-APE-004 raised when depth limit exceeded | Unit | ✅ Pass |
+| TC-APE-006 | Results are ordered by index | Unit (mocked) | ✅ Pass |
+| TC-APE-007 | 100% failure still returns resolved envelope | Unit (mocked) | ✅ Pass |
+| TC-APE-008 | _level_suffix produces correct alphabetic suffixes | Unit | ✅ Pass |
+
 ## S2-08 — Skill Library
 
 | ID | Description | Level | Status |

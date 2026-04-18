@@ -48,6 +48,16 @@
 | BRT-DB-016 | Scratch read failed | `src/db/scratch.py::read_scratch_for_level` | SQLite query on the scratch table failed. The database file may be corrupt — check the WAL file. |
 | BRT-DB-017 | Scratch delete failed | `src/db/scratch.py::delete_scratch_for_level` | SQLite delete on the scratch table failed. Check database file permissions. |
 
+## BRT-APE — apply_to_each Module
+
+| Code | Description | Origin | Hints |
+|------|-------------|--------|-------|
+| BRT-APE-001 | Items not resolvable | `src/orchestrator/apply_to_each.py::_resolve_items` | `dependency_input` must contain `'items'` (list) or `'inputs_ref'` (list). Check the orchestrator's plan node. |
+| BRT-APE-002 | Child envelope dispatch failed | `src/orchestrator/apply_to_each.py::_run_one` | Individual failures go to `failures[]`, not raised. Check the run trace for the specific item's failure_reason. |
+| BRT-APE-003 | Invalid concurrency_limit | `src/orchestrator/apply_to_each.py::expand_and_run` | Must be a positive integer. Default is 20. |
+| BRT-APE-004 | Depth limit exceeded | `src/orchestrator/apply_to_each.py::expand_and_run` | `current_depth >= max_depth`. Increase `max_depth` or flatten the plan structure. |
+| BRT-APE-005 | No items to process | `src/orchestrator/apply_to_each.py` | Items list is empty. Check the upstream state_op or input reference. |
+
 ## BRT-SKL — Skills Module
 
 | Code | Description | Origin | Hints |

@@ -27,7 +27,10 @@ async def db(tmp_path):
 
 async def _drain(db_path: str) -> tuple[list[dict], list[dict]]:
     """Drain all pending tasks then return logs and log_payloads."""
-    await asyncio.sleep(0.1)
+    # Yield multiple times to let asyncio tasks (fire-and-forget) complete
+    for _ in range(20):
+        await asyncio.sleep(0)
+    await asyncio.sleep(0.2)
     async with aiosqlite.connect(db_path) as db:
         db.row_factory = aiosqlite.Row
         async with db.execute("SELECT * FROM logs ORDER BY log_id") as cur:

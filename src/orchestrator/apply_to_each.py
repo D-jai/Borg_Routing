@@ -1,0 +1,207 @@
+"""apply_to_each — runtime expansion of an apply_to_each WrappedTask.
+
+The orchestrator writes ONE apply_to_each node; this module expands it to
+N child answerer envelopes at runtime, runs them concurrently (bounded by
+concurrency_limit), aggregates results, and returns a single InboundEnvelope.
+
+Failure semantics (DESIGN_PRINCIPLES.md §9): best-effort.
+- Successful results → results[]
+- Failures → failures[]
+- The apply_to_each node ALWAYS resolves (failures are data, not catastrophe).
+  The orchestrator reads the aggregate and decides what to do.
+
+Error codes:
+- BRT-APE-001: items_ref not resolvable to a list
+- BRT-APE-002: child envelope dispatch failed (individual failures go to failures[])
+- BRT-APE-003: concurrency_limit invalid
+- BRT-APE-004: max_depth would be exceeded by child envelopes
+- BRT-APE-005: no items to process (empty list)
+"""
+import asyncio
+import uuid
+from typing import Optional
+
+from src.envelopes.schema import InboundEnvelope, WrappedTask
+
+
+def _resolve_items(task: WrappedTask) -> list:
+    """Resolve dependency_input to a list of items.
+
+    Checks dependency_input['items'] then dependency_input['inputs_ref'].
+
+    Raises:
+        ValueError: BRT-APE-001 if items cannot be resolved.
+    """
+    # Direct items list (preferred — already resolved by state_op or similar)
+    items = task.dependency_input.get("items")
+    if items is not None:
+        if not isinstance(items, list):
+            raise ValueError(
+                f"BRT-APE-001: dependency_input['items'] must be a list, "
+                f"got {type(items).__name__} for envelope {task.envelope_id}"
+            )
+        return items
+
+    # inputs_ref as a list of strings (simple inline items)
+    inputs_ref = task.dependency_input.get("inputs_ref")
+    if inputs_ref and isinstance(inputs_ref, list):
+        return inputs_ref
+
+    raise ValueError(
+        f"BRT-APE-001: cannot resolve items for apply_to_each envelope "
+        f"{task.envelope_id}. dependency_input must contain 'items' (list) "
+        f"or 'inputs_ref' (list)."
+    )
+
+
+def _make_child_task(
+    parent: WrappedTask,
+    item: object,
+    index: int,
+    level_suffix: str,
+) -> WrappedTask:
+    """Create a child answerer WrappedTask for one item."""
+    if isinstance(item, dict):
+        item_context = str(item)
+    else:
+        item_context = str(item)
+
+    child_level = parent.level_path + level_suffix
+
+    return WrappedTask(
+        envelope_id=uuid.uuid4(),
+        run_id=parent.run_id,
+        parent_run_id=None,
+        subtask_id=uuid.uuid4(),
+        type="answerer",
+        current_depth=parent.current_depth + 1,
+        max_depth=parent.max_depth,
+        level_path=child_level,
+        model_endpoint=parent.model_endpoint,
+        model_name=parent.model_name,
+        instruction=parent.instruction,
+        context=item_context,
+        output_schema=parent.output_schema,
+        max_output_tokens=parent.max_output_tokens,
+        trigger_reason=f"apply_to_each:{parent.envelope_id}:item_{index}",
+        skill_id=parent.skill_id,
+        skill_version=parent.skill_version,
+    )
+
+
+async def _dispatch_child(
+    task: WrappedTask,
+    db_path: str,
+) -> InboundEnvelope:
+    """Dispatch a single child task through the executor."""
+    from src.agents.executor import execute
+    return await execute(task, db_path=db_path)
+
+
+async def expand_and_run(
+    task: WrappedTask,
+    db_path: str = "data/borg_route.db",
+) -> InboundEnvelope:
+    """Expand an apply_to_each task to N child envelopes, run concurrently, aggregate.
+
+    Returns a resolved InboundEnvelope with:
+        output = {
+            "results": [{"index": int, "item": ..., "output": dict, "confidence": float}],
+            "failures": [{"index": int, "item": ..., "reason": str}],
+            "total": int,
+            "success_count": int,
+            "failure_count": int,
+        }
+
+    Raises:
+        ValueError: BRT-APE-001 if items cannot be resolved.
+        ValueError: BRT-APE-003 if concurrency_limit is invalid.
+        ValueError: BRT-APE-004 if depth limit would be exceeded.
+    """
+    # Validate depth
+    if task.current_depth >= task.max_depth:
+        raise ValueError(
+            f"BRT-APE-004: apply_to_each cannot spawn children — "
+            f"current_depth ({task.current_depth}) >= max_depth ({task.max_depth})"
+        )
+
+    # Resolve items
+    items = _resolve_items(task)
+
+    # Concurrency limit
+    raw_limit = task.dependency_input.get("concurrency_limit", 20)
+    try:
+        concurrency_limit = int(raw_limit)
+        if concurrency_limit < 1:
+            raise ValueError()
+    except (ValueError, TypeError):
+        raise ValueError(
+            f"BRT-APE-003: invalid concurrency_limit '{raw_limit}' for "
+            f"envelope {task.envelope_id}"
+        )
+
+    semaphore = asyncio.Semaphore(concurrency_limit)
+    results = []
+    failures = []
+
+    async def _run_one(index: int, item: object) -> None:
+        suffix = _level_suffix(index)
+        child = _make_child_task(task, item, index, suffix)
+        async with semaphore:
+            try:
+                env = await _dispatch_child(child, db_path)
+                if env.status == "resolved":
+                    results.append({
+                        "index": index,
+                        "item": item,
+                        "output": env.output,
+                        "confidence": env.confidence,
+                    })
+                else:
+                    failures.append({
+                        "index": index,
+                        "item": item,
+                        "reason": env.failure_reason or "status=failed",
+                        "model_id": child.model_name,
+                    })
+            except Exception as exc:
+                failures.append({
+                    "index": index,
+                    "item": item,
+                    "reason": f"BRT-APE-002: {exc}",
+                    "model_id": child.model_name,
+                })
+
+    await asyncio.gather(*[_run_one(i, item) for i, item in enumerate(items)])
+
+    # Sort results by index for deterministic ordering
+    results.sort(key=lambda r: r["index"])
+    failures.sort(key=lambda r: r["index"])
+
+    return InboundEnvelope(
+        envelope_id=task.envelope_id,
+        subtask_id=task.subtask_id,
+        status="resolved",
+        output={
+            "results": results,
+            "failures": failures,
+            "total": len(items),
+            "success_count": len(results),
+            "failure_count": len(failures),
+        },
+    )
+
+
+def _level_suffix(index: int) -> str:
+    """Generate a short alphabetic suffix for child level_paths.
+
+    0→a, 1→b, ..., 25→z, 26→aa, 27→ab, ...
+    """
+    chars = []
+    n = index
+    while True:
+        chars.append(chr(ord("a") + (n % 26)))
+        n = n // 26 - 1
+        if n < 0:
+            break
+    return "".join(reversed(chars))
