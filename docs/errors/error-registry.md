@@ -48,6 +48,16 @@
 | BRT-DB-016 | Scratch read failed | `src/db/scratch.py::read_scratch_for_level` | SQLite query on the scratch table failed. The database file may be corrupt — check the WAL file. |
 | BRT-DB-017 | Scratch delete failed | `src/db/scratch.py::delete_scratch_for_level` | SQLite delete on the scratch table failed. Check database file permissions. |
 
+## BRT-PIP — Pipeline Module
+
+| Code | Description | Origin | Hints |
+|------|-------------|--------|-------|
+| BRT-PIP-001 | Run creation failed | `src/pipeline/runner.py::run_pipeline` | Could not insert a new run record. Check database connectivity. |
+| BRT-PIP-002 | Orchestration failed | `src/pipeline/runner.py::run_pipeline` | The orchestration engine raised an error. See the nested error message. |
+| BRT-PIP-003 | Run completion update failed | `src/pipeline/runner.py::run_pipeline` | Could not update the run status after completion. Check database connectivity. |
+| BRT-PIP-004 | Empty user_instruction | `src/pipeline/runner.py::run_pipeline` | user_instruction must not be empty or whitespace-only. |
+| BRT-PIP-005 | Run already in terminal state | `src/pipeline/runner.py` | The run is already completed or failed and cannot be re-run. |
+
 ## BRT-ORC — Orchestrator Module
 
 | Code | Description | Origin | Hints |

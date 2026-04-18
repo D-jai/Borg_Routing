@@ -21,6 +21,16 @@
 | TC-ENV-011 | All four valid envelope types accepted | Unit | ✅ Pass |
 | TC-ENV-012 | InboundEnvelope with scratch_writes and scratch_cleanup | Unit | ✅ Pass |
 
+## S2-12 — Pipeline Runner
+
+| ID | Description | Level | Status |
+|----|-------------|-------|--------|
+| TC-PIP-001 | run_pipeline returns completed dict with run_id + response | Unit (mocked) | ✅ Pass |
+| TC-PIP-002 | BRT-PIP-004 for empty instruction | Unit | ✅ Pass |
+| TC-PIP-003 | run status=completed in DB after success | Unit (mocked) | ✅ Pass |
+| TC-PIP-004 | BRT-PIP-002 in error field when orchestration fails | Unit (mocked) | ✅ Pass |
+| TC-PIP-005 | run status=failed in DB after orchestration error | Unit (mocked) | ✅ Pass |
+
 ## S2-11 — Orchestration Engine
 
 | ID | Description | Level | Status |
