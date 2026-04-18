@@ -4,6 +4,16 @@
 
 ---
 
+## S1-04 — Effective Cost Formula
+
+| ID | Description | Level | Status |
+|----|-------------|-------|--------|
+| TC-REG-020 | Local model returns time-only cost (no dollars) | Unit | ✅ Pass |
+| TC-REG-021 | External model returns dollar + time combined cost | Unit | ✅ Pass |
+| TC-REG-022 | BRT-REG-013 raised on zero/negative throughput_tps | Unit | ✅ Pass |
+| TC-REG-023 | Local model with no throughput_tps returns 0.0 | Unit | ✅ Pass |
+| TC-REG-024 | Custom time_cost_per_sec applied correctly | Unit | ✅ Pass |
+
 ## S1-03 — CapabilityMatrix
 
 | ID | Description | Level | Status |
