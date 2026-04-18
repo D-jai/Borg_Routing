@@ -21,6 +21,22 @@
 | TC-ENV-011 | All four valid envelope types accepted | Unit | ✅ Pass |
 | TC-ENV-012 | InboundEnvelope with scratch_writes and scratch_cleanup | Unit | ✅ Pass |
 
+## S2-08 — Skill Library
+
+| ID | Description | Level | Status |
+|----|-------------|-------|--------|
+| TC-SKL-001 | load() populates skills from data/skills.yaml | Unit | ✅ Pass |
+| TC-SKL-002 | get() returns skill by id | Unit | ✅ Pass |
+| TC-SKL-003 | get() returns highest version when version=None | Unit | ✅ Pass |
+| TC-SKL-004 | BRT-SKL-003 raised for unknown skill_id | Unit | ✅ Pass |
+| TC-SKL-005 | BRT-SKL-004 raised for wrong version | Unit | ✅ Pass |
+| TC-SKL-006 | BRT-SKL-001 raised for missing file | Unit | ✅ Pass |
+| TC-SKL-007 | catalogue_for_prompt() includes all skill ids | Unit | ✅ Pass |
+| TC-SKL-008 | render() returns valid WrappedTask for classify_into_buckets | Unit | ✅ Pass |
+| TC-SKL-009 | Rendered WrappedTask passes validate_outbound | Unit | ✅ Pass |
+| TC-SKL-010 | BRT-SKL-005 raised when required arg missing | Unit | ✅ Pass |
+| TC-SKL-011 | log_usage() writes to skill_usage_log | Unit | ✅ Pass |
+
 ## S2-07 — State Operators
 
 | ID | Description | Level | Status |

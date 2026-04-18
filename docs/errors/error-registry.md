@@ -48,6 +48,18 @@
 | BRT-DB-016 | Scratch read failed | `src/db/scratch.py::read_scratch_for_level` | SQLite query on the scratch table failed. The database file may be corrupt — check the WAL file. |
 | BRT-DB-017 | Scratch delete failed | `src/db/scratch.py::delete_scratch_for_level` | SQLite delete on the scratch table failed. Check database file permissions. |
 
+## BRT-SKL — Skills Module
+
+| Code | Description | Origin | Hints |
+|------|-------------|--------|-------|
+| BRT-SKL-001 | skills.yaml not found | `src/skills/library.py::SkillLibrary.load` | Ensure `data/skills.yaml` exists. It ships with the project — restore from git or zip backup if missing. |
+| BRT-SKL-002 | Malformed skills.yaml | `src/skills/library.py::SkillLibrary.load` | The file must be a YAML list. Validate with `python -c "import yaml; yaml.safe_load(open('data/skills.yaml'))"`. |
+| BRT-SKL-003 | Skill not found | `src/skills/library.py::SkillLibrary.get` | The skill_id does not exist in the loaded library. Check the orchestrator's skill invocation. |
+| BRT-SKL-004 | Skill version not found | `src/skills/library.py::SkillLibrary.get` | The requested version does not exist for this skill. Check available versions in data/skills.yaml. |
+| BRT-SKL-005 | Missing required arg | `src/skills/library.py::SkillLibrary.render` | A required arg for this skill was not provided. Check the skill's `required_args` section. |
+| BRT-SKL-006 | Invalid envelope_type in skill | `src/skills/library.py::SkillLibrary.render` | The skill's `envelope_type` is not one of the valid types. Check data/skills.yaml. |
+| BRT-SKL-007 | skill_usage_log write failed | `src/skills/library.py::log_usage` | SQLite write failed. Check disk space and database file permissions. |
+
 ## BRT-SOP — State Operators Module
 
 | Code | Description | Origin | Hints |
