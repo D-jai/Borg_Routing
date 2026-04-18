@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Admin — BORG_ROUTE</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: sans-serif; background: #0f0f1a; color: #ddd; }
+    nav { background: #1a1a2e; padding: 10px 20px; display: flex; gap: 20px; align-items: center; }
+    nav .brand { font-weight: bold; color: #e94560; font-size: 1.1em; }
+    nav a { color: #eee; text-decoration: none; }
+    nav a:hover { color: #e94560; }
+    .container { padding: 24px; max-width: 900px; margin: 0 auto; }
+    h1 { font-size: 1.3em; color: #e94560; margin-bottom: 20px; }
+    h2 { font-size: 1em; color: #aaa; margin: 24px 0 10px; border-bottom: 1px solid #222; padding-bottom: 6px; }
+    label { display: block; font-size: 0.82em; color: #888; margin-bottom: 4px; margin-top: 12px; }
+    input[type=text], input[type=number], textarea, select {
+      width: 100%; padding: 7px 10px; background: #1a1a2e; border: 1px solid #333; color: #eee;
+      border-radius: 4px; font-size: 0.88em; font-family: monospace;
+    }
+    textarea { resize: vertical; min-height: 60px; }
+    button {
+      margin-top: 10px; padding: 7px 18px; background: #e94560; color: #fff;
+      border: none; border-radius: 4px; cursor: pointer; font-size: 0.88em;
+    }
+    button:hover { background: #c73350; }
+    button.secondary { background: #2a2a3e; color: #ccc; }
+    button.secondary:hover { background: #333355; }
+    .rule-card {
+      background: #151524; border: 1px solid #2a2a3e; border-radius: 4px;
+      padding: 10px 14px; margin-bottom: 8px; font-size: 0.84em;
+    }
+    .rule-card.retired { opacity: 0.45; border-color: #1a1a1a; }
+    .rule-meta { color: #555; font-size: 0.78em; margin-top: 4px; font-family: monospace; }
+    .msg { padding: 8px 12px; margin-top: 10px; border-radius: 4px; font-size: 0.82em; display: none; }
+    .msg.ok { background: #1a3a1a; color: #4c4; }
+    .msg.err { background: #3a1a1a; color: #c44; }
+    .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  </style>
+</head>
+<body>
+<nav>
+  <span class="brand">BORG_ROUTE</span>
+  <a href="/ui/chat.html">Chat</a>
+  <a href="/ui/models.html">Models</a>
+  <a href="/ui/dashboard.html">Dashboard</a>
+  <a href="/ui/admin.html" style="color:#e94560">Admin</a>
+</nav>
+
+<div class="container">
+  <h1>Admin</h1>
+
+  <!-- Global Rules -->
+  <h2>Global Rules</h2>
+  <p style="font-size:0.82em;color:#666;margin-bottom:8px;">Injected verbatim into every model call's governance layer (Law 1).</p>
+  <textarea id="global-rules" rows="4" placeholder="One rule per line, e.g.: Always respond in English."></textarea>
+  <button onclick="saveGlobalRules()">Save Global Rules</button>
+  <div id="global-rules-msg" class="msg"></div>
+
+  <!-- Admin Rules Ledger -->
+  <h2>Admin Rules Ledger</h2>
+  <p style="font-size:0.82em;color:#666;margin-bottom:8px;">Additive rules appended over time. Active rules cascade into all model calls.</p>
+  <div id="rules-list"><span style="color:#555;font-size:0.82em;">Loading…</span></div>
+  <label style="margin-top:16px;">New Rule</label>
+  <input type="text" id="new-rule-text" placeholder="e.g.: Never reveal internal model names.">
+  <button onclick="appendRule()">Add Rule</button>
+  <div id="rule-msg" class="msg"></div>
+
+  <!-- Settings -->
+  <h2>Settings</h2>
+  <div class="grid2">
+    <div>
+      <label>Max Recursion Depth (1–10)</label>
+      <input type="number" id="max-depth" min="1" max="10" value="5">
+    </div>
+    <div>
+      <label>Default Strategy</label>
+      <select id="strategy">
+        <option value="SYSTEM_CHOOSE">SYSTEM_CHOOSE</option>
+        <option value="LOCAL_FIRST">LOCAL_FIRST</option>
+      </select>
+    </div>
+    <div>
+      <label>Context Window Size (turns)</label>
+      <input type="number" id="window-size" min="1" max="50" value="10">
+    </div>
+    <div>
+      <label>Time Cost Per Second ($/s)</label>
+      <input type="number" id="time-cost" min="0" step="0.0001" value="0.0083">
+    </div>
+  </div>
+  <button onclick="saveSettings()">Save Settings</button>
+  <div id="settings-msg" class="msg"></div>
+</div>
+
+<script>
+  async function loadConfig() {
+    const r = await fetch('/config').catch(() => null);
+    if (!r || !r.ok) return;
+    const cfg = await r.json();
+    if (cfg.global_rules) document.getElementById('global-rules').value = cfg.global_rules;
+    if (cfg.max_recursion_depth) document.getElementById('max-depth').value = cfg.max_recursion_depth;
+    if (cfg.default_strategy) document.getElementById('strategy').value = cfg.default_strategy;
+    if (cfg.context_window_size) document.getElementById('window-size').value = cfg.context_window_size;
+    if (cfg.time_cost_per_sec) document.getElementById('time-cost').value = cfg.time_cost_per_sec;
+  }
+
+  async function loadRules() {
+    const r = await fetch('/config/rules').catch(() => null);
+    if (!r || !r.ok) { document.getElementById('rules-list').textContent = 'Failed to load.'; return; }
+    const data = await r.json();
+    const el = document.getElementById('rules-list');
+    el.innerHTML = '';
+    (data.rules || []).forEach(rule => {
+      const div = document.createElement('div');
+      div.className = 'rule-card' + (rule.retired_at ? ' retired' : '');
+      div.innerHTML = `
+        <div>${htmlEscape(rule.text)}</div>
+        <div class="rule-meta">id: ${rule.id} · added: ${rule.added_at?.slice(0,10) || '?'}
+          ${rule.retired_at ? ' · <em>retired ' + rule.retired_at.slice(0,10) + '</em>' : ''}
+        </div>
+        ${!rule.retired_at ? `<button class="secondary" onclick="retireRule('${rule.id}')" style="margin-top:6px;padding:3px 10px;font-size:0.78em;">Retire</button>` : ''}
+      `;
+      el.appendChild(div);
+    });
+    if (!data.rules || data.rules.length === 0) {
+      el.innerHTML = '<p style="color:#555;font-size:0.82em;">No rules yet.</p>';
+    }
+  }
+
+  async function saveGlobalRules() {
+    const text = document.getElementById('global-rules').value.trim();
+    const r = await fetch('/config', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({key: 'global_rules', value: text}),
+    });
+    showMsg('global-rules-msg', r.ok, r.ok ? 'Saved.' : 'Save failed.');
+  }
+
+  async function appendRule() {
+    const text = document.getElementById('new-rule-text').value.trim();
+    if (!text) { showMsg('rule-msg', false, 'Rule text is required.'); return; }
+    const r = await fetch('/config/rules', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({text}),
+    });
+    showMsg('rule-msg', r.ok, r.ok ? 'Rule added.' : 'Failed to add rule.');
+    if (r.ok) { document.getElementById('new-rule-text').value = ''; loadRules(); }
+  }
+
+  async function retireRule(id) {
+    const r = await fetch(`/config/rules/${id}/retire`, {method: 'POST'});
+    showMsg('rule-msg', r.ok, r.ok ? 'Rule retired.' : 'Failed to retire.');
+    if (r.ok) loadRules();
+  }
+
+  async function saveSettings() {
+    const pairs = [
+      ['max_recursion_depth', document.getElementById('max-depth').value],
+      ['default_strategy',    document.getElementById('strategy').value],
+      ['context_window_size', document.getElementById('window-size').value],
+      ['time_cost_per_sec',   document.getElementById('time-cost').value],
+    ];
+    let ok = true;
+    for (const [key, value] of pairs) {
+      const r = await fetch('/config', {
+        method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({key, value}),
+      });
+      if (!r.ok) ok = false;
+    }
+    showMsg('settings-msg', ok, ok ? 'Settings saved.' : 'Some settings failed to save.');
+  }
+
+  function showMsg(id, ok, text) {
+    const el = document.getElementById(id);
+    el.className = 'msg ' + (ok ? 'ok' : 'err');
+    el.textContent = text;
+    el.style.display = 'block';
+    setTimeout(() => { el.style.display = 'none'; }, 3000);
+  }
+
+  function htmlEscape(s) {
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  }
+
+  loadConfig();
+  loadRules();
+</script>
+</body>
+</html>

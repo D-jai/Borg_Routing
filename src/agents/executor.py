@@ -24,7 +24,7 @@ from uuid import UUID
 import httpx
 
 from src.db.scratch import apply_cleanup_directives
-from src.db.state import get_config
+from src.db.state import create_run, get_config, update_run_status
 from src.envelopes.schema import InboundEnvelope, WrappedTask
 from src.envelopes.validator import validate_inbound
 from src.logging.writer import write_event
@@ -257,18 +257,55 @@ async def execute(task: WrappedTask, db_path: str = "data/borg_route.db") -> Inb
         return await expand_and_run(task, db_path=db_path)
     elif task.type == "orchestrate":
         from src.orchestrator.engine import orchestrate_run
-        # Child orchestration — returns a response string wrapped in an envelope
-        run_id = task.run_id
-        result_text = await orchestrate_run(
-            run_id=run_id,
-            user_instruction=task.instruction,
-            db_path=db_path,
-        )
+
+        # Depth enforcement — BRT-ORC-020: demote at cap
+        if task.current_depth >= task.max_depth:
+            await write_event(
+                "error",
+                run_id=task.run_id,
+                envelope_id=task.envelope_id,
+                decision={
+                    "error": (
+                        f"BRT-ORC-020: max recursion depth {task.max_depth} reached "
+                        f"at level {task.level_path} — demoting orchestrate node to answerer"
+                    ),
+                },
+                db_path=db_path,
+            )
+            demoted = task.model_copy(update={"type": "answerer"})
+            return await _execute_answerer(demoted, db_path)
+
+        # Spawn child run linked to parent — BRT-ORC-021
+        try:
+            child_run_id = await create_run(
+                task.instruction,
+                parent_run_id=task.run_id,
+                db_path=db_path,
+            )
+        except Exception as exc:
+            raise ValueError(f"BRT-ORC-021: child run creation failed: {exc}") from exc
+
+        try:
+            await update_run_status(child_run_id, "running", db_path=db_path)
+            result_text = await orchestrate_run(
+                run_id=child_run_id,
+                user_instruction=task.instruction,
+                db_path=db_path,
+                current_depth=task.current_depth + 1,
+            )
+            await update_run_status(child_run_id, "completed", db_path=db_path)
+        except Exception as exc:
+            try:
+                await update_run_status(child_run_id, "failed", db_path=db_path)
+            except Exception:
+                pass
+            raise ValueError(f"BRT-ORC-022: child orchestration failed: {exc}") from exc
+
         return InboundEnvelope(
             envelope_id=task.envelope_id,
             subtask_id=task.subtask_id,
             status="resolved",
-            output={"response": result_text},
+            output={"response": result_text, "child_run_id": str(child_run_id)},
         )
     else:
         raise ValueError(f"BRT-ANS-008: unknown task type '{task.type}'")

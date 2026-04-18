@@ -1,13 +1,17 @@
 """Batch / Task API — Surface C (partial).
 
-POST /v1/task — submit async task, returns run_id immediately (202 Accepted)
-GET  /runs/{id} — fetch full run state (envelopes, events, digest)
+POST /v1/task           — submit async task, returns run_id immediately (202 Accepted)
+GET  /runs/{id}         — fetch full run state (envelopes, events, digest)
+POST /runs/{id}/resume  — re-dispatch failed/in-flight envelopes
+GET  /runs              — list recent runs (dashboard support)
 
 Error codes:
 - BRT-API-020: malformed task request body
 - BRT-API-021: run not found
 - BRT-API-022: task submission failed
 - BRT-API-023: run fetch failed
+- BRT-API-024: resume failed
+- BRT-API-025: run list failed
 """
 import asyncio
 import json
@@ -19,7 +23,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from src.db.schema import DB_PATH
-from src.db.state import get_envelopes, get_run
+from src.db.state import get_envelopes, get_run, get_runs_list, resume_run
 from src.pipeline.runner import run_pipeline
 
 router = APIRouter()
@@ -150,3 +154,66 @@ async def get_run_state(run_id: str) -> JSONResponse:
         "envelopes": envelopes,
         "events": events,
     })
+
+
+@router.post("/runs/{run_id}/resume", status_code=202)
+async def resume_run_endpoint(
+    run_id: str,
+    background_tasks: BackgroundTasks,
+) -> JSONResponse:
+    """Re-dispatch all failed or in-flight envelopes for a run.
+
+    Returns 202 immediately. Polling GET /runs/{id} shows updated status.
+    """
+    import uuid as _uuid
+    try:
+        run_uuid = _uuid.UUID(run_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail={"error": "BRT-API-021", "message": f"Invalid run_id format: {run_id}"},
+        )
+
+    try:
+        tasks_to_retry = await resume_run(run_uuid, db_path=DB_PATH)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail={"error": "BRT-API-024", "message": str(exc)},
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail={"error": "BRT-API-024", "message": f"Resume failed: {exc}"},
+        )
+
+    if not tasks_to_retry:
+        return JSONResponse(
+            status_code=202,
+            content={"run_id": run_id, "status": "no_pending_work"},
+        )
+
+    background_tasks.add_task(
+        _run_in_background,
+        instruction=tasks_to_retry[0].instruction if tasks_to_retry else "",
+        run_id_str=run_id,
+        db_path=DB_PATH,
+    )
+
+    return JSONResponse(
+        status_code=202,
+        content={"run_id": run_id, "status": "resuming", "retrying": len(tasks_to_retry)},
+    )
+
+
+@router.get("/runs")
+async def list_runs(limit: int = 50) -> JSONResponse:
+    """Return recent runs ordered by created_at descending."""
+    try:
+        runs = await get_runs_list(limit=limit, db_path=DB_PATH)
+        return JSONResponse(content={"runs": runs})
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail={"error": "BRT-API-025", "message": f"Run list failed: {exc}"},
+        )

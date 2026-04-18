@@ -20,17 +20,19 @@ from src.envelopes.schema import InboundEnvelope, WrappedTask
 async def create_run(
     user_instruction: str,
     parent_run_id: Optional[UUID] = None,
+    thread_id: Optional[str] = None,
     db_path: str = DB_PATH,
 ) -> UUID:
     """Insert a new run record with status=pending. Returns the new run_id."""
     run_id = uuid4()
     async with aiosqlite.connect(db_path) as db:
         await db.execute(
-            """INSERT INTO runs(run_id, parent_run_id, status, user_instruction)
-               VALUES (?, ?, 'pending', ?)""",
+            """INSERT INTO runs(run_id, parent_run_id, thread_id, status, user_instruction)
+               VALUES (?, ?, ?, 'pending', ?)""",
             (
                 str(run_id),
                 str(parent_run_id) if parent_run_id else None,
+                thread_id,
                 user_instruction,
             ),
         )
@@ -145,6 +147,18 @@ async def get_run(run_id: UUID, db_path: str = DB_PATH) -> dict:
     return dict(row)
 
 
+async def get_runs_list(limit: int = 50, db_path: str = DB_PATH) -> list[dict]:
+    """Return the most recent runs ordered by created_at descending."""
+    async with aiosqlite.connect(db_path) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            "SELECT * FROM runs ORDER BY created_at DESC LIMIT ?",
+            (limit,),
+        ) as cur:
+            rows = await cur.fetchall()
+    return [dict(r) for r in rows]
+
+
 async def get_envelopes(run_id: UUID, db_path: str = DB_PATH) -> list[dict]:
     """Return all envelope records for a run, ordered by created_at."""
     async with aiosqlite.connect(db_path) as db:
@@ -155,6 +169,41 @@ async def get_envelopes(run_id: UUID, db_path: str = DB_PATH) -> list[dict]:
         ) as cur:
             rows = await cur.fetchall()
     return [dict(r) for r in rows]
+
+
+async def resume_run(run_id: UUID, db_path: str = DB_PATH) -> list:
+    """Return WrappedTask objects for envelopes in failed or in_flight status.
+
+    Used by POST /runs/{id}/resume to re-dispatch incomplete work.
+
+    Raises:
+        ValueError: BRT-DB-020 if run not found or already completed.
+    """
+    run = await get_run(run_id, db_path=db_path)
+    if run["status"] == "completed":
+        raise ValueError(
+            f"BRT-DB-020: run '{run_id}' is already completed and cannot be resumed"
+        )
+
+    async with aiosqlite.connect(db_path) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            """SELECT outbound_payload FROM envelopes
+               WHERE run_id=? AND status IN ('failed','in_flight')
+               ORDER BY created_at""",
+            (str(run_id),),
+        ) as cur:
+            rows = await cur.fetchall()
+
+    tasks = []
+    for row in rows:
+        try:
+            payload = json.loads(row["outbound_payload"])
+            from src.envelopes.schema import WrappedTask
+            tasks.append(WrappedTask(**payload))
+        except Exception:
+            pass
+    return tasks
 
 
 async def get_config(key: str, db_path: str = DB_PATH) -> Optional[str]:

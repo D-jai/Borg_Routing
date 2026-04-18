@@ -124,3 +124,28 @@ one command, and proves itself alive at `/health`."
 
 **Portfolio/LinkedIn angle:** Clean Python project setup with modern tooling
 (pyproject.toml, asyncio FastAPI, pytest-asyncio).
+
+---
+
+<!-- Added: 2026-04-18 — Slice 3: Recursion + Admin + Resume + Threads -->
+## Slice 3: Recursive Orchestration + Admin + Resume
+
+**What it is:** The system can now orchestrate sub-problems by spawning child runs
+(with linked `parent_run_id`), enforce a configurable recursion depth ceiling (demoting
+to answerer at the cap), resume failed/in-flight envelopes without repeating completed
+work, manage governance rules via an Admin UI, and track multi-turn context via threads.
+
+**Why it matters:** This makes BORG_ROUTE a production-grade orchestrator — it handles
+arbitrarily complex task hierarchies, recovers gracefully from partial failures, and
+gives operators real-time control over model behaviour without restarting the server.
+
+**Key points:**
+- **Recursive orchestration:** `type=orchestrate` nodes spawn child runs with `parent_run_id` linkage, visible in the run trace UI with drill-down navigation
+- **Depth cap + demotion:** `MAX_RECURSION_DEPTH=5` (configurable); at the cap the node is demoted to an answerer rather than crashing the run
+- **Resume:** `POST /runs/{id}/resume` re-dispatches only the failed/in-flight envelopes — completed work is preserved
+- **Admin Rules Ledger:** operators append additive governance rules at runtime; rules cascade into every model call (Law 1 enforcement); retired rules are excluded but kept in the ledger
+- **Threads:** `threads` + `messages` tables store conversation history; `extract_window()` provides the last N turns for the orchestrator's context
+
+**Demo talking point:** "A complex task spawns sub-tasks, each with their own run ID linked to the parent. If a sub-task fails, one API call resumes only that work — nothing else is re-run. The admin can add a new governance rule mid-session and it applies to the very next model call."
+
+**Portfolio/LinkedIn angle:** Production-quality recursive agent architecture with fault tolerance, live governance, and full audit trail.

@@ -145,3 +145,36 @@
 | BRT-API-032 | MCP tool not found | `src/mcp/server.py::_handle_tools_call` | The tool name is not in the catalogue. Use `tools/list` to see available tools. |
 | BRT-API-033 | MCP tool execution failed | `src/mcp/server.py::_handle_tools_call` | The tool raised an error. Check the `message` field in the JSON-RPC error response. |
 | BRT-API-034 | Missing required tool argument | `src/mcp/server.py::_tool_*` | A required argument was not provided. Check the tool's `inputSchema`. |
+| BRT-API-024 | Resume failed | `src/api/tasks.py::resume_run_endpoint` | Could not resume the run. Check that the run exists and is not completed. |
+| BRT-API-025 | Run list failed | `src/api/tasks.py::list_runs` | Could not fetch the list of runs from the database. Check database connectivity. |
+
+## BRT-ORC — Orchestrator Module (Slice 3 additions)
+
+| Code | Description | Origin | Hints |
+|------|-------------|--------|-------|
+| BRT-ORC-020 | Max recursion depth reached — orchestrate node demoted to answerer | `src/agents/executor.py::execute` | The orchestrate node was at `max_depth`. Increase `max_recursion_depth` in Admin config, or flatten the plan. |
+| BRT-ORC-021 | Child run creation failed for orchestrate node | `src/agents/executor.py::execute` | Could not create a child run in the database. Check database connectivity. |
+| BRT-ORC-022 | Child orchestration run failed | `src/agents/executor.py::execute` | The recursive orchestrate_run call raised an error. Inspect the child run trace for details. |
+
+## BRT-DB — Database Module (Slice 3 additions)
+
+| Code | Description | Origin | Hints |
+|------|-------------|--------|-------|
+| BRT-DB-020 | Run cannot be resumed (already completed) | `src/db/state.py::resume_run` | Only `pending`, `running`, or `failed` runs can be resumed. Check the run status first. |
+
+## BRT-ADM — Admin Module
+
+| Code | Description | Origin | Hints |
+|------|-------------|--------|-------|
+| BRT-ADM-001 | Missing required field in request body | `src/api/admin.py` | `key` (for config) or `text` (for rules) is required and must not be empty. |
+| BRT-ADM-002 | Rule not found | `src/api/admin.py::retire_rule` | The rule_id does not exist in the ledger. Use `GET /config/rules` to see valid rule IDs. |
+| BRT-ADM-003 | Rule already retired | `src/api/admin.py::retire_rule` | The rule has already been retired. No action needed. |
+| BRT-ADM-004 | Config read failed | `src/api/admin.py` | SQLite read error. Check database file permissions and connectivity. |
+| BRT-ADM-005 | Config write failed | `src/api/admin.py` | SQLite write error. Check database file permissions and disk space. |
+
+## BRT-MEM — Memory Module
+
+| Code | Description | Origin | Hints |
+|------|-------------|--------|-------|
+| BRT-MEM-001 | Thread not found | `src/memory/window.py` | The thread_id does not exist. Create a thread first via `create_thread()`. |
+| BRT-MEM-002 | Window extraction failed | `src/memory/window.py::extract_window` | SQLite error while reading messages. Check database connectivity. |

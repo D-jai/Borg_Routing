@@ -85,3 +85,76 @@ Every piece of work BORG_ROUTE sends to a model is wrapped in a **WrappedTask** 
 ### If something goes wrong
 - **"BRT-ENV-001" in logs** — A model returned `status="unresolved"`. This should never happen; the schema rejects it. Check the model's raw output in the run trace.
 - **"BRT-ENV-003" in logs** — A plan exceeded the maximum recursion depth (default: 5). The task may be too complex to decompose at this depth; check the run trace and consider restructuring the request.
+
+---
+
+<!-- Added: 2026-04-18 — Slice 3: Recursion + Admin + Resume + Threads -->
+## Recursion and Depth Control
+
+BORG_ROUTE can orchestrate sub-problems by spawning **child runs**. Each child run has its own run ID, linked to its parent via `parent_run_id`. The depth of nesting is controlled by **Max Recursion Depth** (default: 5).
+
+### What happens at the depth cap
+When an orchestrate node is dispatched at the maximum depth, BORG_ROUTE **demotes it to an answerer** — the model responds directly rather than trying to recurse further. This is logged as a `BRT-ORC-020` event in the run trace.
+
+### How to adjust the depth limit
+1. Open `http://localhost:8000/ui/admin.html`.
+2. In the **Settings** section, adjust **Max Recursion Depth** (1–10).
+3. Click **Save Settings**.
+
+---
+
+## Admin Panel
+
+The Admin panel at `http://localhost:8000/ui/admin.html` lets you configure BORG_ROUTE's behaviour without restarting the server.
+
+### Global Rules
+Text entered here is injected verbatim into every model call's governance layer. Use it to add blanket constraints — for example, "Always respond in English" or "Never reveal pricing information."
+
+### Admin Rules Ledger
+Additive rules that accumulate over time. New rules are appended; old rules can be retired (they are excluded from future model calls but kept in the ledger for audit purposes).
+
+### Settings
+- **Max Recursion Depth** — Maximum levels of nested orchestration (1–10, default: 5).
+- **Default Strategy** — `SYSTEM_CHOOSE` lets BORG_ROUTE pick the best available model; `LOCAL_FIRST` prefers local models and only falls back to external if no local model qualifies.
+- **Context Window Size** — How many recent conversation turns to include in the orchestrator's context (default: 10).
+- **Time Cost Per Second** — Dollar value assigned to one second of local-model compute time, used in cost estimation (default: $0.0083 ≈ $30/hr).
+
+---
+
+## Resuming a Failed Run
+
+If a run fails partway through (network error, model timeout, etc.), you can resume it without re-running the work that already completed.
+
+### How to resume
+1. Open `http://localhost:8000/ui/dashboard.html`.
+2. Find the failed run in the run history table.
+3. Click **Resume** — only failed or in-progress runs show this button.
+4. The system re-dispatches only the failed/in-flight envelopes. Completed work is not repeated.
+
+### Via API
+```
+POST /runs/{run_id}/resume
+```
+Returns 202 immediately. Poll `GET /runs/{run_id}` for updated status.
+
+### If something goes wrong
+- **"BRT-DB-020"** — The run is already completed and cannot be resumed.
+- **"no_pending_work"** — All envelopes already succeeded; nothing to retry.
+
+---
+
+## Multi-turn Conversations (Threads)
+
+BORG_ROUTE tracks conversation history in **threads**. Each thread stores the sequence of user and assistant messages. When a new run is created within a thread, the last N messages are passed to the orchestrator as context, enabling coherent multi-turn conversations.
+
+### How threads work
+1. A thread is created automatically when you start a conversation via the Chat UI.
+2. Each user message and assistant response is stored in the thread.
+3. The orchestrator receives the last **Context Window Size** turns as `thread_window`.
+4. Run IDs are linked to their thread via the `thread_id` field on the run record.
+
+---
+
+## Dashboard
+
+The Dashboard at `http://localhost:8000/ui/dashboard.html` shows all runs with their status, parent link, and creation time. Click **Trace** to open the full run trace for any run.

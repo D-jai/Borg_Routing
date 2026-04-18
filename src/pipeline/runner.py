@@ -24,6 +24,9 @@ async def run_pipeline(
     thread_window: list[dict] = None,
     rolling_summary: str = "",
     db_path: str = DB_PATH,
+    parent_run_id: Optional[UUID] = None,
+    current_depth: int = 0,
+    thread_id: Optional[str] = None,
 ) -> dict:
     """Create a run, orchestrate it, return a summary.
 
@@ -54,7 +57,12 @@ async def run_pipeline(
 
     # Create run record
     try:
-        run_id = await create_run(user_instruction, db_path=db_path)
+        run_id = await create_run(
+            user_instruction,
+            parent_run_id=parent_run_id,
+            thread_id=thread_id,
+            db_path=db_path,
+        )
     except Exception as exc:
         return {
             "run_id": None,
@@ -79,6 +87,7 @@ async def run_pipeline(
             thread_window=thread_window,
             rolling_summary=rolling_summary,
             db_path=db_path,
+            current_depth=current_depth,
         )
     except Exception as exc:
         status = "failed"

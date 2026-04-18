@@ -41,7 +41,8 @@
   <span class="brand">BORG_ROUTE</span>
   <a href="/ui/chat.html">Chat</a>
   <a href="/ui/models.html">Models</a>
-  <a href="/ui/keys.html">API Keys</a>
+  <a href="/ui/dashboard.html">Dashboard</a>
+  <a href="/ui/admin.html">Admin</a>
 </nav>
 
 <div class="container">
@@ -60,7 +61,7 @@
       <thead>
         <tr>
           <th>Level</th><th>Type</th><th>Skill</th><th>Trigger</th>
-          <th>Model</th><th>Tokens In</th><th>Tokens Out</th><th>Status</th>
+          <th>Model</th><th>Tokens In</th><th>Tokens Out</th><th>Status</th><th>Child Run</th>
         </tr>
       </thead>
       <tbody id="envelope-body"></tbody>
@@ -93,6 +94,17 @@
         // Envelopes
         const tbody = document.getElementById('envelope-body');
         (data.envelopes || []).forEach(env => {
+          // Extract child_run_id from inbound_payload if type=orchestrate
+          let childRunId = null;
+          if (env.type === 'orchestrate' && env.inbound_payload) {
+            try {
+              const inbound = JSON.parse(env.inbound_payload);
+              childRunId = inbound.output?.child_run_id || null;
+            } catch(e) {}
+          }
+          const childCell = childRunId
+            ? `<a href="/ui/run.html?id=${childRunId}" style="font-family:monospace;font-size:0.78em;color:#88aaff;">${childRunId.slice(0,8)}…</a>`
+            : '—';
           const tr = document.createElement('tr');
           tr.innerHTML = [
             `<td>${env.level_path || '—'}</td>`,
@@ -103,11 +115,12 @@
             `<td>${env.tokens_input ?? '—'}</td>`,
             `<td>${env.tokens_output ?? '—'}</td>`,
             `<td>${badge(env.status)}</td>`,
+            `<td>${childCell}</td>`,
           ].join('');
           tbody.appendChild(tr);
         });
         if (!data.envelopes || data.envelopes.length === 0) {
-          tbody.innerHTML = '<tr><td colspan="8" style="color:#555;padding:10px;">No envelopes yet.</td></tr>';
+          tbody.innerHTML = '<tr><td colspan="9" style="color:#555;padding:10px;">No envelopes yet.</td></tr>';
         }
 
         // Events

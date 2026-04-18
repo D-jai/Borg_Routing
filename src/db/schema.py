@@ -14,6 +14,11 @@ import aiosqlite
 
 DB_PATH = "data/borg_route.db"
 
+# Migrations applied to existing databases (safe to re-run — errors silently ignored)
+_MIGRATIONS = [
+    "ALTER TABLE runs ADD COLUMN thread_id TEXT",
+]
+
 _SCHEMA_SQL = """
 PRAGMA journal_mode=WAL;
 PRAGMA foreign_keys=ON;
@@ -21,6 +26,7 @@ PRAGMA foreign_keys=ON;
 CREATE TABLE IF NOT EXISTS runs (
     run_id TEXT PRIMARY KEY,
     parent_run_id TEXT,
+    thread_id TEXT,
     status TEXT NOT NULL CHECK(status IN ('pending','running','completed','failed')),
     user_instruction TEXT NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -116,6 +122,21 @@ CREATE TABLE IF NOT EXISTS config (
     value TEXT NOT NULL,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE TABLE IF NOT EXISTS threads (
+    thread_id TEXT PRIMARY KEY,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS messages (
+    message_id TEXT PRIMARY KEY,
+    thread_id TEXT NOT NULL REFERENCES threads(thread_id),
+    run_id TEXT REFERENCES runs(run_id),
+    role TEXT NOT NULL CHECK(role IN ('user','assistant','system')),
+    content TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_messages_thread ON messages(thread_id, created_at);
 """
 
 
@@ -137,6 +158,13 @@ async def create_all(db_path: str = DB_PATH) -> None:
                 raise RuntimeError(
                     f"BRT-DB-002: schema creation failed: {exc}"
                 ) from exc
+            # Migrations for existing databases
+            for migration in _MIGRATIONS:
+                try:
+                    await db.execute(migration)
+                    await db.commit()
+                except Exception:
+                    pass  # Column/index already exists — safe to skip
     except RuntimeError:
         raise
     except Exception as exc:
@@ -150,6 +178,7 @@ async def drop_all(db_path: str = DB_PATH) -> None:
     tables = [
         "log_payloads", "skill_usage_log", "logs",
         "scratch", "envelopes", "subtasks", "runs", "config",
+        "messages", "threads",
     ]
     async with aiosqlite.connect(db_path) as db:
         for table in tables:
