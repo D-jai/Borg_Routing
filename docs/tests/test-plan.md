@@ -21,6 +21,16 @@
 | TC-ENV-011 | All four valid envelope types accepted | Unit | ✅ Pass |
 | TC-ENV-012 | InboundEnvelope with scratch_writes and scratch_cleanup | Unit | ✅ Pass |
 
+## S2-10 — Fold-In Verifier
+
+| ID | Description | Level | Status |
+|----|-------------|-------|--------|
+| TC-ORC-010 | No residue → empty dict returned | Unit | ✅ Pass |
+| TC-ORC-011 | Residue found → event logged + scratch cleaned | Unit | ✅ Pass |
+| TC-ORC-012 | Digest contains sample_tables and residue_count | Unit | ✅ Pass |
+| TC-ORC-013 | No scratch rows remain after fold_in | Unit | ✅ Pass |
+| TC-ORC-014 | child_residue event logged with correct model_id | Unit | ✅ Pass |
+
 ## S2-09 — apply_to_each
 
 | ID | Description | Level | Status |

@@ -48,6 +48,14 @@
 | BRT-DB-016 | Scratch read failed | `src/db/scratch.py::read_scratch_for_level` | SQLite query on the scratch table failed. The database file may be corrupt — check the WAL file. |
 | BRT-DB-017 | Scratch delete failed | `src/db/scratch.py::delete_scratch_for_level` | SQLite delete on the scratch table failed. Check database file permissions. |
 
+## BRT-ORC — Orchestrator Module
+
+| Code | Description | Origin | Hints |
+|------|-------------|--------|-------|
+| BRT-ORC-010 | Fold-in check failed (DB error) | `src/orchestrator/fold_in.py::fold_in` | An unexpected DB error during the fold-in residue check. Check database connectivity. |
+| BRT-ORC-011 | Child residue detected (informational) | `src/orchestrator/fold_in.py::fold_in` | The child agent left scratch rows behind. This is logged as a `child_residue` event. The residue is cleaned up automatically. Check which model_id is producing residue. |
+| BRT-ORC-012 | Cleanup failed after residue detection | `src/orchestrator/fold_in.py::fold_in` | Could not delete residue rows. Check database file permissions. |
+
 ## BRT-APE — apply_to_each Module
 
 | Code | Description | Origin | Hints |
