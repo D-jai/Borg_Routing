@@ -4,6 +4,18 @@
 
 ---
 
+## S1-06 — Model Discovery
+
+| ID | Description | Level | Status |
+|----|-------------|-------|--------|
+| TC-REG-040 | discover_lmstudio parses /v1/models response correctly | Unit (mocked) | ✅ Pass |
+| TC-REG-041 | discover_lmstudio returns [] on connection failure (silent skip) | Unit (mocked) | ✅ Pass |
+| TC-REG-042 | discover_ollama parses /api/tags correctly | Unit (mocked) | ✅ Pass |
+| TC-REG-043 | discover_ollama returns [] on connection failure (silent skip) | Unit (mocked) | ✅ Pass |
+| TC-REG-044 | discover_openrouter parses pricing + context_length; filters image models | Unit (mocked) | ✅ Pass |
+| TC-REG-045 | discover_openrouter returns [] on connection failure | Unit (mocked) | ✅ Pass |
+| TC-REG-046 | discover_all upserts models and preserves existing task_scores | Unit (mocked) | ✅ Pass |
+
 ## S1-05 — Model Router
 
 | ID | Description | Level | Status |
