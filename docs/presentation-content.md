@@ -51,6 +51,25 @@ validated object. Config errors surface immediately, not mid-run."
 
 ---
 
+<!-- Added: 2026-04-18 — S2-01: Envelope schema -->
+## Envelope Contract — WrappedTask + InboundEnvelope
+
+**What it is:** The typed contract between the orchestrator and every model it dispatches to. `WrappedTask` is the outbound brief; `InboundEnvelope` is the structured result.
+
+**Why it matters:** The output_schema field on every WrappedTask is a declarative compression specification — the model must fit its entire answer into the declared shape. This is the Wrapper-as-Compression Contract pattern that makes progressive distillation work without a separate summarisation step.
+
+**Key points:**
+- `status: Literal["resolved", "failed"]` — models always commit to an outcome; `"unresolved"` is a schema error (BRT-ENV-001)
+- `level_path` (e.g. `"4d"`) encodes position in the run tree for fold-in cleanup and observability
+- `trigger_reason` turns the envelope table into a queryable causal graph with a single WHERE clause
+- Pydantic v2 enforces all invariants at construction time — bad envelopes never reach the model layer
+
+**Demo talking point:** "Every model call is a typed contract. The schema is both the task spec and the compression spec. There is no separate summarisation step."
+
+**Portfolio/LinkedIn angle:** Pydantic v2 advanced validation patterns; domain-driven schema design; typed inter-agent protocol.
+
+---
+
 <!-- Added: 2026-04-18 — S1-00: Project scaffold + health endpoint -->
 ## FastAPI Scaffold + Health Endpoint
 

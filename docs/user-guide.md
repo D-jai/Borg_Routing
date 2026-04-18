@@ -62,3 +62,26 @@ BORG_ROUTE can automatically find models running in LM Studio, Ollama, and on Op
 ### If something goes wrong
 - **No models appear after discovery** — Check that LM Studio is running on ports 1234–1237, or that Ollama is running at `http://localhost:11434`.
 - **OpenRouter models missing** — Make sure you have added an OpenRouter API key on the Keys page.
+
+---
+
+<!-- Added: 2026-04-18 — S2-01: Envelope schema -->
+## How Tasks Are Packaged (Envelopes)
+
+Every piece of work BORG_ROUTE sends to a model is wrapped in a **WrappedTask** envelope. When the model finishes, it returns an **InboundEnvelope**. You never interact with envelopes directly — they are internal to the system — but understanding them helps when reading run traces.
+
+### What a WrappedTask contains
+- **instruction** — the exact task the model must perform
+- **output_schema** — the exact shape the model must return (this is the compression contract)
+- **type** — one of: `orchestrate`, `answerer`, `apply_to_each`, `state_op`
+- **level_path** — where this task sits in the run tree (e.g. `"1a"`, `"2b"`)
+- **trigger_reason** — why this envelope was created (e.g. `initial_plan`, `escalation_from:env-id`)
+
+### What an InboundEnvelope contains
+- **status** — always `resolved` or `failed`. A model must always commit to an outcome.
+- **output** — the model's structured answer, matching the output_schema
+- **failure_reason** — if status is `failed`, a short explanation
+
+### If something goes wrong
+- **"BRT-ENV-001" in logs** — A model returned `status="unresolved"`. This should never happen; the schema rejects it. Check the model's raw output in the run trace.
+- **"BRT-ENV-003" in logs** — A plan exceeded the maximum recursion depth (default: 5). The task may be too complex to decompose at this depth; check the run trace and consider restructuring the request.

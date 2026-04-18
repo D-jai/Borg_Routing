@@ -4,6 +4,23 @@
 
 ---
 
+## S2-01 — Envelope Schema
+
+| ID | Description | Level | Status |
+|----|-------------|-------|--------|
+| TC-ENV-001 | WrappedTask roundtrip serialisation with all fields | Unit | ✅ Pass |
+| TC-ENV-002 | InboundEnvelope (resolved) roundtrip serialisation | Unit | ✅ Pass |
+| TC-ENV-003 | BRT-ENV-001: status='unresolved' rejected | Unit | ✅ Pass |
+| TC-ENV-004 | BRT-ENV-002: invalid envelope type rejected | Unit | ✅ Pass |
+| TC-ENV-005 | BRT-ENV-003: current_depth > max_depth rejected | Unit | ✅ Pass |
+| TC-ENV-006 | BRT-ENV-004: empty instruction rejected | Unit | ✅ Pass |
+| TC-ENV-007 | BRT-ENV-005: invalid SideEffectAction action rejected | Unit | ✅ Pass |
+| TC-ENV-008 | WrappedTask default fields are correct | Unit | ✅ Pass |
+| TC-ENV-009 | InboundEnvelope (failed) roundtrip serialisation | Unit | ✅ Pass |
+| TC-ENV-010 | SideEffectAction accepts write and delete | Unit | ✅ Pass |
+| TC-ENV-011 | All four valid envelope types accepted | Unit | ✅ Pass |
+| TC-ENV-012 | InboundEnvelope with scratch_writes and scratch_cleanup | Unit | ✅ Pass |
+
 ## S1-10 — Slice 1 End-to-End
 
 | ID | Description | Level | Status |
