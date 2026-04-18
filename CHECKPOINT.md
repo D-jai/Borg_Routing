@@ -1,8 +1,8 @@
 # Checkpoint — BORG_ROUTE
-> **Where I Left Off:** Slice 4 (Historical Memory + Rolling Summary) is **complete**.
-> All S4-01 through S4-04 tasks shipped and committed. 219 tests passing.
-> Next session starts at **BUILD_PLAN.md Slice 5** (Observability + NER + Skills UI).
-> First task: S5-01 — create `run_digests` table and `user_rating` column on runs.
+> **Where I Left Off:** Slice 5 (Observability + NER + Skills UI) is **complete**.
+> All S5-01 through S5-10 tasks shipped and committed. 236 tests passing.
+> Next session starts at **BUILD_PLAN.md Slice 6** (Live UI + Streaming Polish).
+> First task: S6-01 — `GET /runs/{id}/stream` SSE endpoint for live envelope status changes.
 
 ---
 
@@ -15,7 +15,7 @@
 | Slice 2: Core Pattern E2E | ✅ Complete | S2-01..S2-17, 191 tests (138 new in Slice 2) |
 | Slice 3: Recursion + Admin + Resume | ✅ Complete | S3-01..S3-11, 210 tests |
 | Slice 4: Historical Memory | ✅ Complete | S4-01..S4-04, 9 new tests, 219 total |
-| Slice 5: Observability + NER | 🔲 Not started | |
+| Slice 5: Observability + NER + Skills UI | ✅ Complete | S5-01..S5-10, 17 new tests, 236 total |
 | Slice 6: Live UI + Polish | 🔲 Not started | |
 
 ---
@@ -123,3 +123,4 @@ No blocking architectural questions remain. Builder can start Slice 1 cleanly.
 | 2026-04-18 | 4 (Builder Session 2) | Slice 2 complete. S2-01..S2-17: envelope schema+validator, 8 DB tables, async state/scratch helpers, fire-and-forget log writer, answerer executor, state_ops, skill library, apply_to_each, fold_in, orchestrator engine (plan/re_plan/compose loop), pipeline runner, chat_completions gateway, task API, MCP server, chat+run UI, E2E test. 138 new tests. | 191 |
 | 2026-04-18 | 5 (Builder Session 3) | Slice 3 complete. S3-01..S3-11: recursive orchestration (child run + parent_run_id linkage, depth cap demotion), run_pipeline parent/depth params, resume_run(), admin API (config + rules ledger), POST /runs/{id}/resume + GET /runs, threads+messages tables + window extractor, admin.html, dashboard.html, run.html drill-down, 19 new tests. | 210 |
 | 2026-04-18 | 6 (Builder Session 4) | Slice 4 complete. S4-01..S4-04: compress_inactive_turns() in src/memory/compressor.py (model call, config store, model_call log event, BRT-MEM-003..005), runner.py auto-loads rolling_summary from config when thread_id provided, 9 new tests. | 219 |
+| 2026-04-18 | 7 (Builder Session 5) | Slice 5 complete. S5-01..S5-10: run_digests + log_entities + log_relations tables, compute_and_save_digest + set_run_rating helpers, POST /runs/{id}/rating, thumbs in chat UI, NER worker (spaCy), GET /logs/* API, ui/logs.html, dashboard Stats tab, GET+POST /skills/* API, ui/skills.html, 17 new tests. | 236 |
