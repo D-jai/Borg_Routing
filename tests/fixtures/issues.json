@@ -1,0 +1,12 @@
+[
+  {"id": "i1", "title": "App crashes on login", "body": "The app crashes every time I try to log in with my Google account. Error: NullPointerException."},
+  {"id": "i2", "title": "Add dark mode", "body": "It would be great to have a dark mode option in settings. Many users have requested this."},
+  {"id": "i3", "title": "How do I export data?", "body": "I can't find the export button. Is there a way to export my data to CSV?"},
+  {"id": "i4", "title": "Database connection timeout", "body": "Getting frequent timeout errors when the database has more than 1000 records. Seems like a performance issue."},
+  {"id": "i5", "title": "Add bulk import", "body": "Please add a feature to bulk import users via CSV. This is critical for onboarding large teams."},
+  {"id": "i6", "title": "What is the rate limit?", "body": "What is the API rate limit for the free tier? I couldn't find this in the docs."},
+  {"id": "i7", "title": "Login button unresponsive on mobile", "body": "On iOS Safari, the login button doesn't respond to taps. Works fine on Chrome."},
+  {"id": "i8", "title": "Support OAuth2", "body": "We need OAuth2 support for enterprise SSO integration. Currently only username/password works."},
+  {"id": "i9", "title": "How to reset password?", "body": "I forgot my password. The reset email never arrived. What should I do?"},
+  {"id": "i10", "title": "Memory leak in API server", "body": "The API server memory usage grows continuously and never releases. Needs to be fixed urgently."}
+]

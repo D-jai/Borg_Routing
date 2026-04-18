@@ -21,6 +21,19 @@
 | TC-ENV-011 | All four valid envelope types accepted | Unit | ✅ Pass |
 | TC-ENV-012 | InboundEnvelope with scratch_writes and scratch_cleanup | Unit | ✅ Pass |
 
+## S2-17 — Slice 2 End-to-End
+
+| ID | Description | Level | Status |
+|----|-------------|-------|--------|
+| TC-E2E-010 | /v1/chat/completions returns OpenAI-shaped response | E2E (mocked) | ✅ Pass |
+| TC-E2E-011 | MCP borg_route.chat tool call succeeds | E2E (mocked) | ✅ Pass |
+| TC-E2E-012 | POST /v1/task + GET /runs/{id} lifecycle | E2E | ✅ Pass |
+| TC-E2E-013 | All 10 skills render to valid WrappedTasks | E2E | ✅ Pass |
+| TC-E2E-014 | apply_to_each over 10 issues: 8 resolved, 2 failed | E2E (mocked) | ✅ Pass |
+| TC-E2E-015 | fold_in detects residue, cleans it, logs event | E2E | ✅ Pass |
+| TC-E2E-016 | run_pipeline happy path (mocked orchestrator) | E2E (mocked) | ✅ Pass |
+| TC-E2E-017 | MCP initialize → tools/list → tools/call full flow | E2E | ✅ Pass |
+
 ## S2-15 — MCP Server
 
 | ID | Description | Level | Status |
