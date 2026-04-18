@@ -1,9 +1,8 @@
 # Checkpoint — BORG_ROUTE
-> **Where I Left Off:** Slice 3 (Recursion + Admin + Resume + Threads) is **complete**.
-> All S3-01 through S3-11 tasks shipped and committed. 210 tests passing.
-> Next session starts at **BUILD_PLAN.md Slice 4** (Historical Memory + Rolling Summary).
-> First task: S4-01 — `src/memory/window.py::extract_window()` already exists;
-> now create `src/memory/compressor.py` for inactive-turn compression via model call.
+> **Where I Left Off:** Slice 4 (Historical Memory + Rolling Summary) is **complete**.
+> All S4-01 through S4-04 tasks shipped and committed. 219 tests passing.
+> Next session starts at **BUILD_PLAN.md Slice 5** (Observability + NER + Skills UI).
+> First task: S5-01 — create `run_digests` table and `user_rating` column on runs.
 
 ---
 
@@ -15,7 +14,7 @@
 | Slice 1: Registry Foundation | ✅ Complete | S1-00..S1-10, 53 tests, all committed |
 | Slice 2: Core Pattern E2E | ✅ Complete | S2-01..S2-17, 191 tests (138 new in Slice 2) |
 | Slice 3: Recursion + Admin + Resume | ✅ Complete | S3-01..S3-11, 210 tests |
-| Slice 4: Historical Memory | 🔲 Not started | **Start here** |
+| Slice 4: Historical Memory | ✅ Complete | S4-01..S4-04, 9 new tests, 219 total |
 | Slice 5: Observability + NER | 🔲 Not started | |
 | Slice 6: Live UI + Polish | 🔲 Not started | |
 
@@ -123,3 +122,4 @@ No blocking architectural questions remain. Builder can start Slice 1 cleanly.
 | 2026-04-18 | 3 (Builder Session 1) | Slice 1 complete. S1-00..S1-10 all shipped: FastAPI scaffold, ModelInfo, CapabilityMatrix, cost formula, specialty-primary router, discovery (LM Studio/Ollama/OpenRouter/custom), 35-prompt benchmark suite, registry API endpoints, Models + Keys + Chat UI pages, Slice 1 E2E test. All Parallel Commit Law artefacts shipped with each commit. | 53 |
 | 2026-04-18 | 4 (Builder Session 2) | Slice 2 complete. S2-01..S2-17: envelope schema+validator, 8 DB tables, async state/scratch helpers, fire-and-forget log writer, answerer executor, state_ops, skill library, apply_to_each, fold_in, orchestrator engine (plan/re_plan/compose loop), pipeline runner, chat_completions gateway, task API, MCP server, chat+run UI, E2E test. 138 new tests. | 191 |
 | 2026-04-18 | 5 (Builder Session 3) | Slice 3 complete. S3-01..S3-11: recursive orchestration (child run + parent_run_id linkage, depth cap demotion), run_pipeline parent/depth params, resume_run(), admin API (config + rules ledger), POST /runs/{id}/resume + GET /runs, threads+messages tables + window extractor, admin.html, dashboard.html, run.html drill-down, 19 new tests. | 210 |
+| 2026-04-18 | 6 (Builder Session 4) | Slice 4 complete. S4-01..S4-04: compress_inactive_turns() in src/memory/compressor.py (model call, config store, model_call log event, BRT-MEM-003..005), runner.py auto-loads rolling_summary from config when thread_id provided, 9 new tests. | 219 |

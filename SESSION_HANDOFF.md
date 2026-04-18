@@ -1,83 +1,65 @@
-# Session Handoff — 2026-04-18T19:30 (Builder Session 3 → Builder Session 4)
+# Session Handoff — 2026-04-18T21:00 (Builder Session 4 → Builder Session 5)
 
 ## Context At Write Time
-- Usage: ~65%
+- Usage: ~30%
 - Model: Claude Sonnet 4.6
 - Reasoning: High
 
 ## Where I Left Off
 
-Slice 3 (Recursion + Admin + Resume + Threads) is **complete and committed**
-(11 tasks, 19 new tests, 210 total passing). The next session opens
-`src/memory/window.py` (already exists with `create_thread`, `add_message`,
-`extract_window`) and creates `src/memory/compressor.py` with an async
-`compress_inactive_turns()` function that calls the orchestrator model to
-compress old thread turns into a rolling_summary string (BRT-MEM-001..005).
+Slice 4 (Historical Memory + Rolling Summary) is **complete and committed**
+(4 tasks, 9 new tests, 219 total passing). The next session opens
+`BUILD_PLAN.md §Slice 5` and begins S5-01: add a `run_digests` table to
+`src/db/schema.py` and a `user_rating` column to the `runs` table.
 
 ## Just Completed (this session)
 
-- S3-01: `src/agents/executor.py` — type=orchestrate: child run creation with parent_run_id, MAX_RECURSION_DEPTH=5 enforcement, demotion at cap (BRT-ORC-020..022)
-- S3-02: `src/pipeline/runner.py` — parent_run_id + current_depth + thread_id params
-- S3-03: `src/db/state.py` — resume_run() + get_runs_list() helpers (BRT-DB-020)
-- S3-04/05: `src/api/admin.py` — GET/POST /config, POST /config/rules, retire endpoint (BRT-ADM-001..005)
-- S3-06: `src/api/tasks.py` — POST /runs/{id}/resume + GET /runs endpoints
-- S3-07: `ui/admin.html` — rules ledger view + append form + settings panel
-- S3-08: `ui/dashboard.html` — run history table with Resume + Trace buttons
-- S3-09: `ui/run.html` — child-run drill-down link on orchestrate envelope rows
-- S3-10: `src/db/schema.py` — threads + messages tables; migration for thread_id on runs; `src/memory/window.py`
-- S3-11: `tests/orchestrator/test_slice3.py` — 19 tests (recursion, resume, rule ledger, threads)
+- S4-01: `src/memory/window.py` — already existed; verified complete
+- S4-02: `src/memory/compressor.py` — `compress_inactive_turns()`: fetches inactive turns, calls model for rolling summary, stores in `config` as `rolling_summary:{thread_id}`, logs `model_call` event (BRT-MEM-003..005)
+- S4-03: `src/pipeline/runner.py` — auto-loads `rolling_summary` from config when `thread_id` provided and no explicit summary passed
+- S4-04: `tests/orchestrator/test_slice4.py` — 9 tests (TC-S4-001..008), 15-turn thread E2E
 
 ## In Progress
 None — clean handoff.
 
 ## Next Task (specific)
 
-**BUILD_PLAN.md Slice 4, task S4-01.**
+**BUILD_PLAN.md Slice 5, task S5-01.**
 
 First concrete actions:
 1. Read AGENTS.md and this file (you're doing it).
-2. Skim DESIGN_PRINCIPLES.md §3.2 (Progressive Distillation) and §3.3 (Cascading Distillation).
-3. Read BUILD_PLAN.md §Slice 4 (S4-01 through S4-04 only).
-4. Open `src/memory/window.py` — understand existing create_thread/add_message/extract_window.
-5. Create `src/memory/compressor.py` — `compress_inactive_turns(thread_id, model_endpoint, model_name, keep_last_n=5, db_path)` that:
-   - Fetches all messages older than the last `keep_last_n` turns
-   - Calls the model with them to produce a rolling_summary string
-   - Stores the summary in config table as `rolling_summary:{thread_id}`
-   - Returns the summary string
-   - Logs a `model_call` event (BRT-MEM-003..005)
-6. Update `src/prompts/orchestrator.py` to accept `{rolling_summary}` substitution (already has it).
-7. Update `src/pipeline/runner.py` to load rolling_summary from config when thread_id provided.
-8. Write tests: S4-04 (15-turn thread; assert compact context passed).
+2. Read BUILD_PLAN.md §Slice 5 (S5-01 through S5-10).
+3. Read `src/db/schema.py` — understand existing tables before adding new ones.
+4. Add `run_digests` table (run_id PK FK runs, summary TEXT, cost_dollars REAL, token_count INT, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP) to `src/db/schema.py::create_all`.
+5. Add `user_rating` column (INTEGER NULL, CHECK user_rating IN (1,-1)) to `runs` table in `src/db/schema.py` — add as ALTER TABLE in a migration block guarded by `try/except`.
+6. Continue with S5-02: digest computation helper in `src/db/state.py::compute_and_save_digest()` called at run completion in `src/pipeline/runner.py`.
 
 ## Files To Read In New Session (minimal set)
 
 1. `AGENTS.md`
 2. This `SESSION_HANDOFF.md`
-3. `DESIGN_PRINCIPLES.md` §3.2 + §3.3 (skim only)
-4. `BUILD_PLAN.md` §Slice 4 (S4-01 through S4-04 only)
-5. `src/memory/window.py` — existing thread/message helpers
-6. `src/pipeline/runner.py` — where to wire rolling_summary loading
-7. `src/prompts/orchestrator.py` — to check {rolling_summary} substitution already present
+3. `BUILD_PLAN.md` §Slice 5 (S5-01 through S5-10 only)
+4. `src/db/schema.py` — before touching it
+5. `src/pipeline/runner.py` — where digest computation hooks in
+6. `src/db/state.py` — to add compute_and_save_digest helper
 
-Do NOT re-read all of DESIGN_PRINCIPLES.md, CHECKPOINT.md history, or Slice 1/2/3 code.
+Do NOT re-read Slice 1/2/3/4 code or historical design docs.
 
 ## Open Issues / Gotchas Discovered This Session
 
-- `orchestrate_run` must remain a lazy import in executor.py (to avoid circular import with engine.py). Tests must patch via `src.orchestrator.engine.orchestrate_run`, not `src.agents.executor.orchestrate_run`.
-- The `create_run` function in `state.py` now accepts `thread_id` param; existing tests that call `create_run` without it are unaffected (it's Optional with default None).
 - PowerShell: use `;` not `&&` to chain commands.
 - `asyncio.get_event_loop()` fails in pytest sync tests on Python 3.14 — use `asyncio.run()` instead.
-- `data/borg_route.db` is untracked (correct; in .gitignore via .env pattern — check if it needs explicit ignoring).
+- `write_event` uses `asyncio.create_task()` — in tests, patch it with `AsyncMock` at `src.memory.compressor.write_event` to avoid "no running event loop" issues.
+- httpx AsyncClient must be patched at the module level (`src.memory.compressor` or `httpx.AsyncClient`) and both `__aenter__`/`__aexit__` must be set as `AsyncMock`.
 
 ## Tests Status
-- Total: 210 passing
+- Total: 219 passing
 - Failing: none
-- New in Slice 3: 19 tests
-- Test files: tests/orchestrator/test_slice3.py (all new), plus existing suite unchanged
+- New in Slice 4: 9 tests (tests/orchestrator/test_slice4.py)
 
 ## Instruction To Future Builder
 
-Read files above in order. Begin at S4-01. Every `feat:` commit must ship all
+Read files above in order. Begin at S5-01. Every `feat:` commit must ship all
 Parallel Commit Law artefacts (code + error codes registered + user-guide section
 + presentation bullet + tests). See CODING_STANDARD_CORE.md for the checklist.
 
@@ -85,7 +67,7 @@ Parallel Commit Law artefacts (code + error codes registered + user-guide sectio
 1. Run full test suite — confirm all passing.
 2. Commit remaining changes.
 3. Create zip backup:
-   `Set-Location C:\stage; Compress-Archive -Path borg_route -DestinationPath "borg_route_slice4_complete_$(Get-Date -Format 'yyyyMMdd_HHmmss').zip"`
+   `Set-Location C:\stage; Compress-Archive -Path borg_route -DestinationPath "borg_route_slice5_complete_$(Get-Date -Format 'yyyyMMdd_HHmmss').zip"`
 4. Update CHECKPOINT.md (one precise paragraph about where you stopped).
 5. OVERWRITE this file (`SESSION_HANDOFF.md`) using the template in AGENTS.md.
 6. Tell the user: "Context at ~65%. Start a new Droid session and type:
