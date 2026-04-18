@@ -4,6 +4,17 @@
 
 ---
 
+## S1-05 — Model Router
+
+| ID | Description | Level | Status |
+|----|-------------|-------|--------|
+| TC-REG-030 | SYSTEM_CHOOSE picks cheapest qualifying coding model | Unit | ✅ Pass |
+| TC-REG-031 | LOCAL_FIRST restricts to local models when one qualifies | Unit | ✅ Pass |
+| TC-REG-032 | LOCAL_FIRST falls back to external when quality bar eliminates all locals | Unit | ✅ Pass |
+| TC-REG-033 | specialty_hint prefers models with matching tag | Unit | ✅ Pass |
+| TC-REG-034 | BRT-REG-020 raised when quality requirement is impossibly high | Unit | ✅ Pass |
+| TC-REG-035 | Roleplay task returns cheapest qualifying roleplay model | Unit | ✅ Pass |
+
 ## S1-04 — Effective Cost Formula
 
 | ID | Description | Level | Status |
