@@ -1,8 +1,8 @@
 # Checkpoint — BORG_ROUTE
-> **Where I Left Off:** Slice 5 (Observability + NER + Skills UI) is **complete**.
-> All S5-01 through S5-10 tasks shipped and committed. 236 tests passing.
-> Next session starts at **BUILD_PLAN.md Slice 6** (Live UI + Streaming Polish).
-> First task: S6-01 — `GET /runs/{id}/stream` SSE endpoint for live envelope status changes.
+> **Where I Left Off:** Slice 6 (Live UI + Streaming Polish) is **complete**.
+> All S6-01 through S6-06 tasks shipped and committed. 245 tests passing (9 new).
+> All planned slices (0-6) are now complete. No further slices defined in BUILD_PLAN.md.
+> System is feature-complete per the current BUILD_PLAN.
 
 ---
 
@@ -16,7 +16,7 @@
 | Slice 3: Recursion + Admin + Resume | ✅ Complete | S3-01..S3-11, 210 tests |
 | Slice 4: Historical Memory | ✅ Complete | S4-01..S4-04, 9 new tests, 219 total |
 | Slice 5: Observability + NER + Skills UI | ✅ Complete | S5-01..S5-10, 17 new tests, 236 total |
-| Slice 6: Live UI + Polish | 🔲 Not started | |
+| Slice 6: Live UI + Polish | ✅ Complete | S6-01..S6-06, 9 new tests, 245 total |
 
 ---
 

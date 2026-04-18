@@ -1,4 +1,4 @@
-# Session Handoff — 2026-04-18T23:30 (Builder Session 5 → Builder Session 6)
+# Session Handoff — 2026-04-18T(Builder Session 6 → Builder Session 7)
 
 ## Context At Write Time
 - Usage: ~65%
@@ -7,77 +7,61 @@
 
 ## Where I Left Off
 
-Slice 5 (Observability + NER + Skills UI) is **complete and committed**
-(10 tasks, 17 new tests, 236 total passing). The next session opens
-`BUILD_PLAN.md §Slice 6` and begins S6-01: implement `GET /runs/{id}/stream`
-as a Server-Sent Events endpoint that emits envelope status changes in real time.
+**All six slices are complete.** Slice 6 (Live UI + Streaming Polish) was fully
+implemented and committed. 245 tests passing. The BUILD_PLAN.md defines no
+further slices. The next session should consult with the user/planning agent
+about what comes next (post-build polish, new features, or production hardening).
 
 ## Just Completed (this session)
 
-- S5-01: `src/db/schema.py` — `run_digests`, `log_entities`, `log_relations` tables + migrations for `user_rating`, `ner_processed`
-- S5-02: `src/db/state.py` — `compute_and_save_digest()` + `set_run_rating()`; `src/pipeline/runner.py` — saves digest at completion
-- S5-03: `src/api/tasks.py` — `POST /runs/{id}/rating` (BRT-API-026/027)
-- S5-04: `ui/chat.html` — thumbs up/down rating buttons after each assistant reply
-- S5-05: `src/logging/ner_worker.py` — async spaCy NER worker, populates `log_entities` + `log_relations` (BRT-LOG-010..013)
-- S5-06: `src/api/logs.py` — `GET /logs`, `GET /logs/entities`, `GET /logs/cost-summary`, `GET /logs/export`
-- S5-07: `ui/logs.html` — events/cost/entities tabs + JSONL export
-- S5-08: `ui/dashboard.html` — Stats tab (outcomes, cost by model, feedback, outliers)
-- S5-09: `src/api/skills.py` + `ui/skills.html` — skill cards with stats; new-version form
-- S5-10: `tests/orchestrator/test_slice5.py` — 17 tests
+- S6-01: `src/api/tasks.py` — `GET /runs/{id}/stream` SSE endpoint; polls DB every
+  0.5s; emits `envelope_update` per status change and `run_terminal` on completion
+  (BRT-API-028/029)
+- S6-02: `src/api/chat_completions.py` — `_stream_bypass_relay()`: relays actual SSE
+  from underlying model endpoint; falls back to word simulation; BRT-API-013 updated
+- S6-03: `ui/run.html` — EventSource SSE listener; live envelope row upsert;
+  apply_to_each counter; pulsing live-dot status bar
+- S6-04: `ui/chat.html` — fetch streaming reader; tokens displayed progressively via
+  `response.body.getReader()`
+- S6-05: `ui/dashboard.html` — cost cards, token leaderboard (horizontal bar chart),
+  depth tree (recursive parent→child run visualisation)
+- S6-06: `tests/orchestrator/test_slice6.py` — 9 tests: SSE lifecycle (TC-S6-001..005)
+  and streaming chat (TC-S6-006..009)
 
 ## In Progress
 None — clean handoff.
 
 ## Next Task (specific)
 
-**BUILD_PLAN.md Slice 6, task S6-01.**
-
-First concrete actions:
-1. Read AGENTS.md and this file.
-2. Read BUILD_PLAN.md §Slice 6 (S6-01 through S6-06 only).
-3. Read `src/api/tasks.py` — the `GET /runs/{run_id}` endpoint structure.
-4. Read `src/db/state.py` — `get_envelopes()` to understand the data.
-5. Implement `GET /runs/{id}/stream` in `src/api/tasks.py` using FastAPI's `StreamingResponse` + `EventSourceResponse` (or raw SSE with `text/event-stream`). Poll DB every 0.5s for envelope status changes; emit one `data:` line per change; close on run terminal state.
-6. Continue with S6-02: streaming `/v1/chat/completions` — token-level SSE.
+No next task defined in BUILD_PLAN.md. Options to discuss with user/planning agent:
+1. Post-build polish (NER worker auto-start, run_digests endpoint, depth tree from real DB data)
+2. Production hardening (auth, rate limiting, Docker packaging)
+3. New features as defined by planning agent
 
 ## Files To Read In New Session (minimal set)
 
 1. `AGENTS.md`
 2. This `SESSION_HANDOFF.md`
-3. `BUILD_PLAN.md` §Slice 6 (S6-01..S6-06 only)
-4. `src/api/tasks.py` — for SSE endpoint placement
-5. `src/api/chat_completions.py` — for streaming chat additions
-6. `ui/run.html` — to wire SSE listener
-7. `ui/chat.html` — to wire token streaming
+3. `CHECKPOINT.md` — for full slice status
+4. `BUILD_PLAN.md` — to confirm no new slices have been added
 
-Do NOT re-read historical slices or design docs.
+Do NOT re-read historical design docs unless starting a new feature.
 
 ## Open Issues / Gotchas Discovered This Session
 
 - PowerShell: use `;` not `&&` to chain commands.
-- `patch.object(library_instance, "load")` is the right approach to prevent `_library.load()` from reading real disk in tests where you pre-populate `_skills` directly.
-- The `SKILLS_PATH` default in `SkillLibrary.load()` is baked at definition time — always patch both the module-level `SKILLS_PATH` constant AND `_library.load` when testing new-version writes.
-- `run_digests` uses ON CONFLICT upsert — safe to call multiple times per run.
-- NER worker uses `asyncio.create_task` pattern — start it from the FastAPI lifespan or a background thread if you want it running during normal operation. It's not auto-started yet (intentional — Slice 6 / post-build polish).
+- `WrappedTask.type` must be one of `{'orchestrate', 'answerer', 'apply_to_each', 'state_op'}` — 'answer' is not valid.
+- `WrappedTask.skill_version` is `Optional[int]`, not a string.
+- `ui/dashboard.html` depth tree uses instruction length as proxy for complexity (real token data from `run_digests` not yet exposed via an API endpoint).
+- NER worker (`src/logging/ner_worker.py`) is NOT auto-started; it was intentionally left as a manual call (noted in Slice 5 handoff). This is a known gap if NER is desired in production.
 
 ## Tests Status
-- Total: 236 passing
+- Total: 245 passing
 - Failing: none
-- New in Slice 5: 17 tests (tests/orchestrator/test_slice5.py)
+- New in Slice 6: 9 tests (tests/orchestrator/test_slice6.py)
 
 ## Instruction To Future Builder
 
-Read files above in order. Begin at S6-01. Every `feat:` commit must ship all
-Parallel Commit Law artefacts (code + error codes registered + user-guide section
-+ presentation bullet + tests). See CODING_STANDARD_CORE.md for the checklist.
-
-**When YOUR context reaches ~65%, or you complete a slice:**
-1. Run full test suite — confirm all passing.
-2. Commit remaining changes.
-3. Create zip backup:
-   `Set-Location C:\stage; Compress-Archive -Path borg_route -DestinationPath "borg_route_slice6_complete_$(Get-Date -Format 'yyyyMMdd_HHmmss').zip"`
-4. Update CHECKPOINT.md (one precise paragraph about where you stopped).
-5. OVERWRITE this file (`SESSION_HANDOFF.md`) using the template in AGENTS.md.
-6. Tell the user: "Context at ~65%. Start a new Droid session and type:
-   `Read AGENTS.md and SESSION_HANDOFF.md, then continue.`"
-7. Stop and wait.
+All BUILD_PLAN slices are complete. Confirm with user what to do next before
+writing any new code. If new work is defined, create a new session handoff
+using the AGENTS.md template once you reach ~65% context or finish the new work.
