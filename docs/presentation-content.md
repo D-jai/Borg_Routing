@@ -28,6 +28,29 @@ first-class architecture — not a hack.
 
 ---
 
+<!-- Added: 2026-04-18 — S1-02: ModelInfo Pydantic model -->
+## Model Registry — ModelInfo
+
+**What it is:** A validated Pydantic model that represents a single AI model
+in the capability matrix — local or external, with pricing, throughput, and
+per-task quality scores.
+
+**Why it matters:** Every routing and cost decision flows through this object.
+Strong validation (BRT-REG-001/002) means bad config is caught at load time,
+not at inference time.
+
+**Key points:**
+- Supports four sources: LM Studio, Ollama, OpenRouter, custom API keys
+- Optional `Pricing` sub-model with non-negativity enforcement
+- Per-task `task_scores` enable specialty-primary routing
+
+**Demo talking point:** "The router never sees a raw dict — every model is a
+validated object. Config errors surface immediately, not mid-run."
+
+**Portfolio/LinkedIn angle:** Pydantic v2 schema design; typed domain models.
+
+---
+
 <!-- Added: 2026-04-18 — S1-00: Project scaffold + health endpoint -->
 ## FastAPI Scaffold + Health Endpoint
 

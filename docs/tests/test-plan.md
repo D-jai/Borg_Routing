@@ -4,6 +4,16 @@
 
 ---
 
+## S1-02 — ModelInfo Pydantic Model
+
+| ID | Description | Level | Status |
+|----|-------------|-------|--------|
+| TC-REG-001 | ModelInfo roundtrip serialisation (local + external) | Unit | ✅ Pass |
+| TC-REG-002 | BRT-REG-001 raised on invalid source | Unit | ✅ Pass |
+| TC-REG-003 | BRT-REG-002 raised on negative pricing | Unit | ✅ Pass |
+| TC-REG-004 | Local model with no pricing/throughput is valid | Unit | ✅ Pass |
+| TC-REG-005 | task_scores and specialty_tags default to empty | Unit | ✅ Pass |
+
 ## S1-00 — Project Scaffold
 
 | ID | Description | Level | Status |
