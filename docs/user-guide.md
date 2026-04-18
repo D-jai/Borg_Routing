@@ -155,6 +155,31 @@ BORG_ROUTE tracks conversation history in **threads**. Each thread stores the se
 
 ---
 
+## Historical Memory (Rolling Summary)
+
+For long conversations BORG_ROUTE compresses older turns into a rolling summary so the orchestrator always has useful context without overloading its window.
+
+**How it works:**
+1. After a thread grows beyond a threshold, call `compress_inactive_turns(thread_id, model_endpoint, model_name, keep_last_n=5)` from `src/memory/compressor.py`.
+2. The compressor sends all turns older than the last `keep_last_n` to the model, which writes a concise summary (3-8 sentences).
+3. The summary is stored in the config table under `rolling_summary:{thread_id}`.
+4. On the next `run_pipeline()` call with that `thread_id`, the summary is auto-loaded and passed to the orchestrator as `{rolling_summary}` in its system prompt.
+
+**Triggering compression manually (Python):**
+```python
+from src.memory.compressor import compress_inactive_turns
+summary = await compress_inactive_turns(
+    thread_id="<your-thread-id>",
+    model_endpoint="http://localhost:1234",
+    model_name="your-model-name",
+    keep_last_n=5,
+)
+```
+
+**Error codes:** BRT-MEM-003 (model call failed), BRT-MEM-004 (empty/bad response), BRT-MEM-005 (config write failed).
+
+---
+
 ## Dashboard
 
 The Dashboard at `http://localhost:8000/ui/dashboard.html` shows all runs with their status, parent link, and creation time. Click **Trace** to open the full run trace for any run.

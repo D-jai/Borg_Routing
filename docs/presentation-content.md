@@ -149,3 +149,17 @@ gives operators real-time control over model behaviour without restarting the se
 **Demo talking point:** "A complex task spawns sub-tasks, each with their own run ID linked to the parent. If a sub-task fails, one API call resumes only that work — nothing else is re-run. The admin can add a new governance rule mid-session and it applies to the very next model call."
 
 **Portfolio/LinkedIn angle:** Production-quality recursive agent architecture with fault tolerance, live governance, and full audit trail.
+
+---
+
+### Slice 4 — Historical Memory + Rolling Summary
+
+**Key points:**
+- **Progressive Distillation in practice:** `compress_inactive_turns()` calls the model once to compress all turns older than the last N into a 3-8 sentence rolling summary — the orchestrator never sees raw history beyond its window
+- **Zero-friction wiring:** `run_pipeline()` auto-loads `rolling_summary:{thread_id}` from the config table when a `thread_id` is provided — callers need no extra code
+- **Orchestrator prompt already wired:** `{rolling_summary}` placeholder in the system prompt receives the stored summary on every run, keeping long conversations coherent without token bloat
+- **Full audit trail:** every compression call is logged as a `model_call` event (tokens, latency, payload) in the logs table
+
+**Demo talking point:** "After 15 turns the system automatically compresses the first 10 into a paragraph summary. The orchestrator reads that summary and the last 5 turns — same reasoning quality, a fraction of the tokens."
+
+**Portfolio/LinkedIn angle:** Demonstrates Progressive Distillation and Cascading Distillation patterns from first principles — memory management built as a first-class architectural concern, not bolted on.

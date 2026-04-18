@@ -15,7 +15,7 @@ from typing import Optional
 from uuid import UUID
 
 from src.db.schema import DB_PATH
-from src.db.state import create_run, get_envelopes, get_run, update_run_status
+from src.db.state import create_run, get_config, get_envelopes, get_run, update_run_status
 from src.orchestrator.engine import orchestrate_run
 
 
@@ -44,6 +44,13 @@ async def run_pipeline(
     """
     if thread_window is None:
         thread_window = []
+
+    # Auto-load rolling_summary from config when thread_id is provided and
+    # no explicit summary was passed by the caller.
+    if thread_id and not rolling_summary:
+        stored = await get_config(f"rolling_summary:{thread_id}", db_path=db_path)
+        if stored:
+            rolling_summary = stored
 
     if not user_instruction or not user_instruction.strip():
         return {

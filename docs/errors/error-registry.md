@@ -178,3 +178,6 @@
 |------|-------------|--------|-------|
 | BRT-MEM-001 | Thread not found | `src/memory/window.py` | The thread_id does not exist. Create a thread first via `create_thread()`. |
 | BRT-MEM-002 | Window extraction failed | `src/memory/window.py::extract_window` | SQLite error while reading messages. Check database connectivity. |
+| BRT-MEM-003 | Model call failed during compression | `src/memory/compressor.py::compress_inactive_turns` | The compressor model endpoint is unreachable or returned a non-2xx response. Check that the model server is running at the configured endpoint. Also raised on timeout (120 s). |
+| BRT-MEM-004 | Compression response parse failed | `src/memory/compressor.py::compress_inactive_turns` | The model returned an empty or structurally unexpected response. Check the model and its output. Re-run compression once the model is healthy. |
+| BRT-MEM-005 | Config write failed after compression | `src/memory/compressor.py::compress_inactive_turns` | Could not persist the rolling summary to the config table. Check database file permissions and disk space. |
