@@ -4,6 +4,18 @@
 
 ---
 
+## S1-10 — Slice 1 End-to-End
+
+| ID | Description | Level | Status |
+|----|-------------|-------|--------|
+| TC-E2E-001 | App starts and /health returns 200 | E2E | ✅ Pass |
+| TC-E2E-002 | POST /models/discover returns upserted count | E2E (mocked ext) | ✅ Pass |
+| TC-E2E-003 | Seed matrix has ≥1 local and ≥1 OpenRouter model | E2E | ✅ Pass |
+| TC-E2E-004 | router.select_model('coding') returns valid ModelInfo | E2E | ✅ Pass |
+| TC-E2E-005 | LOCAL_FIRST strategy returns a local model | E2E | ✅ Pass |
+| TC-E2E-006 | GET /models returns all matrix models as JSON | E2E | ✅ Pass |
+| TC-E2E-007 | GET /models/matrix returns all 13+ seed models | E2E | ✅ Pass |
+
 ## S1-08 — Registry API Endpoints
 
 | ID | Description | Level | Status |
