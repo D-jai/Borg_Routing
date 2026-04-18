@@ -21,6 +21,16 @@
 | TC-ENV-011 | All four valid envelope types accepted | Unit | ✅ Pass |
 | TC-ENV-012 | InboundEnvelope with scratch_writes and scratch_cleanup | Unit | ✅ Pass |
 
+## S2-14 — Task API
+
+| ID | Description | Level | Status |
+|----|-------------|-------|--------|
+| TC-API-030 | POST /v1/task returns 202 with run_id | Integration | ✅ Pass |
+| TC-API-031 | BRT-API-020 for empty instruction | Integration | ✅ Pass |
+| TC-API-032 | GET /runs/{id} returns run state | Integration | ✅ Pass |
+| TC-API-033 | GET /runs/{id} returns 404 for unknown run_id | Integration | ✅ Pass |
+| TC-API-034 | GET /runs/{id} returns 400 for invalid UUID | Integration | ✅ Pass |
+
 ## S2-13 — Chat Completions Gateway
 
 | ID | Description | Level | Status |
