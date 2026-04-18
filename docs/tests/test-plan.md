@@ -21,6 +21,21 @@
 | TC-ENV-011 | All four valid envelope types accepted | Unit | ✅ Pass |
 | TC-ENV-012 | InboundEnvelope with scratch_writes and scratch_cleanup | Unit | ✅ Pass |
 
+## S2-02 — Envelope Validator
+
+| ID | Description | Level | Status |
+|----|-------------|-------|--------|
+| TC-ENV-020 | validate_outbound passes for valid WrappedTask | Unit | ✅ Pass |
+| TC-ENV-021 | BRT-ENV-003 raised on depth violation after mutation | Unit | ✅ Pass |
+| TC-ENV-022 | BRT-ENV-004 raised on empty instruction after mutation | Unit | ✅ Pass |
+| TC-ENV-023 | validate_inbound passes for resolved envelope matching schema | Unit | ✅ Pass |
+| TC-ENV-024 | validate_inbound passes for failed envelope with failure_reason | Unit | ✅ Pass |
+| TC-ENV-025 | BRT-ENV-012: failed envelope missing failure_reason raises | Unit | ✅ Pass |
+| TC-ENV-026 | BRT-ENV-011: output missing required key raises | Unit | ✅ Pass |
+| TC-ENV-027 | Extra output keys beyond schema are acceptable | Unit | ✅ Pass |
+| TC-ENV-028 | Failed envelope with empty output passes (no schema check on failure) | Unit | ✅ Pass |
+| TC-ENV-029 | Empty output_schema means no key check needed | Unit | ✅ Pass |
+
 ## S1-10 — Slice 1 End-to-End
 
 | ID | Description | Level | Status |

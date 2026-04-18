@@ -70,6 +70,22 @@ validated object. Config errors surface immediately, not mid-run."
 
 ---
 
+<!-- Added: 2026-04-18 — S2-02: Envelope validator -->
+## Envelope Contract Enforcement — validate_outbound + validate_inbound
+
+**What it is:** A two-function contract layer that validates envelope correctness at every dispatch and fold-in boundary.
+
+**Why it matters:** `validate_inbound` is the runtime guard against misbehaving models — it checks that the output matches the declared schema and that every failed envelope carries an explanation. These are the exact conditions the fold-in cleanup law depends on.
+
+**Key points:**
+- BRT-ENV-011: output schema mismatch caught at fold-in, before the parent agent consumes bad data
+- BRT-ENV-012: a failed envelope without a reason is itself a contract violation — logged as diagnostic signal
+- Validators re-check at call-site even if Pydantic already validated at construction (defense in depth against mutation)
+
+**Demo talking point:** "Every inter-agent handoff is validated twice — at construction and at receipt. A model that returns the wrong shape is caught immediately, not silently propagated."
+
+---
+
 <!-- Added: 2026-04-18 — S1-00: Project scaffold + health endpoint -->
 ## FastAPI Scaffold + Health Endpoint
 
