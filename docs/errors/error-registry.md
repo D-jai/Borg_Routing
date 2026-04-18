@@ -20,3 +20,10 @@
 | BRT-REG-004 | Invalid external API key | `src/registry/discovery.py::discover_openrouter / discover_custom_key` | HTTP 401 from the external provider. Check the API key in `.env` and the Keys page in the UI. |
 | BRT-REG-014 | Judge model call failed during benchmark | `src/registry/benchmark.py::_judge_response` | The judge model endpoint is not reachable or returned an unparseable score. Check that the judge model is running and accessible at the configured endpoint. |
 | BRT-REG-015 | Model under test unreachable during benchmark | `src/registry/benchmark.py::benchmark_model` | The model has no endpoint configured, or the endpoint is unreachable. Run discovery first to populate endpoints. |
+
+## BRT-API — API Module
+
+| Code | Description | Origin | Hints |
+|------|-------------|--------|-------|
+| BRT-API-001 | Malformed request body | `src/api/models.py::add_key` | `name` and `api_key` are required fields. Check the request JSON body. |
+| BRT-API-002 | Model not found in matrix | `src/api/models.py::run_benchmark` | The model_id does not exist in the capability matrix. Run `POST /models/discover` first, or check the model_id for typos. |

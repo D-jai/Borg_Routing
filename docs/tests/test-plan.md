@@ -4,6 +4,17 @@
 
 ---
 
+## S1-08 — Registry API Endpoints
+
+| ID | Description | Level | Status |
+|----|-------------|-------|--------|
+| TC-API-010 | GET /models returns a list (matrix loaded from disk) | Integration | ✅ Pass |
+| TC-API-011 | GET /models/matrix returns full matrix as JSON array | Integration | ✅ Pass |
+| TC-API-012 | POST /models/discover returns { upserted: int } | Integration (mocked) | ✅ Pass |
+| TC-API-013 | POST /models/benchmark/{id} returns 404 BRT-API-002 on unknown model | Integration | ✅ Pass |
+| TC-API-014 | POST /keys saves KEY_* and ENDPOINT_* env variables | Integration | ✅ Pass |
+| TC-API-015 | POST /keys returns 400 BRT-API-001 on missing name | Integration | ✅ Pass |
+
 ## S1-07 — Model Benchmark
 
 | ID | Description | Level | Status |
