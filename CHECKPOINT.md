@@ -1,9 +1,9 @@
 # Checkpoint — BORG_ROUTE
-> **Where I Left Off:** Slice 2 (Core Pattern E2E) is **complete**.
-> All S2-01 through S2-17 tasks shipped and committed. 191 tests passing.
-> Next session starts at **BUILD_PLAN.md Slice 3, task S3-01**
-> (`src/orchestrator/engine.py` — handle `type=orchestrate`: spawn child run,
-> link `parent_run_id`, enforce `MAX_RECURSION_DEPTH=5`, demote at cap — BRT-ORC-020..029).
+> **Where I Left Off:** Slice 3 (Recursion + Admin + Resume + Threads) is **complete**.
+> All S3-01 through S3-11 tasks shipped and committed. 210 tests passing.
+> Next session starts at **BUILD_PLAN.md Slice 4** (Historical Memory + Rolling Summary).
+> First task: S4-01 — `src/memory/window.py::extract_window()` already exists;
+> now create `src/memory/compressor.py` for inactive-turn compression via model call.
 
 ---
 
@@ -14,8 +14,8 @@
 | Slice 0: Scaffolding | ✅ Complete | Docs, git, reassessment done |
 | Slice 1: Registry Foundation | ✅ Complete | S1-00..S1-10, 53 tests, all committed |
 | Slice 2: Core Pattern E2E | ✅ Complete | S2-01..S2-17, 191 tests (138 new in Slice 2) |
-| Slice 3: Recursion + Admin + Resume | 🔲 Not started | **Start here** |
-| Slice 4: Conversation Memory | 🔲 Not started | |
+| Slice 3: Recursion + Admin + Resume | ✅ Complete | S3-01..S3-11, 210 tests |
+| Slice 4: Historical Memory | 🔲 Not started | **Start here** |
 | Slice 5: Observability + NER | 🔲 Not started | |
 | Slice 6: Live UI + Polish | 🔲 Not started | |
 
@@ -121,3 +121,5 @@ No blocking architectural questions remain. Builder can start Slice 1 cleanly.
 | 2026-04-18 | 2 (reassessment) | Architecture reassessed end-to-end with Droid. Significant simplifications and additions. DESIGN_PRINCIPLES.md created. MESSAGE_TO_CLAUDE.md + BUILD_PLAN.md rewritten to reflect slice-based plan. CHECKPOINT.md + HANDOVER_TO_BUILDER.md updated. Skill Library concept added. capability_matrix.yaml seeded (8 local + 5 OpenRouter). Failure semantics + tool-use + GitHub strategy resolved. | 0 |
 | 2026-04-18 | 2b (peak-context writing) | Actual orchestrator + answerer + base system prompts written into `src/prompts/`. 10 skills fully specified in `data/skills.yaml`. Product surfaces decided (B OpenAI-compat + D MCP from Slice 2). BUILD_PLAN rewritten to extreme-spec detail for Slices 1 + 2 with per-task builder-model tier. DESIGN_PRINCIPLES §11-13 added (surfaces, builder strategy, resolved questions). | 0 |
 | 2026-04-18 | 3 (Builder Session 1) | Slice 1 complete. S1-00..S1-10 all shipped: FastAPI scaffold, ModelInfo, CapabilityMatrix, cost formula, specialty-primary router, discovery (LM Studio/Ollama/OpenRouter/custom), 35-prompt benchmark suite, registry API endpoints, Models + Keys + Chat UI pages, Slice 1 E2E test. All Parallel Commit Law artefacts shipped with each commit. | 53 |
+| 2026-04-18 | 4 (Builder Session 2) | Slice 2 complete. S2-01..S2-17: envelope schema+validator, 8 DB tables, async state/scratch helpers, fire-and-forget log writer, answerer executor, state_ops, skill library, apply_to_each, fold_in, orchestrator engine (plan/re_plan/compose loop), pipeline runner, chat_completions gateway, task API, MCP server, chat+run UI, E2E test. 138 new tests. | 191 |
+| 2026-04-18 | 5 (Builder Session 3) | Slice 3 complete. S3-01..S3-11: recursive orchestration (child run + parent_run_id linkage, depth cap demotion), run_pipeline parent/depth params, resume_run(), admin API (config + rules ledger), POST /runs/{id}/resume + GET /runs, threads+messages tables + window extractor, admin.html, dashboard.html, run.html drill-down, 19 new tests. | 210 |
