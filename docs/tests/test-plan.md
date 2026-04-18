@@ -21,6 +21,16 @@
 | TC-ENV-011 | All four valid envelope types accepted | Unit | ✅ Pass |
 | TC-ENV-012 | InboundEnvelope with scratch_writes and scratch_cleanup | Unit | ✅ Pass |
 
+## S2-11 — Orchestration Engine
+
+| ID | Description | Level | Status |
+|----|-------------|-------|--------|
+| TC-ORC-020 | direct_answer returns immediately (no further calls) | Unit (mocked) | ✅ Pass |
+| TC-ORC-021 | 1-stage plan: 3 orchestrator calls (plan, re_plan, compose) | Unit (mocked) | ✅ Pass |
+| TC-ORC-022 | re_plan action=fail raises BRT-ORC-006 | Unit (mocked) | ✅ Pass |
+| TC-ORC-023 | re_plan action=continue dispatches next_nodes | Unit (mocked) | ✅ Pass |
+| TC-ORC-024 | orchestrator_decision events logged for each call | Unit (mocked) | ✅ Pass |
+
 ## S2-10 — Fold-In Verifier
 
 | ID | Description | Level | Status |

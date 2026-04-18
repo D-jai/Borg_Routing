@@ -55,6 +55,15 @@
 | BRT-ORC-010 | Fold-in check failed (DB error) | `src/orchestrator/fold_in.py::fold_in` | An unexpected DB error during the fold-in residue check. Check database connectivity. |
 | BRT-ORC-011 | Child residue detected (informational) | `src/orchestrator/fold_in.py::fold_in` | The child agent left scratch rows behind. This is logged as a `child_residue` event. The residue is cleaned up automatically. Check which model_id is producing residue. |
 | BRT-ORC-012 | Cleanup failed after residue detection | `src/orchestrator/fold_in.py::fold_in` | Could not delete residue rows. Check database file permissions. |
+| BRT-ORC-001 | Orchestrator model call failed | `src/orchestrator/engine.py::_invoke_orchestrator_model` | HTTP error or timeout calling the orchestrator endpoint. Check that the model server is running. |
+| BRT-ORC-002 | Orchestrator returned unparseable JSON | `src/orchestrator/engine.py::_extract_json` | The orchestrator model returned prose instead of JSON. Check the system prompt and model. |
+| BRT-ORC-003 | Plan is empty or malformed | `src/orchestrator/engine.py::orchestrate_run` | The plan returned by the orchestrator has no nodes. The run falls back to compose mode. |
+| BRT-ORC-004 | Node dispatch failed | `src/orchestrator/engine.py::_dispatch_one` | An individual node failed to dispatch or execute. The node is recorded as failed; the run continues. |
+| BRT-ORC-005 | Maximum loop count exceeded | `src/orchestrator/engine.py::orchestrate_run` | The orchestrator looped more than 10 times without composing. Check for runaway re_plan cycles. |
+| BRT-ORC-006 | Orchestrator returned action=fail | `src/orchestrator/engine.py::orchestrate_run` | The orchestrator decided the task cannot be completed. See the rationale in the run trace. |
+| BRT-ORC-007 | No orchestrator model available | `src/orchestrator/engine.py::_select_orchestrator_model` | No model meets the quality bar for orchestration. Run discovery and/or set `orchestrator_endpoint` in config. |
+| BRT-ORC-008 | Node build failed | `src/orchestrator/engine.py::_build_task_from_node` | A plan node could not be converted to a WrappedTask. Check the node definition in the run trace. |
+| BRT-ORC-009 | Compose mode returned no response | `src/orchestrator/engine.py::orchestrate_run` | The orchestrator returned an empty `response` in compose mode. Check the compose prompt and model. |
 
 ## BRT-APE — apply_to_each Module
 
