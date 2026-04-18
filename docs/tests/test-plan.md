@@ -21,6 +21,19 @@
 | TC-ENV-011 | All four valid envelope types accepted | Unit | ✅ Pass |
 | TC-ENV-012 | InboundEnvelope with scratch_writes and scratch_cleanup | Unit | ✅ Pass |
 
+## S2-15 — MCP Server
+
+| ID | Description | Level | Status |
+|----|-------------|-------|--------|
+| TC-MCP-001 | initialize returns server capabilities | Integration | ✅ Pass |
+| TC-MCP-002 | tools/list returns all 4 tool definitions | Integration | ✅ Pass |
+| TC-MCP-003 | borg_route.list_models returns model list | Integration | ✅ Pass |
+| TC-MCP-004 | borg_route.chat returns content array | Integration (mocked) | ✅ Pass |
+| TC-MCP-005 | BRT-API-031 for unknown method | Integration | ✅ Pass |
+| TC-MCP-006 | BRT-API-032 for unknown tool | Integration | ✅ Pass |
+| TC-MCP-007 | BRT-API-030 for malformed JSON | Integration | ✅ Pass |
+| TC-MCP-008 | JSON-RPC response has id/result/jsonrpc=2.0 | Integration | ✅ Pass |
+
 ## S2-14 — Task API
 
 | ID | Description | Level | Status |

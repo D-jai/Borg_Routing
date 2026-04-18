@@ -44,10 +44,12 @@ if os.path.isdir("ui"):
 from src.api.models import router as models_router  # noqa: E402
 from src.api.chat_completions import router as chat_router  # noqa: E402
 from src.api.tasks import router as tasks_router  # noqa: E402
+from src.mcp.server import router as mcp_router  # noqa: E402
 
 app.include_router(models_router)
 app.include_router(chat_router)
 app.include_router(tasks_router)
+app.include_router(mcp_router)
 
 
 @app.get("/health")

@@ -140,3 +140,8 @@
 | BRT-API-021 | Run not found | `src/api/tasks.py::get_run_state` | The run_id does not exist. Check that the run was submitted first. |
 | BRT-API-022 | Task submission failed | `src/api/tasks.py::submit_task` | Could not create the run record. Check database connectivity. |
 | BRT-API-023 | Run fetch failed | `src/api/tasks.py::get_run_state` | Could not retrieve the run from the database. Check database connectivity. |
+| BRT-API-030 | Invalid JSON-RPC request | `src/mcp/server.py::mcp_endpoint` | The request body is not valid JSON or is not a JSON-RPC 2.0 object. Check the request format. |
+| BRT-API-031 | MCP method not found | `src/mcp/server.py::mcp_endpoint` | The JSON-RPC method is not supported. Valid: `initialize`, `tools/list`, `tools/call`. |
+| BRT-API-032 | MCP tool not found | `src/mcp/server.py::_handle_tools_call` | The tool name is not in the catalogue. Use `tools/list` to see available tools. |
+| BRT-API-033 | MCP tool execution failed | `src/mcp/server.py::_handle_tools_call` | The tool raised an error. Check the `message` field in the JSON-RPC error response. |
+| BRT-API-034 | Missing required tool argument | `src/mcp/server.py::_tool_*` | A required argument was not provided. Check the tool's `inputSchema`. |
