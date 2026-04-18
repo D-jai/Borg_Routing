@@ -48,6 +48,19 @@
 | BRT-DB-016 | Scratch read failed | `src/db/scratch.py::read_scratch_for_level` | SQLite query on the scratch table failed. The database file may be corrupt — check the WAL file. |
 | BRT-DB-017 | Scratch delete failed | `src/db/scratch.py::delete_scratch_for_level` | SQLite delete on the scratch table failed. Check database file permissions. |
 
+## BRT-ANS — Answerer Module
+
+| Code | Description | Origin | Hints |
+|------|-------------|--------|-------|
+| BRT-ANS-001 | Model endpoint not configured | `src/agents/executor.py::_execute_answerer` | The WrappedTask has no `model_endpoint`. Ensure the orchestrator sets `model_endpoint` when building answerer tasks (usually from the capability matrix). |
+| BRT-ANS-002 | HTTP error calling model endpoint | `src/agents/executor.py::_call_model` | The model returned a non-2xx response. Check that the model server is running at the endpoint URL. |
+| BRT-ANS-003 | Cannot build InboundEnvelope from model response | `src/agents/executor.py::_execute_answerer` | The model returned JSON that doesn't match the InboundEnvelope schema. Check the model's raw output in the run trace. |
+| BRT-ANS-004 | No valid JSON in model response | `src/agents/executor.py::_extract_json` | The model returned prose instead of JSON. The task becomes a failed envelope; check the answerer prompt and model. |
+| BRT-ANS-005 | Inbound output failed contract validation | `src/agents/executor.py::_execute_answerer` | The model's output was missing required keys from the output_schema. The task becomes a failed envelope. See BRT-ENV-011 for more detail. |
+| BRT-ANS-006 | Model call timed out | `src/agents/executor.py::_call_model` | The model did not respond within 120 seconds. Check model server load or increase the timeout. |
+| BRT-ANS-007 | Governance load failed | `src/agents/executor.py::_execute_answerer` | Could not read global_rules or admin_rules_ledger from the config table. Check database connectivity. |
+| BRT-ANS-008 | Unexpected executor error | `src/agents/executor.py::execute` | An unexpected exception occurred. Check the logs for the full traceback. |
+
 ## BRT-LOG — Logging Module
 
 | Code | Description | Origin | Hints |

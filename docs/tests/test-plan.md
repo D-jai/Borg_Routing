@@ -21,6 +21,19 @@
 | TC-ENV-011 | All four valid envelope types accepted | Unit | ✅ Pass |
 | TC-ENV-012 | InboundEnvelope with scratch_writes and scratch_cleanup | Unit | ✅ Pass |
 
+## S2-06 — Agent Executor
+
+| ID | Description | Level | Status |
+|----|-------------|-------|--------|
+| TC-ANS-001 | execute(answerer) returns resolved InboundEnvelope | Unit (mocked) | ✅ Pass |
+| TC-ANS-002 | Governance injected into system prompt | Unit (mocked) | ✅ Pass |
+| TC-ANS-003 | BRT-ANS-001 raised when model_endpoint is None | Unit | ✅ Pass |
+| TC-ANS-004 | Unparseable JSON → failed envelope (not crash) | Unit (mocked) | ✅ Pass |
+| TC-ANS-005 | Missing output key → failed envelope (BRT-ANS-005) | Unit (mocked) | ✅ Pass |
+| TC-ANS-006 | scratch_cleanup directives applied after successful call | Unit (mocked) | ✅ Pass |
+| TC-ANS-007 | model_call event logged after successful call | Unit (mocked) | ✅ Pass |
+| TC-ANS-008 | HTTP error from model → BRT-ANS-002 | Unit (mocked) | ✅ Pass |
+
 ## S2-05 — Log Writer
 
 | ID | Description | Level | Status |
