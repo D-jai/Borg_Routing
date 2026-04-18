@@ -1,17 +1,9 @@
 # Checkpoint — BORG_ROUTE
-> **Where I Left Off:** Slice 1 (Registry Foundation) is **complete**.
-> All S1-00 through S1-10 tasks shipped and committed. 53 tests passing.
-> Next session starts at **BUILD_PLAN.md Slice 2, task S2-01**
-> (`src/envelopes/schema.py` — WrappedTask + InboundEnvelope Pydantic models).
->
-> Open `src/envelopes/schema.py` (does not exist yet) and implement the
-> schema per the S2-01 spec in BUILD_PLAN.md.
->
-> Do NOT re-read all of DESIGN_PRINCIPLES.md — skim §2 (Two Laws) and §4
-> (Execution Model) as a quick refresher. The key invariants are:
-> - `status` MUST be `resolved` or `failed` (never `unresolved`) — BRT-ENV-001
-> - Every model call goes through `build_system_prompt()` from `src/prompts/base.py`
-> - Governance is uncompactable (additive, verbatim through every cascade)
+> **Where I Left Off:** Slice 2 (Core Pattern E2E) is **complete**.
+> All S2-01 through S2-17 tasks shipped and committed. 191 tests passing.
+> Next session starts at **BUILD_PLAN.md Slice 3, task S3-01**
+> (`src/orchestrator/engine.py` — handle `type=orchestrate`: spawn child run,
+> link `parent_run_id`, enforce `MAX_RECURSION_DEPTH=5`, demote at cap — BRT-ORC-020..029).
 
 ---
 
@@ -21,8 +13,8 @@
 |-------|--------|-------|
 | Slice 0: Scaffolding | ✅ Complete | Docs, git, reassessment done |
 | Slice 1: Registry Foundation | ✅ Complete | S1-00..S1-10, 53 tests, all committed |
-| Slice 2: Core Pattern E2E | 🔲 Not started | **Start here** — THE architectural milestone |
-| Slice 3: Recursion + Admin + Resume | 🔲 Not started | |
+| Slice 2: Core Pattern E2E | ✅ Complete | S2-01..S2-17, 191 tests (138 new in Slice 2) |
+| Slice 3: Recursion + Admin + Resume | 🔲 Not started | **Start here** |
 | Slice 4: Conversation Memory | 🔲 Not started | |
 | Slice 5: Observability + NER | 🔲 Not started | |
 | Slice 6: Live UI + Polish | 🔲 Not started | |

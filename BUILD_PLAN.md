@@ -881,8 +881,8 @@ Slice 2.
 |-------|--------|-------|
 | Slice 0: Scaffolding + prompts + skills + seed matrix | ✅ Complete | Docs, `src/prompts/*`, `data/skills.yaml`, `data/capability_matrix.yaml` |
 | Slice 1: Registry Foundation | ✅ Complete | S1-00..S1-10, 53 tests |
-| Slice 2: Core Pattern E2E (B + D surfaces) | 🔲 Not started | **Start here** — THE architectural milestone |
-| Slice 3: Recursion + Admin + Resume + Multi-turn | 🔲 Not started | |
+| Slice 2: Core Pattern E2E (B + D surfaces) | ✅ Complete | S2-01..S2-17, 191 tests |
+| Slice 3: Recursion + Admin + Resume + Multi-turn | 🔲 Not started | **Start here** |
 | Slice 4: Historical Memory | 🔲 Not started | |
 | Slice 5: Observability + NER + Skills UI | 🔲 Not started | |
 | Slice 6: Live Streaming Polish | 🔲 Not started | |
