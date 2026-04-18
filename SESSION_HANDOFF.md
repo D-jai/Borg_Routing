@@ -1,91 +1,89 @@
-# Session Handoff — 2026-04-18 (Planning → First Build Session)
+# Session Handoff — 2026-04-18T15:00 (Builder Session 1 → Builder Session 2)
 
 ## Context At Write Time
-- Written by: Planning agent (Session 2, complete)
-- For: The first builder session
-- Model to use: **Claude Sonnet 4.6** (set via `/model` or Shift+Tab → Settings)
-- Reasoning effort: **High** by default, **Max** for Builder: Heavy tasks
+- Usage: ~65% (approaching limit)
+- Model: Claude Sonnet 4.6
+- Reasoning: High
 
 ## Where I Left Off
 
-Planning is complete. No code has been written yet. Next session is the
-first building session. Start at **BUILD_PLAN.md S1-00** (create
-`pyproject.toml` + `main.py`).
+Slice 1 (Registry Foundation) is **complete and committed** (9 commits, 53 tests
+passing). The next session opens `src/envelopes/schema.py` (does not exist yet)
+and implements `WrappedTask` + `InboundEnvelope` Pydantic models per BUILD_PLAN.md
+§S2-01. That is the exact first concrete action.
 
-## Just Completed (Planning Session 2)
+## Just Completed (this session)
 
-- Architecture reassessed end-to-end; DESIGN_PRINCIPLES.md written
-- Orchestrator + answerer + base prompts written into `src/prompts/`
-- 10 skills hand-crafted in `data/skills.yaml`
-- Capability matrix seeded in `data/capability_matrix.yaml` (8 local + 5 OpenRouter)
-- BUILD_PLAN.md rewritten with extreme-spec tasks for Slices 1 and 2
-- B (OpenAI-compat gateway) and D (MCP server) chosen as product surfaces
-- Context handoff regime designed (this document, + AGENTS.md)
+- S1-00: `pyproject.toml`, `main.py`, `/health` endpoint, `tests/test_health.py`
+- S1-01: Verified pre-written artefacts (`src/prompts/`, `data/skills.yaml`, `data/capability_matrix.yaml`)
+- S1-02: `src/registry/models.py` — ModelInfo + Pricing (BRT-REG-001/002)
+- S1-03: `src/registry/capability_matrix.py` — YAML load/save/query/upsert (BRT-REG-010..012)
+- S1-04: `src/registry/cost.py` — unified effective_cost (BRT-REG-013)
+- S1-05: `src/registry/router.py` — select_model specialty-primary (BRT-REG-020)
+- S1-06: `src/registry/discovery.py` — LM Studio/Ollama/OpenRouter/custom (BRT-REG-001/003/004)
+- S1-07: `src/registry/benchmark.py` + `data/benchmark_prompts.yaml` (BRT-REG-011/014/015)
+- S1-08: `src/api/models.py` — GET /models, POST /discover, POST /benchmark/{id}, POST /keys (BRT-API-001/002); updated `main.py` to load matrix at startup
+- S1-09: `ui/models.html`, `ui/keys.html`, `ui/chat.html`, `ui/_header.html`
+- S1-10: `tests/e2e/test_slice_1.py` (7 E2E tests); CHECKPOINT.md + BUILD_PLAN.md updated
 
 ## In Progress
-None — clean slate for the builder.
+None — clean handoff.
 
 ## Next Task (specific)
 
-**BUILD_PLAN.md Slice 1, task S1-00.**
+**BUILD_PLAN.md Slice 2, task S2-01.**
 
-First concrete actions for the builder:
-1. Read `AGENTS.md` and this file (you're doing it).
-2. Read `DESIGN_PRINCIPLES.md` in full (once; it's the only time you'll need to).
-3. Read `BUILD_PLAN.md` Slice 1 section only.
-4. Create `pyproject.toml` per S1-00 spec.
-5. Create `main.py` per S1-00 spec.
-6. Run `python -m pip install -e .[dev]` (or `uv sync` if using uv).
-7. Run `uvicorn main:app --reload` — verify `GET /health` returns `{"status":"ok"}`.
-8. Update `docs/user-guide.md` + `docs/install-guide.md` with install steps.
-9. Write first pytest: `tests/test_health.py`.
-10. Commit: `feat: scaffold FastAPI app with health endpoint (S1-00)` per Parallel Commit Law.
-11. Update `BUILD_PLAN.md` — check S1-00.
-12. Update `CHECKPOINT.md` — log session progress.
-13. Create zip backup per HANDOVER_TO_BUILDER.md Step 4.
-14. Proceed to S1-01 (verify pre-written artefacts exist).
+First concrete actions:
+1. Read AGENTS.md and this file (you're doing it).
+2. Skim DESIGN_PRINCIPLES.md §2 (Two Laws) and §4 (Execution Model) — already read once; just refresh.
+3. Read BUILD_PLAN.md §Slice 2, tasks S2-01 and S2-02 only (envelopes).
+4. Create `src/envelopes/__init__.py` (empty) and `src/envelopes/schema.py`.
+5. Implement `SideEffectAction`, `WrappedTask`, `InboundEnvelope` per S2-01 spec.
+   Key invariant: `status: Literal["resolved", "failed"]` — NO "unresolved" — BRT-ENV-001.
+6. Write `tests/envelopes/test_schema.py` — roundtrip, status=unresolved rejected, required fields.
+7. Commit with Parallel Commit Law (docs/errors, docs/user-guide, docs/presentation, docs/tests/test-plan).
+8. Proceed to S2-02 (`src/envelopes/validator.py`).
 
 ## Files To Read In New Session (minimal set)
 
-In this order:
 1. `AGENTS.md`
 2. This `SESSION_HANDOFF.md`
-3. `MESSAGE_TO_CLAUDE.md` (first session only — once you know it, reference briefly)
-4. `DESIGN_PRINCIPLES.md` §§ 1, 2, 3 at minimum (thesis + laws + patterns)
-5. `CODING_STANDARD_CORE.md` (the Parallel Commit Law rules)
-6. `BUILD_PLAN.md` — **only Slice 1** for this first session
-7. `CHECKPOINT.md`
+3. `DESIGN_PRINCIPLES.md` §2 (Two Laws) + §4 (Execution Model) — skim only
+4. `BUILD_PLAN.md` §Slice 2, tasks S2-01 through S2-04 first (envelopes + DB schema)
+5. `src/registry/models.py` — ModelInfo is already used; understand its structure
+6. `src/prompts/base.py` — build_system_prompt() signature (used in S2-06)
 
-DO NOT read source files yet — there are none.
+Do NOT re-read all of DESIGN_PRINCIPLES.md or MESSAGE_TO_CLAUDE.md.
 
-## Open Issues / Gotchas
+## Open Issues / Gotchas Discovered This Session
 
-- `spacy` is listed in pyproject dependencies, but the model file
-  `en_core_web_sm` needs a separate download step:
-  `python -m spacy download en_core_web_sm`. Include this in install-guide.md.
-- `gh` CLI is not installed per user's environment info. GitHub remote is
-  deferred; use zip backups.
+- Python 3.14.3 is installed (not 3.11). All packages installed fine; `>=3.11` constraint is met.
+- `.python-version` says 3.11 but Python 3.14 runs — no issue in practice.
+- `capability_matrix.yaml` is a flat YAML list (no top-level `models:` key) — already handled correctly in CapabilityMatrix.load().
+- The router's cost-sort may select Claude Sonnet 4 (external) over qwen3-coder for "coding" at default token counts, because Claude has higher throughput (80 tps vs 60 tps). This is correct per the spec (cheapest by effective_cost). Tests verify the invariant, not a specific model name.
+- PowerShell `&&` syntax not supported — use `;` as separator or `Set-Location` first.
+- `git push` not configured (no remote); using zip backups per HANDOVER_TO_BUILDER.md.
 
 ## Tests Status
-- Total: 0
-- Will be created starting in S1-00 (test_health.py)
+- Total: 53 passing
+- Failing: none
+- Test files: `tests/test_health.py`, `tests/registry/test_models.py`,
+  `tests/registry/test_capability_matrix.py`, `tests/registry/test_cost.py`,
+  `tests/registry/test_router.py`, `tests/registry/test_discovery.py`,
+  `tests/registry/test_benchmark.py`, `tests/api/test_models_api.py`,
+  `tests/e2e/test_slice_1.py`
 
 ## Instruction To Future Builder
 
-Read the files listed above in order. Continue from "Next Task (specific)".
-The planning agent front-loaded all architectural decisions — your job is
-disciplined execution with Parallel Commit Law on every feat commit.
+Read the files listed above in order. Begin at S2-01. Every `feat:` commit must
+ship all Parallel Commit Law artefacts (code + error codes registered + user-guide
+section + presentation bullet + tests). See CODING_STANDARD_CORE.md for the checklist.
 
 **When YOUR context reaches ~65%, or you complete a slice:**
-1. Commit + zip backup
-2. Update CHECKPOINT.md
-3. OVERWRITE this file (`SESSION_HANDOFF.md`) using the template in AGENTS.md
-4. Tell the user: "Context at 65%. Start a new Droid session and type:
-   `Read AGENTS.md and SESSION_HANDOFF.md, then continue.`"
-5. Stop and wait.
-
-The bootstrap chain: this planning handoff → builder session 1 →
-builder session 2 → ... → project complete. Each session hands off
-to the next cleanly via this file.
-
-**Good luck. Build exactly what is specified. Do not redesign.**
+1. Run full test suite — confirm all passing.
+2. Commit remaining changes.
+3. Create zip backup: `Set-Location C:\stage; Compress-Archive -Path borg_route -DestinationPath "borg_route_slice2_complete_$(Get-Date -Format 'yyyyMMdd_HHmmss').zip"`
+4. Update CHECKPOINT.md (one precise paragraph about where you stopped).
+5. OVERWRITE this file (`SESSION_HANDOFF.md`) using the template in AGENTS.md.
+6. Tell the user: "Context at ~65%. Start a new Droid session and type: `Read AGENTS.md and SESSION_HANDOFF.md, then continue.`"
+7. Stop and wait.
