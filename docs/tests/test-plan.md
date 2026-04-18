@@ -21,6 +21,16 @@
 | TC-ENV-011 | All four valid envelope types accepted | Unit | ✅ Pass |
 | TC-ENV-012 | InboundEnvelope with scratch_writes and scratch_cleanup | Unit | ✅ Pass |
 
+## S2-13 — Chat Completions Gateway
+
+| ID | Description | Level | Status |
+|----|-------------|-------|--------|
+| TC-API-020 | POST /v1/chat/completions returns OpenAI-shaped response | Integration (mocked) | ✅ Pass |
+| TC-API-021 | BRT-API-010 for malformed request body | Integration | ✅ Pass |
+| TC-API-022 | BRT-API-010 when no user message present | Integration | ✅ Pass |
+| TC-API-023 | stream=true returns SSE data: lines + [DONE] | Integration (mocked) | ✅ Pass |
+| TC-API-024 | Pipeline failure returns 200 with error text in content | Integration (mocked) | ✅ Pass |
+
 ## S2-12 — Pipeline Runner
 
 | ID | Description | Level | Status |

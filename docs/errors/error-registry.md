@@ -133,3 +133,6 @@
 |------|-------------|--------|-------|
 | BRT-API-001 | Malformed request body | `src/api/models.py::add_key` | `name` and `api_key` are required fields. Check the request JSON body. |
 | BRT-API-002 | Model not found in matrix | `src/api/models.py::run_benchmark` | The model_id does not exist in the capability matrix. Run `POST /models/discover` first, or check the model_id for typos. |
+| BRT-API-010 | Malformed chat completions request | `src/api/chat_completions.py` | The request body is not valid JSON or does not contain required fields (model, messages). Check the request format. |
+| BRT-API-011 | Model not found (bypass mode) | `src/api/chat_completions.py::_bypass_to_model` | The specified model_id is not in the capability matrix. Run discovery first. |
+| BRT-API-012 | Pipeline/bypass execution failed | `src/api/chat_completions.py` | The orchestration pipeline or bypass model call failed. Check the run trace for details. |
