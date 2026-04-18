@@ -21,6 +21,31 @@
 | TC-ENV-011 | All four valid envelope types accepted | Unit | ✅ Pass |
 | TC-ENV-012 | InboundEnvelope with scratch_writes and scratch_cleanup | Unit | ✅ Pass |
 
+## S2-04 — DB State + Scratch Helpers
+
+| ID | Description | Level | Status |
+|----|-------------|-------|--------|
+| TC-DB-020 | create_run returns UUID, record persisted | Unit | ✅ Pass |
+| TC-DB-021 | update_run_status transitions correctly + sets completed_at | Unit | ✅ Pass |
+| TC-DB-022 | BRT-DB-010 raised for unknown run_id | Unit | ✅ Pass |
+| TC-DB-023 | BRT-DB-012 raised for invalid status value | Unit | ✅ Pass |
+| TC-DB-024 | save_envelope inserts with status=in_flight | Unit | ✅ Pass |
+| TC-DB-025 | update_envelope_inbound marks envelope completed | Unit | ✅ Pass |
+| TC-DB-026 | BRT-DB-011 raised for unknown envelope_id | Unit | ✅ Pass |
+| TC-DB-027 | BRT-DB-010 raised by get_run for unknown id | Unit | ✅ Pass |
+| TC-DB-028 | get_envelopes returns ordered list | Unit | ✅ Pass |
+| TC-DB-029 | get_config returns None for missing key | Unit | ✅ Pass |
+| TC-DB-030 | set_config + get_config roundtrip (str and dict) | Unit | ✅ Pass |
+| TC-DB-040 | write_scratch inserts row and returns id | Unit | ✅ Pass |
+| TC-DB-041 | read_scratch_for_level returns rows with parsed data | Unit | ✅ Pass |
+| TC-DB-042 | delete_scratch_for_level removes rows and returns count | Unit | ✅ Pass |
+| TC-DB-043 | count_scratch_for_level returns correct count | Unit | ✅ Pass |
+| TC-DB-044 | count_scratch_for_level returns 0 when empty | Unit | ✅ Pass |
+| TC-DB-045 | apply_cleanup_directives with ids deletes specified rows | Unit | ✅ Pass |
+| TC-DB-046 | apply_cleanup_directives with row_id deletes single row | Unit | ✅ Pass |
+| TC-DB-047 | apply_cleanup_directives ignores write actions | Unit | ✅ Pass |
+| TC-DB-048 | Level-path isolation — rows from different levels don't mix | Unit | ✅ Pass |
+
 ## S2-03 — Database Schema
 
 | ID | Description | Level | Status |
