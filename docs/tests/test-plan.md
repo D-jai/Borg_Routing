@@ -4,6 +4,18 @@
 
 ---
 
+## S1-03 — CapabilityMatrix
+
+| ID | Description | Level | Status |
+|----|-------------|-------|--------|
+| TC-REG-010 | Load seed file; 13 models, local + external present | Unit | ✅ Pass |
+| TC-REG-011 | query_by_task('coding') returns highest-score model first | Unit | ✅ Pass |
+| TC-REG-012 | BRT-REG-010 raised on missing file | Unit | ✅ Pass |
+| TC-REG-013 | BRT-REG-011 raised on malformed YAML (non-list) | Unit | ✅ Pass |
+| TC-REG-014 | BRT-REG-012 raised on update_score for unknown model | Unit | ✅ Pass |
+| TC-REG-015 | upsert inserts new model and replaces existing one | Unit | ✅ Pass |
+| TC-REG-016 | update_throughput persists tps value | Unit | ✅ Pass |
+
 ## S1-02 — ModelInfo Pydantic Model
 
 | ID | Description | Level | Status |
