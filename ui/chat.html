@@ -20,6 +20,11 @@
     .run-link { font-size: 0.75em; color: #555; margin-top: 4px; }
     .run-link a { color: #4080c0; text-decoration: none; }
     .run-link a:hover { text-decoration: underline; }
+    .rating-bar { display: flex; gap: 6px; margin-top: 4px; }
+    .rating-btn { background: none; border: 1px solid #333; color: #888; border-radius: 4px; padding: 2px 8px; cursor: pointer; font-size: 0.85em; }
+    .rating-btn:hover { border-color: #e94560; color: #e94560; }
+    .rating-btn.active-up { border-color: #4c4; color: #4c4; }
+    .rating-btn.active-down { border-color: #c44; color: #c44; }
     #input-bar { background: #1a1a2e; border-top: 1px solid #2a2a3e; padding: 12px 20px; display: flex; gap: 10px; flex-shrink: 0; }
     #input-bar select { background: #0f0f1a; border: 1px solid #333; color: #ccc; padding: 8px; border-radius: 4px; font-size: 0.9em; }
     #user-input { flex: 1; background: #0f0f1a; border: 1px solid #333; color: #ddd; padding: 10px 14px; border-radius: 4px; font-size: 1em; resize: none; height: 42px; min-height: 42px; max-height: 160px; }
@@ -114,6 +119,30 @@
         thinkingDiv.after(link);
       }
       thread.push({ role: 'assistant', content: answer });
+      if (runId) {
+        const ratingBar = document.createElement('div');
+        ratingBar.className = 'rating-bar';
+        const upBtn = document.createElement('button');
+        upBtn.className = 'rating-btn';
+        upBtn.textContent = '👍';
+        const downBtn = document.createElement('button');
+        downBtn.className = 'rating-btn';
+        downBtn.textContent = '👎';
+        async function sendRating(val) {
+          await fetch(`/runs/${runId}/rating`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ rating: val }),
+          });
+          upBtn.className = 'rating-btn' + (val === 1 ? ' active-up' : '');
+          downBtn.className = 'rating-btn' + (val === -1 ? ' active-down' : '');
+        }
+        upBtn.addEventListener('click', () => sendRating(1));
+        downBtn.addEventListener('click', () => sendRating(-1));
+        ratingBar.appendChild(upBtn);
+        ratingBar.appendChild(downBtn);
+        thinkingDiv.after(ratingBar);
+      }
     } catch (err) {
       thinkingDiv.textContent = `Error: ${err.message}`;
     } finally {

@@ -23,7 +23,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from src.db.schema import DB_PATH
-from src.db.state import get_envelopes, get_run, get_runs_list, resume_run
+from src.db.state import get_envelopes, get_run, get_runs_list, resume_run, set_run_rating
 from src.pipeline.runner import run_pipeline
 
 router = APIRouter()
@@ -32,6 +32,10 @@ router = APIRouter()
 class TaskRequest(BaseModel):
     instruction: str
     inputs_ref: Optional[str] = None
+
+
+class RatingRequest(BaseModel):
+    rating: int  # 1 = thumbs up, -1 = thumbs down
 
 
 async def _run_in_background(
@@ -204,6 +208,41 @@ async def resume_run_endpoint(
         status_code=202,
         content={"run_id": run_id, "status": "resuming", "retrying": len(tasks_to_retry)},
     )
+
+
+@router.post("/runs/{run_id}/rating", status_code=200)
+async def rate_run(run_id: str, req: RatingRequest) -> JSONResponse:
+    """Set thumbs-up (1) or thumbs-down (-1) rating for a completed run.
+
+    Error codes: BRT-API-026 (invalid rating), BRT-API-027 (run not found).
+    """
+    import uuid as _uuid
+    if req.rating not in (1, -1):
+        raise HTTPException(
+            status_code=400,
+            detail={"error": "BRT-API-026", "message": "rating must be 1 (up) or -1 (down)"},
+        )
+    try:
+        run_uuid = _uuid.UUID(run_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail={"error": "BRT-API-027", "message": f"Invalid run_id format: {run_id}"},
+        )
+    try:
+        await set_run_rating(run_uuid, req.rating, db_path=DB_PATH)
+    except ValueError as exc:
+        msg = str(exc)
+        if "BRT-DB-010" in msg:
+            raise HTTPException(
+                status_code=404,
+                detail={"error": "BRT-API-027", "message": f"Run '{run_id}' not found"},
+            )
+        raise HTTPException(
+            status_code=400,
+            detail={"error": "BRT-API-026", "message": msg},
+        )
+    return JSONResponse(content={"run_id": run_id, "rating": req.rating})
 
 
 @router.get("/runs")

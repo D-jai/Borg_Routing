@@ -15,7 +15,14 @@ from typing import Optional
 from uuid import UUID
 
 from src.db.schema import DB_PATH
-from src.db.state import create_run, get_config, get_envelopes, get_run, update_run_status
+from src.db.state import (
+    compute_and_save_digest,
+    create_run,
+    get_config,
+    get_envelopes,
+    get_run,
+    update_run_status,
+)
 from src.orchestrator.engine import orchestrate_run
 
 
@@ -113,6 +120,12 @@ async def run_pipeline(
         envelope_count = len(envelopes)
     except Exception:
         envelope_count = 0
+
+    # Fire-and-forget digest at completion
+    try:
+        await compute_and_save_digest(run_id, db_path=db_path)
+    except Exception:
+        pass
 
     return {
         "run_id": str(run_id),

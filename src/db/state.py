@@ -206,6 +206,72 @@ async def resume_run(run_id: UUID, db_path: str = DB_PATH) -> list:
     return tasks
 
 
+async def compute_and_save_digest(run_id: UUID, db_path: str = DB_PATH) -> dict:
+    """Aggregate envelope cost/tokens for a run and persist to run_digests.
+
+    Returns the digest dict: {run_id, summary, cost_dollars, token_count}.
+    Safe to call multiple times — upserts on conflict.
+    """
+    async with aiosqlite.connect(db_path) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            """SELECT COUNT(*) as cnt,
+                      COALESCE(SUM(tokens_input), 0) + COALESCE(SUM(tokens_output), 0) AS total_tokens,
+                      COALESCE(SUM(dollars), 0) AS total_cost
+               FROM envelopes WHERE run_id=?""",
+            (str(run_id),),
+        ) as cur:
+            row = await cur.fetchone()
+
+    envelope_count = row["cnt"] if row else 0
+    token_count = int(row["total_tokens"]) if row else 0
+    cost_dollars = float(row["total_cost"]) if row else 0.0
+
+    summary = (
+        f"{envelope_count} envelope(s) dispatched; "
+        f"{token_count:,} tokens; "
+        f"${cost_dollars:.4f} cost."
+    )
+
+    async with aiosqlite.connect(db_path) as db:
+        await db.execute(
+            """INSERT INTO run_digests(run_id, summary, cost_dollars, token_count)
+               VALUES (?, ?, ?, ?)
+               ON CONFLICT(run_id) DO UPDATE SET
+                 summary=excluded.summary,
+                 cost_dollars=excluded.cost_dollars,
+                 token_count=excluded.token_count""",
+            (str(run_id), summary, cost_dollars, token_count),
+        )
+        await db.commit()
+
+    return {
+        "run_id": str(run_id),
+        "summary": summary,
+        "cost_dollars": cost_dollars,
+        "token_count": token_count,
+    }
+
+
+async def set_run_rating(run_id: UUID, rating: int, db_path: str = DB_PATH) -> None:
+    """Set user_rating (1 = thumbs up, -1 = thumbs down) on a run.
+
+    Raises:
+        ValueError: if rating is not 1 or -1.
+        ValueError: BRT-DB-010 if run_id not found.
+    """
+    if rating not in (1, -1):
+        raise ValueError(f"Invalid rating '{rating}': must be 1 (up) or -1 (down)")
+    async with aiosqlite.connect(db_path) as db:
+        cur = await db.execute(
+            "UPDATE runs SET user_rating=? WHERE run_id=?",
+            (rating, str(run_id)),
+        )
+        if cur.rowcount == 0:
+            raise ValueError(f"BRT-DB-010: run_id '{run_id}' not found")
+        await db.commit()
+
+
 async def get_config(key: str, db_path: str = DB_PATH) -> Optional[str]:
     """Return config value for key, or None if not set."""
     async with aiosqlite.connect(db_path) as db:

@@ -178,6 +178,34 @@
 |------|-------------|--------|-------|
 | BRT-MEM-001 | Thread not found | `src/memory/window.py` | The thread_id does not exist. Create a thread first via `create_thread()`. |
 | BRT-MEM-002 | Window extraction failed | `src/memory/window.py::extract_window` | SQLite error while reading messages. Check database connectivity. |
+## BRT-API — API Module (Slice 5 additions)
+
+| Code | Description | Origin | Hints |
+|------|-------------|--------|-------|
+| BRT-API-026 | Invalid rating value | `src/api/tasks.py::rate_run` | rating must be 1 (thumbs up) or -1 (thumbs down). |
+| BRT-API-027 | Run not found for rating | `src/api/tasks.py::rate_run` | The run_id does not exist or is malformed. Check the run was created before rating it. |
+| BRT-API-040 | Logs fetch failed | `src/api/logs.py::list_logs` | SQLite error while reading logs. Check database connectivity. |
+| BRT-API-041 | Entities fetch failed | `src/api/logs.py::list_entities` | SQLite error while reading log_entities. Check database connectivity. |
+| BRT-API-042 | Cost summary failed | `src/api/logs.py::cost_summary` | SQLite aggregation error. Check database connectivity. |
+| BRT-API-043 | Export failed | `src/api/logs.py::export_logs` | SQLite error during JSONL export. Check database connectivity. |
+| BRT-API-050 | Skills load failed | `src/api/skills.py` | Could not load skills.yaml. Check that data/skills.yaml exists. |
+| BRT-API-051 | Skill not found | `src/api/skills.py` | The skill_id does not exist in the library. Check the skill_id. |
+| BRT-API-052 | New-version write failed | `src/api/skills.py::create_skill_version` | Could not write the updated skills.yaml. Check file permissions. |
+| BRT-API-053 | Invalid new-version payload | `src/api/skills.py::create_skill_version` | Required fields are missing or malformed. |
+
+## BRT-LOG — Logging Module (Slice 5 additions)
+
+| Code | Description | Origin | Hints |
+|------|-------------|--------|-------|
+| BRT-LOG-010 | spaCy model not available | `src/logging/ner_worker.py::_load_nlp` | Run `python -m spacy download en_core_web_sm` to install the model. |
+| BRT-LOG-011 | NER processing failed for a payload | `src/logging/ner_worker.py::process_batch` | A payload caused spaCy to error. The payload is marked processed and skipped. Check the payload content. |
+| BRT-LOG-012 | DB write failed after NER | `src/logging/ner_worker.py::process_batch` | Could not insert entities/relations. Check disk space and database file permissions. |
+| BRT-LOG-013 | NER worker poll error | `src/logging/ner_worker.py::run_ner_worker` | An unexpected error in the poll loop. Logged to stderr; worker continues. |
+
+## BRT-MEM — Memory Module (Slice 4 additions)
+
+| Code | Description | Origin | Hints |
+|------|-------------|--------|-------|
 | BRT-MEM-003 | Model call failed during compression | `src/memory/compressor.py::compress_inactive_turns` | The compressor model endpoint is unreachable or returned a non-2xx response. Check that the model server is running at the configured endpoint. Also raised on timeout (120 s). |
 | BRT-MEM-004 | Compression response parse failed | `src/memory/compressor.py::compress_inactive_turns` | The model returned an empty or structurally unexpected response. Check the model and its output. Re-run compression once the model is healthy. |
 | BRT-MEM-005 | Config write failed after compression | `src/memory/compressor.py::compress_inactive_turns` | Could not persist the rolling summary to the config table. Check database file permissions and disk space. |

@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Skills — BORG_ROUTE</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: sans-serif; background: #0f0f1a; color: #ddd; }
+    nav { background: #1a1a2e; padding: 10px 20px; display: flex; gap: 20px; align-items: center; }
+    nav .brand { font-weight: bold; color: #e94560; font-size: 1.1em; }
+    nav a { color: #eee; text-decoration: none; }
+    nav a:hover { color: #e94560; }
+    .container { padding: 24px; max-width: 1200px; margin: 0 auto; }
+    h1 { font-size: 1.3em; color: #e94560; margin-bottom: 20px; }
+    .skill-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 16px; }
+    .skill-card { background: #1a1a2e; border: 1px solid #2a2a3e; border-radius: 8px; padding: 16px; }
+    .skill-card h3 { font-size: 0.95em; color: #e94560; margin-bottom: 4px; }
+    .skill-card .version { font-size: 0.72em; color: #555; margin-bottom: 8px; }
+    .skill-card .desc { font-size: 0.82em; color: #aaa; margin-bottom: 10px; line-height: 1.4; }
+    .stat-row { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
+    .stat { background: #0f0f1a; border-radius: 4px; padding: 4px 8px; font-size: 0.75em; }
+    .stat .slabel { color: #555; }
+    .stat .sval { color: #ccc; font-weight: bold; }
+    .tier-badge { display: inline-block; padding: 2px 7px; border-radius: 3px; font-size: 0.72em; }
+    .light { background: #1a3a1a; color: #4c4; }
+    .mid { background: #1a2a3a; color: #48f; }
+    .heavy { background: #2a1a3a; color: #c8f; }
+    .btn { padding: 5px 12px; border-radius: 4px; border: none; cursor: pointer; font-size: 0.8em; }
+    .btn-new-ver { background: #2a1a3a; color: #c8f; margin-top: 8px; }
+    .btn-new-ver:hover { background: #332; }
+    /* Modal */
+    .modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 100; align-items: center; justify-content: center; }
+    .modal-overlay.open { display: flex; }
+    .modal { background: #1a1a2e; border: 1px solid #2a2a3e; border-radius: 8px; padding: 24px; width: 500px; max-width: 95vw; }
+    .modal h2 { color: #e94560; font-size: 1em; margin-bottom: 14px; }
+    .modal label { display: block; font-size: 0.8em; color: #888; margin-bottom: 4px; margin-top: 10px; }
+    .modal input, .modal textarea { width: 100%; background: #0f0f1a; border: 1px solid #333; color: #ccc; padding: 7px 10px; border-radius: 4px; font-size: 0.85em; }
+    .modal textarea { height: 80px; resize: vertical; }
+    .modal-btns { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; }
+    .btn-save { background: #e94560; color: #fff; }
+    .btn-save:hover { background: #c73450; }
+    .btn-cancel { background: #2a2a3e; color: #aaa; }
+    #loading { color: #555; font-size: 0.88em; }
+    #status-msg { margin-top: 12px; font-size: 0.85em; color: #4c4; }
+  </style>
+</head>
+<body>
+<nav>
+  <span class="brand">BORG_ROUTE</span>
+  <a href="/ui/chat.html">Chat</a>
+  <a href="/ui/models.html">Models</a>
+  <a href="/ui/dashboard.html">Dashboard</a>
+  <a href="/ui/logs.html">Logs</a>
+  <a href="/ui/skills.html" style="color:#e94560">Skills</a>
+  <a href="/ui/admin.html">Admin</a>
+</nav>
+
+<div class="container">
+  <h1>Skill Library</h1>
+  <div id="loading">Loading…</div>
+  <div class="skill-grid" id="skill-grid"></div>
+  <div id="status-msg"></div>
+</div>
+
+<!-- New Version Modal -->
+<div class="modal-overlay" id="modal">
+  <div class="modal">
+    <h2>New Version — <span id="modal-skill-id"></span></h2>
+    <label>Description</label>
+    <input id="nv-desc" type="text" placeholder="What this skill does">
+    <label>When to use (one per line)</label>
+    <textarea id="nv-when"></textarea>
+    <label>Not when (one per line)</label>
+    <textarea id="nv-notwhen"></textarea>
+    <label>Recommended tier</label>
+    <input id="nv-tier" type="text" value="mid" placeholder="light | mid | heavy">
+    <div class="modal-btns">
+      <button class="btn btn-cancel" onclick="closeModal()">Cancel</button>
+      <button class="btn btn-save" onclick="saveVersion()">Save New Version</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  let currentSkillId = null;
+
+  async function loadSkills() {
+    document.getElementById('loading').style.display = '';
+    const data = await fetch('/skills').then(r => r.json()).catch(() => ({skills:[]}));
+    document.getElementById('loading').style.display = 'none';
+    const grid = document.getElementById('skill-grid');
+    grid.innerHTML = '';
+    (data.skills || []).forEach(s => {
+      const card = document.createElement('div');
+      card.className = 'skill-card';
+      const successStr = s.success_rate != null ? (s.success_rate * 100).toFixed(0) + '%' : '—';
+      const tierClass = s.recommended_tier || 'mid';
+      card.innerHTML = `
+        <h3>${s.skill_id}</h3>
+        <div class="version">v${s.version} · <span class="tier-badge ${tierClass}">${tierClass}</span> · ${s.envelope_type}</div>
+        <div class="desc">${htmlEscape(s.description)}</div>
+        <div class="stat-row">
+          <div class="stat"><span class="slabel">Calls </span><span class="sval">${s.call_count}</span></div>
+          <div class="stat"><span class="slabel">Success </span><span class="sval">${successStr}</span></div>
+          <div class="stat"><span class="slabel">Residue </span><span class="sval">${s.total_residue}</span></div>
+          <div class="stat"><span class="slabel">Avg tokens </span><span class="sval">${s.avg_tokens}</span></div>
+          <div class="stat"><span class="slabel">Avg ms </span><span class="sval">${s.avg_latency_ms}</span></div>
+        </div>
+        <button class="btn btn-new-ver" onclick="openModal('${s.skill_id}', ${JSON.stringify(s.description)})">Edit → New Version</button>
+      `;
+      grid.appendChild(card);
+    });
+  }
+
+  function openModal(skillId, desc) {
+    currentSkillId = skillId;
+    document.getElementById('modal-skill-id').textContent = skillId;
+    document.getElementById('nv-desc').value = desc || '';
+    document.getElementById('nv-when').value = '';
+    document.getElementById('nv-notwhen').value = '';
+    document.getElementById('nv-tier').value = 'mid';
+    document.getElementById('modal').classList.add('open');
+  }
+
+  function closeModal() {
+    document.getElementById('modal').classList.remove('open');
+    currentSkillId = null;
+  }
+
+  async function saveVersion() {
+    if (!currentSkillId) return;
+    const desc = document.getElementById('nv-desc').value.trim();
+    const when = document.getElementById('nv-when').value.split('\n').map(s => s.trim()).filter(Boolean);
+    const notWhen = document.getElementById('nv-notwhen').value.split('\n').map(s => s.trim()).filter(Boolean);
+    const tier = document.getElementById('nv-tier').value.trim() || 'mid';
+
+    const resp = await fetch(`/skills/${currentSkillId}/version`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ description: desc, when_to_use: when, not_when: notWhen, recommended_tier: tier }),
+    });
+
+    if (resp.ok) {
+      const data = await resp.json();
+      document.getElementById('status-msg').textContent = `Saved v${data.version} for ${currentSkillId}.`;
+      closeModal();
+      loadSkills();
+    } else {
+      const err = await resp.json().catch(() => ({}));
+      document.getElementById('status-msg').textContent = 'Error: ' + (err.detail?.message || resp.status);
+      document.getElementById('status-msg').style.color = '#c44';
+    }
+  }
+
+  function htmlEscape(s) {
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  }
+
+  loadSkills();
+</script>
+</body>
+</html>

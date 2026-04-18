@@ -1,7 +1,8 @@
-"""Database schema — all SQLite tables for Slice 2.
+"""Database schema — all SQLite tables.
 
 Tables: runs, subtasks, envelopes, scratch, logs, log_payloads,
-        skill_usage_log, config.
+        skill_usage_log, config, threads, messages, run_digests,
+        log_entities, log_relations.
 
 Call `create_all(db_path)` on startup to ensure all tables exist.
 
@@ -17,6 +18,8 @@ DB_PATH = "data/borg_route.db"
 # Migrations applied to existing databases (safe to re-run — errors silently ignored)
 _MIGRATIONS = [
     "ALTER TABLE runs ADD COLUMN thread_id TEXT",
+    "ALTER TABLE runs ADD COLUMN user_rating INTEGER",
+    "ALTER TABLE log_payloads ADD COLUMN ner_processed BOOLEAN DEFAULT 0",
 ]
 
 _SCHEMA_SQL = """
@@ -137,6 +140,38 @@ CREATE TABLE IF NOT EXISTS messages (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_messages_thread ON messages(thread_id, created_at);
+
+CREATE TABLE IF NOT EXISTS run_digests (
+    run_id TEXT PRIMARY KEY REFERENCES runs(run_id),
+    summary TEXT NOT NULL,
+    cost_dollars REAL DEFAULT 0,
+    token_count INTEGER DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS log_entities (
+    entity_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    log_id INTEGER NOT NULL REFERENCES logs(log_id),
+    run_id TEXT,
+    text TEXT NOT NULL,
+    label TEXT NOT NULL,
+    start_char INTEGER,
+    end_char INTEGER,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_log_entities_run ON log_entities(run_id);
+CREATE INDEX IF NOT EXISTS idx_log_entities_label ON log_entities(label);
+
+CREATE TABLE IF NOT EXISTS log_relations (
+    relation_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    log_id INTEGER NOT NULL REFERENCES logs(log_id),
+    run_id TEXT,
+    subject TEXT NOT NULL,
+    relation TEXT NOT NULL,
+    object TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_log_relations_run ON log_relations(run_id);
 """
 
 
@@ -176,8 +211,8 @@ async def create_all(db_path: str = DB_PATH) -> None:
 async def drop_all(db_path: str = DB_PATH) -> None:
     """Drop all application tables. Used in tests only."""
     tables = [
-        "log_payloads", "skill_usage_log", "logs",
-        "scratch", "envelopes", "subtasks", "runs", "config",
+        "log_relations", "log_entities", "log_payloads", "skill_usage_log", "logs",
+        "scratch", "envelopes", "subtasks", "run_digests", "runs", "config",
         "messages", "threads",
     ]
     async with aiosqlite.connect(db_path) as db:

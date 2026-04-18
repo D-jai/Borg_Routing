@@ -46,12 +46,16 @@ from src.api.chat_completions import router as chat_router  # noqa: E402
 from src.api.tasks import router as tasks_router  # noqa: E402
 from src.mcp.server import router as mcp_router  # noqa: E402
 from src.api.admin import router as admin_router  # noqa: E402
+from src.api.logs import router as logs_router  # noqa: E402
+from src.api.skills import router as skills_router  # noqa: E402
 
 app.include_router(models_router)
 app.include_router(chat_router)
 app.include_router(tasks_router)
 app.include_router(mcp_router)
 app.include_router(admin_router)
+app.include_router(logs_router)
+app.include_router(skills_router)
 
 
 @app.get("/health")

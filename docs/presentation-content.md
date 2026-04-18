@@ -160,6 +160,23 @@ gives operators real-time control over model behaviour without restarting the se
 - **Orchestrator prompt already wired:** `{rolling_summary}` placeholder in the system prompt receives the stored summary on every run, keeping long conversations coherent without token bloat
 - **Full audit trail:** every compression call is logged as a `model_call` event (tokens, latency, payload) in the logs table
 
+---
+
+### Slice 5 — Observability + NER + Skills UI
+
+**Key points:**
+- **Run digests:** every completed run auto-generates a cost/token summary stored in `run_digests` — queryable and displayed in the Stats tab
+- **User feedback loop:** thumbs up/down in the Chat UI writes `user_rating` to the run; the Stats tab shows the feedback ratio — closing the loop between user satisfaction and run data
+- **NER pipeline:** a background async worker runs spaCy `en_core_web_sm` over all model call payloads, extracting named entities (PERSON, ORG, GPE) and SVO relations into `log_entities` / `log_relations` — zero-cost structured knowledge from existing traffic
+- **Full observability surface:** `/ui/logs.html` — event list, cost summary by model, NER entity browser, JSONL export
+- **Skills governance:** `/ui/skills.html` shows per-skill success rate, residue count, and cost; one click creates a new version that is live on the next orchestrator call
+
+**Demo talking point:** "Every model call is logged with tokens and cost. The background NER worker extracts entities from those payloads automatically — no extra code needed. The Stats tab shows which models cost the most and how users rated the results."
+
+**Portfolio/LinkedIn angle:** End-to-end observability stack built from scratch — cost accounting, NLP entity extraction, user feedback — all integrated into a coherent operational dashboard.
+
+---
+
 **Demo talking point:** "After 15 turns the system automatically compresses the first 10 into a paragraph summary. The orchestrator reads that summary and the last 5 turns — same reasoning quality, a fraction of the tokens."
 
 **Portfolio/LinkedIn angle:** Demonstrates Progressive Distillation and Cascading Distillation patterns from first principles — memory management built as a first-class architectural concern, not bolted on.

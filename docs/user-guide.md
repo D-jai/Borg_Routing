@@ -155,6 +155,59 @@ BORG_ROUTE tracks conversation history in **threads**. Each thread stores the se
 
 ---
 
+## Feedback — Rating Runs
+
+After each assistant reply in the Chat UI, thumbs-up (👍) and thumbs-down (👎) buttons appear. Click either to submit a rating. Ratings are stored against the run and visible in the Dashboard Stats tab.
+
+You can also rate a run via the API: `POST /runs/{run_id}/rating` with body `{"rating": 1}` (up) or `{"rating": -1}` (down).
+
+---
+
+## Observability Logs
+
+The Logs page at `http://localhost:8000/ui/logs.html` provides three tabs:
+
+- **Events** — all model_call, orchestrator_decision, child_residue, and error events with filtering by run ID and event type
+- **Cost Summary** — aggregate token counts and dollar cost grouped by model
+- **NER Entities** — named entities extracted from log payloads by the background NER worker
+
+Click **Export JSONL** to download a full log snapshot for offline analysis.
+
+### NER Worker
+
+The NER worker runs in the background and processes unprocessed `log_payloads` rows using spaCy `en_core_web_sm`. It extracts named entities (PERSON, ORG, GPE, etc.) and subject-verb-object relations. Start it in your application startup if desired:
+
+```python
+from src.logging.ner_worker import run_ner_worker
+asyncio.create_task(run_ner_worker())
+```
+
+---
+
+## Skills Library
+
+The Skills page at `http://localhost:8000/ui/skills.html` shows all loaded skills with:
+- Call count, success rate, residue count, average tokens and latency
+- An **Edit → New Version** button that opens a form to create an improved version of any skill
+
+New versions are appended to `data/skills.yaml` with an incremented version number. The orchestrator will use the highest version by default.
+
+You can also manage skills via the API:
+- `GET /skills` — list all skills with stats
+- `GET /skills/{skill_id}` — detail for one skill including all versions
+- `POST /skills/{skill_id}/version` — create new version (JSON body with `description`, `when_to_use`, `not_when`, `recommended_tier`)
+
+---
+
+## Dashboard Stats Tab
+
+The Dashboard at `http://localhost:8000/ui/dashboard.html` now has two tabs:
+
+- **Runs** — full run history table with trace and resume buttons
+- **Stats** — run outcome counts, cost breakdown by model, feedback summary (thumbs up/down), and top outlier runs
+
+---
+
 ## Historical Memory (Rolling Summary)
 
 For long conversations BORG_ROUTE compresses older turns into a rolling summary so the orchestrator always has useful context without overloading its window.
