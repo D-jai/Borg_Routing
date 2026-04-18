@@ -4,4 +4,9 @@
 
 ---
 
-<!-- No test cases yet. Add as features are built. -->
+## S1-00 — Project Scaffold
+
+| ID | Description | Level | Status |
+|----|-------------|-------|--------|
+| TC-API-001 | `GET /health` returns HTTP 200 and `{"status":"ok"}` | Unit | ✅ Pass |
+| TC-API-002 | `POST /health` returns HTTP 405 Method Not Allowed | Unit | ✅ Pass |

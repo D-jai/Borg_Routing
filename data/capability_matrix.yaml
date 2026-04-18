@@ -1,0 +1,272 @@
+# Capability Matrix — BORG_ROUTE
+# Seeded 2026-04-18 during Session 2 reassessment
+#
+# This is the INITIAL SEED based on the user's local lineup (LM Studio)
+# and recommended OpenRouter externals.
+#
+# Scores are honest estimates for English tasks only.
+# They WILL be overwritten by actual benchmark runs during Slice 1.
+# Throughput (tps) values for locals are estimates and will be measured.
+#
+# Schema notes:
+#   source: "lmstudio" | "ollama" | "openrouter" | "custom_key"
+#   pricing: null for local; dollars per TOKEN for external
+#   context_length: maximum input tokens the model supports
+#   throughput_tps: measured tokens/second for output (inverse cost on local)
+#   task_scores: 0.0-10.0 per task type; honest pre-benchmark estimates
+#   specialty_tags: optional; e.g. "uncensored_roleplay", "coding_specialist"
+#   notes: free text for humans
+
+# ============================================================================
+# LOCAL MODELS (LM Studio)
+# ============================================================================
+
+- model_id: "lmstudio/gemma-4-e2b-it"
+  source: "lmstudio"
+  endpoint: "http://localhost:1234"
+  params_b: 4.6
+  publisher: "lmstudio-community"
+  context_length: 32000
+  pricing: null
+  throughput_tps: 60     # estimate — measure during benchmark
+  task_scores:
+    reasoning: 5.0
+    coding: 5.0
+    summarize: 6.5
+    writing: 6.0
+    roleplay: 5.5
+    agentic: 5.5
+    extraction: 7.0
+  specialty_tags: ["fast_light"]
+  notes: "Ultra-light, fast. Use for simple per-item classification / extraction."
+
+- model_id: "lmstudio/gemma-4-e4b-it"
+  source: "lmstudio"
+  endpoint: "http://localhost:1234"
+  params_b: 7.5
+  publisher: "lmstudio-community"
+  context_length: 32000
+  pricing: null
+  throughput_tps: 40
+  task_scores:
+    reasoning: 6.0
+    coding: 6.0
+    summarize: 7.0
+    writing: 6.5
+    roleplay: 6.0
+    agentic: 6.5
+    extraction: 7.5
+  specialty_tags: ["fast_light"]
+  notes: "Slightly stronger E2B successor. Good second-tier local light option."
+
+- model_id: "lmstudio/gemma-3-12b"
+  source: "lmstudio"
+  endpoint: "http://localhost:1234"
+  params_b: 12.0
+  publisher: "lmstudio-community"
+  context_length: 128000
+  pricing: null
+  throughput_tps: 22
+  task_scores:
+    reasoning: 6.5
+    coding: 6.5
+    summarize: 7.5
+    writing: 7.0
+    roleplay: 6.5
+    agentic: 7.0
+    extraction: 8.0
+  specialty_tags: ["long_context_local"]
+  notes: "Solid mid-tier generalist. 128k context is useful for long-thread work."
+
+- model_id: "lmstudio/llama-3.3-8b-instruct-thinking-heretic-uncensored"
+  source: "lmstudio"
+  endpoint: "http://localhost:1234"
+  params_b: 8.0
+  publisher: "mradermacher"
+  context_length: 128000
+  pricing: null
+  throughput_tps: 30
+  task_scores:
+    reasoning: 6.0
+    coding: 6.0
+    summarize: 7.0
+    writing: 7.5
+    roleplay: 8.5
+    agentic: 6.5
+    extraction: 7.0
+  specialty_tags: ["uncensored_roleplay", "creative_writing"]
+  notes: "Uncensored thinking variant. Preferred for roleplay and creative writing locally."
+
+- model_id: "lmstudio/qwen3.5-9b"
+  source: "lmstudio"
+  endpoint: "http://localhost:1234"
+  params_b: 9.0
+  publisher: "lmstudio-community"
+  context_length: 128000
+  pricing: null
+  throughput_tps: 28
+  task_scores:
+    reasoning: 7.0
+    coding: 7.5
+    summarize: 7.0
+    writing: 6.5
+    roleplay: 6.0
+    agentic: 7.5
+    extraction: 7.5
+  specialty_tags: ["reasoning_local", "coding_local"]
+  notes: "Qwen models are strong at reasoning and coding. Preferred local for structured / coding work."
+
+- model_id: "lmstudio/gemma-3-27b"
+  source: "lmstudio"
+  endpoint: "http://localhost:1234"
+  params_b: 27.0
+  publisher: "lmstudio-community"
+  context_length: 128000
+  pricing: null
+  throughput_tps: 15
+  task_scores:
+    reasoning: 7.5
+    coding: 7.0
+    summarize: 8.0
+    writing: 8.0
+    roleplay: 7.0
+    agentic: 7.5
+    extraction: 8.5
+  specialty_tags: ["heavy_local"]
+  notes: "Heavy dense local model. Slow but capable."
+
+- model_id: "lmstudio/gemma-4-26b-a4b"
+  source: "lmstudio"
+  endpoint: "http://localhost:1234"
+  params_b: 26.0   # MoE with 4B active
+  publisher: "lmstudio-community"
+  context_length: 128000
+  pricing: null
+  throughput_tps: 35    # MoE — faster than dense 27B thanks to active params
+  task_scores:
+    reasoning: 7.5
+    coding: 7.0
+    summarize: 8.0
+    writing: 8.0
+    roleplay: 7.0
+    agentic: 7.5
+    extraction: 8.5
+  specialty_tags: ["heavy_local", "moe_fast"]
+  notes: "MoE with only 4B active — much faster than a dense 27B. Preferred heavy local option for batch work."
+
+- model_id: "lmstudio/llama-3.3-70b-instruct"
+  source: "lmstudio"
+  endpoint: "http://localhost:1234"
+  params_b: 70.0
+  publisher: "bartowski"
+  context_length: 128000
+  pricing: null
+  throughput_tps: 6     # estimate — slow dense 70B
+  task_scores:
+    reasoning: 8.5
+    coding: 8.0
+    summarize: 9.0
+    writing: 8.5
+    roleplay: 7.5
+    agentic: 8.5
+    extraction: 9.0
+  specialty_tags: ["heaviest_local"]
+  notes: "Flagship local quality. Too slow for batch fan-out; use sparingly, usually as a final composer if offline."
+
+# ============================================================================
+# EXTERNAL MODELS (OpenRouter — English only, no image-gen)
+# ============================================================================
+#
+# NOTE: pricing values below are pre-benchmark estimates. The discovery code
+# in src/registry/discovery.py must refresh these live from
+# GET https://openrouter.ai/api/v1/models on every matrix update.
+
+- model_id: "openrouter/google/gemini-2.5-flash"
+  source: "openrouter"
+  context_length: 1000000
+  pricing:
+    input_per_token: 0.0000003    # $0.30 / 1M
+    output_per_token: 0.0000025   # $2.50 / 1M
+  throughput_tps: 120              # typical OpenRouter reported
+  task_scores:
+    reasoning: 7.5
+    coding: 7.5
+    summarize: 8.5
+    writing: 7.5
+    roleplay: 6.5
+    agentic: 8.5
+    extraction: 9.0
+  specialty_tags: ["cheap_workhorse", "huge_context"]
+  notes: "Cheapest reliable external option. Default for apply_to_each fan-out jobs."
+
+- model_id: "openrouter/deepseek/deepseek-chat-v3.1"
+  source: "openrouter"
+  context_length: 128000
+  pricing:
+    input_per_token: 0.00000027   # $0.27 / 1M (approx)
+    output_per_token: 0.0000011   # $1.10 / 1M (approx)
+  throughput_tps: 50
+  task_scores:
+    reasoning: 8.5
+    coding: 9.0
+    summarize: 8.0
+    writing: 7.5
+    roleplay: 7.0
+    agentic: 8.5
+    extraction: 8.5
+  specialty_tags: ["budget_general", "coding_capable"]
+  notes: "Excellent price/performance. Strong at coding + reasoning. Good default for mid-tier work."
+
+- model_id: "openrouter/qwen/qwen3-coder"
+  source: "openrouter"
+  context_length: 256000
+  pricing:
+    input_per_token: 0.000001     # $1.00 / 1M (estimate — refresh live)
+    output_per_token: 0.000003    # $3.00 / 1M (estimate — refresh live)
+  throughput_tps: 60
+  task_scores:
+    reasoning: 7.5
+    coding: 9.5
+    summarize: 7.0
+    writing: 6.5
+    roleplay: 5.5
+    agentic: 8.0
+    extraction: 8.0
+  specialty_tags: ["coding_specialist"]
+  notes: "Dedicated coding specialist. Beats generalists on code tasks."
+
+- model_id: "openrouter/mistralai/mistral-small-creative"
+  source: "openrouter"
+  context_length: 128000
+  pricing:
+    input_per_token: 0.0000002    # $0.20 / 1M (estimate — refresh live)
+    output_per_token: 0.0000006   # $0.60 / 1M (estimate — refresh live)
+  throughput_tps: 70
+  task_scores:
+    reasoning: 6.5
+    coding: 6.0
+    summarize: 7.5
+    writing: 9.0
+    roleplay: 9.0
+    agentic: 6.5
+    extraction: 7.0
+  specialty_tags: ["creative_writing_specialist", "roleplay_specialist"]
+  notes: "Cheap creative + roleplay specialist. Use when the task is narrative / character-driven."
+
+- model_id: "openrouter/anthropic/claude-sonnet-4"
+  source: "openrouter"
+  context_length: 200000
+  pricing:
+    input_per_token: 0.000003     # $3.00 / 1M
+    output_per_token: 0.000015    # $15.00 / 1M
+  throughput_tps: 80
+  task_scores:
+    reasoning: 9.5
+    coding: 9.5
+    summarize: 9.5
+    writing: 9.0
+    roleplay: 8.0
+    agentic: 9.5
+    extraction: 9.5
+  specialty_tags: ["heavy_composer", "flagship"]
+  notes: "Heavy composer / final synthesis model. Use sparingly for the 'oracle' turn."

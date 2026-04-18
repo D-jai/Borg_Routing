@@ -7,28 +7,45 @@
 <!-- Added: 2026-04-17 — Phase 0 -->
 ## Project Overview
 
-**What it is:** TBD
+**What it is:** BORG_ROUTE is an Adaptive Recursive Agent Router — a local-first
+AI middleware that decomposes tasks and routes each piece to the cheapest model
+capable of handling it.
 
-**Problem it solves:** TBD
+**Problem it solves:** Most AI setups send every request to the biggest, most
+expensive model available. BORG_ROUTE makes cost-aware decomposition a
+first-class architecture — not a hack.
 
 **Key points:**
-- TBD
+- Drop-in OpenAI-compatible API: point Cursor, Continue, or any AI tool at
+  `http://localhost:8000/v1` and specify `model: "borg_route"`
+- Orchestrator acts as a project manager: it structures work, then routes each
+  atomic step to the cheapest capable model
+- Full observability: every model call logged with token counts, cost, and
+  decision trace
 
-**Portfolio/LinkedIn angle:** [How this demonstrates AI Solution Architect skills]
+**Portfolio/LinkedIn angle:** Demonstrates production-level AI architecture
+(multi-agent orchestration, cost modelling, local + cloud hybrid deployment)
 
 ---
 
-<!-- Added: YYYY-MM-DD — Phase N: [Feature] -->
-## [Feature Name]
+<!-- Added: 2026-04-18 — S1-00: Project scaffold + health endpoint -->
+## FastAPI Scaffold + Health Endpoint
 
-**What it is:** [One sentence]
+**What it is:** The foundational Python project setup — FastAPI app, dependency
+management via `pyproject.toml`, environment variable loading, and a `/health`
+endpoint.
 
-**Why it matters:** [Business/user value]
+**Why it matters:** Establishes the runnable skeleton that every subsequent
+feature builds on. The health endpoint is the first integration surface any
+operator or CI pipeline can check.
 
 **Key points:**
-- [Bullet 1]
-- [Bullet 2]
+- Single command install: `pip install -e ".[dev]"`
+- Zero-config startup: `uvicorn main:app --reload`
+- `GET /health → {"status":"ok"}` — always available to prove the server is up
 
-**Demo talking point:** [What you'd say/show in 60 seconds]
+**Demo talking point:** "The entire stack installs in one command, starts in
+one command, and proves itself alive at `/health`."
 
-**Portfolio/LinkedIn angle:** [Skill this demonstrates]
+**Portfolio/LinkedIn angle:** Clean Python project setup with modern tooling
+(pyproject.toml, asyncio FastAPI, pytest-asyncio).

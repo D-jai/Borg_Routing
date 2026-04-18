@@ -1,0 +1,343 @@
+# BORG_ROUTE Skill Library
+# Version 1 — initial catalogue hand-crafted during Session 2 reassessment (2026-04-18)
+#
+# A "skill" is a reusable template the orchestrator can invoke instead of
+# crafting a custom envelope. Each skill encodes a known-good output_schema
+# for a common WBS move.
+#
+# When the orchestrator plans, it is told: "Check this library first. If a
+# skill matches your need, invoke it by id. If not, craft a custom envelope."
+#
+# Schema for each skill:
+#   skill_id: unique id, snake_case
+#   version: int (bump on edit; old stats preserved)
+#   description: one-line
+#   when_to_use: bullets — positive examples
+#   not_when: bullets — negative examples
+#   recommended_tier: light | mid | heavy — model class that fits best
+#   recommended_specialty: optional — coding | creative | reasoning | etc.
+#   envelope_type: answerer | apply_to_each
+#   required_args: dict of {arg_name: type_hint}
+#   outbound_template: the envelope shape with {arg} placeholders
+#   example: concrete args + expected output
+
+# ============================================================================
+# CORE 10 SKILLS
+# ============================================================================
+
+- skill_id: classify_into_buckets
+  version: 1
+  description: Assign each item in a list to exactly one of N predefined buckets.
+  when_to_use:
+    - You have a list of items (emails, issues, documents, tickets)
+    - There is a known, closed set of categories
+    - Uncertainty should be expressed via 'defer', not refusal
+    - You need the result as structured data for downstream filtering/counting
+  not_when:
+    - Categories are open-ended or need to be discovered
+    - Items need rich analysis beyond categorisation
+    - A single item needs classification (use 'answerer' with this schema directly)
+  recommended_tier: light
+  recommended_specialty: null  # generalist fine
+  envelope_type: apply_to_each
+  required_args:
+    buckets: list[str]            # the category options
+    items_ref: str                # DB reference to the input list
+    concurrency_limit: int | null # default 20
+  outbound_template:
+    type: apply_to_each
+    instruction: |
+      Classify the following item into EXACTLY ONE of these categories:
+      {buckets}
+      If no category clearly fits, or you are uncertain, return "defer" with a short reason.
+      Do not invent new categories. Do not return multiple.
+    inputs_ref: "{items_ref}"
+    output_schema:
+      bucket: "enum:{buckets}|defer"
+      confidence: "float 0.0-1.0"
+      defer_reason: "string<=50 (only if bucket='defer')"
+    side_effects:
+      - deferrals  # items with bucket='defer' get rows here for orchestrator re_plan
+    concurrency_limit: "{concurrency_limit}"
+  example:
+    args:
+      buckets: [billing, tech_support, sales, feedback, other]
+      items_ref: "run:emails:body"
+      concurrency_limit: 20
+    expected_per_item_output:
+      bucket: billing
+      confidence: 0.93
+
+- skill_id: extract_fields
+  version: 1
+  description: Extract structured fields from unstructured text, one item at a time.
+  when_to_use:
+    - You have unstructured text (emails, contracts, logs, articles)
+    - You need specific named fields pulled out (dates, people, amounts, etc.)
+    - Missing fields should be null, not hallucinated
+  not_when:
+    - Fields are ambiguous or require deep reasoning to locate
+    - You need a synthesis across MANY items (use summarize_batch instead)
+  recommended_tier: light
+  recommended_specialty: extraction
+  envelope_type: apply_to_each
+  required_args:
+    items_ref: str
+    fields: list[dict]  # each: {name, type, description}
+    concurrency_limit: int | null
+  outbound_template:
+    type: apply_to_each
+    instruction: |
+      Extract the following fields from the provided text. If a field is
+      genuinely not present, return null for it — DO NOT guess or fabricate.
+      Fields to extract:
+      {fields_formatted}
+    inputs_ref: "{items_ref}"
+    output_schema: "derived from fields"  # runtime builds this from args
+    concurrency_limit: "{concurrency_limit}"
+  example:
+    args:
+      items_ref: "run:resumes:body"
+      fields:
+        - {name: full_name, type: string, description: "Candidate's full name"}
+        - {name: years_experience, type: int, description: "Total years of professional experience"}
+        - {name: primary_skills, type: "list[str]", description: "Top technical skills mentioned"}
+      concurrency_limit: 10
+
+- skill_id: summarize
+  version: 1
+  description: Reduce a long piece of content to key points with a fixed shape.
+  when_to_use:
+    - You have one or more long texts that need compression
+    - The downstream consumer (you or the Composer) needs a digest, not the raw
+    - You want the summary to be structured (not free prose)
+  not_when:
+    - You need verbatim excerpts (use extract_fields)
+    - The text is already short
+  recommended_tier: mid
+  recommended_specialty: null
+  envelope_type: apply_to_each  # or answerer if single item
+  required_args:
+    items_ref: str
+    max_points: int
+    focus: str | null     # optional: what angle to summarise from
+  outbound_template:
+    type: apply_to_each
+    instruction: |
+      Summarise this text into at most {max_points} key points.
+      {focus_instruction}
+      Be concrete. No filler. No "this text discusses..." preamble.
+    inputs_ref: "{items_ref}"
+    output_schema:
+      headline: "string<=15w"
+      key_points: "list[string<=25w], max {max_points}"
+      topic_tags: "list[string], 2-5 tags"
+  example:
+    args:
+      items_ref: "run:articles"
+      max_points: 5
+      focus: "pricing and product features"
+
+- skill_id: compare_and_rank
+  version: 1
+  description: Score N items against a set of criteria and produce a ranking.
+  when_to_use:
+    - You have multiple candidates (proposals, candidates, options)
+    - There are explicit criteria
+    - You need both per-item scores AND an overall ranking
+  not_when:
+    - Criteria are implicit or subjective
+    - You only have one item
+  recommended_tier: mid
+  recommended_specialty: reasoning
+  envelope_type: answerer  # single call sees all items; easier than per-item scoring
+  required_args:
+    items_ref: str
+    criteria: list[dict]  # each: {name, weight, description}
+  outbound_template:
+    type: answerer
+    instruction: |
+      Evaluate each item against the given criteria. Assign a score 0-10 per
+      criterion per item. Compute a weighted total using the provided weights.
+      Return the items ranked by weighted total, highest first.
+      Criteria:
+      {criteria_formatted}
+    state_query: "SELECT id, content FROM scratch WHERE table_ref = '{items_ref}'"
+    output_schema:
+      rankings:
+        - id: "string"
+          scores: "dict[criterion_name: float]"
+          weighted_total: "float"
+          notes: "string<=40w"
+      rationale: "string<=60w"  # overall remarks
+  example:
+    args:
+      items_ref: "run:proposals"
+      criteria:
+        - {name: technical_fit, weight: 0.4, description: "Match to requirements"}
+        - {name: price, weight: 0.3, description: "Cost effectiveness"}
+        - {name: timeline, weight: 0.3, description: "Delivery speed"}
+
+- skill_id: filter_by_criterion
+  version: 1
+  description: Keep only items that match a specified criterion; return kept + dropped.
+  when_to_use:
+    - You have a list and need to keep only some items
+    - The criterion is natural-language (not pure SQL)
+  not_when:
+    - The criterion is a simple equality/comparison — use state_op `filter` instead (free!)
+  recommended_tier: light
+  envelope_type: apply_to_each
+  required_args:
+    items_ref: str
+    criterion: str
+    concurrency_limit: int | null
+  outbound_template:
+    type: apply_to_each
+    instruction: |
+      For this item, decide: does it match this criterion?
+      CRITERION: {criterion}
+      Answer "keep" or "drop" with a one-sentence reason.
+    inputs_ref: "{items_ref}"
+    output_schema:
+      decision: "enum:keep|drop"
+      reason: "string<=30w"
+    concurrency_limit: "{concurrency_limit}"
+
+- skill_id: transform_style
+  version: 1
+  description: Convert content from one format/tone/style to another, preserving meaning.
+  when_to_use:
+    - Reformatting structured data (e.g. bullet list → paragraph)
+    - Tone shifts (formal → casual, long → short)
+    - Format changes (markdown → plain, prose → JSON)
+  not_when:
+    - The content needs creative elaboration (this is structural)
+  recommended_tier: light
+  envelope_type: apply_to_each  # or answerer
+  required_args:
+    items_ref: str
+    target_style: str            # "plain English", "formal memo", "Slack-appropriate", etc.
+    target_format: str | null    # "markdown", "json", "prose" etc.
+    max_length: int | null       # word limit
+  outbound_template:
+    type: apply_to_each
+    instruction: |
+      Rewrite this content in the target style.
+      Target style: {target_style}
+      {target_format_instruction}
+      {max_length_instruction}
+      Preserve all facts. Do not add new information.
+    inputs_ref: "{items_ref}"
+    output_schema:
+      rewritten: "string"
+      meaning_preserved: "bool"
+      notes: "string<=20w (only if meaning_preserved=false)"
+
+- skill_id: decompose_task
+  version: 1
+  description: Break a complex task into sub-tasks; spawns a child orchestrator.
+  when_to_use:
+    - The task is complex enough to warrant its own WBS
+    - Several tiers of work are needed
+    - You (current orchestrator) don't want to manage the details directly
+  not_when:
+    - current_depth is already at or near max_depth (will be demoted to answerer)
+    - A simple apply_to_each or sequential answerer would work
+  recommended_tier: mid  # the child orchestrator model
+  envelope_type: orchestrate
+  required_args:
+    sub_task_instruction: str
+    context_for_child: str  # distilled — NOT the whole thread
+    expected_return_schema: dict  # what child's composer should produce
+  outbound_template:
+    type: orchestrate
+    instruction: "{sub_task_instruction}"
+    context: "{context_for_child}"
+    output_schema: "{expected_return_schema}"
+
+- skill_id: verify_claim
+  version: 1
+  description: Check whether a claim is consistent with provided evidence.
+  when_to_use:
+    - You have a claim and a set of evidence documents/facts
+    - You need a structured verdict with citations
+  not_when:
+    - No explicit evidence is provided (use a retrieval step first)
+  recommended_tier: mid
+  recommended_specialty: reasoning
+  envelope_type: answerer
+  required_args:
+    claim: str
+    evidence_ref: str
+  outbound_template:
+    type: answerer
+    instruction: |
+      Assess whether this claim is supported, contradicted, or
+      insufficiently-addressed by the evidence. Cite the specific evidence
+      items (by id) that support your verdict.
+      CLAIM: {claim}
+    state_query: "SELECT id, content FROM scratch WHERE table_ref = '{evidence_ref}'"
+    output_schema:
+      verdict: "enum:supported|contradicted|insufficient"
+      confidence: "float 0.0-1.0"
+      cited_evidence_ids: "list[string]"
+      explanation: "string<=80w"
+
+- skill_id: retry_escalate
+  version: 1
+  description: Re-run a specific failed set of items on a higher-tier model.
+  when_to_use:
+    - Previous stage had items in a 'failed' or 'defer' list
+    - You want to retry them with better intelligence
+  not_when:
+    - The failures are due to malformed input (fix input first)
+  recommended_tier: mid  # the ESCALATED tier, up from original
+  envelope_type: apply_to_each
+  required_args:
+    failed_items_ref: str   # e.g. "scratch:deferrals:batch_5"
+    original_instruction: str
+    original_output_schema: dict
+    escalation_note: str | null   # "Previous attempt reasoned: ..."
+  outbound_template:
+    type: apply_to_each
+    instruction: |
+      Retry this task. A previous attempt could not resolve it confidently.
+      {escalation_note}
+      ORIGINAL INSTRUCTION: {original_instruction}
+    inputs_ref: "{failed_items_ref}"
+    output_schema: "{original_output_schema}"
+    trigger_reason: "escalation_from:{failed_items_ref}"
+
+- skill_id: defer_and_collect
+  version: 1
+  description: Run a light first pass that aggressively defers; collect the deferrals for stronger handling later.
+  when_to_use:
+    - You have a large batch and most items are probably easy
+    - A cheap model can handle the clear cases and bounce the unclear ones
+    - Total cost < using a strong model on the whole batch
+  not_when:
+    - The batch is small enough that a single strong pass is cleaner
+  recommended_tier: light
+  envelope_type: apply_to_each
+  required_args:
+    items_ref: str
+    instruction: str            # what to do per item
+    output_schema: dict         # include 'defer' option in any enum
+    confidence_threshold: float # below this → mark defer
+  outbound_template:
+    type: apply_to_each
+    instruction: |
+      Attempt this task. If your confidence would be below {confidence_threshold},
+      return a 'defer' status instead of guessing. Better to defer and let a
+      stronger model handle it than to pollute the results with low-confidence guesses.
+      TASK: {instruction}
+    inputs_ref: "{items_ref}"
+    output_schema:
+      result_or_defer: "either {output_schema} OR 'defer'"
+      confidence: "float 0.0-1.0"
+      defer_reason: "string<=30w (only if deferred)"
+    side_effects:
+      - deferrals
+  # After this skill completes, orchestrator typically follows with retry_escalate
+  # over the deferrals table.
