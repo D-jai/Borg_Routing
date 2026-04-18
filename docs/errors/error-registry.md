@@ -48,6 +48,16 @@
 | BRT-DB-016 | Scratch read failed | `src/db/scratch.py::read_scratch_for_level` | SQLite query on the scratch table failed. The database file may be corrupt — check the WAL file. |
 | BRT-DB-017 | Scratch delete failed | `src/db/scratch.py::delete_scratch_for_level` | SQLite delete on the scratch table failed. Check database file permissions. |
 
+## BRT-SOP — State Operators Module
+
+| Code | Description | Origin | Hints |
+|------|-------------|--------|-------|
+| BRT-SOP-001 | Unknown operator name | `src/orchestrator/state_ops.py::dispatch_state_op` | Must be one of: `filter`, `count`, `group_by`, `sample`. Check `dependency_input['op']` in the task. |
+| BRT-SOP-002 | Missing required param | `src/orchestrator/state_ops.py::op_*` | Each operator requires specific params. `filter` needs `key` + `value`; `group_by` needs `key`; `sample` needs `n`. |
+| BRT-SOP-003 | Items not found in dependency_input | `src/orchestrator/state_ops.py::_get_items` | The state_op task must have `dependency_input['items']` — a list of dicts to operate on. |
+| BRT-SOP-004 | Invalid filter expression | `src/orchestrator/state_ops.py::op_filter` | The filter comparison raised an error. Check that the key and value types are compatible. |
+| BRT-SOP-005 | group_by key not found in items | `src/orchestrator/state_ops.py::op_group_by` | One or more items in the list don't have the specified `key`. Ensure all items have the key or pre-filter. |
+
 ## BRT-ANS — Answerer Module
 
 | Code | Description | Origin | Hints |

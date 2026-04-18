@@ -21,6 +21,23 @@
 | TC-ENV-011 | All four valid envelope types accepted | Unit | ✅ Pass |
 | TC-ENV-012 | InboundEnvelope with scratch_writes and scratch_cleanup | Unit | ✅ Pass |
 
+## S2-07 — State Operators
+
+| ID | Description | Level | Status |
+|----|-------------|-------|--------|
+| TC-SOP-001 | op_filter keeps matching items | Unit | ✅ Pass |
+| TC-SOP-002 | op_filter negate keeps non-matching | Unit | ✅ Pass |
+| TC-SOP-003 | op_count returns total count | Unit | ✅ Pass |
+| TC-SOP-004 | op_count group_by returns grouped counts | Unit | ✅ Pass |
+| TC-SOP-005 | op_group_by groups items by key | Unit | ✅ Pass |
+| TC-SOP-006 | op_sample returns n items | Unit | ✅ Pass |
+| TC-SOP-007 | op_sample with seed is deterministic | Unit | ✅ Pass |
+| TC-SOP-008 | BRT-SOP-001 raised for unknown operator | Unit | ✅ Pass |
+| TC-SOP-009 | BRT-SOP-002 raised when required param missing | Unit | ✅ Pass |
+| TC-SOP-010 | BRT-SOP-003 raised when items not in dependency_input | Unit | ✅ Pass |
+| TC-SOP-011 | BRT-SOP-005 raised when group_by key absent | Unit | ✅ Pass |
+| TC-SOP-012 | dispatch_state_op returns resolved InboundEnvelope | Unit | ✅ Pass |
+
 ## S2-06 — Agent Executor
 
 | ID | Description | Level | Status |
