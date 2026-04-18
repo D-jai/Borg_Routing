@@ -21,6 +21,21 @@
 | TC-ENV-011 | All four valid envelope types accepted | Unit | ✅ Pass |
 | TC-ENV-012 | InboundEnvelope with scratch_writes and scratch_cleanup | Unit | ✅ Pass |
 
+## S2-03 — Database Schema
+
+| ID | Description | Level | Status |
+|----|-------------|-------|--------|
+| TC-DB-001 | create_all is idempotent | Unit | ✅ Pass |
+| TC-DB-002 | All 8 tables exist after create_all | Unit | ✅ Pass |
+| TC-DB-003 | runs.status CHECK rejects invalid values | Unit | ✅ Pass |
+| TC-DB-004 | subtasks.status CHECK rejects invalid values | Unit | ✅ Pass |
+| TC-DB-005 | logs.event_type CHECK rejects invalid values | Unit | ✅ Pass |
+| TC-DB-006 | log_payloads.direction CHECK rejects invalid values | Unit | ✅ Pass |
+| TC-DB-007 | skill_usage_log.outcome CHECK rejects invalid values | Unit | ✅ Pass |
+| TC-DB-008 | idx_scratch_run_level index exists | Unit | ✅ Pass |
+| TC-DB-009 | config key is unique; upsert works | Unit | ✅ Pass |
+| TC-DB-010 | Valid run record inserts cleanly | Unit | ✅ Pass |
+
 ## S2-02 — Envelope Validator
 
 | ID | Description | Level | Status |

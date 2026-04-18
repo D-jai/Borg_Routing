@@ -70,6 +70,23 @@ validated object. Config errors surface immediately, not mid-run."
 
 ---
 
+<!-- Added: 2026-04-18 — S2-03: Database schema -->
+## SQLite Schema — 8 Tables, All Constraints Enforced
+
+**What it is:** The full SQLite schema for Slice 2 — runs, subtasks, envelopes, scratch, logs, log_payloads, skill_usage_log, config.
+
+**Why it matters:** Every table has CHECK constraints and indexes. The `scratch` table with its `(run_id, level_path)` index is the foundation for the fold-in cleanup law — the parent can check for child residue with a single indexed query.
+
+**Key points:**
+- `trigger_reason` on envelopes turns the envelope table into a queryable causal graph
+- `child_residue` as a `logs.event_type` gives free observability on misbehaving agents
+- `run_digests` table (Slice 5) will compute cost/latency summaries without any AI calls
+- WAL journal mode for safe concurrent reads during live runs
+
+**Demo talking point:** "Residue detection is just `SELECT COUNT(*) WHERE level_path = {child_level}`. The cleanup law costs one indexed query per fold-in."
+
+---
+
 <!-- Added: 2026-04-18 — S2-02: Envelope validator -->
 ## Envelope Contract Enforcement — validate_outbound + validate_inbound
 
