@@ -1,5 +1,6 @@
 # Build Plan — BORG_ROUTE (Slice-Based, Extreme-Spec)
-> Last updated: 2026-04-18 (Session 2 — reassessment + extreme-spec expansion)
+> Last updated: 2026-04-18 (post-Slice 6 — progress markers synced)
+> Status: **All slices 0-6 complete; 245 tests passing.**
 > Each slice produces a working, tested, committed increment.
 > Read only the slice you are currently working on.
 > Check off tasks as you complete them. Update CHECKPOINT.md after every session.
@@ -800,57 +801,57 @@ tests green; CHECKPOINT updated; zipped.
 
 ---
 
-## Slice 3: Recursion + Admin + Resume + Multi-turn memory
-Condensed — builder to detail with same discipline, borrowing patterns from
+## Slice 3: Recursion + Admin + Resume + Multi-turn memory ✅ Complete
+Condensed — builder detailed with same discipline, borrowing patterns from
 Slice 2.
 
 ### Tasks
-- [ ] S3-01: `engine.py` — handle `type=orchestrate`: spawn child run, link `parent_run_id`, enforce `MAX_RECURSION_DEPTH=5`, demote at cap — BRT-ORC-020..029
-- [ ] S3-02: `runner.py` — child runner folds digest into parent `dependency_input`
-- [ ] S3-03: `src/db/state.py` — `resume_run()`: re-dispatch failed/in-flight only — BRT-DB-020
-- [ ] S3-04: `src/api/admin.py` — `GET/POST /config`, `POST /config/rules` (append), `POST /config/rules/{id}/retire`
-- [ ] S3-05: Rule ledger logic in config + governance loader
-- [ ] S3-06: `POST /runs/{id}/resume`
-- [ ] S3-07: `ui/admin.html` — rules append + ledger view, depth slider, strategy toggle, window size, time_cost_per_sec
-- [ ] S3-08: `ui/dashboard.html` — run history, Resume button, depth tree
-- [ ] S3-09: `ui/run.html` — child-run drill-down on `orchestrate` rows
-- [ ] S3-10: threads + messages tables; window extractor; thread-scoped runs
-- [ ] S3-11: Tests — recursion, resume, rule ledger, multi-turn context
+- [x] S3-01: `engine.py` — handle `type=orchestrate`: spawn child run, link `parent_run_id`, enforce `MAX_RECURSION_DEPTH=5`, demote at cap — BRT-ORC-020..029
+- [x] S3-02: `runner.py` — child runner folds digest into parent `dependency_input`
+- [x] S3-03: `src/db/state.py` — `resume_run()`: re-dispatch failed/in-flight only — BRT-DB-020
+- [x] S3-04: `src/api/admin.py` — `GET/POST /config`, `POST /config/rules` (append), `POST /config/rules/{id}/retire`
+- [x] S3-05: Rule ledger logic in config + governance loader
+- [x] S3-06: `POST /runs/{id}/resume`
+- [x] S3-07: `ui/admin.html` — rules append + ledger view, depth slider, strategy toggle, window size, time_cost_per_sec
+- [x] S3-08: `ui/dashboard.html` — run history, Resume button, depth tree
+- [x] S3-09: `ui/run.html` — child-run drill-down on `orchestrate` rows
+- [x] S3-10: threads + messages tables; window extractor; thread-scoped runs
+- [x] S3-11: Tests — recursion, resume, rule ledger, multi-turn context
 
 ---
 
-## Slice 4: Historical Memory + Rolling Summary
+## Slice 4: Historical Memory + Rolling Summary ✅ Complete
 
-- [ ] S4-01: `src/memory/window.py` — last N turns extraction
-- [ ] S4-02: `src/memory/compressor.py` — compress inactive turns into rolling summary via model call (logged) — BRT-MEM-001..005
-- [ ] S4-03: `ORCHESTRATOR_SYSTEM_PROMPT` rendered with window + rolling summary
-- [ ] S4-04: Tests — 15-turn thread; assert compact context passed to model
-
----
-
-## Slice 5: Observability + NER + Skills UI
-
-- [ ] S5-01: `run_digests` table; `user_rating` on runs
-- [ ] S5-02: digest computation at run completion
-- [ ] S5-03: `POST /runs/{id}/rating`
-- [ ] S5-04: thumbs up/down in `ui/chat.html`
-- [ ] S5-05: `src/logging/ner_worker.py` — async poll, spacy en_core_web_sm, populate log_entities + log_relations — BRT-LOG-010..020
-- [ ] S5-06: `src/api/logs.py` — list, entities, export JSONL, cost-summary
-- [ ] S5-07: `ui/logs.html`
-- [ ] S5-08: `ui/dashboard.html` — Stats tab (cost chart, outliers, feedback)
-- [ ] S5-09: `src/api/skills.py` — list/stats/new-version; `ui/skills.html` — per-skill success/residue/cost cards; edit → new version
-- [ ] S5-10: Tests
+- [x] S4-01: `src/memory/window.py` — last N turns extraction
+- [x] S4-02: `src/memory/compressor.py` — compress inactive turns into rolling summary via model call (logged) — BRT-MEM-001..005
+- [x] S4-03: `ORCHESTRATOR_SYSTEM_PROMPT` rendered with window + rolling summary
+- [x] S4-04: Tests — 15-turn thread; assert compact context passed to model
 
 ---
 
-## Slice 6: Live UI + Streaming Polish
+## Slice 5: Observability + NER + Skills UI ✅ Complete
 
-- [ ] S6-01: `GET /runs/{id}/stream` — SSE emit envelope status changes
-- [ ] S6-02: Streaming `/v1/chat/completions` — token-level SSE
-- [ ] S6-03: `ui/run.html` — SSE listener; live apply_to_each counter
-- [ ] S6-04: `ui/chat.html` — token streaming
-- [ ] S6-05: `ui/dashboard.html` — cost cards, token leaderboard, depth tree
-- [ ] S6-06: Tests — SSE lifecycle
+- [x] S5-01: `run_digests` table; `user_rating` on runs
+- [x] S5-02: digest computation at run completion
+- [x] S5-03: `POST /runs/{id}/rating`
+- [x] S5-04: thumbs up/down in `ui/chat.html`
+- [x] S5-05: `src/logging/ner_worker.py` — async poll, spacy en_core_web_sm, populate log_entities + log_relations — BRT-LOG-010..020
+- [x] S5-06: `src/api/logs.py` — list, entities, export JSONL, cost-summary
+- [x] S5-07: `ui/logs.html`
+- [x] S5-08: `ui/dashboard.html` — Stats tab (cost chart, outliers, feedback)
+- [x] S5-09: `src/api/skills.py` — list/stats/new-version; `ui/skills.html` — per-skill success/residue/cost cards; edit → new version
+- [x] S5-10: Tests
+
+---
+
+## Slice 6: Live UI + Streaming Polish ✅ Complete
+
+- [x] S6-01: `GET /runs/{id}/stream` — SSE emit envelope status changes
+- [x] S6-02: Streaming `/v1/chat/completions` — token-level SSE
+- [x] S6-03: `ui/run.html` — SSE listener; live apply_to_each counter
+- [x] S6-04: `ui/chat.html` — token streaming
+- [x] S6-05: `ui/dashboard.html` — cost cards, token leaderboard, depth tree
+- [x] S6-06: Tests — SSE lifecycle
 
 ---
 
@@ -881,8 +882,11 @@ Slice 2.
 |-------|--------|-------|
 | Slice 0: Scaffolding + prompts + skills + seed matrix | ✅ Complete | Docs, `src/prompts/*`, `data/skills.yaml`, `data/capability_matrix.yaml` |
 | Slice 1: Registry Foundation | ✅ Complete | S1-00..S1-10, 53 tests |
-| Slice 2: Core Pattern E2E (B + D surfaces) | ✅ Complete | S2-01..S2-17, 191 tests |
-| Slice 3: Recursion + Admin + Resume + Multi-turn | 🔲 Not started | **Start here** |
-| Slice 4: Historical Memory | 🔲 Not started | |
-| Slice 5: Observability + NER + Skills UI | 🔲 Not started | |
-| Slice 6: Live Streaming Polish | 🔲 Not started | |
+| Slice 2: Core Pattern E2E (B + D surfaces) | ✅ Complete | S2-01..S2-17, 191 tests (138 new) |
+| Slice 3: Recursion + Admin + Resume + Multi-turn | ✅ Complete | S3-01..S3-11, 210 tests (19 new) |
+| Slice 4: Historical Memory | ✅ Complete | S4-01..S4-04, 219 tests (9 new) |
+| Slice 5: Observability + NER + Skills UI | ✅ Complete | S5-01..S5-10, 236 tests (17 new) |
+| Slice 6: Live Streaming Polish | ✅ Complete | S6-01..S6-06, 245 tests (9 new) |
+
+**All BUILD_PLAN slices complete.** Post-build polish / new features require
+planning-agent direction; see `SESSION_HANDOFF.md` for known deferred items.
