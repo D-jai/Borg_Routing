@@ -173,14 +173,77 @@ The Logs page at `http://localhost:8000/ui/logs.html` provides three tabs:
 
 Click **Export JSONL** to download a full log snapshot for offline analysis.
 
-### NER Worker
+### NER Worker (Optional, Currently Parked)
 
-The NER worker runs in the background and processes unprocessed `log_payloads` rows using spaCy `en_core_web_sm`. It extracts named entities (PERSON, ORG, GPE, etc.) and subject-verb-object relations. Start it in your application startup if desired:
+**Status:** Shipped and tested, but **not auto-started**. Treat this as a
+dormant feature you can turn on later if you want richer log analytics. Day-to-day
+operation of BORG_ROUTE does not require it.
 
-```python
-from src.logging.ner_worker import run_ner_worker
-asyncio.create_task(run_ner_worker())
-```
+#### What NER is for
+NER (Named Entity Recognition) reads every text payload the system logs —
+prompts, model outputs, orchestrator decisions, error messages — and pulls out
+structured facts:
+
+- **Named entities** — people, organisations, places, dates, products, money
+  amounts (`PERSON`, `ORG`, `GPE`, `DATE`, `MONEY`, etc., via spaCy's
+  `en_core_web_sm` model).
+- **Subject-verb-object relations** — simple `(subject, verb, object)` triples
+  extracted from sentences via dependency parsing.
+
+Results land in the `log_entities` and `log_relations` tables and are surfaced
+on the **NER Entities** tab of `/ui/logs.html`.
+
+#### What it was meant to be useful for
+1. **Search across runs** — "show me every run that mentioned customer X" or
+   "every model call that produced a dollar amount."
+2. **Audit and compliance** — quickly spot PII, company names, or sensitive
+   terms leaking into prompts or outputs.
+3. **Skill-improvement signal** — see which entity types a skill reliably
+   handles vs. drops, feeding the Skills Library continuous-improvement loop.
+4. **Offline exploration** — export JSONL from the Logs page and join
+   entities to runs for ad-hoc analysis.
+
+#### How to turn it on (when you decide you want it)
+1. Download the spaCy model once:
+   ```
+   python -m spacy download en_core_web_sm
+   ```
+2. Start the worker alongside the FastAPI server — either inline in
+   `main.py` startup, or as a separate process:
+   ```python
+   # Option A: inline in main.py @app.on_event("startup")
+   import asyncio
+   from src.logging.ner_worker import run_ner_worker
+   asyncio.create_task(run_ner_worker())
+   ```
+   ```python
+   # Option B: standalone script (run_ner.py)
+   import asyncio
+   from src.logging.ner_worker import run_ner_worker
+   asyncio.run(run_ner_worker())
+   ```
+3. Open `/ui/logs.html` → **NER Entities** tab. Entities for new payloads
+   should appear within ~5 seconds (the worker's poll interval).
+
+#### How it behaves
+- Polls `log_payloads` every 5 seconds, processes batches of 20.
+- Caps input at 10 000 characters per payload to stay memory-safe.
+- Sets `ner_processed=1` on each row so work is never repeated.
+- Failures on a single payload are logged and skipped — the worker never crashes.
+
+#### Error codes to know
+- **BRT-LOG-010** — spaCy model not available. Run the `spacy download`
+  command above.
+- **BRT-LOG-011** — NER failed on a specific payload (malformed text, etc.).
+  The row is marked processed and skipped.
+- **BRT-LOG-012** — DB write failure after extraction.
+- **BRT-LOG-013** — worker poll error; worker continues after logging.
+
+#### Why it is parked by default
+The worker loads a ~50 MB spaCy model on first use and adds a steady poll
+to the SQLite database. For small deployments that is wasted work. The code
+is kept ready so you can enable it the moment entity-level log analytics
+become worth the cost — nothing else in the pipeline depends on it.
 
 ---
 
