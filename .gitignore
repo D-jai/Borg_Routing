@@ -26,3 +26,10 @@ dist/
 # OS
 .DS_Store
 Thumbs.db
+
+# Runtime data (SQLite DB, logs)
+data/borg_route.db
+data/borg_route.db-journal
+data/borg_route.db-wal
+data/borg_route.db-shm
+/tmp/borg_route_uvicorn.log

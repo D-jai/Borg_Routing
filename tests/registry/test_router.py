@@ -1,11 +1,16 @@
 """Tests for src/registry/router.py.
 
-TC-REG-030 — coding task (SYSTEM_CHOOSE) selects qwen3-coder or deepseek
+The router only considers models whose `checked` flag is True, so the module
+fixture flips every row to checked=True. A separate test asserts that the
+router honours the filter when rows are unchecked.
+
+TC-REG-030 — coding task (SYSTEM_CHOOSE) picks the cheapest qualifying model
 TC-REG-031 — LOCAL_FIRST keeps external models out when a local qualifies
 TC-REG-032 — LOCAL_FIRST falls back to external when no local meets the bar
 TC-REG-033 — specialty_hint prefers models with that tag
 TC-REG-034 — BRT-REG-020 raised when no model meets quality requirement
-TC-REG-035 — roleplay task returns a roleplay-specialist model
+TC-REG-035 — roleplay task returns cheapest model meeting the roleplay bar
+TC-REG-036 — router ignores unchecked rows (even when they would qualify)
 """
 import pytest
 
@@ -19,6 +24,9 @@ SEED_PATH = "data/capability_matrix.yaml"
 def matrix():
     cm = CapabilityMatrix(SEED_PATH)
     cm.load()
+    # Router operates on the checked pool; fixtures mark everything checked.
+    for m in cm.all():
+        cm.set_checked(m.model_id, True)
     return cm
 
 
@@ -29,7 +37,6 @@ def test_coding_system_choose(matrix):
     model = select_model(matrix, task_type="coding", quality_requirement=8.0)
     assert model.task_scores.get("coding", 0) >= 8.0
 
-    # Verify it is truly the cheapest qualifying candidate
     candidates = [
         m for m in matrix.all()
         if m.task_scores.get("coding", 0) >= 8.0 and m.context_length >= 1000
@@ -54,16 +61,14 @@ def test_local_first_excludes_externals(matrix):
 
 def test_local_first_falls_back_to_external(matrix):
     """TC-REG-032 — LOCAL_FIRST falls back to external when quality bar eliminates all locals."""
-    # quality_requirement=9.5 — no local model scores this high for reasoning
+    # No local scores >= 9.5 on reasoning; frontier OpenRouter does.
     model = select_model(
         matrix,
         task_type="reasoning",
         quality_requirement=9.5,
         strategy="LOCAL_FIRST",
     )
-    # Only claude-sonnet-4 has reasoning=9.5; it's external
     assert model.source == "openrouter"
-    assert "claude" in model.model_id.lower()
 
 
 def test_specialty_hint_preferred(matrix):
@@ -102,3 +107,13 @@ def test_roleplay_task_returns_specialist(matrix):
     my_cost = effective_cost(model, 1000, 500)
     all_costs = [effective_cost(m, 1000, 500) for m in candidates]
     assert my_cost == min(all_costs)
+
+
+def test_router_ignores_unchecked_rows():
+    """TC-REG-036 — router raises BRT-REG-020 when no row is checked, even if rows qualify."""
+    cm = CapabilityMatrix(SEED_PATH)
+    cm.load()
+    # Intentionally do NOT set_checked — every row is False.
+    with pytest.raises(ValueError) as exc_info:
+        select_model(cm, task_type="coding", quality_requirement=6.0)
+    assert "BRT-REG-020" in str(exc_info.value)

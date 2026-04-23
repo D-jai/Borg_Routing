@@ -36,6 +36,7 @@ class ModelInfo(BaseModel):
     params_b: Optional[float] = None
     publisher: Optional[str] = None
     notes: Optional[str] = None
+    checked: bool = False
 
     @model_validator(mode="before")
     @classmethod

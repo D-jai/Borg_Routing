@@ -1,9 +1,12 @@
 """CapabilityMatrix — load, query, and persist the model capability matrix.
 
 The matrix is the authoritative store for all known models. It is backed by a
-YAML file so operators can inspect and hand-edit it. At runtime, discovery and
-benchmark runs call upsert() / update_score() / update_throughput() and the
-file is kept in sync.
+YAML file so operators can inspect and hand-edit it. At runtime, discovery,
+the scorer, and the checkbox endpoint all mutate it; save() keeps the file in
+sync.
+
+Routing only considers models whose `checked` flag is True. The operator
+curates that pool from the Models UI.
 
 Error codes:
 - BRT-REG-010: capability_matrix.yaml not found
@@ -18,7 +21,7 @@ from typing import Optional
 
 import yaml
 
-from .models import ModelInfo
+from .models import ModelInfo, Pricing
 
 
 class CapabilityMatrix:
@@ -31,13 +34,18 @@ class CapabilityMatrix:
     # Persistence
     # ------------------------------------------------------------------
 
-    def load(self) -> None:
+    def load(self, path: Optional[str] = None) -> None:
         """Load (or reload) the YAML file into memory.
+
+        Args:
+            path: Optional override for the YAML file path.
 
         Raises:
             FileNotFoundError: BRT-REG-010 — file does not exist.
             ValueError: BRT-REG-011 — file is not a valid YAML list of model records.
         """
+        if path is not None:
+            self._path = Path(path)
         if not self._path.exists():
             raise FileNotFoundError(
                 f"BRT-REG-010: capability matrix not found at '{self._path}'. "
@@ -89,9 +97,14 @@ class CapabilityMatrix:
         task_type: str,
         min_score: float = 0.0,
         min_context_length: int = 0,
+        checked_only: bool = True,
     ) -> list[ModelInfo]:
         """Return models that have a task_score >= min_score for task_type
         and context_length >= min_context_length.
+
+        By default only `checked == True` rows are returned. Pass
+        ``checked_only=False`` to include unchecked rows (used by tests and
+        admin flows — the router always uses the default).
 
         Models without a task_scores entry for task_type are excluded.
         Results are returned in descending score order.
@@ -102,6 +115,7 @@ class CapabilityMatrix:
                 if task_type in m.task_scores
                 and m.task_scores[task_type] >= min_score
                 and m.context_length >= min_context_length
+                and (not checked_only or m.checked)
             ]
         candidates.sort(key=lambda m: m.task_scores[task_type], reverse=True)
         return candidates
@@ -143,3 +157,40 @@ class CapabilityMatrix:
                     f"BRT-REG-012: model '{model_id}' not found in capability matrix."
                 )
             m.throughput_tps = tps
+
+    def update_pricing(
+        self,
+        model_id: str,
+        input_per_token: float,
+        output_per_token: float,
+    ) -> None:
+        """Update pricing on an existing model row.
+
+        Raises:
+            KeyError: BRT-REG-012 — model_id not in matrix.
+            ValueError: BRT-REG-002 — negative pricing.
+        """
+        with self._lock:
+            m = self._models.get(model_id)
+            if m is None:
+                raise KeyError(
+                    f"BRT-REG-012: model '{model_id}' not found in capability matrix."
+                )
+            m.pricing = Pricing(
+                input_per_token=input_per_token,
+                output_per_token=output_per_token,
+            )
+
+    def set_checked(self, model_id: str, checked: bool) -> None:
+        """Flip the `checked` flag on an existing model row.
+
+        Raises:
+            KeyError: BRT-REG-012 — model_id not in matrix.
+        """
+        with self._lock:
+            m = self._models.get(model_id)
+            if m is None:
+                raise KeyError(
+                    f"BRT-REG-012: model '{model_id}' not found in capability matrix."
+                )
+            m.checked = checked

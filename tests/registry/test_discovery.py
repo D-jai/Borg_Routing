@@ -159,8 +159,15 @@ async def test_discover_ollama_silent_on_failure():
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_discover_openrouter_parses_and_filters():
-    """TC-REG-044 — discover_openrouter parses pricing and filters image models."""
+async def test_discover_openrouter_parses_and_filters(tmp_path):
+    """TC-REG-044 — discover_openrouter uses the curated list to filter."""
+    curated = tmp_path / "curated.yaml"
+    curated.write_text(
+        "- id: anthropic/claude-sonnet-4\n"
+        "- id: google/gemini-2.5-flash\n",
+        encoding="utf-8",
+    )
+
     mock_resp = _mock_response(OPENROUTER_RESPONSE)
 
     with patch("httpx.AsyncClient") as mock_client_cls:
@@ -170,9 +177,9 @@ async def test_discover_openrouter_parses_and_filters():
         mock_client.__aexit__ = AsyncMock(return_value=None)
         mock_client_cls.return_value = mock_client
 
-        models = await discover_openrouter()
+        models = await discover_openrouter(curated_path=str(curated))
 
-    assert len(models) == 2  # dall-e-3 must be filtered out
+    assert len(models) == 2  # dall-e-3 absent from curated list
     ids = {m.model_id for m in models}
     assert "openrouter/anthropic/claude-sonnet-4" in ids
     assert "openrouter/google/gemini-2.5-flash" in ids
@@ -185,8 +192,11 @@ async def test_discover_openrouter_parses_and_filters():
 
 
 @pytest.mark.asyncio
-async def test_discover_openrouter_silent_on_failure():
+async def test_discover_openrouter_silent_on_failure(tmp_path):
     """TC-REG-045 — discover_openrouter returns [] on connection error."""
+    curated = tmp_path / "curated.yaml"
+    curated.write_text("- id: anthropic/claude-sonnet-4\n", encoding="utf-8")
+
     with patch("httpx.AsyncClient") as mock_client_cls:
         mock_client = AsyncMock()
         mock_client.get = AsyncMock(side_effect=httpx.ConnectError("refused"))
@@ -194,9 +204,18 @@ async def test_discover_openrouter_silent_on_failure():
         mock_client.__aexit__ = AsyncMock(return_value=None)
         mock_client_cls.return_value = mock_client
 
-        models = await discover_openrouter()
+        models = await discover_openrouter(curated_path=str(curated))
 
     assert models == []
+
+
+@pytest.mark.asyncio
+async def test_discover_openrouter_missing_curated_raises_brt_reg_032(tmp_path):
+    """TC-REG-048 — missing curated_models.yaml raises BRT-REG-032."""
+    missing = tmp_path / "does_not_exist.yaml"
+    with pytest.raises(FileNotFoundError) as exc_info:
+        await discover_openrouter(curated_path=str(missing))
+    assert "BRT-REG-032" in str(exc_info.value)
 
 
 # ---------------------------------------------------------------------------

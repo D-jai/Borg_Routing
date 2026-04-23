@@ -1,11 +1,12 @@
-"""Registry API endpoints — model discovery, matrix, benchmark, API keys.
+"""Registry API endpoints — model discovery, matrix, research, checkbox, API keys.
 
 Endpoints:
-- GET  /models                     → list of ModelInfo
-- POST /models/discover             → { added, updated }
-- POST /models/benchmark/{model_id} → { score, throughput_tps }
-- GET  /models/matrix               → full capability_matrix content as JSON
-- POST /keys                        → write provider key to .env
+- GET    /models                        -> list of ModelInfo
+- GET    /models/matrix                 -> full matrix JSON
+- POST   /models/discover               -> { upserted }
+- POST   /models/research               -> { scored: [model_id] } (Get Info button)
+- PATCH  /models/{model_id:path}/checked -> { model_id, checked }
+- POST   /keys                          -> persist a provider key
 
 Error codes:
 - BRT-API-001: malformed request body
@@ -20,10 +21,10 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
-from src.registry.benchmark import benchmark_model
 from src.registry.capability_matrix import CapabilityMatrix
 from src.registry.discovery import discover_all
 from src.registry.models import ModelInfo
+from src.registry.scorer import research_and_apply
 
 logger = logging.getLogger(__name__)
 
@@ -52,10 +53,21 @@ class DiscoverResponse(BaseModel):
     upserted: int
 
 
-class BenchmarkResponse(BaseModel):
-    score: float
-    throughput_tps: float
-    elapsed_sec: float
+class ResearchRequest(BaseModel):
+    model_ids: Optional[list[str]] = None  # None = all rows in matrix
+
+
+class ResearchResponse(BaseModel):
+    scored: list[str]
+
+
+class CheckedRequest(BaseModel):
+    checked: bool
+
+
+class CheckedResponse(BaseModel):
+    model_id: str
+    checked: bool
 
 
 class KeyRequest(BaseModel):
@@ -86,7 +98,7 @@ async def get_matrix_json(matrix: CapabilityMatrix = Depends(get_matrix)):
 
 @router.post("/models/discover", response_model=DiscoverResponse)
 async def discover_models(matrix: CapabilityMatrix = Depends(get_matrix)):
-    """Probe LM Studio, Ollama, and OpenRouter; upsert discovered models."""
+    """Probe LM Studio, Ollama, and the curated OpenRouter list; upsert results."""
     openrouter_key: Optional[str] = os.getenv("OPENROUTER_API_KEY")
     try:
         count = await discover_all(matrix, openrouter_key=openrouter_key)
@@ -97,42 +109,49 @@ async def discover_models(matrix: CapabilityMatrix = Depends(get_matrix)):
         raise HTTPException(status_code=500, detail=f"Discovery error: {exc}") from exc
 
 
-@router.post("/models/benchmark/{model_id:path}", response_model=BenchmarkResponse)
-async def run_benchmark(
-    model_id: str,
+@router.post("/models/research", response_model=ResearchResponse)
+async def research_models_endpoint(
+    body: ResearchRequest,
     matrix: CapabilityMatrix = Depends(get_matrix),
 ):
-    """Run a 5-prompt quality + throughput benchmark against a specific model.
+    """Run the Get Model Info pass.
 
-    Raises HTTP 404 (BRT-API-002) if model_id is not in the matrix.
+    If ``model_ids`` is omitted, every row currently in the matrix is scored.
+    Otherwise only the listed model_ids are researched (missing rows are
+    skipped with a log warning).
     """
-    model = matrix.get(model_id)
-    if model is None:
+    requested = body.model_ids or [m.model_id for m in matrix.all()]
+    if not requested:
+        return ResearchResponse(scored=[])
+
+    try:
+        scored = await research_and_apply(matrix, requested)
+    except RuntimeError as exc:
+        # BRT-REG-030
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    except ValueError as exc:
+        # BRT-REG-031
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    matrix.save()
+    return ResearchResponse(scored=list(scored.keys()))
+
+
+@router.patch("/models/{model_id:path}/checked", response_model=CheckedResponse)
+async def set_model_checked(
+    model_id: str,
+    body: CheckedRequest,
+    matrix: CapabilityMatrix = Depends(get_matrix),
+):
+    """Flip the `checked` flag on a model. Unchecked models are excluded from routing."""
+    if matrix.get(model_id) is None:
         raise HTTPException(
             status_code=404,
             detail=f"BRT-API-002: model '{model_id}' not found in capability matrix.",
         )
-
-    from src.registry.benchmark import _load_prompts
-
-    all_prompts = _load_prompts()
-    # Use the first available task_type for the model
-    task_type = next(
-        (tt for tt in model.task_scores if tt in all_prompts),
-        next(iter(all_prompts), "reasoning"),
-    )
-    prompts = all_prompts.get(task_type, [])
-
-    try:
-        result = await benchmark_model(model, task_type, prompts)
-    except RuntimeError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-
-    matrix.update_score(model_id, task_type, result["score"])
-    matrix.update_throughput(model_id, result["throughput_tps"])
+    matrix.set_checked(model_id, body.checked)
     matrix.save()
-
-    return BenchmarkResponse(**result)
+    return CheckedResponse(model_id=model_id, checked=body.checked)
 
 
 @router.post("/keys", response_model=KeyResponse)

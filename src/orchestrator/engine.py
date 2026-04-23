@@ -11,17 +11,21 @@ Error codes:
 - BRT-ORC-005: maximum loop count exceeded (safety ceiling)
 - BRT-ORC-006: orchestrator returned action=fail
 - BRT-ORC-007: no orchestrator model available
+- BRT-ORC-007-DEGRADED: quality bar relaxed below the default because no model qualified
 - BRT-ORC-008: node builder failed for a plan node
 - BRT-ORC-009: compose mode returned no response
 """
 import asyncio
 import json
+import logging
 import re
 import time
 from typing import Optional
 from uuid import UUID, uuid4
 
 import httpx
+
+logger = logging.getLogger(__name__)
 
 from src.agents.executor import execute
 from src.db.scratch import count_scratch_for_level
@@ -138,9 +142,30 @@ async def _select_orchestrator_model(
     except Exception:
         pass
 
+    # Degraded fallback: if no checked model meets 8.0, retry at 5.1 —
+    # just above the default 5.0 unresearched score, so rows that have
+    # genuinely been scored even weakly are preferred over flat defaults.
+    try:
+        model = select_model(
+            matrix=matrix,
+            task_type=task_type,
+            quality_requirement=5.1,
+        )
+        logger.warning(
+            "BRT-ORC-007-DEGRADED: no model met quality_requirement=8.0 for "
+            "task_type='%s'; falling back to '%s' at its current score. "
+            "Run Get Model Info to refresh scores.",
+            task_type, model.model_id,
+        )
+        endpoint = model.endpoint or ""
+        return endpoint, model.model_id
+    except Exception:
+        pass
+
     raise ValueError(
         "BRT-ORC-007: no orchestrator model available. "
-        "Add a model via discovery or set orchestrator_endpoint in config."
+        "Check that at least one model is checked on the Models page, "
+        "or set orchestrator_endpoint in config."
     )
 
 

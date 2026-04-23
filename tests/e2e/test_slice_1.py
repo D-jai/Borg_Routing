@@ -17,8 +17,14 @@ from src.registry.router import select_model
 
 @pytest.fixture(autouse=True)
 def reload_matrix():
-    """Ensure matrix is loaded from seed file before each test."""
+    """Ensure matrix is loaded from seed file before each test.
+
+    Every row is flipped to checked=True so the router has a pool to pick
+    from — the on-disk seed defaults to False (the operator curates via UI).
+    """
     matrix.load()
+    for m in matrix.all():
+        matrix.set_checked(m.model_id, True)
     yield
 
 
@@ -115,4 +121,4 @@ def test_get_matrix_endpoint(client):
     assert resp.status_code == 200
     data = resp.json()
     assert isinstance(data, list)
-    assert len(data) >= 13  # seed has 13
+    assert len(data) >= 19  # seed has 7 local + 12 openrouter = 19

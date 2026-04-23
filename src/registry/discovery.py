@@ -4,17 +4,24 @@ Each discover_* function is silent on connection failures (logs only) and
 returns an empty list so the caller can continue. discover_all() returns the
 count of models upserted into the matrix.
 
+OpenRouter discovery is curated: only model IDs listed in
+``data/curated_models.yaml`` are pulled. Everything else is ignored. This
+replaces the prior flood-every-OpenRouter-model behaviour.
+
 Error codes:
 - BRT-REG-001: connection failure (logged, not raised — silent skip)
 - BRT-REG-003: rate limit from OpenRouter
 - BRT-REG-004: invalid API key for external provider
+- BRT-REG-032: data/curated_models.yaml missing or malformed
 """
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 from typing import Optional
 
 import httpx
+import yaml
 
 from .capability_matrix import CapabilityMatrix
 from .models import ModelInfo, Pricing
@@ -22,7 +29,8 @@ from .models import ModelInfo, Pricing
 logger = logging.getLogger(__name__)
 
 _OPENROUTER_MODELS_URL = "https://openrouter.ai/api/v1/models"
-_TIMEOUT = 5.0  # seconds
+_CURATED_MODELS_PATH = "data/curated_models.yaml"
+_TIMEOUT = 5.0
 
 
 def _lmstudio_model_id(raw_id: str) -> str:
@@ -33,15 +41,42 @@ def _ollama_model_id(name: str) -> str:
     return f"ollama/{name}"
 
 
+def _load_curated_ids(path: str = _CURATED_MODELS_PATH) -> set[str]:
+    """Load the curated OpenRouter model IDs (without the 'openrouter/' prefix).
+
+    Raises:
+        FileNotFoundError: BRT-REG-032 — file missing.
+        ValueError: BRT-REG-032 — file malformed.
+    """
+    p = Path(path)
+    if not p.exists():
+        raise FileNotFoundError(
+            f"BRT-REG-032: curated_models.yaml not found at '{path}'. "
+            "Create it with a list of OpenRouter model IDs you want in the pool."
+        )
+    try:
+        raw = yaml.safe_load(p.read_text(encoding="utf-8"))
+    except yaml.YAMLError as exc:
+        raise ValueError(f"BRT-REG-032: curated_models.yaml parse error — {exc}") from exc
+
+    if not isinstance(raw, list):
+        raise ValueError(
+            "BRT-REG-032: curated_models.yaml must be a list of entries with an 'id' field."
+        )
+
+    ids: set[str] = set()
+    for entry in raw:
+        if isinstance(entry, dict) and entry.get("id"):
+            ids.add(str(entry["id"]).strip())
+        elif isinstance(entry, str):
+            ids.add(entry.strip())
+    return ids
+
+
 async def discover_lmstudio(
     ports: list[int] = [1234, 1235, 1236, 1237],
 ) -> list[ModelInfo]:
-    """Discover models loaded in LM Studio on the given ports.
-
-    LM Studio exposes the OpenAI-compatible `GET /v1/models` endpoint.
-    Each port may have a different model loaded. All reachable models are
-    returned; unreachable ports are silently skipped.
-    """
+    """Discover models loaded in LM Studio on the given ports."""
     found: list[ModelInfo] = []
     async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
         for port in ports:
@@ -104,46 +139,48 @@ async def discover_ollama(
 
 async def discover_openrouter(
     api_key: Optional[str] = None,
+    curated_path: str = _CURATED_MODELS_PATH,
 ) -> list[ModelInfo]:
-    """Fetch all text-generation models from OpenRouter's public model list.
+    """Fetch only curated OpenRouter models.
 
-    No auth required for the list endpoint. api_key is passed as a header
-    if provided (improves rate limits). Image-generation models are filtered out.
+    The full OpenRouter catalogue is pulled, then filtered down to the IDs
+    listed in ``data/curated_models.yaml``. A missing curated file raises
+    BRT-REG-032 (loudly — this is an operator error).
 
     Raises:
-        httpx.HTTPStatusError: BRT-REG-003 on 429 (rate limit),
-                               BRT-REG-004 on 401 (invalid key).
+        FileNotFoundError, ValueError: BRT-REG-032 on curated-list problems.
     """
+    curated_ids = _load_curated_ids(curated_path)
+    if not curated_ids:
+        logger.warning("BRT-REG-032: curated_models.yaml is empty; no OpenRouter models will be discovered.")
+        return []
+
     headers: dict[str, str] = {}
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
 
-    found: list[ModelInfo] = []
     try:
         async with httpx.AsyncClient(timeout=15.0) as client:
             resp = await client.get(_OPENROUTER_MODELS_URL, headers=headers)
             if resp.status_code == 429:
                 logger.warning("BRT-REG-003: OpenRouter rate limit hit during discovery")
-                return found
+                return []
             if resp.status_code == 401:
                 logger.warning("BRT-REG-004: Invalid OpenRouter API key")
-                return found
+                return []
             resp.raise_for_status()
             data = resp.json()
     except Exception as exc:
         logger.warning("BRT-REG-001: Could not reach OpenRouter: %s", exc)
-        return found
+        return []
 
+    found: list[ModelInfo] = []
+    seen: set[str] = set()
     for item in data.get("data", []):
         model_id = item.get("id", "")
-        if not model_id:
+        if not model_id or model_id not in curated_ids:
             continue
-
-        # Filter out image-generation models
-        architecture = item.get("architecture", {})
-        modality = architecture.get("modality", "")
-        if "image" in modality:
-            continue
+        seen.add(model_id)
 
         context_length = item.get("context_length") or 4096
         pricing_raw = item.get("pricing", {})
@@ -169,6 +206,12 @@ async def discover_openrouter(
             )
         )
 
+    missing = curated_ids - seen
+    if missing:
+        logger.warning(
+            "BRT-REG-032: %d curated IDs not found in OpenRouter catalogue: %s",
+            len(missing), sorted(missing),
+        )
     return found
 
 
@@ -177,10 +220,7 @@ async def discover_custom_key(
     base_url: str,
     api_key: str,
 ) -> list[ModelInfo]:
-    """Discover models from a custom OpenAI-compatible API endpoint.
-
-    The endpoint must support `GET /v1/models`.
-    """
+    """Discover models from a custom OpenAI-compatible API endpoint."""
     found: list[ModelInfo] = []
     headers = {"Authorization": f"Bearer {api_key}"}
     async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
@@ -214,11 +254,9 @@ async def discover_all(
 ) -> int:
     """Run all discovery sources and upsert results into the matrix.
 
-    Existing task_scores and throughput_tps are preserved — discovery only
-    adds/updates endpoint, context_length, and pricing from live data.
-
-    Returns:
-        Number of models upserted (new + updated).
+    Existing task_scores, specialty_tags, throughput_tps, and the `checked`
+    flag are preserved — discovery only refreshes endpoint, context_length,
+    and pricing.
     """
     import asyncio
 
@@ -237,8 +275,8 @@ async def discover_all(
         for model in batch:
             existing = matrix.get(model.model_id)
             if existing:
-                # Preserve task_scores, throughput_tps, specialty_tags from existing
-                model = ModelInfo(
+                # Preserve task_scores, throughput_tps, specialty_tags, checked
+                merged = ModelInfo(
                     **{
                         **existing.model_dump(),
                         "endpoint": model.endpoint or existing.endpoint,
@@ -246,7 +284,9 @@ async def discover_all(
                         "pricing": model.pricing or existing.pricing,
                     }
                 )
-            matrix.upsert(model)
+                matrix.upsert(merged)
+            else:
+                matrix.upsert(model)
             upserted += 1
 
     return upserted

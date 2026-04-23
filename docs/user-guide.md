@@ -50,18 +50,69 @@ To use external AI models (like those on OpenRouter), you need to add an API key
 
 ## Discovering Models
 
-BORG_ROUTE can automatically find models running in LM Studio, Ollama, and on OpenRouter.
+BORG_ROUTE finds local models (LM Studio / Ollama) automatically, and pulls
+a **curated** list of OpenRouter models from `data/curated_models.yaml` —
+by default 12 picks spanning frontier, mid, cheap, and specialty tiers.
 
 ### How to use it
 1. Start your local model server (LM Studio or Ollama) if you want local models.
 2. Open `http://localhost:8000/ui/models.html`.
-3. Click **Discover Models** at the top.
-4. The table will refresh with all discovered models, including their context length, tier, estimated cost, and throughput.
-5. Click **Benchmark** on any model to measure its actual quality and speed.
+3. Click **Discover Models**. LM Studio + Ollama are probed live; the 12 OpenRouter rows are populated with pricing + context length.
+4. The table shows two sections: **LM Studio (local)** and **OpenRouter (curated)**.
+
+### Editing the OpenRouter pool
+Edit `data/curated_models.yaml` (add / remove `- id: <openrouter-id>`
+entries) and re-run Discover. A good spread has 1-3 frontier, 2-4 mid,
+2-4 cheap / fast, and 1 specialty (e.g. web-search).
 
 ### If something goes wrong
-- **No models appear after discovery** — Check that LM Studio is running on ports 1234–1237, or that Ollama is running at `http://localhost:11434`.
-- **OpenRouter models missing** — Make sure you have added an OpenRouter API key on the Keys page.
+- **No local models appear** — LM Studio on ports 1234-1237, or Ollama at `http://localhost:11434`, must be running.
+- **OpenRouter section is empty** — Check that `data/curated_models.yaml` exists and lists at least one `id:` (BRT-REG-032).
+- **"Invalid OpenRouter API key"** — Check `OPENROUTER_API_KEY` in `.env`.
+
+---
+
+## Curating Your Model Pool (Checkboxes)
+
+Every row on the Models page has a checkbox. **Only checked models are
+available to the orchestrator.** The default is unchecked for every row —
+the operator opts models into the pool explicitly.
+
+### How to use it
+1. Open `http://localhost:8000/ui/models.html`.
+2. Tick the checkbox next to each model you want the orchestrator to be able to pick today. Typical: 3-6 total.
+3. Unchecking removes a model from the pool immediately. Scores are preserved — re-ticking restores instantly.
+4. State persists in `data/capability_matrix.yaml`; it survives restarts.
+
+### If something goes wrong
+- **"BRT-REG-020: no model found"** — No row is checked, or none meets the quality bar. Tick at least one row that has been researched.
+
+---
+
+## Researching Model Capabilities (Get Model Info)
+
+Instead of running live benchmarks, BORG_ROUTE asks a web-search-enabled
+LLM to research each model's **published** capabilities — MMLU, HumanEval,
+MT-Bench, model cards — and assign relative 0-10 scores across seven task
+types (reasoning, coding, summarize, writing, roleplay, agentic,
+extraction). This is the "Get Model Info" button.
+
+### How to use it
+1. Set `OPENROUTER_API_KEY` in `.env` (the default scoring LLM is `perplexity/sonar-pro-search`, accessed via OpenRouter).
+2. Open `http://localhost:8000/ui/models.html`.
+3. Click **Get Model Info**. The scorer processes the matrix in batches of 5, with a rolling summary so it can keep relative rankings consistent across all models.
+4. Takes 30-90 seconds for a full 19-row matrix and costs roughly $0.05-0.20 per run.
+5. Score cells fill in per task type. You can re-run any time — each click re-researches from scratch.
+
+### Overriding the scoring model
+Set `SCORING_MODEL` and `SCORING_MODEL_ENDPOINT` in `.env`. The model must
+support real web search — Perplexity Sonar, GPT-4o Search Preview, or
+Gemini with search grounding. A non-search model will hallucinate scores.
+
+### If something goes wrong
+- **BRT-REG-030** — The scoring LLM endpoint is unreachable or the key is wrong. Check `.env`.
+- **BRT-REG-031** — The scoring LLM returned unparseable content. Usually means the model does not actually support web search. Switch `SCORING_MODEL`.
+- **Scores all come back at 5.0** — You clicked Get Info on rows the LLM could not research (private / custom / brand-new models). Consider hand-editing their `task_scores` in the YAML.
 
 ---
 

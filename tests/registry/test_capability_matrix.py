@@ -1,12 +1,15 @@
 """Tests for src/registry/capability_matrix.py.
 
-TC-REG-010 — load seed file; all 13 models present
-TC-REG-011 — query_by_task('coding') returns qwen3-coder first (highest score)
+TC-REG-010 — load seed file; all 19 models present (7 local + 12 openrouter)
+TC-REG-011 — query_by_task('coding') returns highest-score model first (checked-only)
 TC-REG-012 — BRT-REG-010 raised on missing file
 TC-REG-013 — BRT-REG-011 raised on malformed YAML
 TC-REG-014 — BRT-REG-012 raised on update_score for unknown model_id
 TC-REG-015 — upsert inserts and replaces correctly
 TC-REG-016 — update_throughput persists value on existing model
+TC-REG-017 — query_by_task excludes unchecked rows by default
+TC-REG-018 — set_checked flips the flag on a known model; BRT-REG-012 on unknown
+TC-REG-019 — update_pricing writes both input/output rates
 """
 import tempfile
 from pathlib import Path
@@ -21,12 +24,20 @@ from src.registry.models import ModelInfo
 SEED_PATH = "data/capability_matrix.yaml"
 
 
+def _loaded_all_checked() -> CapabilityMatrix:
+    cm = CapabilityMatrix(SEED_PATH)
+    cm.load()
+    for m in cm.all():
+        cm.set_checked(m.model_id, True)
+    return cm
+
+
 def test_load_seed_file():
-    """TC-REG-010 — load the real seed file; expect 13 models."""
+    """TC-REG-010 — load the real seed file; expect 19 models."""
     cm = CapabilityMatrix(SEED_PATH)
     cm.load()
     models = cm.all()
-    assert len(models) == 13
+    assert len(models) == 19
     model_ids = {m.model_id for m in models}
     # at least one local and one openrouter
     assert any("lmstudio" in mid for mid in model_ids)
@@ -35,15 +46,14 @@ def test_load_seed_file():
 
 def test_query_by_task_coding_order():
     """TC-REG-011 — coding task returns model with highest coding score first."""
-    cm = CapabilityMatrix(SEED_PATH)
-    cm.load()
+    cm = _loaded_all_checked()
     results = cm.query_by_task("coding", min_score=0)
     assert len(results) > 0
     scores = [m.task_scores["coding"] for m in results]
     assert scores == sorted(scores, reverse=True)
-    # The top coding model should be qwen3-coder or deepseek-r1
+    # Top coding model should be a frontier OpenRouter model
     top_id = results[0].model_id.lower()
-    assert "qwen" in top_id or "deepseek" in top_id or "coder" in top_id
+    assert "openrouter/" in top_id
 
 
 def test_missing_file_raises_brt_reg_010():
@@ -92,7 +102,6 @@ def test_upsert_insert_and_replace():
     assert len(cm.all()) == initial_count + 1
     assert cm.get("lmstudio/test-upsert-model") == new_model
 
-    # Replace with different context_length
     updated = ModelInfo(
         model_id="lmstudio/test-upsert-model",
         source="lmstudio",
@@ -111,3 +120,49 @@ def test_update_throughput_persists():
     first_id = cm.all()[0].model_id
     cm.update_throughput(first_id, 42.5)
     assert cm.get(first_id).throughput_tps == pytest.approx(42.5)
+
+
+def test_query_by_task_excludes_unchecked():
+    """TC-REG-017 — with no rows checked, query_by_task returns [] by default."""
+    cm = CapabilityMatrix(SEED_PATH)
+    cm.load()
+    # Every row defaults to checked=False
+    results = cm.query_by_task("coding", min_score=0)
+    assert results == []
+    # Opting out of the filter returns the full population
+    all_results = cm.query_by_task("coding", min_score=0, checked_only=False)
+    assert len(all_results) > 0
+
+
+def test_set_checked_flips_flag_and_raises_on_unknown():
+    """TC-REG-018 — set_checked flips the flag; BRT-REG-012 raised for unknown model."""
+    cm = CapabilityMatrix(SEED_PATH)
+    cm.load()
+    first_id = cm.all()[0].model_id
+    assert cm.get(first_id).checked is False
+    cm.set_checked(first_id, True)
+    assert cm.get(first_id).checked is True
+    cm.set_checked(first_id, False)
+    assert cm.get(first_id).checked is False
+
+    with pytest.raises(KeyError) as exc_info:
+        cm.set_checked("fake/nonexistent", True)
+    assert "BRT-REG-012" in str(exc_info.value)
+
+
+def test_update_pricing_writes_both_rates():
+    """TC-REG-019 — update_pricing replaces pricing on an existing model."""
+    cm = CapabilityMatrix(SEED_PATH)
+    cm.load()
+    # Find any openrouter row (has pricing) or add one
+    target = next((m for m in cm.all() if m.source == "openrouter"), None)
+    assert target is not None
+    cm.update_pricing(target.model_id, 1.23e-6, 4.56e-6)
+    updated = cm.get(target.model_id)
+    assert updated.pricing is not None
+    assert updated.pricing.input_per_token == pytest.approx(1.23e-6)
+    assert updated.pricing.output_per_token == pytest.approx(4.56e-6)
+
+    with pytest.raises(KeyError) as exc_info:
+        cm.update_pricing("fake/nonexistent", 1e-6, 2e-6)
+    assert "BRT-REG-012" in str(exc_info.value)

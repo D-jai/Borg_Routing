@@ -5,6 +5,9 @@ context requirement for a given task. Tier (light/mid/heavy) is a derived
 concept expressed through quality_requirement; specialty is expressed through
 per-task task_scores in the capability matrix.
 
+Only `checked == True` rows are considered (CapabilityMatrix.query_by_task
+applies the filter by default).
+
 Error codes:
 - BRT-REG-020: no model meets the requirements
 """
@@ -27,14 +30,14 @@ def select_model(
     specialty_hint: Optional[str] = None,
     time_cost_per_sec: float = _DEFAULT_TIME_COST_PER_SEC,
 ) -> ModelInfo:
-    """Return the cheapest model meeting the quality + context bar.
+    """Return the cheapest checked model meeting the quality + context bar.
 
     Args:
         matrix: Loaded CapabilityMatrix instance.
         task_type: Task type string matching task_scores keys (e.g. "coding").
         estimated_input_tokens: Expected input token count for context filtering.
         estimated_output_tokens: Expected output token count for cost calc.
-        quality_requirement: Minimum task_score threshold (0–10).
+        quality_requirement: Minimum task_score threshold (0-10).
         strategy: LOCAL_FIRST tries local models first; SYSTEM_CHOOSE picks
             globally cheapest regardless of source.
         specialty_hint: Optional specialty_tag string; candidates with this tag
@@ -58,8 +61,10 @@ def select_model(
             f"BRT-REG-020: no model found for task_type='{task_type}' "
             f"with quality_requirement={quality_requirement} and "
             f"min_context_length={estimated_input_tokens}. "
-            "Run discovery and benchmark to populate the capability matrix, "
-            "or lower quality_requirement."
+            "Possible causes: no models are currently checked on the Models page; "
+            "the Get Info pass has not been run so scores are at the default 5.0; "
+            "or the quality bar is too strict. Check models, lower the bar, or "
+            "re-run Get Info."
         )
 
     # LOCAL_FIRST: restrict to local sources if any qualify

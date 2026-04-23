@@ -13,13 +13,18 @@
 | BRT-REG-010 | capability_matrix.yaml not found | `src/registry/capability_matrix.py::CapabilityMatrix.load` | Ensure `data/capability_matrix.yaml` exists in the project root. It ships with the project — if missing, restore from git or a backup zip. |
 | BRT-REG-011 | Malformed capability matrix YAML | `src/registry/capability_matrix.py::CapabilityMatrix.load` | The file must be a YAML list of model records. Check for syntax errors (indentation, colons, quotes). Validate with `python -c "import yaml; yaml.safe_load(open('data/capability_matrix.yaml'))"`. |
 | BRT-REG-012 | Unknown model_id on update | `src/registry/capability_matrix.py::CapabilityMatrix.update_score / update_throughput` | The model_id does not exist in the matrix. Run discovery first (`POST /models/discover`) or check for typos in the model_id. |
-| BRT-REG-013 | Zero or negative throughput_tps | `src/registry/cost.py::effective_cost` | A local model has an invalid throughput value (0 or negative). Re-run `POST /models/benchmark/{id}` to re-measure. |
-| BRT-REG-020 | No model meets requirements | `src/registry/router.py::select_model` | No model in the capability matrix satisfies the task_type + quality_requirement + context_length combination. Run `POST /models/discover` to find more models, or lower quality_requirement. |
-| BRT-REG-001 (connection) | Connection failure during discovery | `src/registry/discovery.py` | A local or external model source was unreachable. This is logged at DEBUG level and silently skipped. Check that LM Studio / Ollama / OpenRouter is running. |
+| BRT-REG-013 | Zero or negative throughput_tps | `src/registry/cost.py::effective_cost` | A local model has an invalid throughput value (0 or negative). Run Get Model Info on the Models page to refresh throughput, or hand-edit `data/capability_matrix.yaml`. |
+| BRT-REG-020 | No model meets requirements | `src/registry/router.py::select_model` | No **checked** model in the capability matrix satisfies the task_type + quality_requirement + context_length combination. Possible causes: no models are currently checked on the Models page (tick a checkbox); the Get Info pass has not been run so scores are at the default 5.0 (click "Get Model Info"); or the quality bar is too strict. |
+| BRT-REG-001 (connection) | Connection failure during discovery | `src/registry/discovery.py` | A local or external model source was unreachable. Logged at DEBUG level and silently skipped. Check that LM Studio / Ollama / OpenRouter is running. |
 | BRT-REG-003 | OpenRouter rate limit | `src/registry/discovery.py::discover_openrouter` | HTTP 429 from OpenRouter. Wait and retry, or add an API key to get higher rate limits. |
 | BRT-REG-004 | Invalid external API key | `src/registry/discovery.py::discover_openrouter / discover_custom_key` | HTTP 401 from the external provider. Check the API key in `.env` and the Keys page in the UI. |
-| BRT-REG-014 | Judge model call failed during benchmark | `src/registry/benchmark.py::_judge_response` | The judge model endpoint is not reachable or returned an unparseable score. Check that the judge model is running and accessible at the configured endpoint. |
-| BRT-REG-015 | Model under test unreachable during benchmark | `src/registry/benchmark.py::benchmark_model` | The model has no endpoint configured, or the endpoint is unreachable. Run discovery first to populate endpoints. |
+| BRT-REG-030 | Scorer LLM call failed | `src/registry/scorer.py::_call_scoring_model` | HTTP / timeout / network error calling the scoring LLM. Check `SCORING_MODEL_ENDPOINT`, `SCORING_MODEL`, and `OPENROUTER_API_KEY` in `.env`. |
+| BRT-REG-031 | Scorer response unparseable | `src/registry/scorer.py::_parse_scores` | The scoring LLM returned content that is not JSON. Most often happens when `SCORING_MODEL` is a model that cannot web-search. Switch to `perplexity/sonar-pro-search` or another search-enabled model. |
+| BRT-REG-032 | curated_models.yaml missing or malformed | `src/registry/discovery.py::_load_curated_ids` | `data/curated_models.yaml` is absent, not a YAML list, or empty. Restore the sample file and list up to ~12 OpenRouter model IDs (`- id: <openrouter-id>`). |
+
+> **Retired error codes:** `BRT-REG-014` and `BRT-REG-015` were emitted by the
+> removed benchmark subsystem (judge-model and model-under-test failures) and
+> no longer exist in the code.
 
 ## BRT-ENV — Envelope Module
 
@@ -71,7 +76,8 @@
 | BRT-ORC-004 | Node dispatch failed | `src/orchestrator/engine.py::_dispatch_one` | An individual node failed to dispatch or execute. The node is recorded as failed; the run continues. |
 | BRT-ORC-005 | Maximum loop count exceeded | `src/orchestrator/engine.py::orchestrate_run` | The orchestrator looped more than 10 times without composing. Check for runaway re_plan cycles. |
 | BRT-ORC-006 | Orchestrator returned action=fail | `src/orchestrator/engine.py::orchestrate_run` | The orchestrator decided the task cannot be completed. See the rationale in the run trace. |
-| BRT-ORC-007 | No orchestrator model available | `src/orchestrator/engine.py::_select_orchestrator_model` | No model meets the quality bar for orchestration. Run discovery and/or set `orchestrator_endpoint` in config. |
+| BRT-ORC-007 | No orchestrator model available | `src/orchestrator/engine.py::_select_orchestrator_model` | No checked model meets any quality bar for orchestration. Check that at least one model is ticked on the Models page, or set `orchestrator_endpoint` in config. |
+| BRT-ORC-007-DEGRADED | Quality bar relaxed from 8.0 to 5.1 | `src/orchestrator/engine.py::_select_orchestrator_model` | The default 8.0 bar found no qualifying model, so the orchestrator fell back to the lowest-scored checked row just above the unresearched default (5.0). The run continues but model quality is unknown. Click "Get Model Info" on the Models page to refresh scores. |
 | BRT-ORC-008 | Node build failed | `src/orchestrator/engine.py::_build_task_from_node` | A plan node could not be converted to a WrappedTask. Check the node definition in the run trace. |
 | BRT-ORC-009 | Compose mode returned no response | `src/orchestrator/engine.py::orchestrate_run` | The orchestrator returned an empty `response` in compose mode. Check the compose prompt and model. |
 
@@ -132,7 +138,7 @@
 | Code | Description | Origin | Hints |
 |------|-------------|--------|-------|
 | BRT-API-001 | Malformed request body | `src/api/models.py::add_key` | `name` and `api_key` are required fields. Check the request JSON body. |
-| BRT-API-002 | Model not found in matrix | `src/api/models.py::run_benchmark` | The model_id does not exist in the capability matrix. Run `POST /models/discover` first, or check the model_id for typos. |
+| BRT-API-002 | Model not found in matrix | `src/api/models.py::set_model_checked` | The model_id does not exist in the capability matrix. Run `POST /models/discover` first, check the model_id for typos, or add the row via `data/curated_models.yaml`. |
 | BRT-API-010 | Malformed chat completions request | `src/api/chat_completions.py` | The request body is not valid JSON or does not contain required fields (model, messages). Check the request format. |
 | BRT-API-011 | Model not found (bypass mode) | `src/api/chat_completions.py::_bypass_to_model` | The specified model_id is not in the capability matrix. Run discovery first. |
 | BRT-API-012 | Pipeline/bypass execution failed | `src/api/chat_completions.py` | The orchestration pipeline or bypass model call failed. Check the run trace for details. |

@@ -1,0 +1,37 @@
+id: BRT-S4-02
+timestamp: 2026-04-18T18:45:00Z
+type: feat
+scope: slice-4
+title: Rolling summary compression for long conversations
+
+summary_human: |
+  When a conversation gets long, BORG_ROUTE compresses the older turns
+  into a concise summary (3-8 sentences) so the orchestrator always has
+  useful context without overloading its prompt window. The summary is
+  produced by a model call, logged for auditability, and stored per
+  thread. On the next run in that thread the summary is auto-loaded.
+
+files_touched:
+  - src/memory/compressor.py
+  - src/memory/window.py
+  - src/pipeline/runner.py
+
+public_surface:
+  added:
+    - { kind: python_api, path: "src.memory.compressor.compress_inactive_turns", purpose: "Compress older turns into rolling summary" }
+
+breaking_change: false
+
+error_codes_added:
+  - { code: BRT-MEM-003, meaning: "Rolling summary: model call failed" }
+  - { code: BRT-MEM-004, meaning: "Rolling summary: model returned empty/bad response" }
+  - { code: BRT-MEM-005, meaning: "Rolling summary: config write failed" }
+
+env_vars_added: []
+
+tests_added: { count: 9 }
+
+audience: [developer]
+demo_value: medium
+user_visible: false
+keywords: [memory, compression, rolling-summary, threads, long-context]
