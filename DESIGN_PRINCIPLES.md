@@ -1,6 +1,6 @@
 # Design Principles — BORG_ROUTE (Cheatsheet)
-> Compacted from the original 668-line design doc (preserved in `zArchive/DESIGN_PRINCIPLES_FULL.md`).
-> This file captures the architectural invariants any future maintainer must respect. The WHY is in the archive; the WHAT-you-must-not-break is here.
+> Compacted from the original 668-line design doc (archived out of the repo).
+> This file captures the architectural invariants any future maintainer must respect.
 
 ---
 
@@ -132,6 +132,6 @@ If any of these look necessary: stop, document why, and escalate before coding.
 ---
 
 ## Further Reading
-- `zArchive/DESIGN_PRINCIPLES_FULL.md` — full rationale, examples, rejected alternatives, slice-by-slice change log.
 - `CODING_STANDARD_CORE.md` — commit + error-code + test conventions.
 - `docs/user-guide.md` — operator-facing behaviour.
+- `docs/install-guide.md` — install + LLM-installer notes.

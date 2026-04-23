@@ -5,8 +5,6 @@
 2. `DESIGN_PRINCIPLES.md` — Two Laws + architectural invariants
 3. `CODING_STANDARD_CORE.md` — commit + error-code + test conventions
 
-Historical build docs (BUILD_PLAN, CHECKPOINT, SESSION_HANDOFF, etc.) are archived under `zArchive/` and need not be read.
-
 ## Memory
 - Global memory: `C:\Users\Deejr\.claude\memory\MEMORY.md`
 - Stage memory: `C:\Stage\memory\MEMORY.md`

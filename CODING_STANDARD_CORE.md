@@ -72,25 +72,30 @@ Never swallow errors. Always re-throw with code + context data. API layer transl
 
 ---
 
-## File Structure (every project has these from day one)
+## File Structure (this project)
 ```
 docs/
-  user-guide.md           ← updated with every feature
-  install-guide.md        ← operator/IT docs
-  presentation-content.md ← slide content, updated with every feature
+  user-guide.md             ← updated with every feature
+  install-guide.md          ← operator/IT + LLM-installer notes
+  presentation-content.md   ← slide content (hand-maintained parallel doc)
+  CHANGELOG.md              ← generated from .dev/ledger/
+  user-guide.generated.md   ← generated from .dev/ledger/
+  presentation.generated.md ← generated from .dev/ledger/
   errors/error-registry.md
-  tests/test-plan.md
+.dev/
+  ledger/                   ← one YAML per slice (Peak Context Ledger)
+  render_*.py               ← regenerators for the .generated.md files
 .env.example
-MESSAGE_TO_CLAUDE.md      ← AI onboarding
-CHECKPOINT.md             ← current state + "where I left off"
-BUILD_PLAN.md
-CODING_STANDARDS_CORE.md  ← this file (copied from C:\Stage\)
+AGENTS.md                   ← AI onboarding (Droid auto-loads)
+CLAUDE.md                   ← Claude onboarding
+DESIGN_PRINCIPLES.md        ← architectural invariants
+CODING_STANDARD_CORE.md     ← this file
 ```
 
 ---
 
 ## AI Session Protocol
-- **Start:** Read `CHECKPOINT.md` → `MESSAGE_TO_CLAUDE.md` → start infra → run tests
-- **End:** All tests pass → update `CHECKPOINT.md` → commit + push → remind Deej to say **"save to memory"**
+- **Start:** Read `AGENTS.md` / `CLAUDE.md` → `DESIGN_PRINCIPLES.md` → `CODING_STANDARD_CORE.md` → run tests
+- **End:** All tests pass → commit scoped changes → remind Deej to say **"save to memory"**
 - **Task cards must specify:** file paths, function names, DB tables, API routes, error codes, interfaces (not concrete classes), doc sections to update
 - **Full reference:** `C:\Users\Deejr\OneDrive\Documents\Claude\CODING_STANDARD.md`

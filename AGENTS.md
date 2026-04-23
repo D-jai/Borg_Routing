@@ -6,9 +6,7 @@
 
 ## Project Status
 
-BORG_ROUTE is an Adaptive Recursive Agent Router. The initial build is **complete**: Slices 0-6 shipped, 245 tests passing. Subsequent sessions are maintenance, polish, or user-directed new features — not original-design work.
-
-Build history and the full planning trail live under `zArchive/`. Do not re-read it unless specifically needed.
+BORG_ROUTE is an Adaptive Recursive Agent Router. The initial build is **complete**: Slices 0-6 shipped plus the scorer/checkbox slice (BRT-SC-01), 256 tests passing. Subsequent sessions are maintenance, polish, or user-directed new features — not original-design work.
 
 ## First-Read Order (new session)
 
@@ -16,9 +14,8 @@ Build history and the full planning trail live under `zArchive/`. Do not re-read
 2. **`DESIGN_PRINCIPLES.md`** — Two Laws + architectural invariants (cheatsheet)
 3. **`CODING_STANDARD_CORE.md`** — commit + error-code + test conventions
 4. **`docs/user-guide.md`** — current operator-facing behaviour
-5. Source files relevant to the user's request
-
-Consult `zArchive/` only if a question genuinely requires historical context.
+5. **`docs/install-guide.md`** — install + LLM-installer notes (if installing)
+6. Source files relevant to the user's request
 
 ## Pre-Written Artefacts — DO NOT REGENERATE
 
