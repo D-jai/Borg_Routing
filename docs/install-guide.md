@@ -34,6 +34,13 @@ specifically asks for NER. (The `spacy` library itself is still a
 dependency because tests import it, but the language model download
 is optional.)
 
+**Test-count math (BRT-QA-01):** on a fresh install without
+`en_core_web_sm`, the three NER worker tests skip automatically
+(TC-S5-010 / 011 / 012). You should see `253 passed, 3 skipped,
+0 failed` (i.e. 256 tests collected, 3 skipped). Installing the
+language model flips those three from skip to pass, giving the
+full `256 passed` result.
+
 ### Success criteria
 The install is done when all of these pass:
 - `python -m pytest` → exits 0 with 256 passing

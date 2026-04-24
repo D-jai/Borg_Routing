@@ -1,0 +1,43 @@
+id: BRT-QA-01
+timestamp: 2026-04-23T19:30:00Z
+type: test
+scope: phase-1
+title: Guard slice-5 NER tests behind en_core_web_sm availability
+
+summary_human: |
+  Three slice-5 NER worker tests now skip automatically when the optional
+  spaCy language model (en_core_web_sm) is not installed, so a fresh
+  install with no model download reports "253 passed, 3 skipped, 0 failed"
+  instead of 3 confusing errors. The install guide's promised test count
+  matches reality for the first time.
+
+files_touched:
+  - tests/orchestrator/test_slice5.py
+  - docs/install-guide.md
+
+public_surface: {}
+
+breaking_change: false
+
+error_codes_added: []
+
+env_vars_added: []
+
+tests_added: { count: 0, note: "Only existing tests are now guarded." }
+
+audience: [developer, operator]
+demo_value: low
+user_visible: false
+keywords: [tests, spacy, installation, fresh-install]
+
+user_guide:
+  heading: null
+
+install_guide:
+  prerequisites_added: []
+  setup_steps:
+    - "Fresh install: spaCy is installed via pip but the language model (~12 MB) is optional. Three tests will skip until you run `python -m spacy download en_core_web_sm`."
+
+presentation:
+  hero_bullet: "Fresh install no longer shows phantom test failures for the NER module operators never enabled."
+  slide_angle: "Boring-but-essential test hygiene — the ground truth for every other Phase 1 claim."

@@ -38,6 +38,25 @@ from src.logging.writer import write_event
 from src.logging.ner_worker import process_batch
 
 
+# BRT-QA-01: guard the 3 NER-dependent tests behind en_core_web_sm availability.
+# The spaCy library itself is a hard dependency, but the language-model download
+# is optional per the install guide. Without it, the three process_batch tests
+# below skip so a fresh install reports the advertised "256 passed, 3 skipped".
+def _spacy_model_available() -> bool:
+    try:
+        import spacy  # noqa: PLC0415
+        spacy.load("en_core_web_sm")
+        return True
+    except Exception:
+        return False
+
+
+_requires_spacy_model = pytest.mark.skipif(
+    not _spacy_model_available(),
+    reason="en_core_web_sm not installed — NER worker tests skipped.",
+)
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Fixtures
 # ──────────────────────────────────────────────────────────────────────────────
@@ -204,6 +223,7 @@ def test_rate_run_endpoint_invalid_rating(client):
 # TC-S5-010 — NER worker extracts entities
 # ──────────────────────────────────────────────────────────────────────────────
 
+@_requires_spacy_model
 @pytest.mark.asyncio
 async def test_ner_worker_extracts_entities(db):
     """TC-S5-010 — process_batch extracts PERSON/ORG entities from payload."""
@@ -243,6 +263,7 @@ async def test_ner_worker_extracts_entities(db):
 # TC-S5-011 — NER worker marks ner_processed=1
 # ──────────────────────────────────────────────────────────────────────────────
 
+@_requires_spacy_model
 @pytest.mark.asyncio
 async def test_ner_worker_marks_processed(db):
     """TC-S5-011 — payload ner_processed flag set to 1 after processing."""
@@ -276,6 +297,7 @@ async def test_ner_worker_marks_processed(db):
 # TC-S5-012 — NER worker returns 0 when no unprocessed payloads
 # ──────────────────────────────────────────────────────────────────────────────
 
+@_requires_spacy_model
 @pytest.mark.asyncio
 async def test_ner_worker_empty_batch(db):
     """TC-S5-012 — process_batch returns 0 when nothing to process."""
