@@ -220,3 +220,38 @@ def test_compose_evidence_discipline_clause_present():
     p = ORCHESTRATOR_SYSTEM_PROMPT
     assert "evidence discipline" in p.lower()
     assert "grounded" in p.lower() or "grounded in" in p.lower()
+
+
+# ---------- Slice A.5 — Adaptive Internal Reasoning ----------
+
+def test_adaptive_reasoning_clause_present():
+    """TC-PROMPT-011a — model self-decides number of internal passes;
+    Trivial / Moderate / Complex tiers are explicit."""
+    p = ORCHESTRATOR_SYSTEM_PROMPT
+    assert "Adaptive Internal Reasoning" in p
+    # All three complexity tiers must be named.
+    assert "Trivial" in p
+    assert "Moderate" in p
+    assert "Complex" in p
+    # The model — not a hardcoded loop — chooses depth.
+    assert "you — not a hardcoded loop — decide" in p.lower() \
+        or "you, not a hardcoded loop, decide" in p.lower()
+
+
+def test_adaptive_reasoning_no_chain_leak_clause_present():
+    """TC-PROMPT-011b — internal reasoning must not leak into the JSON
+    response (model uses it privately, only rationale gets a hint)."""
+    p = ORCHESTRATOR_SYSTEM_PROMPT
+    assert "do NOT emit your reasoning" in p.lower() \
+        or "do not emit your reasoning" in p.lower()
+    assert "verified via internal review" in p.lower() \
+        or "internal review" in p.lower()
+
+
+def test_adaptive_reasoning_escalation_clause_present():
+    """TC-PROMPT-011c — escalation path: spawn an `orchestrate` node with
+    `recommended_model` set to a frontier model."""
+    p = ORCHESTRATOR_SYSTEM_PROMPT
+    assert "Escalation" in p
+    assert "frontier" in p.lower()
+    assert "recommended_model" in p
