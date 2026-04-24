@@ -196,3 +196,18 @@ gives operators real-time control over model behaviour without restarting the se
 **Demo talking point:** "Open the run trace and watch the orchestrator work in real time — each envelope appears as it's dispatched, the apply_to_each counter ticks up as subtasks fan out, and the status dot turns red or green the moment the run completes."
 
 **Portfolio/LinkedIn angle:** Production-grade streaming architecture — SSE pub/sub from the DB layer through the API to the browser, all without WebSockets or external message queues.
+
+---
+
+<!-- Added: 2026-04-23 - Phase 1: Fresh-install-works-out-of-the-box -->
+## Phase 1 — Fresh install works out of the box
+
+**What it adds:**
+- **BRT-QA-01:** Slice-5 NER tests now skip cleanly when the optional spaCy language model (en_core_web_sm) is not installed, so `python -m pytest` on a fresh checkout reports the advertised test count — no phantom failures from a module the operator never enabled.
+- **BRT-OR-01:** OpenRouter rows are first-class. A new `resolve_model_call` helper injects the correct URL, bearer auth, and attribution headers, and strips the `openrouter/` prefix from the outbound model id. Every call now sends `max_tokens` so OpenRouter stops rejecting with HTTP 402 "tokens=0". `POST /keys` with name="OpenRouter" writes the canonical `OPENROUTER_API_KEY=` env var so discovery, scorer, and chat completions all share one secret.
+- **BRT-DS-01:** Discovery is the single source of truth for local rows. Hand-seeded LM Studio entries were removed from `data/capability_matrix.yaml`; instead, a reconciliation pass at the end of `discover_all` marks any local row that was not seen live as `endpoint=None, checked=False`, killing ghost rows that would otherwise silently route to a server that is no longer running.
+- **BRT-RT-01:** Local-developer-friendly routing defaults. `time_cost_per_sec` drops from 0.0083 to 0.0001 and `orchestrator_quality_requirement` drops from 8.0 to 6.5, so a mid-tier local model (e.g. `lmstudio/google/gemma-4-26b-a4b` at reasoning=6.8) can orchestrate without a frontier API key. The Admin UI time-cost knob now actually feeds the router via DB config — no restart needed.
+
+**Demo talking point:** Clone the repo, set `OPENROUTER_API_KEY`, run `pip install -e .` and `uvicorn main:app`, open the chat UI, and ask "hi" — you get a real answer, without editing a YAML, tweaking a quality bar, or learning a config key.
+
+**Portfolio/LinkedIn angle:** Shows that getting the boring parts right - config, discovery, HTTP auth, defaults - is where open-source tools actually succeed or fail. Phase 1 is the turning point from works-for-the-author to works-for-everyone.

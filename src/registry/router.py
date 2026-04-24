@@ -17,7 +17,7 @@ from .capability_matrix import CapabilityMatrix
 from .cost import effective_cost
 from .models import ModelInfo
 
-_DEFAULT_TIME_COST_PER_SEC = 0.0083
+_DEFAULT_TIME_COST_PER_SEC = 0.0001  # BRT-RT-01: local-dev default; see cost.py
 
 
 def select_model(

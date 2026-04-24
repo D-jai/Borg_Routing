@@ -87,6 +87,27 @@ the operator opts models into the pool explicitly.
 ### If something goes wrong
 - **"BRT-REG-020: no model found"** — No row is checked, or none meets the quality bar. Tick at least one row that has been researched.
 
+### Tuning the quality bar and time-cost knobs (BRT-RT-01)
+The router only picks models whose `task_scores` for the current task meet
+the **quality bar**, then among those picks the cheapest. Cost combines the
+row's pricing with a **time cost per second** so faster models are preferred
+when latency matters.
+
+Fresh installs ship with developer-friendly defaults:
+
+| Knob | Default | Where it lives |
+|---|---|---|
+| `orchestrator_quality_requirement` | `6.5` | `.env` or Admin UI |
+| `time_cost_per_sec` | `0.0001` (~$0.36/hr) | `.env` or Admin UI |
+
+Lower the quality bar to let weaker local models orchestrate (useful while
+you're still running Get Model Info). Raise it to force frontier-only
+orchestration. Lower the time cost toward 0 to strongly prefer local
+(free) models; raise it toward `0.0083` ($30/hr) if you're running a SaaS
+where every second of latency costs you real money. Both settings can be
+changed live from **Admin UI → Settings** — the next run reads the new
+value with no restart.
+
 ---
 
 ## Researching Model Capabilities (Get Model Info)

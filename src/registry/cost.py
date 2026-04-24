@@ -11,7 +11,12 @@ Error codes:
 """
 from .models import ModelInfo
 
-_DEFAULT_TIME_COST_PER_SEC = 0.0083  # ≈ $30/hr
+# Primary: single developer running locally (electricity + modest respect for
+# wait time). Override: TIME_COST_PER_SEC env var, or Admin UI → time-cost
+# field, which persists to the `time_cost_per_sec` config key in DB and wins
+# over this default at orchestrate_run() time. For a production SaaS
+# deployment 0.0083 (~$30/hr) is more appropriate — set it via Admin UI.
+_DEFAULT_TIME_COST_PER_SEC = 0.0001
 
 
 def effective_cost(
