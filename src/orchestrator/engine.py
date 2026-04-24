@@ -14,6 +14,12 @@ Error codes:
 - BRT-ORC-007-DEGRADED: quality bar relaxed below the default because no model qualified
 - BRT-ORC-008: node builder failed for a plan node
 - BRT-ORC-009: compose mode returned no response
+- BRT-ORC-015: default answerer selection failed; fell back to orchestrator
+               model (warning; run continues)
+- BRT-ORC-016: envelope persistence (save/update_inbound) failed (error;
+               run continues, trace shows the DB hiccup)
+- BRT-ORC-017: depends_on id not found in results (warning; node dispatches
+               with whatever upstream outputs could be resolved)
 """
 import asyncio
 import json
@@ -297,15 +303,21 @@ def _build_task_from_node(
     model_endpoint: str,
     model_name: str,
     user_instruction: str,
+    results: Optional[dict] = None,
 ) -> WrappedTask:
     """Convert a plan node dict into a WrappedTask.
 
     Handles skill-based nodes (has skill_id) and custom nodes.
     For state_op nodes, packages the op/params/source into dependency_input.
+    For apply_to_each nodes: if ``inputs_ref`` is a string and matches a
+    prior node id in ``results``, the upstream envelope's output is walked
+    for an ``items`` / ``results`` list and stamped into
+    ``dependency_input['items']`` — BRT-APE-01.
 
     Raises:
         ValueError: BRT-ORC-008 on build failure.
     """
+    results = results or {}
     node_type = node.get("type", "answerer")
 
     # If skill node
@@ -352,9 +364,31 @@ def _build_task_from_node(
 
     # apply_to_each node
     if node_type == "apply_to_each":
+        # BRT-APE-01 — if inputs_ref is a string that matches a prior node id,
+        # resolve the upstream envelope output to a concrete list of items
+        # so the expander sees dependency_input['items'] (not an unresolved
+        # symbolic reference). Falls back to whatever the orchestrator wrote
+        # directly into node['items'] if available.
+        inputs_ref_raw = node.get("inputs_ref", "")
+        items_from_node = node.get("items", [])
+        resolved_items = items_from_node
+        if (
+            isinstance(inputs_ref_raw, str)
+            and inputs_ref_raw
+            and inputs_ref_raw in results
+            and not items_from_node
+        ):
+            upstream_env = results[inputs_ref_raw]
+            upstream_out = getattr(upstream_env, "output", {}) or {}
+            for key in ("items", "results", "list"):
+                candidate = upstream_out.get(key)
+                if isinstance(candidate, list):
+                    resolved_items = candidate
+                    break
+
         dep_input = {
-            "inputs_ref": node.get("inputs_ref", ""),
-            "items": node.get("items", []),
+            "inputs_ref": inputs_ref_raw,
+            "items": resolved_items,
             "concurrency_limit": node.get("concurrency_limit", 20),
         }
         return WrappedTask(
@@ -376,6 +410,35 @@ def _build_task_from_node(
         )
 
     # answerer or orchestrate
+    # BRT-PR-01a — when the node declares depends_on and matching upstream
+    # envelopes are in results, inject their outputs into the child's
+    # dependency_input AND append a short "Upstream outputs:" block to the
+    # context string so the model can read them without needing to know the
+    # dependency_input schema.
+    depends_on = node.get("depends_on") or []
+    base_context = node.get("context", "")
+    base_dep_input = dict(node.get("dependency_input", {}))
+    if isinstance(depends_on, list) and depends_on:
+        upstream_results: dict = {}
+        missing: list[str] = []
+        for upstream_id in depends_on:
+            if upstream_id in results:
+                env = results[upstream_id]
+                upstream_results[upstream_id] = getattr(env, "output", {}) or {}
+            else:
+                missing.append(upstream_id)
+        if upstream_results:
+            base_dep_input["upstream_results"] = upstream_results
+            block = "\n\nUpstream stage outputs (from depends_on):\n" + json.dumps(
+                upstream_results, indent=2
+            )
+            base_context = (base_context or "") + block
+        if missing:
+            # Fire-and-forget warning; dispatch continues with whatever we
+            # could resolve. BRT-ORC-017 is logged from the dispatch loop
+            # because we don't have db_path here.
+            base_dep_input["_depends_on_missing"] = missing
+
     return WrappedTask(
         envelope_id=uuid4(),
         run_id=run_id,
@@ -387,11 +450,11 @@ def _build_task_from_node(
         model_endpoint=model_endpoint,
         model_name=model_name,
         instruction=node.get("instruction", user_instruction),
-        context=node.get("context", ""),
+        context=base_context,
         state_query=node.get("state_query"),
         output_schema=node.get("output_schema", {}),
         side_effects=node.get("side_effects", []),
-        dependency_input=node.get("dependency_input", {}),
+        dependency_input=base_dep_input,
         trigger_reason=node.get("trigger_reason", "initial_plan"),
     )
 
@@ -428,15 +491,17 @@ async def orchestrate_run(
         else os.getenv("TIME_COST_PER_SEC", "0.0001")
     )
 
-    try:
-        orch_model = await _select_orchestrator_model(
-            "reasoning",
-            db_path=db_path,
-            quality_requirement=quality_req,
-            time_cost_per_sec=time_cost,
-        )
-    except ValueError:
-        orch_model = _pinned_model(endpoint="", name="unavailable")
+    # BRT-ORC-02 — no silent fallback. Previously a ValueError from
+    # _select_orchestrator_model was swallowed and replaced with a synthetic
+    # _pinned_model(endpoint=""), which then produced httpx.UnsupportedProtocol
+    # deep in the call stack with no run trace. Let BRT-ORC-007 propagate so
+    # the run row flips to failed with a real reason.
+    orch_model = await _select_orchestrator_model(
+        "reasoning",
+        db_path=db_path,
+        quality_requirement=quality_req,
+        time_cost_per_sec=time_cost,
+    )
 
     skill_lib = _get_skill_lib()
     skills_catalogue = skill_lib.catalogue_for_prompt()
@@ -487,7 +552,10 @@ async def orchestrate_run(
     child_digests: dict = {}
     loop_count = 0
 
-    # Select a default answerer model
+    # Select a default answerer model. BRT-ORC-02 — make the fallback visible:
+    # if select_model raises (usually no model meets the quality bar), fall
+    # back to the orchestrator model but log a warning event so the run
+    # trace shows the demotion.
     try:
         default_model = select_model(
             matrix=matrix,
@@ -497,19 +565,53 @@ async def orchestrate_run(
         )
         answerer_endpoint = default_model.endpoint or ""
         answerer_name = default_model.model_id
-    except Exception:
+    except Exception as exc:
         answerer_endpoint = orch_model.endpoint or ""
         answerer_name = orch_model.model_id
+        # Note: logs.event_type has a CHECK constraint; 'warning' is not a
+        # permitted value, so BRT-ORC-015 rides on 'error' with its own code
+        # in the decision payload. UI/trace filters on the code when they
+        # need severity granularity.
+        try:
+            await write_event(
+                "error",
+                run_id=run_id,
+                decision={
+                    "code": "BRT-ORC-015",
+                    "severity": "warning",
+                    "msg": (
+                        "default answerer selection failed; falling back to "
+                        "orchestrator model"
+                    ),
+                    "fallback_model": answerer_name,
+                    "err": str(exc),
+                },
+                db_path=db_path,
+            )
+        except Exception:
+            pass
 
     while loop_count < MAX_LOOPS:
         loop_count += 1
 
-        # Find ready nodes
+        # Find ready nodes. BRT-PR-01a — depends_on ids that reference nodes
+        # not present in the plan at all (e.g. orchestrator hallucinated an
+        # upstream id) are IGNORED by the ready-check — they would otherwise
+        # block the node forever. The mismatch is logged as BRT-ORC-017 when
+        # the task is built below.
         completed_ids = set(results.keys())
+        known_ids = {n.get("id") for n in current_nodes if n.get("id")}
+
+        def _deps_ready(node_deps: list) -> bool:
+            for d in node_deps or []:
+                if d in known_ids and d not in completed_ids:
+                    return False
+            return True
+
         ready = [
             n for n in current_nodes
             if n.get("id") not in completed_ids
-            and all(d in completed_ids for d in n.get("depends_on", []))
+            and _deps_ready(n.get("depends_on", []))
         ]
 
         if not ready:
@@ -530,7 +632,29 @@ async def orchestrate_run(
                     model_endpoint=answerer_endpoint,
                     model_name=answerer_name,
                     user_instruction=user_instruction,
+                    results=results,
                 )
+                # BRT-PR-01a — log any depends_on ids that didn't resolve.
+                missing_deps = (task.dependency_input or {}).pop(
+                    "_depends_on_missing", None
+                )
+                if missing_deps:
+                    try:
+                        await write_event(
+                            "error",
+                            run_id=run_id,
+                            envelope_id=task.envelope_id,
+                            decision={
+                                "code": "BRT-ORC-017",
+                                "severity": "warning",
+                                "msg": "depends_on ids not resolved",
+                                "node_id": node_id,
+                                "missing": missing_deps,
+                            },
+                            db_path=db_path,
+                        )
+                    except Exception:
+                        pass
                 tasks_to_dispatch.append((node_id, node, task))
             except Exception as exc:
                 # Node build failed — record as failed result
@@ -542,12 +666,28 @@ async def orchestrate_run(
                     failure_reason=str(exc),
                 )
 
-        # Save and execute in parallel
+        # Save and execute in parallel. BRT-ORC-02 — envelope persistence
+        # errors used to be swallowed silently (bare except: pass), so a
+        # broken DB produced a run that appeared to complete but had no
+        # envelopes/logs to show. Now we log BRT-ORC-016 and continue.
         async def _dispatch_one(node_id: str, node: dict, task: WrappedTask):
             try:
                 await save_envelope(task, db_path=db_path)
-            except Exception:
-                pass
+            except Exception as exc:
+                try:
+                    await write_event(
+                        "error",
+                        run_id=run_id,
+                        envelope_id=task.envelope_id,
+                        decision={
+                            "code": "BRT-ORC-016",
+                            "msg": "envelope save failed",
+                            "err": str(exc),
+                        },
+                        db_path=db_path,
+                    )
+                except Exception:
+                    pass
             try:
                 env = await execute(task, db_path=db_path)
             except Exception as exc:
@@ -560,8 +700,21 @@ async def orchestrate_run(
                 )
             try:
                 await update_envelope_inbound(task.envelope_id, env, db_path=db_path)
-            except Exception:
-                pass
+            except Exception as exc:
+                try:
+                    await write_event(
+                        "error",
+                        run_id=run_id,
+                        envelope_id=task.envelope_id,
+                        decision={
+                            "code": "BRT-ORC-016",
+                            "msg": "envelope inbound update failed",
+                            "err": str(exc),
+                        },
+                        db_path=db_path,
+                    )
+                except Exception:
+                    pass
 
             # Fold-in for orchestrate nodes (Law 2)
             if node.get("type") == "orchestrate":
