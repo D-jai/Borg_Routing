@@ -197,7 +197,7 @@ async def stream_run_state(run_id: str) -> StreamingResponse:
 
     async def _event_generator():
         seen: dict[str, str] = {}  # envelope_id -> last emitted status
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         deadline = loop.time() + 90.0
 
         try:

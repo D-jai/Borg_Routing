@@ -36,14 +36,14 @@ is optional.)
 
 **Test-count math (BRT-QA-01):** on a fresh install without
 `en_core_web_sm`, the three NER worker tests skip automatically
-(TC-S5-010 / 011 / 012). You should see `253 passed, 3 skipped,
-0 failed` (i.e. 256 tests collected, 3 skipped). Installing the
+(TC-S5-010 / 011 / 012). You should see `293 passed, 3 skipped,
+0 failed` (i.e. 296 tests collected, 3 skipped). Installing the
 language model flips those three from skip to pass, giving the
-full `256 passed` result.
+full `296 passed` result.
 
 ### Success criteria
 The install is done when all of these pass:
-- `python -m pytest` → exits 0 with 256 passing
+- `python -m pytest` → exits 0 with 296 passing
 - `GET http://localhost:8000/health` → `{"status":"ok"}`
 - `GET http://localhost:8000/models/matrix` → returns 19 rows (7 LM Studio + 12 OpenRouter) with `checked: false` defaults
 - At least one row has been ticked with `PATCH /models/<id>/checked` (use `d-jai/test-model` from LM Studio, or any one you plan to use)
@@ -67,7 +67,7 @@ copy .env.example .env
 # Edit .env — add OPENROUTER_API_KEY (and any LM Studio paths)
 
 python -m pip install -e ".[dev]"
-python -m pytest                            # expect 256 passing
+python -m pytest                            # expect 296 passing
 
 uvicorn main:app --reload
 # Server at http://localhost:8000
@@ -81,7 +81,7 @@ cp .env.example .env
 # Edit .env — add OPENROUTER_API_KEY (and any LM Studio paths)
 
 python3 -m pip install -e ".[dev]"
-python3 -m pytest                           # expect 256 passing
+python3 -m pytest                           # expect 296 passing
 
 uvicorn main:app --reload
 # Server at http://localhost:8000

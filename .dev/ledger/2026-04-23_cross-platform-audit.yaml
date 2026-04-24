@@ -1,0 +1,78 @@
+id: BRT-XPLAT-01
+timestamp: 2026-04-23T23:00:00Z
+type: fix
+scope: phase-4
+title: Cross-platform (Linux/Windows) audit — three polish fixes
+
+summary_human: |
+  Systematic scan of src/, tests/, main.py, docs/, ui/ for Linux/Windows
+  compatibility issues. Result: the codebase is already largely portable.
+  No Unix-only imports (fcntl/termios/pwd/grp/resource/syslog), no
+  subprocess/shell invocations, no platform gates (sys.platform/os.name),
+  no hardcoded /tmp | /var | C:\ paths. All open() calls pass
+  encoding="utf-8". Paths use forward-slash literals or pathlib.Path
+  (both Python-normalised). LM Studio and Ollama run on identical ports
+  on all three OSes.
+
+  Three minor polish items found and fixed:
+
+  1. .gitattributes was near-empty (only "export-ignore"), triggering
+     "LF will be replaced by CRLF" warnings on every Windows commit.
+     Added "* text=auto eol=lf" so repo storage stays LF-normalised for
+     all contributors, plus explicit binary patterns for images and DB
+     files.
+
+  2. src/api/tasks.py used asyncio.get_event_loop() inside an async
+     handler — deprecated in Python 3.12+, raises in 3.14+. Swapped to
+     asyncio.get_running_loop() (the handler is already inside a running
+     loop).
+
+  3. docs/install-guide.md stated "expect 256 passing" in three places,
+     stale since Phase 1. Updated to 296 to match the current suite.
+
+  No behaviour change. Full suite still green: 296 passed.
+
+files_touched:
+  - .gitattributes
+  - src/api/tasks.py
+  - docs/install-guide.md
+
+public_surface: {}
+
+breaking_change: false
+
+error_codes_added: []
+
+env_vars_added: []
+
+tests_added: { count: 0, note: "Audit + polish slice, no new tests per the user's 'planned test later' directive." }
+
+audience: [developer, operator]
+demo_value: low
+user_visible: false
+keywords: [cross-platform, windows, linux, portability, audit, line-endings, asyncio, docs-drift]
+
+architectural_notes: |
+  Things that did NOT need fixing (documented here so the next audit can
+  skip them):
+  - Unix-only imports: none.
+  - subprocess / os.system / shell=True: none. All I/O is via httpx or
+    aiosqlite.
+  - sys.platform / os.name / platform.system checks: none. No dead
+    branches.
+  - WindowsSelectorEventLoopPolicy: not needed. We don't use subprocess,
+    so ProactorEventLoop (uvicorn's Windows default) works fine.
+  - Data directory creation: not needed. data/ is committed with seed
+    YAML + curated model list; SQLite auto-creates the .db file.
+  - UI / shell scripts: none exist. No .sh / .bash / .ps1 / .bat / .cmd
+    files in the repo.
+
+  Deferred (not in this slice):
+  - docs/install-guide.md stale test count of "256 passing" updated here
+    but the fact that it drifts every phase suggests Bug Report §4's
+    original recommendation to generate this number from the test run in
+    CI (part of a future BRT-CI-01 slice).
+
+presentation:
+  hero_bullet: "BORG_ROUTE runs on Windows and Linux out of the box. Pure-Python, pure-httpx, pure-SQLite; no OS-specific code paths needed. This audit confirms it — three tiny polish fixes found, zero portability bugs."
+  slide_angle: "Portability by default is a property of discipline, not a feature. By sticking to standard-library cross-platform idioms throughout the build (pathlib, encoding=utf-8, forward-slash path literals, no subprocess), the audit finished in one session with three-line diffs."
