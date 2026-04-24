@@ -16,6 +16,7 @@ Error codes:
 - BRT-ANS-008: unexpected executor error
 """
 import json
+import os
 import re
 import time
 from typing import Optional
@@ -30,6 +31,8 @@ from src.envelopes.validator import validate_inbound
 from src.logging.writer import write_event
 from src.prompts.answerer import ANSWERER_SYSTEM_PROMPT
 from src.prompts.base import build_system_prompt, load_governance
+from src.registry.model_call import resolve_model_call
+from src.registry.models import ModelInfo
 
 _MODEL_CALL_TIMEOUT_SEC = 120
 
@@ -65,8 +68,53 @@ def _extract_json(text: str) -> dict:
     raise ValueError("BRT-ANS-004: no valid JSON object found in model response")
 
 
-async def _call_model(endpoint: str, system_prompt: str, user_msg: str) -> tuple[str, int, int]:
+def _infer_source(model_id: str) -> str:
+    """Infer provider source from a model_id prefix."""
+    if model_id.startswith("openrouter/"):
+        return "openrouter"
+    if model_id.startswith("ollama/"):
+        return "ollama"
+    if model_id.startswith("custom_"):
+        return "custom_key"
+    return "lmstudio"
+
+
+def _resolve_call_model(task: WrappedTask) -> ModelInfo:
+    """Build a ModelInfo for resolve_model_call() from a WrappedTask.
+
+    Prefers the live matrix row if present (it has canonical endpoint/source);
+    otherwise synthesises one from the task's ``model_name`` + ``model_endpoint``.
+    """
+    model_id = task.model_name or ""
+    # Late import keeps tests that mock the matrix happy.
+    try:
+        from src.orchestrator.engine import _get_matrix  # noqa: PLC0415
+        matrix = _get_matrix()
+        row = matrix.get(model_id)
+        if row is not None:
+            # If the task was dispatched with a different endpoint (e.g. pinned
+            # config override) honour that but keep the row's source.
+            if task.model_endpoint and task.model_endpoint != (row.endpoint or ""):
+                return row.model_copy(update={"endpoint": task.model_endpoint})
+            return row
+    except Exception:
+        pass
+    return ModelInfo(
+        model_id=model_id or "lmstudio/default",
+        source=_infer_source(model_id),
+        endpoint=task.model_endpoint,
+        context_length=4096,
+    )
+
+
+async def _call_model(
+    model: ModelInfo, system_prompt: str, user_msg: str
+) -> tuple[str, int, int]:
     """Call model via OpenAI-compat /v1/chat/completions.
+
+    Uses ``resolve_model_call`` so OpenRouter rows get auth headers and the
+    right body model id. Always sends ``max_tokens`` (configurable via
+    ``ANSWERER_MAX_TOKENS``) to avoid OpenRouter 402 ``tokens=0`` rejections.
 
     Returns:
         (content_text, input_tokens, output_tokens)
@@ -75,26 +123,29 @@ async def _call_model(endpoint: str, system_prompt: str, user_msg: str) -> tuple
         ValueError: BRT-ANS-006 on timeout.
         ValueError: BRT-ANS-002 on HTTP error.
     """
+    url, headers, body_model = resolve_model_call(model)
+    max_tokens = int(os.getenv("ANSWERER_MAX_TOKENS", "2000"))
     payload = {
-        "model": "default",
+        "model": body_model,
         "messages": [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_msg},
         ],
         "temperature": 0.2,
+        "max_tokens": max_tokens,
     }
     try:
         async with httpx.AsyncClient(timeout=_MODEL_CALL_TIMEOUT_SEC) as client:
-            resp = await client.post(f"{endpoint}/v1/chat/completions", json=payload)
+            resp = await client.post(url, json=payload, headers=headers)
         resp.raise_for_status()
     except httpx.TimeoutException as exc:
-        raise ValueError(f"BRT-ANS-006: model call timed out ({endpoint})") from exc
+        raise ValueError(f"BRT-ANS-006: model call timed out ({url})") from exc
     except httpx.HTTPStatusError as exc:
         raise ValueError(
-            f"BRT-ANS-002: HTTP {exc.response.status_code} from {endpoint}: {exc.response.text[:200]}"
+            f"BRT-ANS-002: HTTP {exc.response.status_code} from {url}: {exc.response.text[:200]}"
         ) from exc
     except httpx.RequestError as exc:
-        raise ValueError(f"BRT-ANS-002: request error calling {endpoint}: {exc}") from exc
+        raise ValueError(f"BRT-ANS-002: request error calling {url}: {exc}") from exc
 
     body = resp.json()
     content = body["choices"][0]["message"]["content"]
@@ -144,11 +195,16 @@ async def _execute_answerer(task: WrappedTask, db_path: str) -> InboundEnvelope:
         user_instruction=task.instruction,
     )
 
+    # Build a ModelInfo for the call. Prefer the matrix row (captures source
+    # + endpoint canonically); fall back to inferring source from the model_id
+    # prefix and using the endpoint stamped on the task.
+    model_for_call = _resolve_call_model(task)
+
     # Call model
     t0 = time.monotonic()
     try:
         content, tokens_in, tokens_out = await _call_model(
-            task.model_endpoint, system_prompt, "begin"
+            model_for_call, system_prompt, "begin"
         )
     except ValueError:
         raise

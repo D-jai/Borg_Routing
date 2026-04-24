@@ -154,12 +154,17 @@ async def set_model_checked(
     return CheckedResponse(model_id=model_id, checked=body.checked)
 
 
+_CANONICAL_KEY_VARS = {"openrouter": "OPENROUTER_API_KEY"}
+
+
 @router.post("/keys", response_model=KeyResponse)
 async def add_key(body: KeyRequest):
     """Save an external provider API key to the .env file.
 
-    The key is written as KEY_{NAME_UPPER}=value. The base_url is also stored
-    as ENDPOINT_{NAME_UPPER}=value.
+    Writes ``{KEY_VAR}=value`` and ``ENDPOINT_{NAME_UPPER}=value``. For
+    well-known providers the canonical env-var name is preferred
+    (e.g. ``OPENROUTER_API_KEY`` instead of ``KEY_OPENROUTER``) so that
+    discovery, the scorer, and chat completions all read the same variable.
     """
     if not body.name or not body.api_key:
         raise HTTPException(
@@ -168,19 +173,33 @@ async def add_key(body: KeyRequest):
         )
 
     env_path = ".env"
+    name_lower = body.name.lower()
     name_upper = body.name.upper().replace("-", "_").replace(" ", "_")
-    key_var = f"KEY_{name_upper}"
+    key_var = _CANONICAL_KEY_VARS.get(name_lower, f"KEY_{name_upper}")
     endpoint_var = f"ENDPOINT_{name_upper}"
+    # For well-known providers we also strip any legacy KEY_{NAME_UPPER} entry
+    # so operators upgrading from the old naming don't end up with two keys.
+    legacy_key_var = (
+        f"KEY_{name_upper}"
+        if key_var != f"KEY_{name_upper}"
+        else None
+    )
 
     lines: list[str] = []
     if os.path.exists(env_path):
         with open(env_path, encoding="utf-8") as f:
             lines = f.readlines()
 
-    # Remove existing entries for this provider
+    # Remove existing entries for this provider (and any legacy alias)
+    def _prefix(varname: str) -> str:
+        return f"{varname}="
+
+    drop_prefixes = [_prefix(key_var), _prefix(endpoint_var)]
+    if legacy_key_var:
+        drop_prefixes.append(_prefix(legacy_key_var))
     lines = [
         line for line in lines
-        if not line.startswith(f"{key_var}=") and not line.startswith(f"{endpoint_var}=")
+        if not any(line.startswith(p) for p in drop_prefixes)
     ]
     lines.append(f"{key_var}={body.api_key}\n")
     lines.append(f"{endpoint_var}={body.base_url}\n")
@@ -191,5 +210,9 @@ async def add_key(body: KeyRequest):
     # Reload into current process environment
     os.environ[key_var] = body.api_key
     os.environ[endpoint_var] = body.base_url
+    if legacy_key_var and legacy_key_var in os.environ:
+        os.environ.pop(legacy_key_var, None)
 
-    return KeyResponse(message=f"Key '{body.name}' saved successfully.")
+    return KeyResponse(
+        message=f"Key '{body.name}' saved successfully.",
+    )

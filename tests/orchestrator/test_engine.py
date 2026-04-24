@@ -17,6 +17,17 @@ import pytest
 from src.db.schema import create_all
 from src.db.state import create_run
 from src.orchestrator.engine import orchestrate_run
+from src.registry.models import ModelInfo
+
+
+def _fake_model(endpoint: str = "http://localhost:1234", model_id: str = "lmstudio/test-model") -> ModelInfo:
+    """Build a synthetic ModelInfo the engine can pass to resolve_model_call."""
+    return ModelInfo(
+        model_id=model_id,
+        source="lmstudio",
+        endpoint=endpoint,
+        context_length=4096,
+    )
 
 
 @pytest.fixture
@@ -86,7 +97,10 @@ async def test_direct_answer_returns_immediately(db):
         return json.loads(_orchestrator_response("plan_direct"))
 
     with patch("src.orchestrator.engine._invoke_orchestrator_model", new=AsyncMock(side_effect=mock_invoke)):
-        with patch("src.orchestrator.engine._select_orchestrator_model", new=AsyncMock(return_value=("http://localhost:1234", "test-model"))):
+        with patch(
+            "src.orchestrator.engine._select_orchestrator_model",
+            new=AsyncMock(return_value=_fake_model()),
+        ):
             result = await orchestrate_run(run_id, "Hello there", db_path=db)
 
     assert result == "Hello!"
@@ -120,7 +134,7 @@ async def test_one_stage_plan_three_calls(db):
         )
 
     with patch("src.orchestrator.engine._invoke_orchestrator_model", new=AsyncMock(side_effect=mock_invoke)):
-        with patch("src.orchestrator.engine._select_orchestrator_model", new=AsyncMock(return_value=("http://localhost:1234", "test-model"))):
+        with patch("src.orchestrator.engine._select_orchestrator_model", new=AsyncMock(return_value=_fake_model())):
             with patch("src.orchestrator.engine.execute", new=AsyncMock(side_effect=mock_execute)):
                 result = await orchestrate_run(run_id, "Classify this issue", db_path=db)
 
@@ -154,7 +168,7 @@ async def test_replan_fail_raises(db):
         )
 
     with patch("src.orchestrator.engine._invoke_orchestrator_model", new=AsyncMock(side_effect=mock_invoke)):
-        with patch("src.orchestrator.engine._select_orchestrator_model", new=AsyncMock(return_value=("http://localhost:1234", "test-model"))):
+        with patch("src.orchestrator.engine._select_orchestrator_model", new=AsyncMock(return_value=_fake_model())):
             with patch("src.orchestrator.engine.execute", new=AsyncMock(side_effect=mock_execute)):
                 with pytest.raises(ValueError, match="BRT-ORC-006"):
                     await orchestrate_run(run_id, "Impossible task", db_path=db)
@@ -189,7 +203,7 @@ async def test_replan_continue_dispatches_next_nodes(db):
         )
 
     with patch("src.orchestrator.engine._invoke_orchestrator_model", new=AsyncMock(side_effect=mock_invoke)):
-        with patch("src.orchestrator.engine._select_orchestrator_model", new=AsyncMock(return_value=("http://localhost:1234", "test-model"))):
+        with patch("src.orchestrator.engine._select_orchestrator_model", new=AsyncMock(return_value=_fake_model())):
             with patch("src.orchestrator.engine.execute", new=AsyncMock(side_effect=mock_execute)):
                 result = await orchestrate_run(run_id, "Two stage task", db_path=db)
 
@@ -238,7 +252,7 @@ async def test_orchestrator_decision_events_logged(db):
         return result
 
     with patch("src.orchestrator.engine._invoke_orchestrator_model", new=AsyncMock(side_effect=patched_invoke)):
-        with patch("src.orchestrator.engine._select_orchestrator_model", new=AsyncMock(return_value=("http://localhost:1234", "test-model"))):
+        with patch("src.orchestrator.engine._select_orchestrator_model", new=AsyncMock(return_value=_fake_model())):
             with patch("src.orchestrator.engine.execute", new=AsyncMock(side_effect=mock_execute)):
                 await orchestrate_run(run_id, "Classify", db_path=db)
 

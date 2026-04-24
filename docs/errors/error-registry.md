@@ -80,6 +80,8 @@
 | BRT-ORC-007-DEGRADED | Quality bar relaxed from 8.0 to 5.1 | `src/orchestrator/engine.py::_select_orchestrator_model` | The default 8.0 bar found no qualifying model, so the orchestrator fell back to the lowest-scored checked row just above the unresearched default (5.0). The run continues but model quality is unknown. Click "Get Model Info" on the Models page to refresh scores. |
 | BRT-ORC-008 | Node build failed | `src/orchestrator/engine.py::_build_task_from_node` | A plan node could not be converted to a WrappedTask. Check the node definition in the run trace. |
 | BRT-ORC-009 | Compose mode returned no response | `src/orchestrator/engine.py::orchestrate_run` | The orchestrator returned an empty `response` in compose mode. Check the compose prompt and model. |
+| BRT-ORC-013 | OpenRouter API key missing | `src/registry/model_call.py::resolve_model_call` | An OpenRouter row was selected but `OPENROUTER_API_KEY` is not set. Add it to `.env` or uncheck OpenRouter rows on the Models page. |
+| BRT-ORC-014 | Model row has no endpoint | `src/registry/model_call.py::resolve_model_call` | The matrix row was never populated with an endpoint (likely left over from a previous install). Run `POST /models/discover` to repopulate. |
 
 ## BRT-APE — apply_to_each Module
 

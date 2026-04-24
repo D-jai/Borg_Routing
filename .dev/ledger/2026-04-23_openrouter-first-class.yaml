@@ -1,0 +1,76 @@
+id: BRT-OR-01
+timestamp: 2026-04-23T19:45:00Z
+type: feat
+scope: phase-1
+title: OpenRouter rows are first-class (URL, auth, max_tokens, canonical env var)
+
+summary_human: |
+  OpenRouter-hosted models can now be called directly — no more "model=default"
+  400s, no more schemeless URLs, no more max_tokens=0 HTTP 402s. A new
+  resolve_model_call helper centralises URL + header construction across the
+  orchestrator, answerer, and chat gateway. POST /keys with name=OpenRouter
+  writes the canonical OPENROUTER_API_KEY so the scorer, discovery, and the
+  chat pipeline all read the same variable.
+
+files_touched:
+  - src/registry/model_call.py                   # new
+  - src/registry/discovery.py                    # endpoint backfill
+  - src/orchestrator/engine.py                   # resolve_model_call + max_tokens
+  - src/agents/executor.py                       # resolve_model_call + max_tokens
+  - src/api/chat_completions.py                  # bypass uses helper + max_tokens
+  - src/api/models.py                            # canonical OPENROUTER_API_KEY
+  - ui/keys.html                                 # updated hint text
+  - data/capability_matrix.yaml                  # endpoint backfilled on OR rows
+  - .env.example                                 # OPENROUTER_APP_*, ANSWERER_MAX_TOKENS, ORCHESTRATOR_MAX_TOKENS
+  - tests/registry/test_model_call.py            # new
+  - tests/orchestrator/test_engine_openrouter.py # new
+  - tests/agents/test_executor_openrouter.py     # new
+  - tests/api/test_openrouter_wiring.py          # new
+
+public_surface:
+  added:
+    - { kind: module,    path: "src/registry/model_call.py::resolve_model_call", purpose: "Return (url, headers, body_model) for one HTTP call." }
+    - { kind: env_var,   path: "OPENROUTER_APP_URL",  purpose: "OpenRouter attribution header." }
+    - { kind: env_var,   path: "OPENROUTER_APP_NAME", purpose: "OpenRouter attribution header." }
+    - { kind: env_var,   path: "ORCHESTRATOR_MAX_TOKENS", purpose: "Per-call cap on orchestrator output." }
+    - { kind: env_var,   path: "ANSWERER_MAX_TOKENS",     purpose: "Per-call cap on answerer output." }
+
+breaking_change: false
+
+error_codes_added:
+  - { code: BRT-ORC-013, meaning: "OpenRouter row selected but OPENROUTER_API_KEY not set." }
+  - { code: BRT-ORC-014, meaning: "Matrix row has no endpoint configured — run discovery." }
+
+env_vars_added:
+  - { name: OPENROUTER_APP_URL,       required: false, purpose: "HTTP-Referer header for OpenRouter attribution." }
+  - { name: OPENROUTER_APP_NAME,      required: false, purpose: "X-Title header for OpenRouter attribution." }
+  - { name: ORCHESTRATOR_MAX_TOKENS,  required: false, purpose: "Default 2000. Sent on every orchestrator call." }
+  - { name: ANSWERER_MAX_TOKENS,      required: false, purpose: "Default 2000. Sent on every answerer call." }
+
+tests_added: { count: 10 }
+
+audience: [developer, operator]
+demo_value: high
+user_visible: true
+keywords: [openrouter, auth, max-tokens, chat-completions, api-keys]
+
+user_guide:
+  heading: Talking to OpenRouter
+  how_to_use:
+    - "Set OPENROUTER_API_KEY in .env (or POST /keys with name=OpenRouter; both write the same variable)."
+    - "Tick any openrouter/* row on the Models page — discovery pre-populates endpoint, auth is added automatically at call time."
+    - "Adjust ORCHESTRATOR_MAX_TOKENS / ANSWERER_MAX_TOKENS in .env if you need longer responses."
+  troubleshooting:
+    - symptom: "BRT-ORC-013: OPENROUTER_API_KEY not set."
+      cause_and_fix: "Add the key to .env or uncheck every OpenRouter row."
+    - symptom: "BRT-ORC-014: model row has no endpoint."
+      cause_and_fix: "Run POST /models/discover or click Discover on the Models page."
+
+install_guide:
+  prerequisites_added: []
+  setup_steps:
+    - "Set OPENROUTER_API_KEY in .env before running Discover if you want OpenRouter models populated."
+
+presentation:
+  hero_bullet: "A single helper unified four broken code paths into one working call flow — OpenRouter now just works."
+  slide_angle: "The boring auth + config plumbing you skip on day one, fixed properly on day thirty."

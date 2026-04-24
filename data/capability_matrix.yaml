@@ -1,155 +1,16 @@
-- model_id: lmstudio/gemma-4-e4b-it-q4km
-  source: lmstudio
-  endpoint: http://localhost:1234
-  context_length: 32000
-  pricing: null
-  throughput_tps: 45.0
-  task_scores:
-    reasoning: 8.5
-    coding: 7.0
-    summarize: 8.0
-    writing: 7.5
-    roleplay: 6.5
-    agentic: 8.0
-    extraction: 8.5
-  specialty_tags:
-  - fast_light
-  params_b: 7.5
-  publisher: ggml-org
-  notes: Gemma-4 E4B at Q4_K_M (6.3 GB). Lower-fidelity quant; fastest of the E4B
-    pair.
-  checked: false
-- model_id: lmstudio/gemma-4-e4b-it
-  source: lmstudio
-  endpoint: http://localhost:1234
-  context_length: 32000
-  pricing: null
-  throughput_tps: 40.0
-  task_scores:
-    reasoning: 5.5
-    coding: 5.5
-    summarize: 6.5
-    writing: 6.0
-    roleplay: 5.5
-    agentic: 5.5
-    extraction: 6.5
-  specialty_tags:
-  - fast_light
-  params_b: 7.5
-  publisher: lmstudio-community
-  notes: Gemma-4 E4B at Q6_K (7.2 GB). Higher-fidelity quant; recommended default
-    for E4B.
-  checked: false
-- model_id: lmstudio/gemma-4-e2b-it
-  source: lmstudio
-  endpoint: http://localhost:1234
-  context_length: 32000
-  pricing: null
-  throughput_tps: 60.0
-  task_scores:
-    reasoning: 4.5
-    coding: 4.5
-    summarize: 5.8
-    writing: 5.3
-    roleplay: 4.8
-    agentic: 4.5
-    extraction: 6.0
-  specialty_tags:
-  - ultra_light
-  params_b: 4.6
-  publisher: lmstudio-community
-  notes: Gemma-4 E2B at Q6_K (4.8 GB). Ultra-light; classification / simple extraction.
-  checked: false
-- model_id: lmstudio/gemma-4-26b-a4b
-  source: lmstudio
-  endpoint: http://localhost:1234
-  context_length: 128000
-  pricing: null
-  throughput_tps: 35.0
-  task_scores:
-    reasoning: 6.8
-    coding: 6.8
-    summarize: 7.5
-    writing: 7.2
-    roleplay: 6.5
-    agentic: 6.8
-    extraction: 7.2
-  specialty_tags:
-  - mid_local
-  - moe
-  - long_context_local
-  params_b: 26.0
-  publisher: lmstudio-community
-  notes: Gemma-4 26B-A4B MoE at Q6_K (23.8 GB). 4B active params — strong mid-tier
-    local.
-  checked: false
-- model_id: lmstudio/llama3.3-8b-thinking-heretic-uncensored
-  source: lmstudio
-  endpoint: http://localhost:1234
-  context_length: 128000
-  pricing: null
-  throughput_tps: 30.0
-  task_scores:
-    reasoning: 5.0
-    coding: 5.0
-    summarize: 5.8
-    writing: 7.0
-    roleplay: 8.0
-    agentic: 5.5
-    extraction: 5.8
-  specialty_tags:
-  - uncensored_roleplay
-  - creative_writing
-  params_b: 8.0
-  publisher: mradermacher
-  notes: Llama-3.3 8B uncensored thinking variant at Q4_K_S (4.7 GB). Roleplay / creative
-    writing only.
-  checked: false
-- model_id: lmstudio/qwen3.5-9b
-  source: lmstudio
-  endpoint: http://localhost:1234
-  context_length: 128000
-  pricing: null
-  throughput_tps: 35.0
-  task_scores:
-    reasoning: 6.0
-    coding: 6.5
-    summarize: 7.0
-    writing: 6.5
-    roleplay: 6.0
-    agentic: 6.0
-    extraction: 6.8
-  specialty_tags:
-  - mid_local
-  - fast_local
-  params_b: 9.0
-  publisher: lmstudio-community
-  notes: Qwen-3.5 9B at Q4_K_M (5.6 GB). Solid small-mid generalist; strong on extraction.
-  checked: false
-- model_id: lmstudio/llama-3.3-70b-instruct
-  source: lmstudio
-  endpoint: http://localhost:1234
-  context_length: 128000
-  pricing: null
-  throughput_tps: 8.0
-  task_scores:
-    reasoning: 7.8
-    coding: 7.5
-    summarize: 8.0
-    writing: 7.5
-    roleplay: 7.5
-    agentic: 7.5
-    extraction: 7.8
-  specialty_tags:
-  - heavy_local
-  - long_context_local
-  params_b: 70.0
-  publisher: bartowski
-  notes: Llama-3.3 70B at Q4_K_S (40.3 GB). Strongest local option; slow throughput.
-  checked: false
+# BORG_ROUTE capability matrix — seeded models.
+#
+# LM Studio / Ollama rows are populated LIVE by POST /models/discover.
+# Do not hand-seed them here (BRT-DS-01). Operators load models in LM Studio
+# and click Discover; the matrix then learns model ids, endpoints, and context
+# lengths from the live server. Run Get Info next to fill task_scores.
+#
+# OpenRouter rows below ARE seeded because the curated 12-model list is a
+# deliberate operator choice surfaced in the UI, not a live-probed truth.
+
 - model_id: openrouter/anthropic/claude-opus-4.7
   source: openrouter
-  endpoint: null
+  endpoint: https://openrouter.ai/api
   context_length: 1000000
   pricing:
     input_per_token: 5.0e-06
@@ -173,7 +34,7 @@
   checked: false
 - model_id: openrouter/openai/gpt-5.4-pro
   source: openrouter
-  endpoint: null
+  endpoint: https://openrouter.ai/api
   context_length: 1050000
   pricing:
     input_per_token: 3.0e-05
@@ -198,7 +59,7 @@
   checked: false
 - model_id: openrouter/x-ai/grok-4.20
   source: openrouter
-  endpoint: null
+  endpoint: https://openrouter.ai/api
   context_length: 2000000
   pricing:
     input_per_token: 2.0e-06
@@ -222,7 +83,7 @@
   checked: false
 - model_id: openrouter/anthropic/claude-sonnet-4.6
   source: openrouter
-  endpoint: null
+  endpoint: https://openrouter.ai/api
   context_length: 1000000
   pricing:
     input_per_token: 3.0e-06
@@ -246,7 +107,7 @@
   checked: false
 - model_id: openrouter/google/gemini-3.1-pro-preview
   source: openrouter
-  endpoint: null
+  endpoint: https://openrouter.ai/api
   context_length: 1048576
   pricing:
     input_per_token: 2.0e-06
@@ -270,7 +131,7 @@
   checked: false
 - model_id: openrouter/moonshotai/kimi-k2-thinking
   source: openrouter
-  endpoint: null
+  endpoint: https://openrouter.ai/api
   context_length: 262144
   pricing:
     input_per_token: 6.0e-07
@@ -293,7 +154,7 @@
   checked: false
 - model_id: openrouter/openai/gpt-5.3-codex
   source: openrouter
-  endpoint: null
+  endpoint: https://openrouter.ai/api
   context_length: 400000
   pricing:
     input_per_token: 1.75e-06
@@ -315,7 +176,7 @@
   checked: false
 - model_id: openrouter/deepseek/deepseek-v3.2
   source: openrouter
-  endpoint: null
+  endpoint: https://openrouter.ai/api
   context_length: 131072
   pricing:
     input_per_token: 2.52e-07
@@ -338,7 +199,7 @@
   checked: false
 - model_id: openrouter/x-ai/grok-4.1-fast
   source: openrouter
-  endpoint: null
+  endpoint: https://openrouter.ai/api
   context_length: 2000000
   pricing:
     input_per_token: 2.0e-07
@@ -361,7 +222,7 @@
   checked: false
 - model_id: openrouter/openai/gpt-5.4-nano
   source: openrouter
-  endpoint: null
+  endpoint: https://openrouter.ai/api
   context_length: 400000
   pricing:
     input_per_token: 2.0e-07
@@ -384,7 +245,7 @@
   checked: false
 - model_id: openrouter/google/gemini-3.1-flash-lite-preview
   source: openrouter
-  endpoint: null
+  endpoint: https://openrouter.ai/api
   context_length: 1048576
   pricing:
     input_per_token: 2.5e-07
@@ -407,7 +268,7 @@
   checked: false
 - model_id: openrouter/perplexity/sonar-pro-search
   source: openrouter
-  endpoint: null
+  endpoint: https://openrouter.ai/api
   context_length: 200000
   pricing:
     input_per_token: 3.0e-06

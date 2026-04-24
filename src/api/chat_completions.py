@@ -22,6 +22,7 @@ Error codes:
 """
 import asyncio
 import json
+import os
 import time
 import uuid
 from typing import AsyncIterator, Optional
@@ -34,6 +35,7 @@ from pydantic import BaseModel, ValidationError
 from src.db.schema import DB_PATH, create_all
 from src.pipeline.runner import run_pipeline
 from src.registry.capability_matrix import CapabilityMatrix
+from src.registry.model_call import resolve_model_call
 from src.registry.router import select_model
 
 router = APIRouter()
@@ -169,18 +171,22 @@ async def _bypass_to_model(
             status_code=404,
             detail={"error": "BRT-API-011", "message": f"Model '{model_id}' not found in matrix"},
         )
-    if not model_info.endpoint:
+    try:
+        url, headers, body_model = resolve_model_call(model_info)
+    except ValueError as exc:
         raise HTTPException(
             status_code=422,
-            detail={"error": "BRT-API-011", "message": f"Model '{model_id}' has no endpoint configured"},
-        )
+            detail={"error": "BRT-API-011", "message": str(exc)},
+        ) from exc
 
+    max_tokens = int(os.getenv("ANSWERER_MAX_TOKENS", "2000"))
     payload = {
-        "model": "default",
+        "model": body_model,
         "messages": [{"role": m.role, "content": m.content} for m in messages],
+        "max_tokens": max_tokens,
     }
     async with httpx.AsyncClient(timeout=120) as client:
-        resp = await client.post(f"{model_info.endpoint}/v1/chat/completions", json=payload)
+        resp = await client.post(url, json=payload, headers=headers)
     resp.raise_for_status()
     body = resp.json()
     return body["choices"][0]["message"]["content"]
@@ -199,7 +205,7 @@ async def _stream_bypass_relay(
     word-by-word simulation so the caller always gets a valid SSE stream.
     """
     model_info = matrix.get(model_id)
-    if not model_info or not model_info.endpoint:
+    if not model_info:
         # Fallback: non-streaming fetch then simulate
         try:
             text = await _bypass_to_model(matrix, model_id, messages)
@@ -213,15 +219,32 @@ async def _stream_bypass_relay(
             yield chunk
         return
 
+    try:
+        url, headers, body_model = resolve_model_call(model_info)
+    except ValueError:
+        try:
+            text = await _bypass_to_model(matrix, model_id, messages)
+        except Exception as exc:
+            err = {"id": f"chatcmpl-{run_id}", "object": "chat.completion.chunk",
+                   "created": int(time.time()), "model": model_alias,
+                   "choices": [{"index": 0, "delta": {"content": f"[BRT-API-013] {exc}"}, "finish_reason": "stop"}]}
+            yield f"data: {json.dumps(err)}\n\ndata: [DONE]\n\n"
+            return
+        async for chunk in _stream_response(text, model_alias, run_id):
+            yield chunk
+        return
+
+    max_tokens = int(os.getenv("ANSWERER_MAX_TOKENS", "2000"))
     payload = {
-        "model": "default",
+        "model": body_model,
         "messages": [{"role": m.role, "content": m.content} for m in messages],
         "stream": True,
+        "max_tokens": max_tokens,
     }
     try:
         async with httpx.AsyncClient(timeout=120) as client:
             async with client.stream(
-                "POST", f"{model_info.endpoint}/v1/chat/completions", json=payload
+                "POST", url, json=payload, headers=headers
             ) as resp:
                 if resp.status_code != 200:
                     # Fallback to non-stream

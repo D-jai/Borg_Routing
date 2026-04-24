@@ -67,10 +67,12 @@
   <button onclick="addRow()" style="background:#333;color:#aaa;margin-top:0;">+ Add Provider</button>
 
   <div class="note">
-    <strong>How it works:</strong> Keys are written to <code>.env</code> as
-    <code>KEY_OPENROUTER=…</code> and <code>ENDPOINT_OPENROUTER=…</code>.
-    After saving, run <strong>Discover Models</strong> on the Models page to pull
-    in this provider's model list and pricing.
+    <strong>How it works:</strong> OpenRouter keys are written to <code>.env</code> as
+    <code>OPENROUTER_API_KEY=…</code> (the canonical env var read by discovery,
+    the scorer, and chat completions). Custom providers fall back to
+    <code>KEY_{NAME}=…</code> and <code>ENDPOINT_{NAME}=…</code>. After saving,
+    run <strong>Discover Models</strong> on the Models page to pull in this
+    provider's model list and pricing.
   </div>
 </div>
 

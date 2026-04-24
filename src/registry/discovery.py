@@ -29,6 +29,7 @@ from .models import ModelInfo, Pricing
 logger = logging.getLogger(__name__)
 
 _OPENROUTER_MODELS_URL = "https://openrouter.ai/api/v1/models"
+_OPENROUTER_API_BASE = "https://openrouter.ai/api"
 _CURATED_MODELS_PATH = "data/curated_models.yaml"
 _TIMEOUT = 5.0
 
@@ -201,6 +202,7 @@ async def discover_openrouter(
             ModelInfo(
                 model_id=f"openrouter/{model_id}",
                 source="openrouter",
+                endpoint=_OPENROUTER_API_BASE,
                 context_length=int(context_length),
                 pricing=pricing,
             )
@@ -248,6 +250,35 @@ async def discover_custom_key(
     return found
 
 
+async def reconcile_local_rows(
+    matrix: CapabilityMatrix,
+    discovered_ids: set[str],
+) -> int:
+    """Mark local rows (lmstudio/ollama) unavailable if not seen this pass.
+
+    "Unavailable" means ``endpoint`` is cleared and ``checked`` forced to False.
+    The row is kept so operator-assigned scores / notes survive; it just can't
+    be routed to until discovery sees it again.
+
+    OpenRouter and custom_key rows are never reconciled — their authoritative
+    source is the curated list / operator-provided credentials, not live probing.
+
+    Returns:
+        Number of rows reconciled.
+    """
+    reconciled = 0
+    for m in matrix.all():
+        if m.source not in ("lmstudio", "ollama"):
+            continue
+        if m.model_id in discovered_ids:
+            continue
+        if m.endpoint or m.checked:
+            m.endpoint = None
+            m.checked = False
+            reconciled += 1
+    return reconciled
+
+
 async def discover_all(
     matrix: CapabilityMatrix,
     openrouter_key: Optional[str] = None,
@@ -256,7 +287,9 @@ async def discover_all(
 
     Existing task_scores, specialty_tags, throughput_tps, and the `checked`
     flag are preserved — discovery only refreshes endpoint, context_length,
-    and pricing.
+    and pricing. Local rows (lmstudio/ollama) that were NOT seen in this pass
+    are reconciled by :func:`reconcile_local_rows` (endpoint cleared,
+    checked=False) so stale ghosts from previous installs don't keep routing.
     """
     import asyncio
 
@@ -268,6 +301,7 @@ async def discover_all(
     )
 
     upserted = 0
+    all_found: list[ModelInfo] = []
     for batch in results:
         if isinstance(batch, Exception):
             logger.warning("Discovery batch failed: %s", batch)
@@ -287,6 +321,15 @@ async def discover_all(
                 matrix.upsert(merged)
             else:
                 matrix.upsert(model)
+            all_found.append(model)
             upserted += 1
+
+    discovered_ids = {m.model_id for m in all_found}
+    reconciled = await reconcile_local_rows(matrix, discovered_ids)
+    if reconciled:
+        logger.info(
+            "Reconciled %d stale local row(s): endpoint cleared, checked=False.",
+            reconciled,
+        )
 
     return upserted

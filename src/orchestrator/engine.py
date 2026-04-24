@@ -18,6 +18,7 @@ Error codes:
 import asyncio
 import json
 import logging
+import os
 import re
 import time
 from typing import Optional
@@ -42,6 +43,8 @@ from src.orchestrator.fold_in import fold_in
 from src.prompts.base import build_system_prompt, load_governance
 from src.prompts.orchestrator import ORCHESTRATOR_SYSTEM_PROMPT
 from src.registry.capability_matrix import CapabilityMatrix
+from src.registry.model_call import resolve_model_call
+from src.registry.models import ModelInfo
 from src.registry.router import select_model
 from src.skills.library import SkillLibrary
 
@@ -112,13 +115,26 @@ def _safe_sub(template: str, subs: dict) -> str:
     return result
 
 
+def _pinned_model(endpoint: str, name: str) -> ModelInfo:
+    """Wrap a pinned-config endpoint/name in a synthetic ModelInfo so the
+    resolve_model_call helper can handle it uniformly with matrix rows."""
+    return ModelInfo(
+        model_id=f"lmstudio/{name}" if "/" not in name else name,
+        source="lmstudio",
+        endpoint=endpoint,
+        context_length=4096,
+    )
+
+
 async def _select_orchestrator_model(
     task_type: str,
     db_path: str,
-) -> tuple[str, str]:
-    """Select the orchestrator model endpoint and name.
+    quality_requirement: float = 6.5,
+    time_cost_per_sec: Optional[float] = None,
+) -> ModelInfo:
+    """Select the orchestrator ModelInfo row.
 
-    Returns: (endpoint, model_name)
+    Returns: ModelInfo
 
     Raises:
         ValueError: BRT-ORC-007 if no model available.
@@ -127,38 +143,40 @@ async def _select_orchestrator_model(
     pinned = await get_config("orchestrator_endpoint", db_path=db_path)
     if pinned:
         name = await get_config("orchestrator_model_name", db_path=db_path) or "orchestrator"
-        return pinned, name
+        return _pinned_model(pinned, name)
 
     # Try to select from capability matrix
     matrix = _get_matrix()
+    select_kwargs: dict = {}
+    if time_cost_per_sec is not None:
+        select_kwargs["time_cost_per_sec"] = time_cost_per_sec
     try:
-        model = select_model(
+        return select_model(
             matrix=matrix,
             task_type=task_type,
-            quality_requirement=8.0,
+            quality_requirement=quality_requirement,
+            **select_kwargs,
         )
-        endpoint = model.endpoint or ""
-        return endpoint, model.model_id
     except Exception:
         pass
 
-    # Degraded fallback: if no checked model meets 8.0, retry at 5.1 —
-    # just above the default 5.0 unresearched score, so rows that have
+    # Degraded fallback: if no checked model meets the quality bar, retry at
+    # 5.1 — just above the default 5.0 unresearched score, so rows that have
     # genuinely been scored even weakly are preferred over flat defaults.
     try:
         model = select_model(
             matrix=matrix,
             task_type=task_type,
             quality_requirement=5.1,
+            **select_kwargs,
         )
         logger.warning(
-            "BRT-ORC-007-DEGRADED: no model met quality_requirement=8.0 for "
+            "BRT-ORC-007-DEGRADED: no model met quality_requirement=%s for "
             "task_type='%s'; falling back to '%s' at its current score. "
             "Run Get Model Info to refresh scores.",
-            task_type, model.model_id,
+            quality_requirement, task_type, model.model_id,
         )
-        endpoint = model.endpoint or ""
-        return endpoint, model.model_id
+        return model
     except Exception:
         pass
 
@@ -182,8 +200,7 @@ async def _invoke_orchestrator_model(
     skills_catalogue: str,
     governance: dict,
     available_models_brief: str,
-    orchestrator_endpoint: str,
-    orchestrator_model_name: str,
+    orchestrator_model: ModelInfo,
     db_path: str,
 ) -> dict:
     """One call to the orchestrator model. Returns parsed JSON dict.
@@ -218,21 +235,23 @@ async def _invoke_orchestrator_model(
         user_instruction=user_instruction,
     )
 
+    url, headers, body_model = resolve_model_call(orchestrator_model)
+    max_tokens = int(os.getenv("ORCHESTRATOR_MAX_TOKENS", "2000"))
+
     payload = {
-        "model": "default",
+        "model": body_model,
         "messages": [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_instruction if mode == "plan" else "continue"},
         ],
         "temperature": 0.1,
+        "max_tokens": max_tokens,
     }
 
     t0 = time.monotonic()
     try:
         async with httpx.AsyncClient(timeout=_MODEL_CALL_TIMEOUT) as client:
-            resp = await client.post(
-                f"{orchestrator_endpoint}/v1/chat/completions", json=payload
-            )
+            resp = await client.post(url, json=payload, headers=headers)
         resp.raise_for_status()
     except httpx.TimeoutException as exc:
         raise ValueError(f"BRT-ORC-001: orchestrator call timed out") from exc
@@ -256,7 +275,7 @@ async def _invoke_orchestrator_model(
     await write_event(
         "orchestrator_decision",
         run_id=run_id,
-        model_id=orchestrator_model_name,
+        model_id=orchestrator_model.model_id,
         tokens_input=tokens_in,
         tokens_output=tokens_out,
         latency_ms=latency_ms,
@@ -395,13 +414,29 @@ async def orchestrate_run(
 
     governance = await load_governance(lambda key: get_config(key, db_path=db_path))
 
+    # Read routing knobs from config (falls back to env, then hardcoded defaults).
+    # BRT-RT-01 lowers the orchestrator quality bar from 8.0 → 6.5 so mid-tier
+    # local models (e.g. lmstudio/gemma-4-26b-a4b at reasoning=6.8) are eligible.
+    configured_quality = await get_config("orchestrator_quality_requirement", db_path=db_path)
+    quality_req = float(
+        configured_quality if configured_quality is not None
+        else os.getenv("ORCHESTRATOR_QUALITY_REQUIREMENT", "6.5")
+    )
+    configured_time_cost = await get_config("time_cost_per_sec", db_path=db_path)
+    time_cost = float(
+        configured_time_cost if configured_time_cost is not None
+        else os.getenv("TIME_COST_PER_SEC", "0.0001")
+    )
+
     try:
-        orch_endpoint, orch_model_name = await _select_orchestrator_model(
-            "reasoning", db_path=db_path
+        orch_model = await _select_orchestrator_model(
+            "reasoning",
+            db_path=db_path,
+            quality_requirement=quality_req,
+            time_cost_per_sec=time_cost,
         )
     except ValueError:
-        orch_endpoint = ""
-        orch_model_name = "unavailable"
+        orch_model = _pinned_model(endpoint="", name="unavailable")
 
     skill_lib = _get_skill_lib()
     skills_catalogue = skill_lib.catalogue_for_prompt()
@@ -421,8 +456,7 @@ async def orchestrate_run(
         skills_catalogue=skills_catalogue,
         governance=governance,
         available_models_brief=available_models_brief,
-        orchestrator_endpoint=orch_endpoint,
-        orchestrator_model_name=orch_model_name,
+        orchestrator_model=orch_model,
         db_path=db_path,
     )
 
@@ -455,12 +489,17 @@ async def orchestrate_run(
 
     # Select a default answerer model
     try:
-        default_model = select_model(matrix=matrix, task_type="reasoning")
+        default_model = select_model(
+            matrix=matrix,
+            task_type="reasoning",
+            quality_requirement=quality_req,
+            time_cost_per_sec=time_cost,
+        )
         answerer_endpoint = default_model.endpoint or ""
         answerer_name = default_model.model_id
     except Exception:
-        answerer_endpoint = orch_endpoint
-        answerer_name = orch_model_name
+        answerer_endpoint = orch_model.endpoint or ""
+        answerer_name = orch_model.model_id
 
     while loop_count < MAX_LOOPS:
         loop_count += 1
