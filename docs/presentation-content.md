@@ -241,3 +241,19 @@ gives operators real-time control over model behaviour without restarting the se
 
 **Portfolio/LinkedIn angle:** Phase 3 is about expectation-setting and user-facing polish. The heartbeat fix is twelve lines of code; the Rule Zero shortcut is a regex and two phrase lists. Both change the first-minute experience of BORG_ROUTE from "broken" to "obvious". The docs section is the honest-marketing counterpart — admitting where BORG costs more so the operator trusts you when you claim it saves money at scale.
 
+---
+
+<!-- Added: 2026-04-23 - Phase 4: Runtime tooling + adaptive research -->
+## Phase 4 — Runtime tooling
+
+**What it adds:**
+- **BRT-WEB-01:** BORG_ROUTE gains its first runtime tool — `web_search` — powered by Tavily primary + Perplexity fallback. The design choice ("Option B+") is the quietly-clever part: the executor pre-fetches search results **before** the LLM call and injects them into the prompt, so every answerer model gets web access without anyone having to implement model-native tool-calling. Local gemma gets search. Claude gets search. Any OpenAI-compatible model gets search. One HTTP call per envelope, bounded cost, no tool-call loops.
+- **Multi-search heuristic (orchestrator prompt):** for any research question, the orchestrator emits two parallel `web_search` nodes — one broad, one narrow — then uses its existing `re_plan` loop to decide whether to compose, refine with more searches, or verify contradictions. `max_depth` bounds the total search spend deterministically. The whole adaptive-tool-use pattern is built entirely out of primitives we already had (fan-out, re_plan, depends_on) — no new orchestration concepts needed.
+- **Tool dispatcher foundation:** a new `src/tools/` package (BaseTool, ToolRequest, ToolInvocationResult, run_tool_requests) sets up the home for inbox and outbox tools in Phase 5. The envelope protocol grows one field, `tool_requests: list[ToolRequest]`, and the executor resolves it before dispatch.
+- **Provider failover:** Tavily down → silent fallback to Perplexity (one `BRT-TOOL-DEGRADED` event in the trace, run continues). Both down → `BRT-TOOL-002` envelope failure, orchestrator re-plans.
+- **Cross-cutting observability:** every tool call gets a `model_call` trace event with `model_id="tool:web_search"`, so the Live Trace UI shows tool calls alongside real model calls, same schema, no magic.
+
+**Demo talking point:** ask "what was the highest-grossing movie last month?" on a pure-local-model pool. Before Phase 4: hallucinated answer. After Phase 4: two parallel Tavily searches resolve in ~1s, gemma-26b composes a grounded answer with URLs. Same model. New tool. Zero provider lock-in.
+
+**Portfolio/LinkedIn angle:** Phase 4 closes an architectural gap that most agent frameworks solve by requiring a frontier model with native tool-calling. BORG_ROUTE solves it by doing the tool work in the executor — pre-fetched, deterministic, legible, bounded. This is the kind of design decision that separates production-grade orchestration from demo-ware: you keep the hard-won invariants (one HTTP call per envelope, per-envelope token accounting, local models first-class) and only grow the envelope protocol by one field.
+

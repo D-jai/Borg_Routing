@@ -9,6 +9,7 @@ Error codes:
 - BRT-ENV-003: current_depth exceeds max_depth
 - BRT-ENV-004: instruction is empty or whitespace-only
 - BRT-ENV-005: Invalid SideEffectAction — unknown action value
+- BRT-ENV-006: ToolRequest.tool is empty or whitespace-only (BRT-WEB-01)
 """
 from typing import Literal, Optional
 from uuid import UUID
@@ -17,6 +18,25 @@ from pydantic import BaseModel, field_validator, model_validator
 
 VALID_ENVELOPE_TYPES = {"orchestrate", "answerer", "apply_to_each", "state_op"}
 VALID_SIDE_EFFECT_ACTIONS = {"write", "delete"}
+
+
+class ToolRequest(BaseModel):
+    """A single tool invocation requested by the orchestrator on behalf of a leaf.
+
+    The executor runs the tool BEFORE calling the answerer model and injects
+    the result into ``dependency_input.tool_results[<tool>]`` so the model
+    sees the output in its prompt. No in-model tool-call loops — see
+    BRT-WEB-01 / "Option B+" in Bug Report.md.
+    """
+    tool: str
+    args: dict = {}
+
+    @field_validator("tool")
+    @classmethod
+    def _non_empty(cls, v: str) -> str:
+        if not v or not v.strip():
+            raise ValueError("BRT-ENV-006: ToolRequest.tool must be non-empty")
+        return v.strip()
 
 
 class SideEffectAction(BaseModel):
@@ -51,6 +71,7 @@ class WrappedTask(BaseModel):
     context: str = ""
     state_query: Optional[str] = None
     side_effects: list[str] = []
+    tool_requests: list[ToolRequest] = []
     dependency_input: dict = {}
     output_schema: dict
     max_output_tokens: int = 1000

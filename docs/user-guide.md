@@ -176,6 +176,51 @@ Writing a synthesis node **without** `depends_on` is an anti-pattern — that no
 
 ---
 
+## Web Search Tool (BRT-WEB-01)
+
+BORG_ROUTE has one built-in runtime tool: `web_search`. It closes the "scorer has web access, runtime doesn't" asymmetry identified in the Bug Report's deferred-capabilities section.
+
+### How it works
+The orchestrator adds a `tool_requests` array to any answerer node in its plan:
+
+```json
+{"type":"answerer","id":"n1",
+ "instruction":"Summarise the findings.",
+ "output_schema":{"summary":"string"},
+ "tool_requests":[
+   {"tool":"web_search","args":{"query":"GPT-5 release pricing 2026"}}
+ ]}
+```
+
+The executor runs the search **before** calling the answerer LLM, then injects the normalised `{title, url, snippet}` list into the prompt. Any model — local or remote — sees the results; there is no model-native tool-calling loop.
+
+### Providers and fallback
+Tavily is the primary provider (cheap, fast, raw results). Perplexity Sonar (via OpenRouter) is the silent fallback.
+
+- Set `TAVILY_API_KEY` for primary. If absent, Perplexity becomes primary — the first call logs `BRT-TOOL-DEGRADED` once per process and the run continues.
+- If both providers fail, the envelope comes back `status=failed` with `failure_reason=BRT-TOOL-002`. The orchestrator's `re_plan` step decides whether to retry with a different query or give up.
+- Flip the order with `BORG_WEB_SEARCH_PROVIDER_ORDER=perplexity,tavily` in `.env`.
+
+### Multi-search heuristic
+The orchestrator prompt teaches a broad + narrow protocol: for any non-trivial research question, plan **two** independent `web_search` nodes in parallel — one broad (the full question), one narrow (a specific proper noun / angle / time window). Re-enter `re_plan` with both result sets and decide:
+
+- **Enough info** → proceed to compose.
+- **Gap detected** → emit 1-2 more searches with refined queries.
+- **Contradictions** → emit a verification search.
+
+`max_depth` bounds the total spend.
+
+### Observability
+Each tool invocation writes a `model_call` event with `model_id="tool:web_search"` so the run trace can filter tool calls from real model calls. The payload captures the query and the top-k URLs.
+
+### Error codes at a glance
+- `BRT-TOOL-000` — plan references a tool not in the registry (caught in `validate_outbound`, before dispatch).
+- `BRT-TOOL-001` — tool registered but no provider has credentials.
+- `BRT-TOOL-002` — all providers failed at runtime.
+- `BRT-TOOL-DEGRADED` — primary provider down, fallback answered (informational, once per process).
+
+---
+
 ## Rule Zero Shortcut (BRT-ZERO-01)
 
 For unambiguously conversational short prompts — greetings, factual lookups, small requests, casual chat — BORG_ROUTE now bypasses the plan / re_plan cycle and answers in a single compose call. This saves 2-3 orchestrator calls (~$0.0035) on prompts where decomposition adds no value.

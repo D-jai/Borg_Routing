@@ -2,10 +2,12 @@
 
 Error codes:
 - BRT-ENV-001..005: outbound violations (see schema.py)
+- BRT-ENV-006: ToolRequest.tool empty (raised inside schema on construction)
 - BRT-ENV-010: answerer returned a status not matching the schema (shouldn't
                happen if schema is correct, but guards against runtime bypasses)
 - BRT-ENV-011: inbound output does not match the task's declared output_schema
 - BRT-ENV-012: failure_reason missing when status=failed
+- BRT-TOOL-000: tool_request references a tool not in TOOL_REGISTRY (BRT-WEB-01)
 """
 from src.envelopes.schema import InboundEnvelope, WrappedTask
 
@@ -20,6 +22,7 @@ def validate_outbound(task: WrappedTask) -> None:
     Raises:
         ValueError: BRT-ENV-003 if current_depth > max_depth.
         ValueError: BRT-ENV-004 if instruction is empty.
+        ValueError: BRT-TOOL-000 if any tool_request names an unknown tool.
     """
     if task.current_depth > task.max_depth:
         raise ValueError(
@@ -30,6 +33,18 @@ def validate_outbound(task: WrappedTask) -> None:
         raise ValueError(
             f"BRT-ENV-004: instruction is empty for envelope {task.envelope_id}"
         )
+    # BRT-WEB-01 — catch hallucinated tool names before dispatch.
+    if task.tool_requests:
+        # Late import so the tool package can import validator types cleanly.
+        from src.tools.registry import TOOL_REGISTRY  # noqa: PLC0415
+
+        for req in task.tool_requests:
+            if req.tool not in TOOL_REGISTRY:
+                raise ValueError(
+                    f"BRT-TOOL-000: tool_request references unknown tool "
+                    f"'{req.tool}' for envelope {task.envelope_id}. "
+                    f"Registered tools: {sorted(TOOL_REGISTRY)}"
+                )
 
 
 def validate_inbound(env: InboundEnvelope, task: WrappedTask) -> None:

@@ -49,7 +49,7 @@ from src.db.state import (
     update_envelope_inbound,
     update_run_status,
 )
-from src.envelopes.schema import InboundEnvelope, WrappedTask
+from src.envelopes.schema import InboundEnvelope, ToolRequest, WrappedTask
 from src.logging.writer import write_event
 from src.orchestrator.fold_in import fold_in
 from src.prompts.base import build_system_prompt, load_governance
@@ -484,6 +484,16 @@ def _build_task_from_node(
             # because we don't have db_path here.
             base_dep_input["_depends_on_missing"] = missing
 
+    # BRT-WEB-01 — propagate tool_requests from the plan JSON into the task.
+    # The executor will run them before the LLM call and inject results.
+    raw_tool_requests = node.get("tool_requests") or []
+    tool_requests: list[ToolRequest] = []
+    for req in raw_tool_requests:
+        if isinstance(req, dict) and req.get("tool"):
+            tool_requests.append(
+                ToolRequest(tool=str(req["tool"]), args=req.get("args") or {})
+            )
+
     return WrappedTask(
         envelope_id=uuid4(),
         run_id=run_id,
@@ -499,6 +509,7 @@ def _build_task_from_node(
         state_query=node.get("state_query"),
         output_schema=node.get("output_schema", {}),
         side_effects=node.get("side_effects", []),
+        tool_requests=tool_requests,
         dependency_input=base_dep_input,
         trigger_reason=node.get("trigger_reason", "initial_plan"),
     )

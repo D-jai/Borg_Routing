@@ -1,0 +1,129 @@
+id: BRT-WEB-01
+timestamp: 2026-04-23T23:45:00Z
+type: feat
+scope: phase-4
+title: Native web_search runtime tool — Tavily primary, Perplexity fallback
+
+summary_human: |
+  BORG_ROUTE gains its first runtime tool, closing the scorer/runtime
+  asymmetry flagged in the deferred-capabilities section of Bug
+  Report.md. The scorer has web access (for model capability research);
+  runtime now has it too.
+
+  Design: "Option B+" (orchestrator-driven adaptive search). The
+  executor pre-fetches tool results BEFORE the LLM call, injects them
+  into the prompt, and loops ONLY via the existing orchestrator re_plan
+  DAG — no in-model tool-calling loops. This means every answerer model
+  (local gemma, cloud claude, anything that speaks chat-completions)
+  gets search access equally. Local-first is preserved.
+
+  The orchestrator prompt teaches a broad + narrow heuristic: for any
+  research question, emit two parallel web_search nodes, inspect both
+  result sets in re_plan, then either compose or spawn 1-2 refined
+  searches. max_depth bounds the overall spend.
+
+  Providers: Tavily (cheap, fast, raw results) is primary; Perplexity
+  Sonar via OpenRouter is the silent fallback. Missing TAVILY_API_KEY
+  degrades silently to Perplexity and logs BRT-TOOL-DEGRADED once per
+  process. If both providers fail, the envelope returns
+  status=failed with BRT-TOOL-002 and the orchestrator's re_plan step
+  decides what to do.
+
+  Envelope shape: WrappedTask grows a tool_requests: list[ToolRequest]
+  field (default []). validate_outbound rejects hallucinated tool names
+  with BRT-TOOL-000 BEFORE dispatch. Plans without tool_requests are
+  unchanged; zero impact on Phase 1-3 behaviour.
+
+  Architecture: new src/tools/ package — BaseTool ABC, ToolInvocationResult,
+  ToolError, TOOL_REGISTRY, run_tool_requests dispatcher. Inbox and
+  outbox (future BRT-INBOX-01 / BRT-OUTBOX-01) will register under the
+  same dispatcher — one shape, three capabilities.
+
+files_touched:
+  - src/tools/__init__.py
+  - src/tools/base.py
+  - src/tools/web_search.py
+  - src/tools/registry.py
+  - src/envelopes/schema.py
+  - src/envelopes/validator.py
+  - src/orchestrator/engine.py
+  - src/agents/executor.py
+  - src/prompts/orchestrator.py
+  - .env.example
+  - docs/user-guide.md
+  - docs/errors/error-registry.md
+  - tests/tools/__init__.py
+  - tests/tools/test_web_search.py
+  - tests/tools/test_registry.py
+  - tests/envelopes/test_schema_tool_requests.py
+  - tests/agents/test_executor_tool_requests.py
+  - tests/prompts/test_web_search_prompt_section.py
+
+public_surface:
+  envelope:
+    - "WrappedTask.tool_requests: list[ToolRequest]"
+    - "ToolRequest(tool: str, args: dict)"
+  orchestrator_plan_json:
+    - "tool_requests: [{tool: 'web_search', args: {query, max_results}}]"
+  tools_package:
+    - "src.tools.BaseTool (ABC)"
+    - "src.tools.ToolInvocationResult"
+    - "src.tools.ToolError"
+    - "src.tools.TOOL_REGISTRY"
+    - "src.tools.register_tool"
+    - "src.tools.run_tool_requests"
+
+breaking_change: false
+
+error_codes_added:
+  - BRT-ENV-006  # ToolRequest.tool empty
+  - BRT-TOOL-000 # unknown tool (caught in validate_outbound)
+  - BRT-TOOL-001 # tool unavailable (no provider credentials)
+  - BRT-TOOL-002 # runtime failure after all providers exhausted
+  - BRT-TOOL-DEGRADED # primary provider down, fallback answered
+
+env_vars_added:
+  - TAVILY_API_KEY
+  - BORG_WEB_SEARCH_MAX_RESULTS
+  - BORG_WEB_SEARCH_TIMEOUT_SEC
+  - BORG_WEB_SEARCH_PROVIDER_ORDER
+
+tests_added: { count: 28, note: "web_search 7 + registry 7 + schema 6 + executor 4 + prompt 4. Fuller test load per user's request." }
+
+audience: [developer, operator, product]
+demo_value: high
+user_visible: true
+keywords: [web-search, tool-dispatcher, tavily, perplexity, option-b, multi-search, research]
+
+user_guide:
+  heading: "Web Search Tool (BRT-WEB-01)"
+
+install_guide:
+  prerequisites_added:
+    - "Optional: TAVILY_API_KEY for cheap primary search (https://tavily.com)"
+  setup_steps: []
+
+architectural_notes: |
+  The Option B+ design was chosen over model-native tool-calling (Option
+  A) and hybrid whitelist (Option C) because:
+
+  1. Local models (gemma, qwen, llama via LM Studio/Ollama) support
+     tool-calling inconsistently; pre-fetching works for every model
+     equally.
+  2. The one-HTTP-call-per-envelope invariant is preserved; tokens and
+     latency stay legible per envelope.
+  3. Runaway cost from tool-call loops is impossible — the orchestrator's
+     max_depth bounds total search spend deterministically.
+
+  Upgrade path to Option A is kept open: a future `allow_model_tools:
+  bool = False` field on WrappedTask would let the executor bind tools
+  onto the chat-completions payload and run a bounded in-model loop
+  when that opt-in is set. Option B+ stays the default.
+
+  Inbox (BRT-INBOX-01) and outbox (BRT-OUTBOX-01) will register under
+  the same dispatcher as additional tools — no new primitives needed.
+  This slice lays the foundation.
+
+presentation:
+  hero_bullet: "BORG_ROUTE learns to look things up. One new package, one new runtime tool, and the scorer/runtime asymmetry is gone — with local models getting search access for the first time."
+  slide_angle: "The cheapest implementation of model-grade tool calling is to do the tools BEFORE the model call. Pre-fetch, inject, one round-trip per envelope, bounded cost, works with any model including the ones in your LM Studio. We turned a hard protocol problem into a plan-time decision."

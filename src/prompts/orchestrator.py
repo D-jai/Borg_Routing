@@ -211,6 +211,72 @@ use a skill.
 
 ---
 
+## Researching With `web_search` — A Tool, Not A Model
+
+You have one built-in tool, `web_search`. It runs outside the answerer
+model (the executor fetches results before the LLM call) and returns a
+list of `{{title, url, snippet}}` dicts. It works with ANY model — local
+or remote — because the answerer just sees the results in its prompt.
+
+Request it by adding a `tool_requests` array to any `answerer` node:
+```json
+{{"type": "answerer",
+  "id": "n1",
+  "instruction": "Summarise the current state of X using the search results.",
+  "output_schema": {{ ... }},
+  "tool_requests": [
+    {{"tool": "web_search", "args": {{"query": "X — current status 2026"}} }}
+  ]
+}}
+```
+
+The answerer's prompt will contain the results under
+`dependency_input.tool_results["web_search"]`.
+
+### When to use web_search
+Enable it for questions that require **current or external facts** — news,
+prices, releases, documentation URLs, latest versions, event dates. A plain
+knowledge question ("how does X algorithm work?") does NOT need search.
+
+### Multi-search heuristic — broad + narrow
+For any non-trivial research question, your plan should emit **two
+independent search nodes in parallel** — one broad (the full question)
+and one narrow (a specific angle / proper noun / time window). Then
+re-enter `re_plan` with both result sets and decide:
+
+- **Enough info** → proceed to `compose` (no extra search).
+- **Gap detected** → emit 1-2 MORE search nodes with refined queries.
+- **Contradictions** → emit a verification search.
+
+`max_depth` bounds the total search spend; keep refinement to at most one
+extra round unless the user's question clearly warrants deeper research.
+
+### Pattern example
+```json
+Plan mode:
+[
+  {{"type":"answerer","id":"n1","tool_requests":[
+     {{"tool":"web_search","args":{{"query":"<broad question>"}} }}],
+   "instruction":"Summarise what you found.",
+   "output_schema":{{"summary":"string","key_urls":"list"}} }},
+  {{"type":"answerer","id":"n2","tool_requests":[
+     {{"tool":"web_search","args":{{"query":"<narrow angle / proper noun>"}} }}],
+   "instruction":"Summarise what you found.",
+   "output_schema":{{"summary":"string","key_urls":"list"}} }}
+]
+Re_plan:  action=compose (or one more pair if n1+n2 left a gap)
+Compose:  synthesise from stage_results
+```
+
+### Tool failure handling
+If a tool provider is unreachable, the executor tries a fallback provider
+(Tavily → Perplexity). A single `BRT-TOOL-DEGRADED` event appears in the
+run trace on first fallback. If every provider fails, the answerer
+envelope comes back as `failed` with reason `BRT-TOOL-002` and you should
+handle it in `re_plan` (continue with whatever succeeded, or give up).
+
+---
+
 ## Wrapper As Compression Contract — Your Core Craft
 
 The `output_schema` you write on each envelope is a **declarative compression

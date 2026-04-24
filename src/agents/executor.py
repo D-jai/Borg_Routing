@@ -14,6 +14,8 @@ Error codes:
 - BRT-ANS-006: model call timed out
 - BRT-ANS-007: governance load failed
 - BRT-ANS-008: unexpected executor error
+- BRT-TOOL-001: tool unavailable (caught via ToolInvocationResult, not raised)
+- BRT-TOOL-002: tool runtime failure (BRT-WEB-01)
 """
 import json
 import os
@@ -171,6 +173,75 @@ async def _execute_answerer(task: WrappedTask, db_path: str) -> InboundEnvelope:
         governance = await load_governance(lambda key: get_config(key, db_path=db_path))
     except Exception as exc:
         raise ValueError(f"BRT-ANS-007: governance load failed: {exc}") from exc
+
+    # BRT-WEB-01 — run tool_requests BEFORE the LLM call. Results land in
+    # dependency_input['tool_results'] so the prompt can read them.
+    if task.tool_requests:
+        from src.tools import run_tool_requests  # noqa: PLC0415
+
+        try:
+            tool_outcomes = await run_tool_requests(task.tool_requests)
+        except Exception as exc:
+            return InboundEnvelope(
+                envelope_id=task.envelope_id,
+                subtask_id=task.subtask_id,
+                status="failed",
+                output={},
+                failure_reason=f"BRT-TOOL-002: tool dispatcher crashed: {exc}",
+            )
+
+        public = {
+            name: [r.to_public_dict() for r in results]
+            for name, results in tool_outcomes.items()
+        }
+        # Inline tool_results into the context string so the answerer prompt
+        # (which does NOT read dependency_input directly) can see them. The
+        # key name "tool_results" is stamped verbatim so downstream prompts
+        # (and tests) can grep for it.
+        inlined_block = (
+            "\n\ntool_results (pre-fetched by the executor before this call):\n"
+            + json.dumps(public, indent=2, default=str)
+        )
+        task = task.model_copy(
+            update={
+                "context": (task.context or "") + inlined_block,
+                "dependency_input": {
+                    **task.dependency_input,
+                    "tool_results": public,
+                },
+            }
+        )
+
+        # Log one model_call event per tool invocation (model_id="tool:<name>"
+        # so the run trace can filter tool calls from real model calls).
+        for name, results in tool_outcomes.items():
+            for r in results:
+                await write_event(
+                    "model_call",
+                    run_id=task.run_id,
+                    envelope_id=task.envelope_id,
+                    model_id=f"tool:{name}",
+                    latency_ms=r.latency_ms,
+                    payload_in=json.dumps({"tool": name, "args": r.args})[:2000],
+                    payload_out=(r.error or "")[:2000] if r.status == "failed"
+                                else json.dumps(r.result)[:2000],
+                    db_path=db_path,
+                )
+
+        # If every tool request failed, surface a BRT-TOOL-002 envelope
+        # instead of calling the model against an empty tool_results.
+        all_results = [r for rs in tool_outcomes.values() for r in rs]
+        if all_results and all(r.status == "failed" for r in all_results):
+            first_err = next(
+                (r.error for r in all_results if r.error), "BRT-TOOL-002: tools failed"
+            )
+            return InboundEnvelope(
+                envelope_id=task.envelope_id,
+                subtask_id=task.subtask_id,
+                status="failed",
+                output={},
+                failure_reason=first_err,
+            )
 
     # Build system prompt — use safe replacement (prompt contains JSON {} examples)
     state_query_result = task.dependency_input.get("state_query_result", "(none)")

@@ -96,6 +96,15 @@
 | BRT-APE-004 | Depth limit exceeded | `src/orchestrator/apply_to_each.py::expand_and_run` | `current_depth >= max_depth`. Increase `max_depth` or flatten the plan structure. |
 | BRT-APE-005 | No items to process | `src/orchestrator/apply_to_each.py` | Items list is empty. Check the upstream state_op or input reference. |
 
+## BRT-TOOL — Runtime Tool Dispatcher (BRT-WEB-01)
+
+| Code | Description | Origin | Hints |
+|------|-------------|--------|-------|
+| BRT-TOOL-000 | `tool_request` references an unknown tool | `src/envelopes/validator.py::validate_outbound` | The plan named a tool not in `TOOL_REGISTRY`. Typo or orchestrator hallucination. Check the registered tool names (currently only `web_search`). Task fails before dispatch, caller handles via `re_plan`. |
+| BRT-TOOL-001 | Tool registered but has no runnable provider | `src/tools/registry.py::_lookup_or_raise` | Every configured provider is missing credentials. For `web_search`, this means both `TAVILY_API_KEY` and `OPENROUTER_API_KEY` are absent. Add at least one key to `.env`. |
+| BRT-TOOL-002 | Tool runtime failure after all providers exhausted | `src/tools/web_search.py::WebSearchTool.run` / `src/agents/executor.py` | The tool ran but every provider returned an error (HTTP, timeout, unparseable response). Check provider status, API keys, and network. The envelope returns `status=failed` and the orchestrator can re-plan with a different query. |
+| BRT-TOOL-DEGRADED | Primary provider down, fallback answered | `src/tools/web_search.py::WebSearchTool._note_degraded` | Informational warning, logged once per process. The run continues normally with results from the fallback provider. Check primary provider's dashboard / status page. |
+
 ## BRT-SKL — Skills Module
 
 | Code | Description | Origin | Hints |
