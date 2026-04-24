@@ -12,7 +12,27 @@ from fastapi.testclient import TestClient
 from unittest.mock import AsyncMock, patch
 
 from main import app, matrix
+from src.registry.models import ModelInfo
 from src.registry.router import select_model
+
+
+# Post-BRT-DS-01 the seed YAML no longer hand-seeds LM Studio rows (they are
+# populated live by discovery), so e2e tests inject a minimal local row so the
+# "contains local + openrouter" / LOCAL_FIRST assertions stay meaningful.
+_LOCAL_E2E_ROW = ModelInfo(
+    model_id="lmstudio/test/gemma-4-26b-a4b",
+    source="lmstudio",
+    endpoint="http://localhost:1234",
+    context_length=128000,
+    throughput_tps=35.0,
+    task_scores={
+        "reasoning": 6.8, "coding": 6.8, "summarize": 7.5, "writing": 7.2,
+        "roleplay": 6.5, "agentic": 6.8, "extraction": 7.2,
+    },
+    specialty_tags=["mid_local"],
+    params_b=26.0,
+    publisher="test",
+)
 
 
 @pytest.fixture(autouse=True)
@@ -23,6 +43,7 @@ def reload_matrix():
     from — the on-disk seed defaults to False (the operator curates via UI).
     """
     matrix.load()
+    matrix.upsert(_LOCAL_E2E_ROW)
     for m in matrix.all():
         matrix.set_checked(m.model_id, True)
     yield
@@ -121,4 +142,6 @@ def test_get_matrix_endpoint(client):
     assert resp.status_code == 200
     data = resp.json()
     assert isinstance(data, list)
-    assert len(data) >= 19  # seed has 7 local + 12 openrouter = 19
+    # Seed has 12 openrouter rows; local rows are discovery-driven (BRT-DS-01).
+    # Test fixture injects one lmstudio row, so we expect ≥ 13 total.
+    assert len(data) >= 13

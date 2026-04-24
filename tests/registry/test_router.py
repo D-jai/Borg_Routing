@@ -15,15 +15,53 @@ TC-REG-036 — router ignores unchecked rows (even when they would qualify)
 import pytest
 
 from src.registry.capability_matrix import CapabilityMatrix
+from src.registry.models import ModelInfo
 from src.registry.router import select_model
 
 SEED_PATH = "data/capability_matrix.yaml"
+
+
+# Since BRT-DS-01 removed the hand-seeded LM Studio rows (now discovery-driven),
+# router tests install a small set of representative local rows in-fixture so
+# the routing behaviours under test remain covered.
+_LOCAL_TEST_ROWS = [
+    ModelInfo(
+        model_id="lmstudio/test/gemma-4-e4b-it",
+        source="lmstudio",
+        endpoint="http://localhost:1234",
+        context_length=32000,
+        throughput_tps=40.0,
+        task_scores={
+            "reasoning": 5.5, "coding": 5.5, "summarize": 6.5, "writing": 6.0,
+            "roleplay": 5.5, "agentic": 5.5, "extraction": 6.5,
+        },
+        specialty_tags=["fast_light"],
+        params_b=7.5,
+        publisher="test",
+    ),
+    ModelInfo(
+        model_id="lmstudio/test/gemma-4-26b-a4b",
+        source="lmstudio",
+        endpoint="http://localhost:1234",
+        context_length=128000,
+        throughput_tps=35.0,
+        task_scores={
+            "reasoning": 6.8, "coding": 6.8, "summarize": 7.5, "writing": 7.2,
+            "roleplay": 6.5, "agentic": 6.8, "extraction": 7.2,
+        },
+        specialty_tags=["mid_local", "moe", "long_context_local"],
+        params_b=26.0,
+        publisher="test",
+    ),
+]
 
 
 @pytest.fixture(scope="module")
 def matrix():
     cm = CapabilityMatrix(SEED_PATH)
     cm.load()
+    for row in _LOCAL_TEST_ROWS:
+        cm.upsert(row)
     # Router operates on the checked pool; fixtures mark everything checked.
     for m in cm.all():
         cm.set_checked(m.model_id, True)

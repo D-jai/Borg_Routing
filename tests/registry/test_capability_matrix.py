@@ -33,15 +33,17 @@ def _loaded_all_checked() -> CapabilityMatrix:
 
 
 def test_load_seed_file():
-    """TC-REG-010 — load the real seed file; expect 19 models."""
+    """TC-REG-010 — load the real seed file; expect the curated OpenRouter rows.
+
+    Post-BRT-DS-01 the YAML no longer hand-seeds LM Studio rows (those come in
+    live via discovery), so the seed file is the 12 curated OpenRouter rows.
+    """
     cm = CapabilityMatrix(SEED_PATH)
     cm.load()
     models = cm.all()
-    assert len(models) == 19
+    assert len(models) == 12
     model_ids = {m.model_id for m in models}
-    # at least one local and one openrouter
-    assert any("lmstudio" in mid for mid in model_ids)
-    assert any("openrouter" in mid for mid in model_ids)
+    assert all("openrouter" in mid for mid in model_ids)
 
 
 def test_query_by_task_coding_order():

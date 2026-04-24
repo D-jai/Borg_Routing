@@ -18,7 +18,9 @@ from src.registry.discovery import (
     discover_ollama,
     discover_openrouter,
     discover_all,
+    reconcile_local_rows,
 )
+from src.registry.models import ModelInfo
 
 
 # ---------------------------------------------------------------------------
@@ -264,3 +266,112 @@ async def test_discover_all_preserves_existing_scores():
     # New model added
     assert cm.get("lmstudio/brand-new-model") is not None
     assert len(cm.all()) == initial_count + 1
+
+
+# ---------------------------------------------------------------------------
+# reconcile_local_rows (BRT-DS-01)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_reconcile_clears_stale_lmstudio_row():
+    """TC-REG-062 — stale local row not in discovered_ids → endpoint cleared, checked=False."""
+    cm = CapabilityMatrix()
+    cm.upsert(
+        ModelInfo(
+            model_id="lmstudio/ghost/model",
+            source="lmstudio",
+            endpoint="http://localhost:1234",
+            context_length=4096,
+            checked=True,
+        )
+    )
+    reconciled = await reconcile_local_rows(cm, discovered_ids=set())
+    assert reconciled == 1
+    row = cm.get("lmstudio/ghost/model")
+    assert row.endpoint is None
+    assert row.checked is False
+
+
+@pytest.mark.asyncio
+async def test_reconcile_preserves_live_lmstudio_row():
+    """TC-REG-063 — local row present in discovered_ids → untouched."""
+    cm = CapabilityMatrix()
+    cm.upsert(
+        ModelInfo(
+            model_id="lmstudio/live/model",
+            source="lmstudio",
+            endpoint="http://localhost:1234",
+            context_length=4096,
+            checked=True,
+        )
+    )
+    reconciled = await reconcile_local_rows(cm, discovered_ids={"lmstudio/live/model"})
+    assert reconciled == 0
+    row = cm.get("lmstudio/live/model")
+    assert row.endpoint == "http://localhost:1234"
+    assert row.checked is True
+
+
+@pytest.mark.asyncio
+async def test_reconcile_skips_openrouter_rows():
+    """TC-REG-064 — openrouter rows are never reconciled."""
+    cm = CapabilityMatrix()
+    cm.upsert(
+        ModelInfo(
+            model_id="openrouter/some/model",
+            source="openrouter",
+            endpoint="https://openrouter.ai/api",
+            context_length=4096,
+            checked=True,
+        )
+    )
+    reconciled = await reconcile_local_rows(cm, discovered_ids=set())
+    assert reconciled == 0
+    row = cm.get("openrouter/some/model")
+    assert row.endpoint == "https://openrouter.ai/api"
+    assert row.checked is True
+
+
+@pytest.mark.asyncio
+async def test_reconcile_end_to_end_via_discover_all():
+    """TC-REG-065 — discover_all flags ghost local rows and leaves live ones alone."""
+    cm = CapabilityMatrix()
+    # Seed two ghosts + one row that will be re-seen as live
+    for gid in ("lmstudio/ghost-a", "lmstudio/ghost-b"):
+        cm.upsert(
+            ModelInfo(
+                model_id=gid,
+                source="lmstudio",
+                endpoint="http://localhost:1234",
+                context_length=4096,
+                checked=True,
+            )
+        )
+
+    live_row = ModelInfo(
+        model_id="lmstudio/live-row",
+        source="lmstudio",
+        endpoint="http://localhost:1234",
+        context_length=8192,
+    )
+
+    with patch("src.registry.discovery.discover_lmstudio", new_callable=AsyncMock) as mock_ls, \
+         patch("src.registry.discovery.discover_ollama", new_callable=AsyncMock) as mock_ol, \
+         patch("src.registry.discovery.discover_openrouter", new_callable=AsyncMock) as mock_or:
+        mock_ls.return_value = [live_row]
+        mock_ol.return_value = []
+        mock_or.return_value = []
+
+        await discover_all(cm)
+
+    # Ghosts reconciled
+    for gid in ("lmstudio/ghost-a", "lmstudio/ghost-b"):
+        row = cm.get(gid)
+        assert row is not None
+        assert row.endpoint is None
+        assert row.checked is False
+
+    # Live row kept
+    live = cm.get("lmstudio/live-row")
+    assert live is not None
+    assert live.endpoint == "http://localhost:1234"

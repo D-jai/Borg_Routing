@@ -1,0 +1,61 @@
+id: BRT-DS-01
+timestamp: 2026-04-23T20:00:00Z
+type: feat
+scope: phase-1
+title: Discovery reconciles stale local rows; LM Studio seeds removed
+
+summary_human: |
+  Discovery is now the single source of truth for LM Studio and Ollama rows.
+  The 7 hand-seeded LM Studio entries in data/capability_matrix.yaml have
+  been removed, and discover_all's new reconcile_local_rows pass marks any
+  local row it did not see as endpoint=None, checked=False. Ghost models
+  from a previous install can no longer silently route to a server that is
+  no longer running. Curated OpenRouter rows are unchanged — they remain
+  seeded because the list is a deliberate operator choice.
+
+files_touched:
+  - src/registry/discovery.py               # reconcile_local_rows
+  - data/capability_matrix.yaml             # LM Studio seeds removed, comment block added
+  - tests/registry/test_discovery.py        # 4 new tests
+  - tests/registry/test_capability_matrix.py # updated count
+  - tests/registry/test_router.py           # injects local rows via fixture
+  - tests/e2e/test_slice_1.py               # injects local row via fixture
+
+public_surface:
+  added:
+    - { kind: function, path: "src/registry/discovery.py::reconcile_local_rows", purpose: "Mark local rows unavailable when not seen in this discovery pass." }
+
+breaking_change: true
+breaking_change_notes: |
+  Existing installs that hand-edited the 7 LM Studio seed rows and relied on
+  them after discovery will now see those rows reconciled to endpoint=None
+  unless LM Studio is actually exposing them. Scores and specialty tags are
+  preserved; re-running discovery with the model loaded restores routability.
+
+error_codes_added: []
+
+env_vars_added: []
+
+tests_added: { count: 4 }
+
+audience: [developer, operator]
+demo_value: medium
+user_visible: true
+keywords: [discovery, reconciliation, seeds, capability-matrix]
+
+user_guide:
+  heading: Re-running discovery cleans up stale models
+  how_to_use:
+    - "Click Discover Models after you change which models are loaded in LM Studio or Ollama."
+    - "Rows that were no longer visible are flagged: endpoint cleared, checked flipped off; scores and notes stay."
+    - "Re-loading the model and clicking Discover again re-populates the endpoint."
+  troubleshooting: []
+
+install_guide:
+  prerequisites_added: []
+  setup_steps:
+    - "Fresh installs no longer ship with hand-seeded LM Studio rows. Load models in LM Studio, click Discover, then click Get Model Info."
+
+presentation:
+  hero_bullet: "The matrix tells the truth — no ghost models, no stale endpoints."
+  slide_angle: "Discovery is the source of truth for every LM Studio and Ollama row."
