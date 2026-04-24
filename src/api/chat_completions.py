@@ -159,6 +159,57 @@ async def _stream_response(response_text: str, model_alias: str, run_id: str) ->
     yield "data: [DONE]\n\n"
 
 
+async def _stream_orchestration_with_heartbeats(
+    user_instruction: str,
+    thread_window: list,
+    model_alias: str,
+) -> AsyncIterator[str]:
+    """BRT-STR-01 — keep the SSE connection alive while the pipeline runs.
+
+    run_pipeline produces bytes only after orchestrate_run completes. On a
+    multi-node plan this can take 60-90s, and browsers time out the fetch
+    before any data arrives. We emit SSE comment lines (": heartbeat\\n\\n")
+    every BORG_STREAM_HEARTBEAT_SEC until the pipeline task resolves, then
+    word-stream the real response. Comments are ignored by SSE consumers
+    but reset their idle timers.
+    """
+    heartbeat_every = float(os.getenv("BORG_STREAM_HEARTBEAT_SEC", "5"))
+    pipeline_task = asyncio.create_task(
+        run_pipeline(
+            user_instruction=user_instruction,
+            thread_window=thread_window,
+        )
+    )
+
+    while not pipeline_task.done():
+        try:
+            await asyncio.wait_for(
+                asyncio.shield(pipeline_task),
+                timeout=heartbeat_every,
+            )
+        except asyncio.TimeoutError:
+            yield f": heartbeat {int(time.time())}\n\n"
+
+    try:
+        result = pipeline_task.result()
+    except Exception as exc:
+        err_run_id = str(uuid.uuid4())
+        async for chunk in _stream_response(
+            f"Pipeline error: {exc}", model_alias, err_run_id
+        ):
+            yield chunk
+        return
+
+    if result["status"] == "failed":
+        response_text = result["response"] or f"Request failed: {result.get('error', 'unknown')}"
+    else:
+        response_text = result["response"]
+
+    run_id = result.get("run_id") or str(uuid.uuid4())
+    async for chunk in _stream_response(response_text, model_alias, run_id):
+        yield chunk
+
+
 async def _bypass_to_model(
     matrix: CapabilityMatrix,
     model_id: str,
@@ -329,7 +380,20 @@ async def chat_completions(request: Request):
             )
         return JSONResponse(content=_build_openai_response(run_id, model_alias, response_text))
 
-    # Full orchestration via pipeline runner
+    # Full orchestration via pipeline runner.
+    # BRT-STR-01 — streaming path uses heartbeats to keep the browser SSE
+    # connection alive while run_pipeline churns through a multi-node plan;
+    # non-streaming path behaves as before.
+    if chat_req.stream:
+        return StreamingResponse(
+            _stream_orchestration_with_heartbeats(
+                user_instruction=user_instruction,
+                thread_window=thread_window,
+                model_alias=model_alias,
+            ),
+            media_type="text/event-stream",
+        )
+
     try:
         result = await run_pipeline(
             user_instruction=user_instruction,
@@ -348,11 +412,5 @@ async def chat_completions(request: Request):
         response_text = result["response"]
 
     run_id = result.get("run_id") or str(uuid.uuid4())
-
-    if chat_req.stream:
-        return StreamingResponse(
-            _stream_response(response_text, model_alias, run_id),
-            media_type="text/event-stream",
-        )
 
     return JSONResponse(content=_build_openai_response(run_id, model_alias, response_text))
