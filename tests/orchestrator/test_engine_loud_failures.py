@@ -91,9 +91,10 @@ async def test_no_orch_model_propagates_007(db):
 
 
 @pytest.mark.asyncio
-async def test_default_answerer_fallback_logs_015(db):
+async def test_default_answerer_fallback_logs_015(db, monkeypatch):
     """TC-ORC-031 — when select_model for the default answerer raises, a
     BRT-ORC-015 warning event is written and the run still completes."""
+    monkeypatch.setenv("BORG_RULE_ZERO_SHORTCUT", "false")
     run_id = await create_run("any", db_path=db)
 
     async def mock_invoke(**kwargs):
@@ -142,9 +143,10 @@ async def test_default_answerer_fallback_logs_015(db):
 
 
 @pytest.mark.asyncio
-async def test_envelope_save_failure_logs_016(db):
+async def test_envelope_save_failure_logs_016(db, monkeypatch):
     """TC-ORC-032 — when save_envelope raises, BRT-ORC-016 is logged and the
     run still completes (error is visible in the trace, not swallowed)."""
+    monkeypatch.setenv("BORG_RULE_ZERO_SHORTCUT", "false")
     run_id = await create_run("any", db_path=db)
 
     async def mock_invoke(**kwargs):

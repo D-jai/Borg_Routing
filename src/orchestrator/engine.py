@@ -20,6 +20,12 @@ Error codes:
                run continues, trace shows the DB hiccup)
 - BRT-ORC-017: depends_on id not found in results (warning; node dispatches
                with whatever upstream outputs could be resolved)
+
+Optimisation hooks (no error code):
+- BRT-ZERO-01: for unambiguously conversational short prompts, skip
+               plan/re_plan and go straight to compose (saves ~2-3
+               orchestrator calls). Disable with BORG_RULE_ZERO_SHORTCUT=false
+               or the rule_zero_shortcut config key.
 """
 import asyncio
 import json
@@ -86,6 +92,45 @@ def _get_skill_lib() -> SkillLibrary:
             pass
         _shared_skill_lib = sl
     return _shared_skill_lib
+
+
+_LIST_MARKER_RE = re.compile(r"(?m)^\s*(?:[-*\u2022]|\d+[.)])\s+")
+
+_BULK_PHRASES = (
+    "for each",
+    "list of",
+    "classify these",
+    "analyse these",
+    "analyze these",
+    "summarise each",
+    "summarize each",
+    "process each",
+    "compare these",
+    "compare all",
+    "for every",
+)
+
+
+def _is_trivial_conversational(text: str) -> bool:
+    """BRT-ZERO-01 — cheap rule-based pre-classifier.
+
+    Returns True for short, non-list, non-bulk conversational prompts that
+    should shortcut plan/re_plan and go straight to compose. Deterministic,
+    no model call. Conservative by design — if any heuristic is uncertain,
+    returns False and we take the normal full path.
+    """
+    if not text:
+        return False
+    t = text.strip()
+    if len(t) >= 500:
+        return False
+    if _LIST_MARKER_RE.search(t):
+        return False
+    lower = t.lower()
+    for phrase in _BULK_PHRASES:
+        if phrase in lower:
+            return False
+    return True
 
 
 def _extract_json(text: str) -> dict:
@@ -524,6 +569,41 @@ async def orchestrate_run(
         orchestrator_model=orch_model,
         db_path=db_path,
     )
+
+    # BRT-ZERO-01 — Rule Zero shortcut. For unambiguously conversational
+    # short prompts, skip plan/re_plan and go straight to compose. Saves
+    # ~2-3 orchestrator calls and ~$0.0035 per run on trivial inputs. The
+    # shortcut can be disabled with BORG_RULE_ZERO_SHORTCUT=false or the
+    # matching config key (useful when debugging the full plan path).
+    shortcut_cfg = await get_config("rule_zero_shortcut", db_path=db_path)
+    if shortcut_cfg is None:
+        shortcut_enabled = os.getenv("BORG_RULE_ZERO_SHORTCUT", "true").strip().lower() != "false"
+    else:
+        shortcut_enabled = str(shortcut_cfg).strip().lower() != "false"
+    if shortcut_enabled and _is_trivial_conversational(user_instruction):
+        try:
+            await write_event(
+                "orchestrator_decision",
+                run_id=run_id,
+                decision={
+                    "mode": "rule_zero_shortcut",
+                    "reason": "trivial-conversational",
+                    "len": len(user_instruction or ""),
+                },
+                db_path=db_path,
+            )
+        except Exception:
+            pass
+        compose_result = await _invoke_orchestrator_model(
+            mode="compose",
+            stage_results={},
+            child_scratch_digest={},
+            **base_kwargs,
+        )
+        shortcut_resp = compose_result.get("response")
+        if shortcut_resp:
+            return shortcut_resp
+        # Empty compose — fall through to the normal plan path.
 
     # --- PLAN MODE ---
     plan_result = await _invoke_orchestrator_model(

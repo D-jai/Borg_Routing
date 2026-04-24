@@ -77,9 +77,10 @@ def test_depends_on_injects_context_and_dep_input():
 
 
 @pytest.mark.asyncio
-async def test_depends_on_missing_emits_017(db):
+async def test_depends_on_missing_emits_017(db, monkeypatch):
     """TC-PR-011 — a node references a depends_on id that isn't present in
     results → BRT-ORC-017 event written during dispatch, run completes."""
+    monkeypatch.setenv("BORG_RULE_ZERO_SHORTCUT", "false")
     run_id = await create_run("x", db_path=db)
 
     async def mock_invoke(**kwargs):

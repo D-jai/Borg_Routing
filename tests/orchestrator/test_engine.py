@@ -87,8 +87,9 @@ def _orchestrator_response(mode: str, **kwargs) -> str:
 
 
 @pytest.mark.asyncio
-async def test_direct_answer_returns_immediately(db):
+async def test_direct_answer_returns_immediately(db, monkeypatch):
     """TC-ORC-020 — direct_answer in plan → no further model calls."""
+    monkeypatch.setenv("BORG_RULE_ZERO_SHORTCUT", "false")
     run_id = await create_run("Hello there", db_path=db)
     call_count = [0]
 
@@ -108,8 +109,9 @@ async def test_direct_answer_returns_immediately(db):
 
 
 @pytest.mark.asyncio
-async def test_one_stage_plan_three_calls(db):
+async def test_one_stage_plan_three_calls(db, monkeypatch):
     """TC-ORC-021 — 1-stage plan uses orchestrator 3 times (plan, re_plan, compose)."""
+    monkeypatch.setenv("BORG_RULE_ZERO_SHORTCUT", "false")
     run_id = await create_run("Classify this issue", db_path=db)
     call_modes = []
 
@@ -175,8 +177,9 @@ async def test_replan_fail_raises(db):
 
 
 @pytest.mark.asyncio
-async def test_replan_continue_dispatches_next_nodes(db):
+async def test_replan_continue_dispatches_next_nodes(db, monkeypatch):
     """TC-ORC-023 — re_plan action=continue dispatches the next_nodes."""
+    monkeypatch.setenv("BORG_RULE_ZERO_SHORTCUT", "false")
     run_id = await create_run("Two stage task", db_path=db)
     dispatch_instructions = []
 
@@ -213,8 +216,9 @@ async def test_replan_continue_dispatches_next_nodes(db):
 
 
 @pytest.mark.asyncio
-async def test_orchestrator_decision_events_logged(db):
+async def test_orchestrator_decision_events_logged(db, monkeypatch):
     """TC-ORC-024 — orchestrator_decision events are logged for each call."""
+    monkeypatch.setenv("BORG_RULE_ZERO_SHORTCUT", "false")
     import aiosqlite
     run_id = await create_run("Classify this issue", db_path=db)
 
