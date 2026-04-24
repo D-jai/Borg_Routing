@@ -35,10 +35,15 @@ def validate_outbound(task: WrappedTask) -> None:
 def validate_inbound(env: InboundEnvelope, task: WrappedTask) -> None:
     """Validate that an inbound envelope conforms to the outbound task contract.
 
+    Supports two output_schema shapes:
+    - Flat ``{field_name: type_hint}`` (all top-level keys are required).
+    - JSON-Schema ``{"type": "object", "properties": {...}, "required": [...]}``
+      (the field names come from ``properties``; ``required`` restricts to a
+      subset if present, otherwise all ``properties`` keys are required).
+
     Raises:
         ValueError: BRT-ENV-012 if status=failed but failure_reason is missing.
-        ValueError: BRT-ENV-011 if output is missing required top-level keys
-                    declared in task.output_schema.
+        ValueError: BRT-ENV-011 if output is missing required keys.
     """
     if env.status == "failed":
         if not env.failure_reason or not env.failure_reason.strip():
@@ -48,10 +53,26 @@ def validate_inbound(env: InboundEnvelope, task: WrappedTask) -> None:
             )
 
     if env.status == "resolved" and task.output_schema:
-        missing = [k for k in task.output_schema if k not in env.output]
+        # BRT-VAL-01 — detect JSON-Schema-shaped output_schema and walk into
+        # `properties` / honour `required`, instead of treating the meta-keys
+        # (type/properties/required) as required field names. Flat shapes
+        # (e.g. {"bucket": "bug|feature|question"}) still work unchanged.
+        schema = task.output_schema
+        if isinstance(schema, dict) and isinstance(schema.get("properties"), dict):
+            props = schema["properties"]
+            required = schema.get("required")
+            expected = (
+                list(required)
+                if isinstance(required, list)
+                else list(props.keys())
+            )
+        else:
+            expected = list(schema.keys())
+
+        missing = [k for k in expected if k not in env.output]
         if missing:
             raise ValueError(
                 f"BRT-ENV-011: inbound output missing required keys "
                 f"{missing} for envelope {env.envelope_id}. "
-                f"Expected schema keys: {list(task.output_schema.keys())}"
+                f"Expected schema keys: {expected}"
             )
