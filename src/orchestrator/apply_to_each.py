@@ -28,11 +28,15 @@ def _resolve_items(task: WrappedTask) -> list:
     """Resolve dependency_input to a list of items.
 
     Checks dependency_input['items'] then dependency_input['inputs_ref'].
+    Empty lists raise BRT-APE-005 so phantom zero-item fan-outs surface in
+    the run trace instead of silently resolving to a no-op.
 
     Raises:
         ValueError: BRT-APE-001 if items cannot be resolved.
+        ValueError: BRT-APE-005 if the resolved items list is empty.
     """
-    # Direct items list (preferred — already resolved by state_op or similar)
+    # Direct items list (preferred — already resolved by state_op, or by
+    # _build_task_from_node when inputs_ref pointed at a prior node).
     items = task.dependency_input.get("items")
     if items is not None:
         if not isinstance(items, list):
@@ -40,11 +44,26 @@ def _resolve_items(task: WrappedTask) -> list:
                 f"BRT-APE-001: dependency_input['items'] must be a list, "
                 f"got {type(items).__name__} for envelope {task.envelope_id}"
             )
+        if not items:
+            # Only signal BRT-APE-005 if no alternate list shape is present
+            inputs_ref_inline = task.dependency_input.get("inputs_ref")
+            if not (isinstance(inputs_ref_inline, list) and inputs_ref_inline):
+                raise ValueError(
+                    f"BRT-APE-005: no items to process for apply_to_each "
+                    f"envelope {task.envelope_id}. Check that inputs_ref "
+                    f"points at an upstream node with a non-empty items/"
+                    f"results list, or populate node['items'] directly."
+                )
         return items
 
     # inputs_ref as a list of strings (simple inline items)
     inputs_ref = task.dependency_input.get("inputs_ref")
-    if inputs_ref and isinstance(inputs_ref, list):
+    if isinstance(inputs_ref, list):
+        if not inputs_ref:
+            raise ValueError(
+                f"BRT-APE-005: no items to process for apply_to_each "
+                f"envelope {task.envelope_id}. inputs_ref list is empty."
+            )
         return inputs_ref
 
     raise ValueError(
@@ -125,8 +144,28 @@ async def expand_and_run(
             f"current_depth ({task.current_depth}) >= max_depth ({task.max_depth})"
         )
 
-    # Resolve items
-    items = _resolve_items(task)
+    # Resolve items. BRT-APE-01 — empty-items used to resolve to an envelope
+    # with 0 results (phantom success). Now _resolve_items raises BRT-APE-005
+    # which we surface as a failed envelope (the orchestrator sees the code
+    # and can decide whether to re_plan/fail).
+    try:
+        items = _resolve_items(task)
+    except ValueError as exc:
+        if "BRT-APE-005" in str(exc):
+            return InboundEnvelope(
+                envelope_id=task.envelope_id,
+                subtask_id=task.subtask_id,
+                status="failed",
+                output={
+                    "results": [],
+                    "failures": [],
+                    "total": 0,
+                    "success_count": 0,
+                    "failure_count": 0,
+                },
+                failure_reason=str(exc),
+            )
+        raise
 
     # Concurrency limit
     raw_limit = task.dependency_input.get("concurrency_limit", 20)
