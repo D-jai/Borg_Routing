@@ -227,3 +227,17 @@ gives operators real-time control over model behaviour without restarting the se
 
 **Portfolio/LinkedIn angle:** Phase 2 is the fine-grained contract work — schema validation, dependency wiring, visible failures. Not flashy, but it is where most LLM-orchestration frameworks quietly rot. Making failures visible is worth more than adding features.
 
+---
+
+<!-- Added: 2026-04-23 - Phase 3: Operator experience - no timeouts, no phantom overhead, no false expectations -->
+## Phase 3 — Operator experience
+
+**What it adds:**
+- **BRT-STR-01:** The streaming endpoint now emits SSE keepalive comments every 5 seconds while `orchestrate_run` is still running, so browsers no longer time out the fetch on multi-node plans that take 60-90 seconds. The heartbeat interval is configurable via `BORG_STREAM_HEARTBEAT_SEC`. Non-streaming requests are unchanged; the fix is a wrap around the existing pipeline, not a rewrite of the orchestrator as a generator.
+- **BRT-ZERO-01:** Trivial conversational prompts — "hi", "what is photosynthesis?", short Q&A — now skip plan and re_plan, going straight to a single compose call. The pre-classifier is deterministic (length < 500 chars, no list markers, no bulk phrases), costs nothing, and is toggleable via `BORG_RULE_ZERO_SHORTCUT` / the `rule_zero_shortcut` config key. ~$0.0035 and 2-3 model calls saved per trivial prompt.
+- **BRT-USAGE-01:** A new "When BORG_ROUTE pays off" section in the install guide: measured cost table (deepseek direct vs. BORG orchestrated — real numbers showing ~21× ratio on a small prompt), break-even formula for bulk workloads (N ≈ 130 items), three workload examples where BORG wins, three pool recipes. Honest framing about what BORG is and isn't good at, so new operators stop judging it on a single short prompt.
+
+**Demo talking point:** On `stream: true`, ask a long prompt that triggers a 4-node plan. Watch the browser keep the connection alive via heartbeats until the real answer word-streams in. Then ask "hi" — one orchestrator call, sub-second response, BRT-ZERO-01 event in the trace.
+
+**Portfolio/LinkedIn angle:** Phase 3 is about expectation-setting and user-facing polish. The heartbeat fix is twelve lines of code; the Rule Zero shortcut is a regex and two phrase lists. Both change the first-minute experience of BORG_ROUTE from "broken" to "obvious". The docs section is the honest-marketing counterpart — admitting where BORG costs more so the operator trusts you when you claim it saves money at scale.
+

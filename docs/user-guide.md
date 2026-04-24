@@ -176,6 +176,37 @@ Writing a synthesis node **without** `depends_on` is an anti-pattern — that no
 
 ---
 
+## Rule Zero Shortcut (BRT-ZERO-01)
+
+For unambiguously conversational short prompts — greetings, factual lookups, small requests, casual chat — BORG_ROUTE now bypasses the plan / re_plan cycle and answers in a single compose call. This saves 2-3 orchestrator calls (~$0.0035) on prompts where decomposition adds no value.
+
+### When the shortcut fires
+The pre-classifier is deterministic and rule-based:
+- prompt length < 500 characters, AND
+- no list markers (`-`, `*`, `•`, `1.`, `1)` on a line start), AND
+- none of these phrases: `for each`, `list of`, `classify these`, `analyse these`, `analyze these`, `summarise each`, `summarize each`, `process each`, `compare these`, `compare all`, `for every`.
+
+If all three checks pass, the orchestrator goes straight to compose mode. An `orchestrator_decision` event with `mode=rule_zero_shortcut` is written to the run trace, so you can tell the shortcut fired vs. a normal direct-mode decision.
+
+### Disabling the shortcut
+- **Per-install:** set `BORG_RULE_ZERO_SHORTCUT=false` in `.env`.
+- **Live, no restart:** `POST /config` with `{"key":"rule_zero_shortcut","value":"false"}`. The config key wins over the env var.
+
+Turn it off when you want to compare costs / latency before and after, or when debugging plan-mode behaviour on short prompts.
+
+---
+
+## Streaming Heartbeats (BRT-STR-01)
+
+`POST /v1/chat/completions` with `stream: true` and `model: borg_route*` now emits SSE keepalive comments (`: heartbeat <ts>`) every `BORG_STREAM_HEARTBEAT_SEC` seconds while the pipeline runs. Previously the stream went silent until `orchestrate_run` finished, which on multi-node plans took long enough that browsers timed the fetch out before any bytes arrived.
+
+Keepalive lines are ignored by SSE consumers but reset their idle timers. The real response is word-streamed after the pipeline resolves.
+
+### Tuning
+`BORG_STREAM_HEARTBEAT_SEC` (default `5`). Set to `0` to disable heartbeats entirely. Non-streaming (`stream: false`) requests are unaffected.
+
+---
+
 ## Loud Failures (BRT-ORC-02)
 
 Previously, three silent-fallback sites in `orchestrate_run` could make a broken run appear blank (no envelopes, no errors, just `status=failed`). Phase 2 made each visible in the run trace:

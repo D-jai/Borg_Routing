@@ -141,6 +141,109 @@ Back up `data/borg_route.db` (the SQLite DB) and `data/capability_matrix.yaml`
 (scores + checkboxes). That is the full state. No other files carry
 user-specific configuration.
 
+## When BORG_ROUTE Pays Off — Honest Expectations
+
+> **TL;DR:** For single-turn conversational prompts under ~500 characters,
+> expect BORG to cost roughly 10–20× more than a direct call to the
+> orchestrator model. BORG's efficiency emerges at scale
+> (N > ~130 bulk items), for oversized corpora, or for mixed-specialty
+> tasks. Read this section before judging BORG on a single short prompt.
+
+### Measured cost comparison (same prompt, two paths)
+
+Prompt: *"Write a short technical deep-dive on three PostgreSQL features
+(MVCC, WAL, Vacuum). For each: what it is, why it exists, one practical
+gotcha."* — ~130 prompt tokens, ~370 response tokens.
+
+| Path | Wall time | Input tokens | Output tokens | Cost (actual) |
+|---|---|---|---|---|
+| **BORG orchestrated** | 34.0s | 13,169 | 1,086 | **~$0.00370** |
+| **Direct call** (deepseek-v3.2 via OpenRouter) | 11.3s | 133 | 371 | **$0.000176** |
+| Ratio | ~3× slower | 99× | 2.9× | **~21× more expensive** |
+
+Quality of the two responses was indistinguishable. All BORG's useful
+work happened in compose mode; the fan-out phase added no content.
+
+### Cost model
+
+```
+BORG_cost  ≈  fixed_overhead  +  N × leaf_cost_per_item
+           ≈  ~$0.0035 (3 orchestrator calls on a mid-premium model)
+              +  per-item work
+Direct     ≈  (prompt_in + response_out) × orchestrator_rate
+```
+
+Savings require **both** conditions:
+1. **Price gradient in the pool.** Orchestrator must be meaningfully more
+   expensive than the leaf model. A deepseek-only pool has no gradient.
+2. **Enough leaf work to amortise overhead.** Leaf savings on a small task
+   (~400 output tokens) are ~$0.00035, well below the $0.0035 overhead.
+
+### Break-even (apply_to_each / bulk item tasks)
+
+Orchestrator = claude-opus-4.7 ($0.005 in / $0.025 out per 1K),
+leaves = deepseek-v3.2 ($0.00025 in / $0.00038 out per 1K), per-item
+workload ~100 input + ~10 output tokens:
+
+```
+Direct_cost = 0.0005 × N + 0.025  (opus bundle)
+BORG_cost   = 0.085 + 0.0000288 × N
+
+Break-even at N ≈ 130 items.
+```
+
+- **N < 100 items** — direct to opus is cheaper.
+- **N ≈ 130** — roughly even.
+- **N = 500** — BORG ~2.7× cheaper.
+- **N = 2000** — BORG ~6× cheaper.
+
+For tasks that do not fit in a single model's context, "direct" is not an
+option at all. BORG's cascading distillation becomes mandatory and the
+cost comparison is N/A for direct.
+
+### Three workloads where BORG wins
+
+1. **Large-scale classification / extraction (apply_to_each-shaped).**
+   *"Classify 200 emails, extract product name, score urgency 1-5.
+   Summarise per-topic counts and top-3 urgent overall."* Fan out to
+   cheap leaves; summary in compose. Cheaper than one bundled call to a
+   premium model at N ≳ 130.
+2. **Multi-source aggregation over oversized corpora.** *"15 articles
+   (~25K tokens each, 375K total). Extract claims, evidence, numeric
+   data. Find contradictions. Produce 500-word synthesis."* 375K exceeds
+   most single-model contexts. Direct is infeasible. BORG cost ≈
+   $0.15-0.25 depending on leaf choice.
+3. **Specialist-mixed generation.** *"URL-shortener spec: Postgres schema
+   + indexes, Go handlers, OpenAPI 3.0 YAML, docker-compose, Python
+   integration tests."* Router picks `coding` vs. `reasoning` vs.
+   `writing` per sub-part. Direct-to-opus ≈ $0.15-0.20; BORG
+   ≈ $0.04-0.08. Roughly 2-4× cheaper and potentially higher per-part
+   quality.
+
+### Pool recipes for cost efficiency
+
+| Recipe | When | Ticked rows |
+|---|---|---|
+| **Local-only dev** | iteration, no external spend | 1 mid-tier local (e.g. `lmstudio/google/gemma-4-26b-a4b`) as both orchestrator + answerer |
+| **OpenRouter mixed** | you have a key but want to test the router | 1 premium OR row as orchestrator (e.g. `openrouter/anthropic/claude-sonnet-4`) + 2-3 cheap OR rows for leaves (`openrouter/deepseek/deepseek-v3.2`, `openrouter/x-ai/grok-4`) |
+| **Premium-orchestrator + cheap-leaves** | real bulk workload | one frontier orchestrator (opus/GPT-5) + one or two bulk leaves. This is where the break-even math pays off; pin via `orchestrator_endpoint` + `orchestrator_model_name` for determinism. |
+
+### Rule Zero shortcut — what it fixes (BRT-ZERO-01)
+
+The orchestrator prompt already contains Rule Zero ("Direct mode is the
+default; 70-80% of conversation turns should be Direct"). A cheap,
+deterministic pre-classifier now bypasses plan → re_plan entirely for
+unambiguously conversational short prompts (`< 500 chars`, no list
+markers, no "for each"/"classify these" phrases). One compose call
+instead of three — the ~$0.0035 overhead on "hi" drops to a single
+compose-mode call.
+
+The shortcut is on by default. To force the full plan path (useful for
+debugging), set `BORG_RULE_ZERO_SHORTCUT=false` in `.env` or write
+`rule_zero_shortcut=false` via the `/config` API.
+
+---
+
 ## Troubleshooting
 See `docs/errors/error-registry.md` for the full error-code reference.
 Most common on a fresh install:
