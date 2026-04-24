@@ -157,6 +157,32 @@ Every piece of work BORG_ROUTE sends to a model is wrapped in a **WrappedTask** 
 ### If something goes wrong
 - **"BRT-ENV-001" in logs** — A model returned `status="unresolved"`. This should never happen; the schema rejects it. Check the model's raw output in the run trace.
 - **"BRT-ENV-003" in logs** — A plan exceeded the maximum recursion depth (default: 5). The task may be too complex to decompose at this depth; check the run trace and consider restructuring the request.
+- **"BRT-ENV-011" with JSON-Schema-shaped `output_schema`** — Fixed in Phase 2 (BRT-VAL-01). The validator now walks `properties` and honours `required`, so answerer outputs like `{recommendation, reason}` are no longer rejected when the schema is `{"type": "object", "properties": {...}, "required": [...]}`.
+
+---
+
+## Fan-Out Synthesis — Compose Mode vs. Dispatched Answerer (BRT-PR-01a)
+
+When a plan fans out to N parallel answerers, there are two correct ways to synthesise their outputs into a final response:
+
+1. **Compose synthesis (preferred).** Emit only the N fan-out nodes. The runtime returns every resolved envelope's output as `stage_results` when the orchestrator re-enters `compose` mode. The orchestrator writes the final response there — one model call, no extra round trip.
+
+2. **Dispatched synthesis with explicit dependencies.** Emit the N fan-out nodes plus one synthesis node that declares `depends_on: ["n1","n2","n3"]`. The runtime waits for all listed upstream ids to resolve, then injects their outputs into `dependency_input.upstream_results` (and into the `context` string) before dispatch. Use this only when the synthesis step needs a model that differs from the one compose would use.
+
+Writing a synthesis node **without** `depends_on` is an anti-pattern — that node dispatches in parallel with its siblings, has no access to their outputs, and fails with "insufficient context". The orchestrator prompt now teaches this distinction explicitly.
+
+### Observability codes
+- **BRT-ORC-017** — A `depends_on` id referenced a node not present in the plan (orchestrator hallucination). The node dispatches anyway with whatever upstream outputs could be resolved; the trace shows the missing ids.
+
+---
+
+## Loud Failures (BRT-ORC-02)
+
+Previously, three silent-fallback sites in `orchestrate_run` could make a broken run appear blank (no envelopes, no errors, just `status=failed`). Phase 2 made each visible in the run trace:
+
+- **BRT-ORC-007** (no orchestrator model available) now propagates instead of being swapped for a synthetic empty-endpoint placeholder that crashed deep in `httpx`. Check that at least one model is checked and has a `task_score` above your quality bar.
+- **BRT-ORC-015** (warning) — the default answerer selection failed and the orchestrator model is being reused. The run still completes; you'll see the event in the trace.
+- **BRT-ORC-016** (error) — envelope save/update failed. Logged and the run continues; check DB health (`data/borg_route.db`).
 
 ---
 

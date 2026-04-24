@@ -211,3 +211,19 @@ gives operators real-time control over model behaviour without restarting the se
 **Demo talking point:** Clone the repo, set `OPENROUTER_API_KEY`, run `pip install -e .` and `uvicorn main:app`, open the chat UI, and ask "hi" — you get a real answer, without editing a YAML, tweaking a quality bar, or learning a config key.
 
 **Portfolio/LinkedIn angle:** Shows that getting the boring parts right - config, discovery, HTTP auth, defaults - is where open-source tools actually succeed or fail. Phase 1 is the turning point from works-for-the-author to works-for-everyone.
+
+---
+
+<!-- Added: 2026-04-23 - Phase 2: Real orchestrations succeed, not just "hi" -->
+## Phase 2 — Real orchestrations succeed, not just "hi"
+
+**What it adds:**
+- **BRT-VAL-01:** The inbound envelope validator now understands JSON-Schema-shaped `output_schema` (`{"type": "object", "properties": {...}, "required": [...]}`), walking `properties` and honouring `required` instead of treating the meta-keys as required field names. Correct answerer outputs like `{recommendation, reason}` are no longer silently thrown away with "missing keys `['type', 'properties', 'required']`".
+- **BRT-ORC-02:** Three silent-fallback sites in `orchestrate_run` now emit visible events instead of masking broken runs. `BRT-ORC-007` (no orchestrator model) propagates — no more empty-endpoint `httpx.UnsupportedProtocol` with a blank run trace. `BRT-ORC-015` logs default-answerer fallbacks. `BRT-ORC-016` logs envelope-persistence errors. The Run Trace page now shows what went wrong, not just that something did.
+- **BRT-APE-01:** `apply_to_each` finally resolves `inputs_ref` as a prior-node-id string — the runtime walks the upstream envelope's output for an `items`/`results` list and stamps it into `dependency_input['items']` before dispatch. Empty item lists surface as `BRT-APE-005` (a visible failed envelope) instead of resolving as a phantom 0-result success that left the orchestrator re-planning against nothing.
+- **BRT-PR-01a:** Two architectural additions. (1) The orchestrator system prompt now teaches when to synthesise in compose mode (using `stage_results`) versus when to dispatch an answerer with explicit `depends_on` — the anti-pattern of "unwired final recommendation node" is called out by name. (2) The engine implements answerer-to-answerer dependencies: when a node declares `depends_on: ["n1"]`, the runtime waits for `n1` to resolve, then injects its output into the child's `dependency_input.upstream_results` and into the `context` string. Hallucinated upstream ids are ignored by the ready-check and logged as `BRT-ORC-017`.
+
+**Demo talking point:** Ask BORG "compare these three rate-limiting stacks and recommend one". Before Phase 2, the 4-node plan dispatched all four in parallel, the recommendation node had no access to the analyses, and the run collapsed silently. Now the recommendation node waits for its dependencies, sees their outputs, and writes a coherent answer — or the orchestrator synthesises in compose mode using `stage_results` directly.
+
+**Portfolio/LinkedIn angle:** Phase 2 is the fine-grained contract work — schema validation, dependency wiring, visible failures. Not flashy, but it is where most LLM-orchestration frameworks quietly rot. Making failures visible is worth more than adding features.
+

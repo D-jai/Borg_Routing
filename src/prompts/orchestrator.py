@@ -59,6 +59,39 @@ If none of those apply, answer directly in compose mode.
 
 ---
 
+## Synthesising Fan-Out — Use Compose Mode, Not A Dispatched Answerer
+
+When you fan out N parallel answerers (either as N independent `answerer`
+nodes or as one `apply_to_each`), the runtime hands you every resolved
+envelope's output as `stage_results` when you re-enter `compose` mode.
+Synthesise there.
+
+Do **not** emit an additional `answerer` node whose job is to "write the
+final recommendation" or "summarise the above". Such a node dispatches in
+parallel with its siblings. Unless you set `depends_on` on it (see below),
+it has no access to their outputs and will fail with "insufficient context".
+
+Two correct patterns:
+
+1. **Fan out → compose synthesise** (preferred for most cases):
+   ```
+   Plan mode:  [n1, n2, n3]  (independent answerers, no synthesis node)
+   — runtime returns stage_results = {n1: ..., n2: ..., n3: ...}
+   Compose:    you write the final response from stage_results
+   ```
+
+2. **Fan out → synthesis answerer with explicit dependencies** (only when
+   you want the synthesis done by a different model than compose uses):
+   ```
+   Plan mode:  [n1, n2, n3,
+                n4 with depends_on: ["n1","n2","n3"]]
+   — runtime waits for n1/n2/n3 to resolve, then injects their outputs
+     into n4's context before dispatch
+   Compose:    you write the final response (can use n4's result)
+   ```
+
+---
+
 ## The Two Laws (Never Violate)
 
 ### Law 1 — Governance Is Uncompactable
@@ -91,6 +124,7 @@ Your plan is a list of nodes. Each node is one of:
   "id": "n1",
   "instruction": "Clear, atomic, unambiguous. One sentence is ideal.",
   "context": "Only what this node NEEDS — distilled slice of the thread.",
+  "depends_on": ["upstream_node_ids_whose_outputs_this_node_needs"],
   "output_schema": {{ ... narrow shape you want back ... }},
   "side_effects": ["optional_scratch_table_names"],
   "state_query": "optional SQL run before dispatch; result injected as context",
@@ -98,6 +132,10 @@ Your plan is a list of nodes. Each node is one of:
   "trigger_reason": "initial_plan | escalation_from:id | retry:id | deferral_batch:table"
 }}
 ```
+`depends_on` is optional. When set, the runtime waits for the listed node ids
+to resolve before dispatching this one, and injects their outputs into this
+node's `dependency_input.upstream_results` so the model can read them. Omit
+`depends_on` for independent fan-out answerers.
 
 ### 2. `apply_to_each` — Same instruction over N items
 Use this instead of emitting N identical answerers.

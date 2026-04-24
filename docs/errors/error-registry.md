@@ -82,6 +82,9 @@
 | BRT-ORC-009 | Compose mode returned no response | `src/orchestrator/engine.py::orchestrate_run` | The orchestrator returned an empty `response` in compose mode. Check the compose prompt and model. |
 | BRT-ORC-013 | OpenRouter API key missing | `src/registry/model_call.py::resolve_model_call` | An OpenRouter row was selected but `OPENROUTER_API_KEY` is not set. Add it to `.env` or uncheck OpenRouter rows on the Models page. |
 | BRT-ORC-014 | Model row has no endpoint | `src/registry/model_call.py::resolve_model_call` | The matrix row was never populated with an endpoint (likely left over from a previous install). Run `POST /models/discover` to repopulate. |
+| BRT-ORC-015 | Default answerer selection failed; fell back to orchestrator model | `src/orchestrator/engine.py::orchestrate_run` | `select_model` could not find a default answerer row, so the orchestrator model was reused. Warning — the run continues. Check that at least one row at or above the configured quality bar is checked on the Models page. |
+| BRT-ORC-016 | Envelope persistence failed | `src/orchestrator/engine.py::orchestrate_run` | `save_envelope` or `update_envelope_inbound` raised. Error logged; the run still completes but the trace may miss an envelope row. Check DB health (`data/borg_route.db`) and disk space. |
+| BRT-ORC-017 | `depends_on` id not found in results | `src/orchestrator/engine.py::_build_task_from_node` | The plan referenced an upstream node id that is not part of the current plan (typo or hallucination). The dependent node dispatches anyway with whatever upstream outputs could be resolved. Check the orchestrator's rationale for the stray id. |
 
 ## BRT-APE — apply_to_each Module
 
