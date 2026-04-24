@@ -65,6 +65,16 @@
     <strong>Get Model Info</strong>: ask a web-search LLM to research each model's capabilities and update task scores.
   </div>
 
+  <!-- BRT-ORC-NO-FRONTIER nudge — only shown when zero rows are checked. -->
+  <div id="no-pool-banner" style="display:none; margin: 14px 0; padding: 12px 16px;
+       background: #3a1a1a; border-left: 4px solid #c44; border-radius: 4px;
+       color: #f88; font-size: 0.88em;">
+    <strong>No models are checked.</strong> The router has nothing to choose from
+    and every prompt will fail with <code style="color:#fcc;background:#2a1010;padding:1px 5px;border-radius:2px;">BRT-ORC-007</code>.
+    Tick at least one OpenRouter row below — Sonnet 4.6 and Kimi K2 Thinking are the
+    recommended cold-start defaults (both already meet the 9.0 reasoning bar).
+  </div>
+
   <h2>LM Studio (local)</h2>
   <table>
     <thead>
@@ -156,6 +166,15 @@ function checkboxHtml(m) {
 function render(models) {
   const lm = models.filter(m => m.source === 'lmstudio' || m.source === 'ollama');
   const or = models.filter(m => m.source === 'openrouter');
+
+  // BRT-ORC-NO-FRONTIER — show the nudge banner when no model is checked
+  // anywhere across all sources. The router would otherwise raise BRT-ORC-007
+  // on the very first prompt and the operator would be left guessing.
+  const anyChecked = models.some(m => m.checked === true);
+  const banner = document.getElementById('no-pool-banner');
+  if (banner) {
+    banner.style.display = anyChecked ? 'none' : 'block';
+  }
 
   const lmBody = document.getElementById('lm-body');
   const orBody = document.getElementById('or-body');

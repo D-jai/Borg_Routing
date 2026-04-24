@@ -58,11 +58,13 @@ _EFFECTIVE_SETTINGS: list[dict[str, Any]] = [
     {
         "key": "orchestrator_quality_requirement",
         "env_var": "ORCHESTRATOR_QUALITY_REQUIREMENT",
-        "default": 6.5,
+        "default": 9.0,
         "cast": float,
         "label": "Orchestrator Quality Requirement",
-        "help_text": "Minimum task_score for a model row to qualify as orchestrator "
-                     "(degrades to 5.1 if no model meets the bar).",
+        "help_text": "Minimum task_score for a model row to qualify as orchestrator. "
+                     "9.0 forces a frontier-class brain. Degrades gracefully to 5.1 "
+                     "with a BRT-ORC-NO-FRONTIER trace event if no checked model "
+                     "meets the bar.",
     },
     {
         "key": "orchestrator_max_tokens",

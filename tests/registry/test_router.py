@@ -148,10 +148,17 @@ def test_roleplay_task_returns_specialist(matrix):
 
 
 def test_router_ignores_unchecked_rows():
-    """TC-REG-036 — router raises BRT-REG-020 when no row is checked, even if rows qualify."""
+    """TC-REG-036 — router raises BRT-REG-020 when no row is checked, even if rows qualify.
+
+    The seed ships with 2 OpenRouter rows pre-checked (Sonnet 4.6 + Kimi K2
+    Thinking, the cold-start orchestrator defaults). Explicitly uncheck
+    them here so the assumption holds.
+    """
     cm = CapabilityMatrix(SEED_PATH)
     cm.load()
-    # Intentionally do NOT set_checked — every row is False.
+    for m in cm.all():
+        if m.checked:
+            cm.set_checked(m.model_id, False)
     with pytest.raises(ValueError) as exc_info:
         select_model(cm, task_type="coding", quality_requirement=6.0)
     assert "BRT-REG-020" in str(exc_info.value)

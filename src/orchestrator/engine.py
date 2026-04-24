@@ -307,10 +307,18 @@ def _pinned_model(endpoint: str, name: str) -> ModelInfo:
 async def _select_orchestrator_model(
     task_type: str,
     db_path: str,
-    quality_requirement: float = 6.5,
+    quality_requirement: float = 9.0,
     time_cost_per_sec: Optional[float] = None,
+    run_id: Optional[UUID] = None,
 ) -> ModelInfo:
     """Select the orchestrator ModelInfo row.
+
+    Resolution order:
+      1. Pinned config (`orchestrator_endpoint` set in DB)
+      2. Capability matrix at the requested quality_requirement (default 9.0)
+      3. Degraded fallback at 5.1 — emits BRT-ORC-NO-FRONTIER trace event
+         (when `run_id` is provided) so the dashboard can flag the run.
+      4. Raises BRT-ORC-007.
 
     Returns: ModelInfo
 
@@ -349,11 +357,42 @@ async def _select_orchestrator_model(
             **select_kwargs,
         )
         logger.warning(
-            "BRT-ORC-007-DEGRADED: no model met quality_requirement=%s for "
+            "BRT-ORC-NO-FRONTIER: no model met quality_requirement=%s for "
             "task_type='%s'; falling back to '%s' at its current score. "
-            "Run Get Model Info to refresh scores.",
+            "Run Get Model Info to refresh scores or check on a frontier "
+            "model in the Models page.",
             quality_requirement, task_type, model.model_id,
         )
+        # Emit a trace event so the dashboard / run timeline can flag this
+        # run as 'ran without a qualifying brain'. Uses event_type='error'
+        # (the only existing severity bucket that fits — see VALID_EVENT_TYPES
+        # in src/logging/writer.py); the BRT-ORC-NO-FRONTIER code in the
+        # decision payload distinguishes it from hard-fail errors. Fire-
+        # and-forget; a logging hiccup must never shadow the real selection.
+        if run_id is not None:
+            try:
+                await write_event(
+                    "error",
+                    run_id=run_id,
+                    model_id=model.model_id,
+                    decision={
+                        "code": "BRT-ORC-NO-FRONTIER",
+                        "severity": "warning",
+                        "msg": (
+                            f"No checked model met quality_requirement="
+                            f"{quality_requirement} for task_type='{task_type}'. "
+                            f"Degraded to '{model.model_id}' at quality_requirement=5.1. "
+                            f"Re-score via Get Model Info or check on a frontier "
+                            f"model on the Models page."
+                        ),
+                        "requested_quality": quality_requirement,
+                        "fallback_quality": 5.1,
+                        "task_type": task_type,
+                    },
+                    db_path=db_path,
+                )
+            except Exception:
+                pass
         return model
     except Exception:
         pass
@@ -769,12 +808,14 @@ async def orchestrate_run(
     governance = await load_governance(lambda key: get_config(key, db_path=db_path))
 
     # Read routing knobs from config (falls back to env, then hardcoded defaults).
-    # BRT-RT-01 lowers the orchestrator quality bar from 8.0 → 6.5 so mid-tier
-    # local models (e.g. lmstudio/gemma-4-26b-a4b at reasoning=6.8) are eligible.
+    # The orchestrator IS the brain of every run — a mid-tier brain produces
+    # mid-tier plans. Default 9.0 forces a frontier-or-near-frontier model;
+    # the matrix already seeds 6 OpenRouter rows that meet this bar, and
+    # cold-start ships with Sonnet-4.6 + Kimi-K2-Thinking pre-checked.
     configured_quality = await get_config("orchestrator_quality_requirement", db_path=db_path)
     quality_req = float(
         configured_quality if configured_quality is not None
-        else os.getenv("ORCHESTRATOR_QUALITY_REQUIREMENT", "6.5")
+        else os.getenv("ORCHESTRATOR_QUALITY_REQUIREMENT", "9.0")
     )
     configured_time_cost = await get_config("time_cost_per_sec", db_path=db_path)
     time_cost = float(
@@ -787,11 +828,14 @@ async def orchestrate_run(
     # _pinned_model(endpoint=""), which then produced httpx.UnsupportedProtocol
     # deep in the call stack with no run trace. Let BRT-ORC-007 propagate so
     # the run row flips to failed with a real reason.
+    # `run_id` is threaded so the degrade path can emit BRT-ORC-NO-FRONTIER
+    # to the run trace.
     orch_model = await _select_orchestrator_model(
         "reasoning",
         db_path=db_path,
         quality_requirement=quality_req,
         time_cost_per_sec=time_cost,
+        run_id=run_id,
     )
 
     skill_lib = _get_skill_lib()

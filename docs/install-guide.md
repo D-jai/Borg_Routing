@@ -159,7 +159,7 @@ are most likely to touch during install and operation are grouped below.
 |---|---|---|
 | `ORCHESTRATOR_MAX_TOKENS` | `2000` | Ceiling on orchestrator JSON responses. Raise for large plans; lower for cost control. |
 | `ANSWERER_MAX_TOKENS` | `2000` | Ceiling on answerer responses (both bypass and orchestrated paths). |
-| `ORCHESTRATOR_QUALITY_REQUIREMENT` | `6.5` | Minimum task_score for a row to qualify as orchestrator. Drop to 5.1 in degraded mode. Raise to 8.0+ to force frontier-only. |
+| `ORCHESTRATOR_QUALITY_REQUIREMENT` | `9.0` | Minimum task_score for a row to qualify as orchestrator. Forces a frontier-or-near-frontier brain. Degrades to 5.1 with a `BRT-ORC-NO-FRONTIER` trace event if no checked model meets the bar. Six curated OpenRouter rows already qualify out of the box. |
 | `TIME_COST_PER_SEC` | `0.0001` | Dollar cost per wall-second, used by the router to penalise slow models. |
 
 ### Safety caps
@@ -179,6 +179,25 @@ table, written via `POST /config`) → `.env` → hardcoded default**. The Admin
 at `/ui/admin.html` displays the effective value for each setting with a tag
 showing which source it came from. **The Admin UI is read-only** for these
 values — to change them, edit `.env` (or `POST /config`) and reload the page.
+
+### Cold-start defaults — pre-checked OpenRouter models
+On a fresh install the curated capability matrix ships with **two OpenRouter
+rows pre-checked** so the system can route a prompt without manual setup:
+
+| Model | reasoning | role |
+|---|---|---|
+| `openrouter/anthropic/claude-sonnet-4.6` | 9.0 | Strict-JSON discipline / instruction-following safety net |
+| `openrouter/moonshotai/kimi-k2-thinking` | 9.2 | ~5-6× cheaper; the cost optimiser will prefer this for most calls |
+
+Both meet the default `ORCHESTRATOR_QUALITY_REQUIREMENT=9.0` bar. The router's
+cost optimiser picks the cheaper model per call (Kimi for most prompts),
+falling back to Sonnet when Kimi is unreachable, when context > 256k is
+needed, or when Kimi trips on strict JSON output. Operators can uncheck
+either or both at `/ui/models.html` and check on different rows.
+
+If every row gets unchecked, the Models page shows a red banner reminding
+the operator that no model is in the pool, and the next prompt would fail
+with `BRT-ORC-007`.
 
 ## Backup & Restore
 Back up `data/borg_route.db` (the SQLite DB) and `data/capability_matrix.yaml`

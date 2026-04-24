@@ -125,10 +125,17 @@ def test_update_throughput_persists():
 
 
 def test_query_by_task_excludes_unchecked():
-    """TC-REG-017 — with no rows checked, query_by_task returns [] by default."""
+    """TC-REG-017 — with no rows checked, query_by_task returns [] by default.
+
+    The seed ships with 2 OpenRouter rows pre-checked (Sonnet 4.6 + Kimi K2
+    Thinking, the cold-start orchestrator defaults). Explicitly uncheck
+    them here so the "nothing checked" assumption holds for this test.
+    """
     cm = CapabilityMatrix(SEED_PATH)
     cm.load()
-    # Every row defaults to checked=False
+    for m in cm.all():
+        if m.checked:
+            cm.set_checked(m.model_id, False)
     results = cm.query_by_task("coding", min_score=0)
     assert results == []
     # Opting out of the filter returns the full population
