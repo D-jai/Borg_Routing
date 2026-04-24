@@ -51,17 +51,50 @@ async def _run_in_background(
     Persists ``failure_reason`` on failure so ``GET /runs/<id>`` shows why
     the run failed (BRT-PIP-010). Also emits a trace-visible error event
     carrying the traceback.
+
+    BRT-PIP-008 — wall-clock budget applies to background runs too. Cap
+    is resolved through the same DB → env → default path the Admin UI
+    displays.
     """
+    import asyncio as _asyncio
     import traceback as _tb
     import uuid as _uuid
     from src.orchestrator.engine import orchestrate_run
     from src.db.state import update_run_status
     from src.logging.writer import write_event
+    from src.pipeline.runner import resolve_max_run_seconds
 
     run_id = _uuid.UUID(run_id_str)
+    max_run_seconds = await resolve_max_run_seconds(db_path=db_path)
     try:
-        await orchestrate_run(run_id=run_id, user_instruction=instruction, db_path=db_path)
+        await _asyncio.wait_for(
+            orchestrate_run(run_id=run_id, user_instruction=instruction, db_path=db_path),
+            timeout=max_run_seconds,
+        )
         await update_run_status(run_id, "completed", db_path=db_path)
+    except _asyncio.TimeoutError:
+        failure_reason = (
+            f"BRT-PIP-008: run exceeded wall-clock budget ({max_run_seconds}s)."
+        )
+        try:
+            await write_event(
+                "error",
+                run_id=run_id,
+                decision={
+                    "code": "BRT-PIP-008",
+                    "msg": failure_reason,
+                    "max_run_seconds": max_run_seconds,
+                },
+                db_path=db_path,
+            )
+        except Exception:
+            pass
+        try:
+            await update_run_status(
+                run_id, "failed", failure_reason=failure_reason, db_path=db_path
+            )
+        except Exception:
+            pass
     except Exception as exc:
         tb = _tb.format_exc()
         failure_reason = f"BRT-PIP-002: orchestration failed: {exc}"

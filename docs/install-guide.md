@@ -162,14 +162,23 @@ are most likely to touch during install and operation are grouped below.
 | `ORCHESTRATOR_QUALITY_REQUIREMENT` | `6.5` | Minimum task_score for a row to qualify as orchestrator. Drop to 5.1 in degraded mode. Raise to 8.0+ to force frontier-only. |
 | `TIME_COST_PER_SEC` | `0.0001` | Dollar cost per wall-second, used by the router to penalise slow models. |
 
+### Safety caps
+| Variable | Default | Purpose |
+|---|---|---|
+| `BORG_MAX_RUN_SECONDS` | `300` | Hard wall-clock budget per run. Runs that exceed this are cancelled and marked `failed` with `BRT-PIP-008`. Protects against runaway / stuck pipelines burning real money. Raise for long research tasks. |
+
 ### Behaviour toggles
 | Variable | Default | Purpose |
 |---|---|---|
 | `BORG_RULE_ZERO_SHORTCUT` | `true` | Set to `false` to force the full plan path on every prompt (useful for debugging). |
 | `BORG_STREAM_HEARTBEAT_SEC` | `5` | SSE heartbeat cadence so long-running plans don't trip browser idle timeouts. |
 
-If a value is set in both `.env` and the `config` table (via `/config` API),
-the config table wins.
+### Where settings come from
+BORG resolves each operator-facing setting in this order: **Admin DB (`config`
+table, written via `POST /config`) → `.env` → hardcoded default**. The Admin UI
+at `/ui/admin.html` displays the effective value for each setting with a tag
+showing which source it came from. **The Admin UI is read-only** for these
+values — to change them, edit `.env` (or `POST /config`) and reload the page.
 
 ## Backup & Restore
 Back up `data/borg_route.db` (the SQLite DB) and `data/capability_matrix.yaml`

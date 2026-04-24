@@ -1,0 +1,143 @@
+id: BRT-INSTALL-FIX-02
+timestamp: 2026-04-24T18:30:00Z
+type: feat
+scope: phase-4
+title: Admin UI read-only settings + wall-clock run budget (BRT-PIP-008)
+
+summary_human: |
+  Three operator-facing issues surfaced during BORG_ROUTE install validation
+  after the keystone observability fix (BRT-INSTALL-FIX-01):
+
+  1. Runaway-cost blind spot: a single pathological prompt could keep the
+     pipeline churning indefinitely, burning real money (operator reported
+     $0.11 in 15 minutes on one stuck run before manually killing uvicorn).
+     There was no wall-clock ceiling anywhere in the stack.
+
+  2. Admin UI was lying: the settings form had `value="0.0083"` hardcoded
+     as the HTML placeholder for time_cost_per_sec, while the engine was
+     reading `TIME_COST_PER_SEC=0.0001` from .env. Operator saw one number,
+     engine used another. Same class of bug as the silent-fallback one
+     BRT-INSTALL-FIX-01 fixed — the system's self-report didn't match
+     reality.
+
+  3. Admin and Dashboard nav links were rendered as dim `<span>` stubs on
+     five UI pages (chat.html, models.html, keys.html, _header.html) —
+     grey, unclickable. Operators installing fresh couldn't reach the Admin
+     surface without typing the URL.
+
+  Resolution:
+
+  A) Wall-clock budget — BRT-PIP-008
+     • New env var `BORG_MAX_RUN_SECONDS` (default 300s = 5 minutes).
+     • `src/pipeline/runner.py` adds `resolve_max_run_seconds()` helper
+       (DB → env → default, mirroring the Admin display path).
+     • `run_pipeline()` wraps `orchestrate_run` in `asyncio.wait_for`. On
+       `TimeoutError`: the in-flight coroutine is cancelled, propagating
+       `CancelledError` into every aiohttp/httpx leaf call so their sockets
+       close and no further external spend occurs. The run is marked
+       `failed` with `failure_reason="BRT-PIP-008: run exceeded wall-clock
+       budget (Xs). Raise max_run_seconds..."`. An `error` event with code
+       BRT-PIP-008 is also written so the trace timeline shows why.
+     • Same wrapper applied to `src/api/tasks.py::_run_in_background` so
+       fire-and-forget submissions inherit the cap.
+     • The caller gets an OpenAI-compat 200 with a readable message that
+       includes the cap value and the run id.
+
+  B) Effective-config endpoint — TC-ADM-020
+     • New `GET /config/effective` in `src/api/admin.py` returns each
+       operator-facing setting resolved through `DB → env → default` with
+       a `source` tag ("db" | "env" | "default") and the env var name.
+     • Registry `_EFFECTIVE_SETTINGS` lists 9 settings: max_run_seconds
+       (new), time_cost_per_sec, orchestrator_quality_requirement,
+       orchestrator_max_tokens, answerer_max_tokens, rule_zero_shortcut,
+       max_recursion_depth, default_strategy, context_window_size.
+     • Existing `GET /config` remains DB-only (backward-compat; preserves
+       TC-S3-011 + TC-ADM-011 semantics).
+
+  C) Admin UI read-only settings
+     • `ui/admin.html` settings block rewritten: all form inputs (max
+       depth, strategy, window, time-cost) replaced with a read-only list.
+     • Each row shows the label, effective value, a colour-coded source
+       badge ("from Admin DB" / "from .env: BORG_MAX_RUN_SECONDS" /
+       "default"), and help text.
+     • Hardcoded `value="0.0083"` removed — can never lie again.
+     • `Save Settings` button removed. `Save Global Rules` and `Add Rule`
+       remain (those are runtime governance, not .env territory).
+     • Rationale captured in install-guide.md "Where settings come from"
+       section: writing to `.env` from a running process is unsafe
+       (read-only FS on containerised deploys, load_dotenv is one-shot,
+       .env holds secrets). Operators edit `.env` manually and reload.
+
+  D) Unified nav bar across all 9 UI pages
+     • chat.html, models.html, keys.html, dashboard.html, logs.html,
+       skills.html, run.html, admin.html, _header.html all now show the
+       same 7-link nav: Chat / Models / API Keys / Dashboard / Logs /
+       Skills / Admin, with the current page highlighted red.
+     • Every `<span class="dim">Admin</span>` / `<span class="dim">Dashboard</span>`
+       stub replaced with real `<a href>` anchors.
+
+  E) Docs + .env.example
+     • `.env.example` gets a `--- Wall-clock budget (BRT-PIP-008) ---`
+       block documenting BORG_MAX_RUN_SECONDS.
+     • `docs/install-guide.md` gets a new "Safety caps" table with the
+       same entry, plus a "Where settings come from" paragraph explaining
+       the resolution order and the read-only-UI design choice.
+
+  Tests: 5 new (tests/api/test_effective_config.py), full suite 333 green.
+
+ids:
+  - BRT-INSTALL-FIX-02
+  - BRT-PIP-008
+  - TC-ADM-020
+
+inputs:
+  - docs/install-guide.md  # operator-reported economic-safety gap
+  - operator report        # "0.0083 in admin vs 0.0001 in .env"
+  - operator report        # "Admin/Dashboard links greyed out"
+
+outputs:
+  code:
+    - src/api/admin.py
+    - src/api/tasks.py
+    - src/pipeline/runner.py
+  ui:
+    - ui/admin.html
+    - ui/chat.html
+    - ui/models.html
+    - ui/keys.html
+    - ui/dashboard.html
+    - ui/logs.html
+    - ui/skills.html
+    - ui/run.html
+    - ui/_header.html
+  tests:
+    - tests/api/test_effective_config.py
+  docs:
+    - docs/install-guide.md
+    - .env.example
+  ledger:
+    - .dev/ledger/2026-04-24_install-fix-02-admin-readonly-wallclock.yaml
+
+error_codes_added:
+  - code: BRT-PIP-008
+    meaning: "Run exceeded wall-clock budget (BORG_MAX_RUN_SECONDS). Run cancelled, marked failed, OpenAI-compat 200 returned with run_id and cap."
+  - code: TC-ADM-020
+    meaning: "GET /config/effective test family — source resolution through DB → env → default."
+
+checklist:
+  code_changes: yes
+  tests_added: yes       # 5 new tests, 333 total passing
+  docs_updated: yes      # install-guide.md + .env.example
+  user_guide_updated: yes  # "Where settings come from" added
+  presentation_updated: no
+  migration_needed: no   # no schema changes this slice
+
+learnings:
+  - Writing to .env at runtime is a tarpit (containerised deploys, secrets,
+    load_dotenv is one-shot). Clean model is DB config → env → default with
+    the UI read-only. Operators edit .env manually and reload.
+  - Every hardcoded HTML `value="..."` is a latent lie. If the UI reads
+    state from an endpoint, the endpoint must be the single source of truth.
+  - `asyncio.wait_for` around the root task is sufficient to cancel every
+    leaf call because CancelledError propagates through `async with` /
+    aiohttp / httpx cleanly.

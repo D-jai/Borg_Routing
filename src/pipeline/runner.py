@@ -9,12 +9,15 @@ Error codes:
 - BRT-PIP-003: run completion update failed
 - BRT-PIP-004: invalid user_instruction (empty)
 - BRT-PIP-005: run already in terminal state
+- BRT-PIP-008: run exceeded wall-clock budget (BORG_MAX_RUN_SECONDS)
 - BRT-PIP-010: failure_reason persisted (informational; written whenever a
                run ends in status='failed'). Not an error itself — exists
                so operators can grep for 'BRT-PIP-010' in the error event
                stream and see the user-facing failure message.
 """
+import asyncio
 import logging
+import os
 import time
 import traceback
 from typing import Optional
@@ -33,6 +36,27 @@ from src.logging.writer import write_event
 from src.orchestrator.engine import orchestrate_run
 
 logger = logging.getLogger(__name__)
+
+
+async def resolve_max_run_seconds(db_path: str = DB_PATH) -> int:
+    """Resolve the per-run wall-clock cap through DB → env → default (300s).
+
+    Mirrors the same resolution order the Admin UI displays via
+    GET /config/effective so what the operator sees is what the engine uses.
+    """
+    stored = await get_config("max_run_seconds", db_path=db_path)
+    if stored is not None:
+        try:
+            return max(1, int(float(stored)))
+        except (TypeError, ValueError):
+            pass
+    env_val = os.getenv("BORG_MAX_RUN_SECONDS")
+    if env_val:
+        try:
+            return max(1, int(float(env_val)))
+        except (TypeError, ValueError):
+            pass
+    return 300
 
 
 async def run_pipeline(
@@ -98,20 +122,56 @@ async def run_pipeline(
 
     await update_run_status(run_id, "running", db_path=db_path)
 
+    max_run_seconds = await resolve_max_run_seconds(db_path=db_path)
+
     t0 = time.monotonic()
     response = ""
     status = "completed"
     error: Optional[str] = None
 
     try:
-        response = await orchestrate_run(
-            run_id=run_id,
-            user_instruction=user_instruction,
-            thread_window=thread_window,
-            rolling_summary=rolling_summary,
-            db_path=db_path,
-            current_depth=current_depth,
+        # BRT-PIP-008 — wall-clock budget. The orchestrator + every leaf
+        # call runs inside this single wait_for. On timeout the inner
+        # task is cancelled; aiohttp/httpx calls propagate CancelledError
+        # and close their sockets, so no further external spend happens
+        # after the cap fires.
+        response = await asyncio.wait_for(
+            orchestrate_run(
+                run_id=run_id,
+                user_instruction=user_instruction,
+                thread_window=thread_window,
+                rolling_summary=rolling_summary,
+                db_path=db_path,
+                current_depth=current_depth,
+            ),
+            timeout=max_run_seconds,
         )
+    except asyncio.TimeoutError:
+        status = "failed"
+        error = (
+            f"BRT-PIP-008: run exceeded wall-clock budget ({max_run_seconds}s). "
+            f"Raise max_run_seconds in Admin or BORG_MAX_RUN_SECONDS in .env if "
+            f"longer runs are expected."
+        )
+        logger.warning("run_pipeline hit wall-clock cap for run_id=%s (%ds)",
+                       run_id, max_run_seconds)
+        response = (
+            f"This run was stopped because it exceeded the {max_run_seconds}-second "
+            f"wall-clock budget. Run id: {run_id}."
+        )
+        try:
+            await write_event(
+                "error",
+                run_id=run_id,
+                decision={
+                    "code": "BRT-PIP-008",
+                    "msg": error,
+                    "max_run_seconds": max_run_seconds,
+                },
+                db_path=db_path,
+            )
+        except Exception:
+            pass
     except Exception as exc:
         status = "failed"
         tb = traceback.format_exc()
