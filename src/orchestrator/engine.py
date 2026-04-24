@@ -160,24 +160,124 @@ def _is_trivial_conversational(text: str) -> bool:
     return True
 
 
+_REASONING_TAG_RE = re.compile(
+    r"<(?:thinking|think|reasoning|reason|analysis|scratchpad)\b[^>]*>.*?"
+    r"</(?:thinking|think|reasoning|reason|analysis|scratchpad)>",
+    re.DOTALL | re.IGNORECASE,
+)
+
+# Model-id patterns that identify reasoning/thinking-family models. These
+# models burn 3-8k tokens on private chain-of-thought *before* any visible
+# output appears; running them with `max_tokens=2000` will hit the cap
+# mid-thought and return an empty / truncated response. When we detect
+# one, we reserve a larger budget (see _resolve_max_tokens_for_model).
+_REASONING_MODEL_PATTERNS = (
+    # OpenAI reasoning family (o1, o3, o4, and thinking-prefixed snapshots)
+    re.compile(r"(^|/)(?:openai/)?o[134](?:-|$)", re.IGNORECASE),
+    re.compile(r"thinking", re.IGNORECASE),
+    # DeepSeek-R1 reasoning family
+    re.compile(r"deepseek[-_/]?r1", re.IGNORECASE),
+    # Qwen QwQ reasoning family
+    re.compile(r"qwen[-_/]?qwq", re.IGNORECASE),
+    re.compile(r"qwq[-_]?\d", re.IGNORECASE),
+    # Gemini / Claude reasoning snapshots (non-exhaustive — caller can
+    # also set specialty_tags=["reasoning"] to force the larger budget).
+    re.compile(r"gemini.*(?:thinking|reasoning)", re.IGNORECASE),
+    re.compile(r"claude.*(?:thinking|reasoning)", re.IGNORECASE),
+    # Grok reasoning
+    re.compile(r"grok[-_]?(?:\d[-_])?reasoning", re.IGNORECASE),
+    # Kimi reasoning
+    re.compile(r"kimi.*k[12].*thinking", re.IGNORECASE),
+)
+
+
+def _is_reasoning_model(model: ModelInfo) -> bool:
+    """Return True if the model is in the reasoning/thinking family.
+
+    Detection is conservative: any of the pattern matches on model_id OR an
+    explicit `reasoning` tag in specialty_tags flips this on. A False
+    negative just means the model runs with the standard token budget (the
+    old behaviour); a False positive costs a few thousand extra output
+    tokens on a call that didn't need them — cheaper than a run-breaking
+    truncation.
+    """
+    if "reasoning" in {t.lower() for t in (model.specialty_tags or [])}:
+        return True
+    mid = model.model_id or ""
+    return any(pat.search(mid) for pat in _REASONING_MODEL_PATTERNS)
+
+
+def _resolve_max_tokens_for_model(
+    model: ModelInfo,
+    base_env_var: str,
+    default: int = 2000,
+) -> int:
+    """Compute the per-call `max_tokens` for the given model.
+
+    Non-reasoning models get the env-configured default (typically 2000).
+    Reasoning models get max(default * 4, 8000) so their private
+    chain-of-thought has headroom before the visible answer is emitted.
+    Operators who want even more headroom can raise `base_env_var`.
+    """
+    base = int(os.getenv(base_env_var, str(default)))
+    if _is_reasoning_model(model):
+        return max(base * 4, 8000)
+    return base
+
+
+def _strip_reasoning_wrappers(text: str) -> str:
+    """Remove <thinking>...</thinking> / <think>...</think> / similar blocks.
+
+    Reasoning-family models (DeepSeek-R1, Qwen-QwQ, Gemini-thinking, some
+    OpenAI reasoning snapshots) sometimes leak their private chain-of-thought
+    as XML-ish wrappers even when `response_format=json_object` is set.
+    Strip them before JSON extraction.
+    """
+    return _REASONING_TAG_RE.sub("", text).strip()
+
+
 def _extract_json(text: str) -> dict:
-    """Extract first JSON object from text."""
+    """Extract first JSON object from ``text`` — tolerant of reasoning-model prose.
+
+    Order of attempts:
+      1. Raw `json.loads` on the stripped text (happy path).
+      2. Strip `<thinking>` / `<think>` / `<reasoning>` wrappers, retry.
+      3. Fenced `json` / generic ``` code block.
+      4. Greedy `{...}` match on the cleaned text (last resort).
+
+    Raises:
+        ValueError: BRT-ORC-002 if none of the strategies produce valid JSON.
+    """
+    raw = text.strip() if text else ""
+    if not raw:
+        raise ValueError("BRT-ORC-002: empty orchestrator response")
+
     try:
-        return json.loads(text.strip())
+        return json.loads(raw)
     except json.JSONDecodeError:
         pass
-    fence_m = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
+
+    cleaned = _strip_reasoning_wrappers(raw)
+    if cleaned and cleaned != raw:
+        try:
+            return json.loads(cleaned)
+        except json.JSONDecodeError:
+            pass
+
+    fence_m = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", cleaned or raw, re.DOTALL)
     if fence_m:
         try:
             return json.loads(fence_m.group(1))
         except json.JSONDecodeError:
             pass
-    brace_m = re.search(r"\{.*\}", text, re.DOTALL)
+
+    brace_m = re.search(r"\{.*\}", cleaned or raw, re.DOTALL)
     if brace_m:
         try:
             return json.loads(brace_m.group(0))
         except json.JSONDecodeError:
             pass
+
     raise ValueError("BRT-ORC-002: no valid JSON in orchestrator response")
 
 
@@ -291,6 +391,26 @@ async def _invoke_orchestrator_model(
         {k: v.output for k, v in stage_results.items()}, indent=2
     ) if stage_results else "(none)"
 
+    # BRT-WEB-02 — surface raw tool_results (web_search citations, etc.)
+    # to compose/re_plan modes so the composer can re-cite from primary
+    # sources even if an answerer summary dropped or mangled them. Only
+    # include in compose/re_plan; plan mode hasn't seen any tools yet.
+    if mode in ("compose", "re_plan") and stage_results:
+        aggregated_tools: dict = {}
+        for node_id, env in stage_results.items():
+            env_tools = getattr(env, "tool_results", None) or {}
+            for tool_name, results in env_tools.items():
+                aggregated_tools.setdefault(tool_name, []).append({
+                    "source_node": node_id,
+                    "results": results,
+                })
+        tool_results_str = (
+            json.dumps(aggregated_tools, indent=2, default=str)
+            if aggregated_tools else "(none)"
+        )
+    else:
+        tool_results_str = "(none)"
+
     subs = {
         "current_mode": mode,
         "run_id": str(run_id),
@@ -300,6 +420,7 @@ async def _invoke_orchestrator_model(
         "thread_window": json.dumps(thread_window, indent=2),
         "rolling_summary": rolling_summary or "(none)",
         "stage_results": stage_results_str,
+        "tool_results": tool_results_str,
         "child_scratch_digest": json.dumps(child_scratch_digest) if child_scratch_digest else "(none)",
         "context_budget_hint": "(unknown — use cascading distillation if context feels dense)",
         "skills_catalogue": skills_catalogue,
@@ -314,7 +435,14 @@ async def _invoke_orchestrator_model(
     )
 
     url, headers, body_model = resolve_model_call(orchestrator_model)
-    max_tokens = int(os.getenv("ORCHESTRATOR_MAX_TOKENS", "2000"))
+    # BRT-ORC-RM — reasoning-family orchestrators burn thousands of hidden
+    # chain-of-thought tokens before the first visible byte; giving them
+    # only 2000 max_tokens truncates them mid-thought and returns empty
+    # JSON. _resolve_max_tokens_for_model bumps the cap to >= 8000 for
+    # detected reasoning models; non-reasoning models keep the default.
+    max_tokens = _resolve_max_tokens_for_model(
+        orchestrator_model, "ORCHESTRATOR_MAX_TOKENS", default=2000
+    )
 
     # BRT-ORC-02b — ask LM Studio / OpenRouter for JSON-only output at the
     # API level so the orchestrator can't wander into prose. Both backends

@@ -117,3 +117,10 @@ class InboundEnvelope(BaseModel):
     tokens_used: dict = {}
     scratch_writes: list[SideEffectAction] = []
     scratch_cleanup: list[SideEffectAction] = []
+    # BRT-WEB-02 — raw tool invocation results (e.g. web_search citations)
+    # that fed into this answerer. Carried back so the orchestrator's
+    # compose step can re-cite from raw citations even if the answerer's
+    # summary was thin, lossy, or hallucinated. Shape:
+    #   {"web_search": [{"title":..., "url":..., "snippet":...}, ...], ...}
+    # Empty dict when no tools were invoked.
+    tool_results: dict = {}

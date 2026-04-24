@@ -126,7 +126,16 @@ async def _call_model(
         ValueError: BRT-ANS-002 on HTTP error.
     """
     url, headers, body_model = resolve_model_call(model)
-    max_tokens = int(os.getenv("ANSWERER_MAX_TOKENS", "2000"))
+    # BRT-ORC-RM — reasoning-family answerers (DeepSeek-R1, Qwen-QwQ,
+    # o1/o3/o4, thinking-prefixed snapshots) burn thousands of hidden
+    # chain-of-thought tokens before emitting visible output; a 2000-token
+    # cap truncates them mid-thought. _resolve_max_tokens_for_model bumps
+    # the cap to >= 8000 for detected reasoning models.
+    from src.orchestrator.engine import _resolve_max_tokens_for_model  # noqa: PLC0415
+
+    max_tokens = _resolve_max_tokens_for_model(
+        model, "ANSWERER_MAX_TOKENS", default=2000
+    )
     payload = {
         "model": body_model,
         "messages": [
@@ -310,6 +319,11 @@ async def _execute_answerer(task: WrappedTask, db_path: str) -> InboundEnvelope:
         )
         return env
 
+    # BRT-WEB-02 — grab any tool_results the executor injected earlier so
+    # we can carry them back on the envelope. Compose mode will re-cite
+    # from these raw citations even if the answerer's summary dropped them.
+    carried_tool_results = dict(task.dependency_input.get("tool_results") or {})
+
     # Build InboundEnvelope
     try:
         env = InboundEnvelope(
@@ -322,6 +336,7 @@ async def _execute_answerer(task: WrappedTask, db_path: str) -> InboundEnvelope:
             tokens_used={"input": tokens_in, "output": tokens_out},
             scratch_writes=raw.get("scratch_writes", []),
             scratch_cleanup=raw.get("scratch_cleanup", []),
+            tool_results=carried_tool_results,
         )
     except Exception as exc:
         raise ValueError(

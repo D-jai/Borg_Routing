@@ -1,0 +1,136 @@
+id: BRT-INSTALL-FIX-03
+timestamp: 2026-04-24T20:00:00Z
+type: fix
+scope: phase-4
+title: "Slice A hardening — 5 install-time bugs (formatting, delegation, JSON tolerance, reasoning-model tokens, tool_results fold-in)"
+
+summary_human: |
+  Operator ran post-install prompts against BORG and surfaced five issues,
+  all rooted in orchestrator / composer quality rather than plumbing:
+
+  1. Token cap too low (2000 → needed 8000 for reasoning models).
+  2. Orchestrator "decided to just continue" and stopped delegating on tasks
+     that needed fresh data.
+  3. Thinking models (DeepSeek-R1 / Qwen-QwQ style) returned JSON wrapped
+     in <thinking>…</thinking> blocks; the extractor failed.
+  4. Live news got captured by web_search but the composer's final answer
+     ignored it — citations were being dropped between answerer and compose.
+  5. Compose output was a wall of text; paragraphs, headers, bullets were
+     all collapsed into one blob.
+
+  Slice A landing: all five fixed in one pass, 20 new tests.
+
+  Fix #1 — Reasoning-model token budget (BRT-ORC-RM)
+    • New helpers in src/orchestrator/engine.py:
+        _is_reasoning_model(model: ModelInfo) -> bool
+        _resolve_max_tokens_for_model(model, env_var, default) -> int
+    • Detects o1/o3/o4, DeepSeek-R1, Qwen-QwQ, Grok/Kimi/Gemini/Claude
+      reasoning snapshots by model_id pattern AND honours
+      specialty_tags=['reasoning'] as an explicit override.
+    • Reasoning models get max(env*4, 8000) tokens; others keep env default
+      (2000). Orchestrator and executor both call the helper, so both the
+      planner and the leaf answerers get the bump when using a reasoning
+      model. Tests: TC-RM-010a-e + TC-RM-011a-c.
+
+  Fix #2 — Delegation discipline (Rule Zero Override)
+    • Added a new "Rule Zero Override" block to ORCHESTRATOR_SYSTEM_PROMPT
+      listing four MUST-decompose triggers:
+        - current / time-sensitive info
+        - specific verifiable facts about real entities
+        - user-supplied URLs or documents
+        - multi-step research
+    • Explicit language: "It is better to run one small search than to
+      bluff from memory. Bluffing is a run-breaking defect, not a
+      cost-saving shortcut." Tests: TC-PROMPT-010b.
+
+  Fix #3 — Tolerant JSON extractor (BRT-ORC-002)
+    • src/orchestrator/engine.py::_extract_json rewritten to strip
+      <thinking> / <think> / <reasoning> / <reason> / <analysis> /
+      <scratchpad> wrappers (case-insensitive, attribute-tolerant) before
+      attempting parse. New _strip_reasoning_wrappers helper.
+    • Extraction order: raw → cleaned → fenced code block → greedy
+      brace-match — each a layered fallback. Tests: TC-JSON-010,
+      TC-JSON-011a-e.
+
+  Fix #4 — tool_results survive fold-in (BRT-WEB-02)
+    • Added `tool_results: dict = {}` field to InboundEnvelope
+      (src/envelopes/schema.py). Executor populates it from the task's
+      dependency_input at envelope construction time so raw citations
+      land on the returned envelope, not just inside the answerer's
+      ephemeral input context.
+    • _invoke_orchestrator_model aggregates tool_results across all
+      stage_results envelopes and feeds them into compose/re_plan via
+      a new {tool_results} placeholder in the prompt.
+    • Orchestrator prompt gains "Compose evidence discipline" clause
+      telling the composer to trust raw citations over a thin answerer
+      summary, and to flag mismatches in rationale.
+      Tests: TC-WEB-020a-b, TC-PROMPT-010c.
+
+  Fix #5 — Compose formatting discipline
+    • Added "Compose formatting discipline (required)" section to
+      ORCHESTRATOR_SYSTEM_PROMPT. Rules: paragraph breaks every 2-4
+      sentences, bullet lists for 3+ enumerations, `##` headers for
+      multi-section responses, **bold** for key terms, fenced code
+      blocks for code/commands, explicit source citation for web_search
+      output. "Never emit a single wall of text."
+      Tests: TC-PROMPT-010a.
+
+  Suite: 333 → 353 (+20 new, zero regressions). Pre-existing aiosqlite
+  thread teardown warning unchanged.
+
+ids:
+  - BRT-INSTALL-FIX-03
+  - BRT-ORC-RM   # reasoning-model token budget
+  - BRT-WEB-02   # tool_results on InboundEnvelope + compose exposure
+
+inputs:
+  - operator report  # "tokens were not enough 2000 went to 8000"
+  - operator report  # "another model decided to just continue"
+  - operator report  # "thinking models non-strict JSON"
+  - operator report  # "news captured but not bundled"
+  - operator report  # "paragraphs all meshed into one long return block"
+
+outputs:
+  code:
+    - src/orchestrator/engine.py
+    - src/agents/executor.py
+    - src/envelopes/schema.py
+    - src/prompts/orchestrator.py
+  tests:
+    - tests/orchestrator/test_slice_a_hardening.py
+  ledger:
+    - .dev/ledger/2026-04-24_install-fix-03-slice-a-hardening.yaml
+
+error_codes_added:
+  - code: BRT-ORC-RM
+    meaning: "Reasoning-model token budget. Detected reasoning models get max(env*4, 8000) max_tokens; others keep env default."
+  - code: BRT-WEB-02
+    meaning: "tool_results preserved on InboundEnvelope and surfaced to compose/re_plan via {tool_results} placeholder."
+
+checklist:
+  code_changes: yes
+  tests_added: yes        # 20 new; 353 total
+  docs_updated: no        # no operator-facing flag changes
+  user_guide_updated: no
+  presentation_updated: no
+  migration_needed: no    # InboundEnvelope.tool_results defaults to {} — back-compat
+
+learnings:
+  - "Reasoning-family models are a separate model class for token budgeting
+    purposes, not a variant of chat models. Hidden chain-of-thought counts
+    against max_tokens but never appears in output; undersizing the cap is
+    the #1 cause of empty / truncated responses from o1 / DeepSeek-R1."
+  - "The answerer's structured output is a LOSSY summary of what it saw.
+    Citations, URLs, and primary-source details get dropped even when the
+    schema asks for them. Preserving raw tool_results on the envelope and
+    exposing them to compose closes the loop: compose can always verify or
+    re-cite from the original, even if the answerer's summary was poor."
+  - "Rule Zero (direct-answer for simple prompts) needs a negative guard.
+    Without one, orchestrators cheerfully bluff on time-sensitive questions
+    from their training memory. The override clause ('bluffing is a
+    run-breaking defect') shifts the default in the right direction without
+    breaking trivial-chat throughput."
+  - "Prompt engineering 'formatting discipline' must be explicit and
+    checkable from within tests. Embedding specific rules (paragraph
+    breaks, bullet thresholds, header syntax) makes the prompt itself
+    regression-testable."
