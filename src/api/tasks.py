@@ -46,21 +46,42 @@ async def _run_in_background(
     run_id_str: str,
     db_path: str,
 ) -> None:
-    """Background task: drive the pipeline for a submitted run."""
-    import uuid
-    # run_pipeline creates its own run_id — but we need to use the one we
-    # pre-created (already created by the POST handler). For background runs,
-    # we just drive orchestration directly.
+    """Background task: drive the pipeline for a submitted run.
+
+    Persists ``failure_reason`` on failure so ``GET /runs/<id>`` shows why
+    the run failed (BRT-PIP-010). Also emits a trace-visible error event
+    carrying the traceback.
+    """
+    import traceback as _tb
+    import uuid as _uuid
     from src.orchestrator.engine import orchestrate_run
     from src.db.state import update_run_status
-    import uuid as _uuid
+    from src.logging.writer import write_event
+
     run_id = _uuid.UUID(run_id_str)
     try:
         await orchestrate_run(run_id=run_id, user_instruction=instruction, db_path=db_path)
         await update_run_status(run_id, "completed", db_path=db_path)
-    except Exception:
+    except Exception as exc:
+        tb = _tb.format_exc()
+        failure_reason = f"BRT-PIP-002: orchestration failed: {exc}"
         try:
-            await update_run_status(run_id, "failed", db_path=db_path)
+            await write_event(
+                "error",
+                run_id=run_id,
+                decision={
+                    "code": "BRT-PIP-010",
+                    "msg": failure_reason,
+                    "traceback": tb[-2000:],
+                },
+                db_path=db_path,
+            )
+        except Exception:
+            pass
+        try:
+            await update_run_status(
+                run_id, "failed", failure_reason=failure_reason, db_path=db_path
+            )
         except Exception:
             pass
 

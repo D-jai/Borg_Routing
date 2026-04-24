@@ -20,6 +20,9 @@ _MIGRATIONS = [
     "ALTER TABLE runs ADD COLUMN thread_id TEXT",
     "ALTER TABLE runs ADD COLUMN user_rating INTEGER",
     "ALTER TABLE log_payloads ADD COLUMN ner_processed BOOLEAN DEFAULT 0",
+    # BRT-PIP-010 — surface run failure reason in the runs table so the
+    # API and UI can show why a run failed. NULL for non-failed runs.
+    "ALTER TABLE runs ADD COLUMN failure_reason TEXT",
 ]
 
 _SCHEMA_SQL = """
@@ -34,7 +37,8 @@ CREATE TABLE IF NOT EXISTS runs (
     user_instruction TEXT NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     completed_at TIMESTAMP,
-    user_rating INTEGER
+    user_rating INTEGER,
+    failure_reason TEXT
 );
 
 CREATE TABLE IF NOT EXISTS subtasks (

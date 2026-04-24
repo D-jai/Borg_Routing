@@ -375,3 +375,46 @@ async def test_reconcile_end_to_end_via_discover_all():
     live = cm.get("lmstudio/live-row")
     assert live is not None
     assert live.endpoint == "http://localhost:1234"
+
+
+@pytest.mark.asyncio
+async def test_discover_all_with_unreachable_lmstudio_seeds_zero_rows():
+    """BUG-007 — when every LM Studio port is unreachable, discover_all
+    must not seed or retain any lmstudio rows as live endpoints."""
+    cm = CapabilityMatrix()
+    # Seed a pre-existing ghost to prove reconciliation kicks in.
+    cm.upsert(
+        ModelInfo(
+            model_id="lmstudio/ghost/model",
+            source="lmstudio",
+            endpoint="http://localhost:1234",
+            context_length=4096,
+            checked=True,
+        )
+    )
+
+    with patch("httpx.AsyncClient") as mock_client_cls:
+        mock_client = AsyncMock()
+        mock_client.get = AsyncMock(side_effect=httpx.ConnectError("refused"))
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=None)
+        mock_client_cls.return_value = mock_client
+
+        # Ollama + OpenRouter: patched empty so we isolate lmstudio.
+        with patch(
+            "src.registry.discovery.discover_ollama",
+            new_callable=AsyncMock,
+        ) as mock_ol, patch(
+            "src.registry.discovery.discover_openrouter",
+            new_callable=AsyncMock,
+        ) as mock_or:
+            mock_ol.return_value = []
+            mock_or.return_value = []
+
+            await discover_all(cm)
+
+    # Rows kept to preserve scores, but all must be reconciled: endpoint
+    # cleared, checked=False. No live lmstudio row should exist.
+    for row in [m for m in cm.all() if m.source == "lmstudio"]:
+        assert row.endpoint is None, f"{row.model_id} endpoint not cleared"
+        assert row.checked is False, f"{row.model_id} still checked"

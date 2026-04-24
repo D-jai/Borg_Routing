@@ -69,7 +69,13 @@ async def test_tavily_happy_path(monkeypatch):
 @pytest.mark.asyncio
 async def test_tavily_failure_falls_back_to_perplexity(monkeypatch, caplog):
     """TC-WEB-002 — Tavily 502 → Perplexity answers → result marked degraded,
-    BRT-TOOL-DEGRADED logged once."""
+    BRT-TOOL-DEGRADED logged once.
+
+    BUG-001 fix: Sonar actually returns PROSE + a top-level ``citations``
+    list; the previous mock returned strict JSON which looked nothing like
+    real Sonar output, letting a bug slip through. This mock matches real
+    Sonar shape.
+    """
     monkeypatch.setenv("TAVILY_API_KEY", "tv-test-abc")
     monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test-xyz")
 
@@ -78,10 +84,11 @@ async def test_tavily_failure_falls_back_to_perplexity(monkeypatch, caplog):
         "choices": [
             {
                 "message": {
-                    "content": '[{"title":"P","url":"https://p","snippet":"px"}]'
+                    "content": "As of today, P is the relevant source for this query."
                 }
             }
-        ]
+        ],
+        "citations": ["https://p"],
     }
     perplexity_client = _mock_httpx_post(perplexity_body)
 
@@ -92,7 +99,9 @@ async def test_tavily_failure_falls_back_to_perplexity(monkeypatch, caplog):
 
     assert res.status == "degraded"
     assert res.provider == "perplexity"
-    assert res.result == [{"title": "P", "url": "https://p", "snippet": "px"}]
+    assert len(res.result) == 1
+    assert res.result[0]["url"] == "https://p"
+    assert "P is the relevant source" in res.result[0]["snippet"]
     assert any("BRT-TOOL-DEGRADED" in rec.message for rec in caplog.records)
 
 
@@ -105,8 +114,9 @@ async def test_no_tavily_key_uses_perplexity_silently(monkeypatch, caplog):
 
     perplexity_body = {
         "choices": [
-            {"message": {"content": '[{"title":"X","url":"https://x","snippet":"xs"}]'}}
-        ]
+            {"message": {"content": "Summary of X, a relevant entity."}}
+        ],
+        "citations": ["https://x"],
     }
     perplexity_client = _mock_httpx_post(perplexity_body)
 
@@ -118,6 +128,71 @@ async def test_no_tavily_key_uses_perplexity_silently(monkeypatch, caplog):
     assert res.status == "degraded"
     assert res.provider == "perplexity"
     assert any("BRT-TOOL-DEGRADED" in rec.message for rec in caplog.records)
+
+
+@pytest.mark.asyncio
+async def test_perplexity_no_citations_regexes_urls_from_prose(monkeypatch):
+    """BUG-001 — when ``citations`` is absent, URLs must be extracted from prose."""
+    monkeypatch.delenv("TAVILY_API_KEY", raising=False)
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test")
+
+    perplexity_body = {
+        "choices": [
+            {"message": {"content": "See https://alpha.example and https://beta.example."}}
+        ]
+    }
+    client = _mock_httpx_post(perplexity_body)
+
+    tool = WebSearchTool()
+    with patch("httpx.AsyncClient", return_value=client):
+        res = await tool.run({"query": "q"})
+
+    urls = {r["url"] for r in res.result}
+    assert "https://alpha.example" in urls
+    assert "https://beta.example" in urls
+
+
+@pytest.mark.asyncio
+async def test_perplexity_prose_only_returns_synthesized_record(monkeypatch):
+    """BUG-001 — prose with no URLs yields one synthesised record, not a raise."""
+    monkeypatch.delenv("TAVILY_API_KEY", raising=False)
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test")
+
+    perplexity_body = {
+        "choices": [
+            {"message": {"content": "Here is a narrative answer without any URLs at all."}}
+        ]
+    }
+    client = _mock_httpx_post(perplexity_body)
+
+    tool = WebSearchTool()
+    with patch("httpx.AsyncClient", return_value=client):
+        res = await tool.run({"query": "q"})
+
+    assert len(res.result) == 1
+    assert res.result[0]["title"] == "Synthesized"
+    assert res.result[0]["url"] == ""
+    assert "narrative answer" in res.result[0]["snippet"]
+
+
+@pytest.mark.asyncio
+async def test_perplexity_model_env_var(monkeypatch):
+    """BUG-001 — BORG_PERPLEXITY_MODEL swaps the model in the payload."""
+    monkeypatch.delenv("TAVILY_API_KEY", raising=False)
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test")
+    monkeypatch.setenv("BORG_PERPLEXITY_MODEL", "perplexity/sonar-pro")
+
+    perplexity_body = {
+        "choices": [{"message": {"content": "x"}}],
+        "citations": ["https://x"],
+    }
+    client = _mock_httpx_post(perplexity_body)
+    tool = WebSearchTool()
+    with patch("httpx.AsyncClient", return_value=client):
+        await tool.run({"query": "q"})
+
+    sent_model = client.post.call_args[1]["json"]["model"]
+    assert sent_model == "perplexity/sonar-pro"
 
 
 @pytest.mark.asyncio

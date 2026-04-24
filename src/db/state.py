@@ -43,9 +43,15 @@ async def create_run(
 async def update_run_status(
     run_id: UUID,
     status: str,
+    failure_reason: Optional[str] = None,
     db_path: str = DB_PATH,
 ) -> None:
     """Update run status. Valid values: pending|running|completed|failed.
+
+    When ``failure_reason`` is provided (typically with status='failed'), it
+    is persisted to the runs.failure_reason column so ``GET /runs/{id}``
+    and the UI can surface why the run failed. Passing ``failure_reason``
+    with a non-failed status is allowed but unusual — no filtering applied.
 
     Raises:
         ValueError: BRT-DB-010 if run_id not found.
@@ -60,6 +66,9 @@ async def update_run_status(
         params: list = [status]
         if status in ("completed", "failed"):
             sql += ", completed_at=CURRENT_TIMESTAMP"
+        if failure_reason is not None:
+            sql += ", failure_reason=?"
+            params.append(failure_reason)
         sql += " WHERE run_id=?"
         params.append(str(run_id))
         cur = await db.execute(sql, params)

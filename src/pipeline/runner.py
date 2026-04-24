@@ -9,8 +9,14 @@ Error codes:
 - BRT-PIP-003: run completion update failed
 - BRT-PIP-004: invalid user_instruction (empty)
 - BRT-PIP-005: run already in terminal state
+- BRT-PIP-010: failure_reason persisted (informational; written whenever a
+               run ends in status='failed'). Not an error itself — exists
+               so operators can grep for 'BRT-PIP-010' in the error event
+               stream and see the user-facing failure message.
 """
+import logging
 import time
+import traceback
 from typing import Optional
 from uuid import UUID
 
@@ -23,7 +29,10 @@ from src.db.state import (
     get_run,
     update_run_status,
 )
+from src.logging.writer import write_event
 from src.orchestrator.engine import orchestrate_run
+
+logger = logging.getLogger(__name__)
 
 
 async def run_pipeline(
@@ -105,13 +114,37 @@ async def run_pipeline(
         )
     except Exception as exc:
         status = "failed"
+        tb = traceback.format_exc()
         error = f"BRT-PIP-002: orchestration failed: {exc}"
+        logger.exception("run_pipeline orchestration failed for run_id=%s", run_id)
         response = f"I was unable to complete this request. (Run: {run_id})"
+        # BRT-PIP-010 — emit a trace-visible error event carrying the
+        # traceback so the UI timeline + `GET /runs/<id>` both show why
+        # the run failed. Fire-and-forget; a logging hiccup never shadows
+        # the real failure.
+        try:
+            await write_event(
+                "error",
+                run_id=run_id,
+                decision={
+                    "code": "BRT-PIP-010",
+                    "msg": error,
+                    "traceback": tb[-2000:],
+                },
+                db_path=db_path,
+            )
+        except Exception:
+            pass
 
     latency_ms = int((time.monotonic() - t0) * 1000)
 
     try:
-        await update_run_status(run_id, status, db_path=db_path)
+        await update_run_status(
+            run_id,
+            status,
+            failure_reason=error if status == "failed" else None,
+            db_path=db_path,
+        )
     except Exception as exc:
         error = error or f"BRT-PIP-003: run completion update failed: {exc}"
 

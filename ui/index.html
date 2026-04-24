@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>BORG_ROUTE — UI Index</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #0f0f1a;
+      color: #eee;
+      margin: 0;
+      padding: 0;
+    }
+    nav {
+      background: #1a1a2e;
+      color: #eee;
+      padding: 10px 20px;
+      display: flex;
+      gap: 20px;
+      align-items: center;
+    }
+    nav .brand {
+      font-weight: bold;
+      color: #e94560;
+      font-size: 1.1em;
+    }
+    main {
+      padding: 40px 20px;
+      max-width: 900px;
+      margin: 0 auto;
+    }
+    h1 { color: #e94560; margin-top: 0; }
+    p { color: #bbb; line-height: 1.5; }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 16px;
+      margin-top: 24px;
+    }
+    a.card {
+      display: block;
+      padding: 18px 20px;
+      background: #1a1a2e;
+      border: 1px solid #2a2a3e;
+      border-radius: 6px;
+      color: #eee;
+      text-decoration: none;
+    }
+    a.card:hover { border-color: #e94560; }
+    a.card h3 { margin: 0 0 6px 0; color: #e94560; }
+    a.card p { margin: 0; font-size: 0.9em; color: #aaa; }
+    footer {
+      margin-top: 40px;
+      padding-top: 20px;
+      border-top: 1px solid #2a2a3e;
+      color: #666;
+      font-size: 0.85em;
+    }
+    footer a { color: #888; }
+  </style>
+</head>
+<body>
+  <nav>
+    <span class="brand">BORG_ROUTE</span>
+    <span style="color:#888;">UI Index</span>
+  </nav>
+
+  <main>
+    <h1>BORG_ROUTE</h1>
+    <p>Adaptive Recursive Agent Router. Pick a surface below, or use the
+       API directly at <code>/health</code>, <code>/v1/chat/completions</code>,
+       <code>/runs</code>, <code>/models/matrix</code>.</p>
+
+    <div class="grid">
+      <a class="card" href="/ui/chat.html">
+        <h3>Chat</h3>
+        <p>Send a single prompt to BORG and watch it orchestrate a response.</p>
+      </a>
+      <a class="card" href="/ui/models.html">
+        <h3>Models</h3>
+        <p>Discover models, run capability research, tick rows into the routing pool.</p>
+      </a>
+      <a class="card" href="/ui/keys.html">
+        <h3>API Keys</h3>
+        <p>Store and manage provider keys (OpenRouter, Tavily, custom endpoints).</p>
+      </a>
+      <a class="card" href="/ui/run.html">
+        <h3>Run Trace</h3>
+        <p>Inspect a single run's envelopes, events, and failure reason.</p>
+      </a>
+      <a class="card" href="/ui/logs.html">
+        <h3>Logs</h3>
+        <p>Browse the rolling event log across all runs.</p>
+      </a>
+      <a class="card" href="/ui/dashboard.html">
+        <h3>Dashboard</h3>
+        <p>Cost, tokens, and run counts over time.</p>
+      </a>
+      <a class="card" href="/ui/skills.html">
+        <h3>Skills</h3>
+        <p>View the pre-written skill catalogue (prompt templates).</p>
+      </a>
+      <a class="card" href="/ui/admin.html">
+        <h3>Admin</h3>
+        <p>Governance rules ledger and router knobs.</p>
+      </a>
+    </div>
+
+    <footer>
+      Not sure where to start? The <a href="/ui/models.html">Models page</a>
+      is step one on a fresh install: discover → research → tick at least
+      one row. Then use <a href="/ui/chat.html">Chat</a>.
+    </footer>
+  </main>
+</body>
+</html>

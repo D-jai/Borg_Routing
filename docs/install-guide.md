@@ -131,10 +131,45 @@ for the Postgres migration slice. Use vertical scale (faster CPU) until
 then.
 
 ## Environment Variables
-See `.env.example` — every variable is documented inline. Key ones:
-- `OPENROUTER_API_KEY` — required for OpenRouter discovery + scorer.
-- `SCORING_MODEL` (default `perplexity/sonar-pro-search`) — must support real web search.
-- `SCORING_MODEL_ENDPOINT` (default OpenRouter) — override if you prefer a direct provider.
+See `.env.example` — every variable is documented inline. The ones you
+are most likely to touch during install and operation are grouped below.
+
+### Provider credentials
+| Variable | Default | Purpose |
+|---|---|---|
+| `OPENROUTER_API_KEY` | (unset) | Required for OpenRouter discovery, the capability scorer, and the Perplexity web-search fallback. |
+| `TAVILY_API_KEY` | (unset) | Optional. When set, Tavily becomes the primary `web_search` provider (cheaper than Perplexity). Without it, `web_search` silently falls back to Perplexity via OpenRouter and logs `BRT-TOOL-DEGRADED` once per process. |
+
+### Scorer
+| Variable | Default | Purpose |
+|---|---|---|
+| `SCORING_MODEL` | `perplexity/sonar-pro-search` | Must support real web search. |
+| `SCORING_MODEL_ENDPOINT` | OpenRouter | Override if you want to hit a provider directly. |
+
+### Web-search tool (BRT-WEB-01)
+| Variable | Default | Purpose |
+|---|---|---|
+| `BORG_WEB_SEARCH_PROVIDER_ORDER` | `tavily,perplexity` | Comma-separated override. Set to `perplexity,tavily` to skip Tavily. |
+| `BORG_WEB_SEARCH_MAX_RESULTS` | `5` | Per-call result cap (1–20). |
+| `BORG_WEB_SEARCH_TIMEOUT_SEC` | `8` | Per-provider HTTP timeout. |
+| `BORG_PERPLEXITY_MODEL` | `perplexity/sonar` | Swap to `perplexity/sonar-pro` or `perplexity/sonar-reasoning` without redeploy. |
+
+### Orchestrator / router knobs
+| Variable | Default | Purpose |
+|---|---|---|
+| `ORCHESTRATOR_MAX_TOKENS` | `2000` | Ceiling on orchestrator JSON responses. Raise for large plans; lower for cost control. |
+| `ANSWERER_MAX_TOKENS` | `2000` | Ceiling on answerer responses (both bypass and orchestrated paths). |
+| `ORCHESTRATOR_QUALITY_REQUIREMENT` | `6.5` | Minimum task_score for a row to qualify as orchestrator. Drop to 5.1 in degraded mode. Raise to 8.0+ to force frontier-only. |
+| `TIME_COST_PER_SEC` | `0.0001` | Dollar cost per wall-second, used by the router to penalise slow models. |
+
+### Behaviour toggles
+| Variable | Default | Purpose |
+|---|---|---|
+| `BORG_RULE_ZERO_SHORTCUT` | `true` | Set to `false` to force the full plan path on every prompt (useful for debugging). |
+| `BORG_STREAM_HEARTBEAT_SEC` | `5` | SSE heartbeat cadence so long-running plans don't trip browser idle timeouts. |
+
+If a value is set in both `.env` and the `config` table (via `/config` API),
+the config table wins.
 
 ## Backup & Restore
 Back up `data/borg_route.db` (the SQLite DB) and `data/capability_matrix.yaml`

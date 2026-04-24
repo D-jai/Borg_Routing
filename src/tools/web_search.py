@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import time
 from typing import Any, Optional
 
@@ -35,9 +36,11 @@ logger = logging.getLogger(__name__)
 
 _TAVILY_URL = "https://api.tavily.com/search"
 _PERPLEXITY_URL = "https://openrouter.ai/api/v1/chat/completions"
-_PERPLEXITY_MODEL = "perplexity/sonar"
+_DEFAULT_PERPLEXITY_MODEL = "perplexity/sonar"
 _DEFAULT_PROVIDER_ORDER = ("tavily", "perplexity")
 _MAX_RESULTS_CAP = 20
+
+_URL_RE = re.compile(r"https?://[^\s\])>,\"']+")
 
 # Module-level flag so we only log BRT-TOOL-DEGRADED once per process
 # (same pattern as BRT-ORC-007-DEGRADED in engine.py).
@@ -166,6 +169,31 @@ class WebSearchTool(BaseTool):
         return normalised
 
     async def _call_perplexity(self, query: str, max_results: int) -> list[dict]:
+        """Call Perplexity Sonar via OpenRouter.
+
+        Sonar is a search-summary model — it returns prose + a sibling
+        `citations` field with the URLs it used, NOT strict JSON. The
+        previous implementation ordered JSON via system prompt and
+        json.loads'd the content, which raised on real output. This
+        rewrite:
+
+        1. Asks for a factual summary (no JSON instructions).
+        2. Reads ``body["citations"]`` (OpenRouter passes Perplexity's URL
+           list through unchanged) and pairs each URL with the prose
+           snippet. This is the happy path — most Sonar calls return
+           citations.
+        3. If ``citations`` is missing, regex-extracts URLs from the
+           prose content.
+        4. If no URLs are extractable, returns a single synthesised
+           record carrying the prose as a snippet. Caller still gets
+           actionable content; envelope records ``status="degraded"`` via
+           the fallback path in ``run()`` so the trace shows the
+           degradation.
+
+        Model is selected via ``BORG_PERPLEXITY_MODEL`` env var
+        (default ``perplexity/sonar``) so operators can swap to
+        ``perplexity/sonar-pro`` / ``sonar-reasoning`` without a redeploy.
+        """
         api_key = os.getenv("OPENROUTER_API_KEY")
         if not api_key:
             raise ToolError(
@@ -173,13 +201,15 @@ class WebSearchTool(BaseTool):
                 "OPENROUTER_API_KEY not set (needed for Perplexity fallback)",
             )
 
+        model = os.getenv("BORG_PERPLEXITY_MODEL", _DEFAULT_PERPLEXITY_MODEL)
+
         system = (
-            "You are a web search assistant. Return up to "
-            f"{max_results} results as a strict JSON array of objects with "
-            "keys 'title', 'url', 'snippet'. No prose, no fences — pure JSON."
+            "Provide a concise factual summary of the user's query using "
+            "current sources. Keep the answer focused; cite URLs when "
+            "available. Do not include editorialising."
         )
         payload = {
-            "model": _PERPLEXITY_MODEL,
+            "model": model,
             "messages": [
                 {"role": "system", "content": system},
                 {"role": "user", "content": query},
@@ -204,47 +234,60 @@ class WebSearchTool(BaseTool):
 
         body = resp.json()
         try:
-            content = body["choices"][0]["message"]["content"]
+            content = body["choices"][0]["message"]["content"] or ""
         except (KeyError, IndexError) as exc:
             raise ToolError(
                 "BRT-TOOL-002",
                 f"Perplexity response missing choices[0].message.content: {body!r:.200s}",
             ) from exc
 
-        import json as _json
+        prose = content.strip()
+        citations = body.get("citations")
+        # Some OpenRouter deployments surface citations on the message
+        # instead of the top-level body.
+        if not citations:
+            try:
+                citations = body["choices"][0]["message"].get("citations")
+            except (KeyError, IndexError):
+                citations = None
 
-        # The model answers in JSON by instruction but may still wrap in
-        # a fence or include a citations preamble — accept either shape.
-        content = content.strip()
-        if content.startswith("```"):
-            # strip optional ```json ... ```
-            content = content.strip("`").lstrip("json").strip()
-        try:
-            parsed = _json.loads(content)
-        except _json.JSONDecodeError as exc:
-            raise ToolError(
-                "BRT-TOOL-002",
-                f"Perplexity returned unparseable JSON: {content[:200]}",
-            ) from exc
+        urls: list[str] = []
+        if isinstance(citations, list):
+            for c in citations:
+                if isinstance(c, str) and c.startswith(("http://", "https://")):
+                    urls.append(c)
+                elif isinstance(c, dict):
+                    u = c.get("url") or c.get("link")
+                    if isinstance(u, str) and u.startswith(("http://", "https://")):
+                        urls.append(u)
 
-        if not isinstance(parsed, list):
-            raise ToolError(
-                "BRT-TOOL-002",
-                f"Perplexity returned {type(parsed).__name__}, expected list",
-            )
+        # No citations → regex the prose for URLs. Strip trailing sentence
+        # punctuation that the greedy match captures.
+        if not urls:
+            raw = _URL_RE.findall(prose)
+            urls = list(dict.fromkeys(u.rstrip(".,;:!?)") for u in raw))
 
+        # Pair citations with prose snippets. Sonar's prose is usually one
+        # coherent summary, so each citation gets the same snippet; that's
+        # enough signal for the orchestrator's re_plan / compose step.
         normalised: list[dict] = []
-        for item in parsed[:max_results]:
-            if not isinstance(item, dict):
-                continue
-            normalised.append(
-                {
-                    "title": str(item.get("title", "")),
-                    "url": str(item.get("url", "")),
-                    "snippet": str(item.get("snippet", "") or item.get("content", "")),
-                }
-            )
-        return normalised
+        snippet = prose[:500]
+        for url in urls[:max_results]:
+            normalised.append({"title": url, "url": url, "snippet": snippet})
+
+        if normalised:
+            return normalised
+
+        # Last resort: return the synthesised prose. Better than raising —
+        # the orchestrator still gets something to work with, and the
+        # envelope surfaces status="degraded" via the fallback path.
+        if prose:
+            return [{"title": "Synthesized", "url": "", "snippet": prose[:1000]}]
+
+        raise ToolError(
+            "BRT-TOOL-002",
+            "Perplexity returned empty content and no citations",
+        )
 
     # ------------------------------------------------------------------
     # Degraded-mode logging (once per process)

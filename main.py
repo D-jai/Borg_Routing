@@ -36,9 +36,11 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="BORG_ROUTE", version="0.1.0", lifespan=lifespan)
 
-# Serve static UI files if the ui/ directory exists.
+# Serve static UI files if the ui/ directory exists. html=True makes
+# /ui/ resolve to ui/index.html (BUG-005 fix) so operators landing on the
+# root UI path see the directory page instead of a 404.
 if os.path.isdir("ui"):
-    app.mount("/ui", StaticFiles(directory="ui"), name="ui")
+    app.mount("/ui", StaticFiles(directory="ui", html=True), name="ui")
 
 # Register routers
 from src.api.models import router as models_router  # noqa: E402

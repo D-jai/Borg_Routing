@@ -110,14 +110,38 @@ _BULK_PHRASES = (
     "for every",
 )
 
+# BRT-ZERO-01b — live-data tokens. Prompts containing any of these cannot
+# be answered from the model's pretraining alone; they need web_search or
+# another runtime tool. Matching any of them forces the full plan path so
+# the orchestrator can emit a tool_requests node. Matched as whole-ish
+# substrings (case-insensitive); kept conservative to avoid false
+# negatives on short conversational turns like "today is my birthday".
+_LIVE_DATA_TOKENS = (
+    "latest",
+    "current",
+    "today's",
+    "this week",
+    "this month",
+    "this year",
+    "news",
+    "price of",
+    "stock",
+    "weather",
+    "score",
+    "who won",
+    "breaking",
+    "right now",
+    "as of",
+)
+
 
 def _is_trivial_conversational(text: str) -> bool:
     """BRT-ZERO-01 — cheap rule-based pre-classifier.
 
-    Returns True for short, non-list, non-bulk conversational prompts that
-    should shortcut plan/re_plan and go straight to compose. Deterministic,
-    no model call. Conservative by design — if any heuristic is uncertain,
-    returns False and we take the normal full path.
+    Returns True for short, non-list, non-bulk, no-live-data conversational
+    prompts that should shortcut plan/re_plan and go straight to compose.
+    Deterministic, no model call. Conservative by design — if any heuristic
+    is uncertain, returns False and we take the normal full path.
     """
     if not text:
         return False
@@ -129,6 +153,9 @@ def _is_trivial_conversational(text: str) -> bool:
     lower = t.lower()
     for phrase in _BULK_PHRASES:
         if phrase in lower:
+            return False
+    for token in _LIVE_DATA_TOKENS:
+        if token in lower:
             return False
     return True
 
@@ -289,6 +316,11 @@ async def _invoke_orchestrator_model(
     url, headers, body_model = resolve_model_call(orchestrator_model)
     max_tokens = int(os.getenv("ORCHESTRATOR_MAX_TOKENS", "2000"))
 
+    # BRT-ORC-02b — ask LM Studio / OpenRouter for JSON-only output at the
+    # API level so the orchestrator can't wander into prose. Both backends
+    # honour `response_format: {"type":"json_object"}` via the
+    # OpenAI-compatible surface. Safe to include unconditionally — backends
+    # that don't recognise the key ignore it.
     payload = {
         "model": body_model,
         "messages": [
@@ -297,46 +329,121 @@ async def _invoke_orchestrator_model(
         ],
         "temperature": 0.1,
         "max_tokens": max_tokens,
+        "response_format": {"type": "json_object"},
     }
 
-    t0 = time.monotonic()
-    try:
-        async with httpx.AsyncClient(timeout=_MODEL_CALL_TIMEOUT) as client:
-            resp = await client.post(url, json=payload, headers=headers)
-        resp.raise_for_status()
-    except httpx.TimeoutException as exc:
-        raise ValueError(f"BRT-ORC-001: orchestrator call timed out") from exc
-    except httpx.HTTPStatusError as exc:
-        raise ValueError(
-            f"BRT-ORC-001: HTTP {exc.response.status_code} from orchestrator"
-        ) from exc
-    except httpx.RequestError as exc:
-        raise ValueError(f"BRT-ORC-001: request error calling orchestrator: {exc}") from exc
+    async def _post_and_collect() -> tuple[str, dict, int]:
+        """POST once; return (content, usage, latency_ms). Raises BRT-ORC-001."""
+        t_start = time.monotonic()
+        try:
+            async with httpx.AsyncClient(timeout=_MODEL_CALL_TIMEOUT) as client:
+                resp = await client.post(url, json=payload, headers=headers)
+            resp.raise_for_status()
+        except httpx.TimeoutException as exc:
+            raise ValueError(f"BRT-ORC-001: orchestrator call timed out") from exc
+        except httpx.HTTPStatusError as exc:
+            raise ValueError(
+                f"BRT-ORC-001: HTTP {exc.response.status_code} from orchestrator"
+            ) from exc
+        except httpx.RequestError as exc:
+            raise ValueError(f"BRT-ORC-001: request error calling orchestrator: {exc}") from exc
+        latency = int((time.monotonic() - t_start) * 1000)
+        body_resp = resp.json()
+        content_resp = body_resp["choices"][0]["message"]["content"]
+        usage_resp = body_resp.get("usage", {})
+        return content_resp, usage_resp, latency
 
-    latency_ms = int((time.monotonic() - t0) * 1000)
-    body = resp.json()
-    content = body["choices"][0]["message"]["content"]
-    usage = body.get("usage", {})
+    content, usage, latency_ms = await _post_and_collect()
     tokens_in = usage.get("prompt_tokens", 0)
     tokens_out = usage.get("completion_tokens", 0)
 
-    parsed = _extract_json(content)
+    # BRT-ORC-02b — ALWAYS log the raw payload_out before attempting to
+    # parse it. Previously _extract_json raised ValueError before
+    # write_event ran, so the raw prose that caused the failure was
+    # lost. Parsing happens AFTER the decision event is scheduled.
+    parsed: Optional[dict] = None
+    parse_error: Optional[Exception] = None
+    try:
+        parsed = _extract_json(content)
+    except ValueError as exc:
+        parse_error = exc
 
-    # Log orchestrator_decision event
-    await write_event(
-        "orchestrator_decision",
-        run_id=run_id,
-        model_id=orchestrator_model.model_id,
-        tokens_input=tokens_in,
-        tokens_output=tokens_out,
-        latency_ms=latency_ms,
-        decision={"mode": mode, "parsed": parsed, "rationale": parsed.get("rationale", "")},
-        payload_in=system_prompt[:2000],
-        payload_out=content[:2000],
-        db_path=db_path,
+    try:
+        await write_event(
+            "orchestrator_decision",
+            run_id=run_id,
+            model_id=orchestrator_model.model_id,
+            tokens_input=tokens_in,
+            tokens_output=tokens_out,
+            latency_ms=latency_ms,
+            decision={
+                "mode": mode,
+                "parsed": parsed,
+                "rationale": (parsed or {}).get("rationale", ""),
+                "parse_error": str(parse_error) if parse_error else None,
+            },
+            payload_in=system_prompt[:2000],
+            payload_out=content[:2000],
+            db_path=db_path,
+        )
+    except Exception:
+        # Logging must never mask the real failure; fall through.
+        pass
+
+    if parsed is not None:
+        return parsed
+
+    # BRT-ORC-02b — one retry with a "JSON ONLY" reinforcement. Works for
+    # the ~5 % of cases where response_format was ignored or the model
+    # leaked prose despite it. Second failure propagates the original
+    # BRT-ORC-002 so the run fails with a real reason (now captured by
+    # BUG-002/BRT-PIP-010).
+    retry_system = system_prompt + (
+        "\n\nCRITICAL: Your entire reply must be valid JSON only. "
+        "Do not emit prose, markdown, or commentary. Return a single JSON "
+        "object matching the schema described above."
     )
+    payload["messages"][0]["content"] = retry_system
+    content_retry, usage_retry, latency_retry = await _post_and_collect()
+    tokens_in_retry = usage_retry.get("prompt_tokens", 0)
+    tokens_out_retry = usage_retry.get("completion_tokens", 0)
 
-    return parsed
+    parsed_retry: Optional[dict] = None
+    retry_error: Optional[Exception] = None
+    try:
+        parsed_retry = _extract_json(content_retry)
+    except ValueError as exc:
+        retry_error = exc
+
+    try:
+        await write_event(
+            "orchestrator_decision",
+            run_id=run_id,
+            model_id=orchestrator_model.model_id,
+            tokens_input=tokens_in_retry,
+            tokens_output=tokens_out_retry,
+            latency_ms=latency_retry,
+            decision={
+                "mode": mode,
+                "parsed": parsed_retry,
+                "rationale": (parsed_retry or {}).get("rationale", ""),
+                "retry": True,
+                "parse_error": str(retry_error) if retry_error else None,
+            },
+            payload_in=retry_system[:2000],
+            payload_out=content_retry[:2000],
+            db_path=db_path,
+        )
+    except Exception:
+        pass
+
+    if parsed_retry is not None:
+        return parsed_retry
+
+    raise ValueError(
+        f"BRT-ORC-002: orchestrator returned unparseable JSON after retry "
+        f"(mode={mode}); first_error={parse_error}; retry_error={retry_error}"
+    )
 
 
 def _build_task_from_node(
@@ -614,7 +721,30 @@ async def orchestrate_run(
         shortcut_resp = compose_result.get("response")
         if shortcut_resp:
             return shortcut_resp
-        # Empty compose — fall through to the normal plan path.
+        # BRT-ZERO-01b — the shortcut compose came back empty OR smuggled
+        # a plan node under `plan.nodes`. Either way we're about to redo
+        # the work via the full plan path, so surface a shortcut_escalated
+        # event. Cost-win telemetry must NOT count this run as a Rule Zero
+        # save; it's actually a Rule Zero miss + full plan on top. The
+        # event uses event_type='reorchestration' (allowed by the logs
+        # CHECK constraint) with a code field for filtering.
+        try:
+            await write_event(
+                "reorchestration",
+                run_id=run_id,
+                decision={
+                    "code": "BRT-ZERO-01-ESCALATED",
+                    "msg": "Rule Zero shortcut compose returned no direct response; "
+                           "falling through to full plan path.",
+                    "had_plan_nodes": bool(
+                        (compose_result.get("plan") or {}).get("nodes")
+                    ),
+                },
+                db_path=db_path,
+            )
+        except Exception:
+            pass
+        # Fall through to the normal plan path.
 
     # --- PLAN MODE ---
     plan_result = await _invoke_orchestrator_model(

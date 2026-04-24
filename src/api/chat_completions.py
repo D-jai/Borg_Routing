@@ -405,12 +405,17 @@ async def chat_completions(request: Request):
             detail={"error": "BRT-API-012", "message": f"Pipeline error: {exc}"},
         )
 
+    run_id = result.get("run_id") or str(uuid.uuid4())
     if result["status"] == "failed":
-        # Return a 200 with the failure message (OpenAI compat — errors go in content)
-        response_text = result["response"] or f"Request failed: {result.get('error', 'unknown')}"
+        # Return a 200 with the failure message (OpenAI compat — errors go in content).
+        # Always include the failure reason and run_id so the user has something
+        # to grep for in the trace; generic fallbacks helped nobody.
+        err_text = result.get("error") or "unknown error"
+        response_text = (
+            f"Request failed: {err_text}. "
+            f"See GET /runs/{run_id} for the full trace."
+        )
     else:
         response_text = result["response"]
-
-    run_id = result.get("run_id") or str(uuid.uuid4())
 
     return JSONResponse(content=_build_openai_response(run_id, model_alias, response_text))
