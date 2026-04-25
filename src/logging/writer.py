@@ -19,6 +19,11 @@ from uuid import UUID
 import aiosqlite
 
 from src.db.schema import DB_PATH
+from src.logging.provenance import (
+    resolve_domain_profile,
+    resolve_instance_id,
+    resolve_source_version,
+)
 
 VALID_EVENT_TYPES = {
     "model_call",
@@ -43,19 +48,30 @@ async def _write_event_task(
     decision_json: Optional[str],
     payload_in: Optional[str],
     payload_out: Optional[str],
+    instance_id: Optional[str],
+    source_version: Optional[str],
+    domain_profile: Optional[str],
     db_path: str,
 ) -> None:
-    """Internal coroutine that does the actual DB writes."""
+    """Internal coroutine that does the actual DB writes.
+
+    The trailing instance_id / source_version / domain_profile fields are
+    BRT-LOG-DB-COMPAT provenance stamps so The_Borg_DB can ingest these
+    rows downstream without losing track of which device / version /
+    domain produced them.
+    """
     try:
         async with aiosqlite.connect(db_path) as db:
             cur = await db.execute(
                 """INSERT INTO logs(
                     run_id, envelope_id, event_type, model_id,
-                    tokens_input, tokens_output, dollars, latency_ms, decision_json
-                ) VALUES (?,?,?,?,?,?,?,?,?)""",
+                    tokens_input, tokens_output, dollars, latency_ms, decision_json,
+                    instance_id, source_version, domain_profile
+                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (
                     run_id, envelope_id, event_type, model_id,
                     tokens_input, tokens_output, dollars, latency_ms, decision_json,
+                    instance_id, source_version, domain_profile,
                 ),
             )
             log_id = cur.lastrowid
@@ -115,6 +131,9 @@ async def write_event(
             decision_json=decision_json,
             payload_in=payload_in,
             payload_out=payload_out,
+            instance_id=resolve_instance_id(),
+            source_version=resolve_source_version(),
+            domain_profile=resolve_domain_profile(),
             db_path=db_path,
         )
     )

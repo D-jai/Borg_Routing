@@ -23,17 +23,27 @@ async def create_run(
     thread_id: Optional[str] = None,
     db_path: str = DB_PATH,
 ) -> UUID:
-    """Insert a new run record with status=pending. Returns the new run_id."""
+    """Insert a new run record with status=pending. Returns the new run_id.
+
+    BRT-LOG-DB-COMPAT — also stamps instance_id so The_Borg_DB can tell
+    apart runs from different devices when aggregated via hive-collective.
+    """
+    # Local import keeps this module side-effect free for tests that
+    # monkey-patch the provenance singletons.
+    from src.logging.provenance import resolve_instance_id  # noqa: PLC0415
+
     run_id = uuid4()
     async with aiosqlite.connect(db_path) as db:
         await db.execute(
-            """INSERT INTO runs(run_id, parent_run_id, thread_id, status, user_instruction)
-               VALUES (?, ?, ?, 'pending', ?)""",
+            """INSERT INTO runs(
+                run_id, parent_run_id, thread_id, status, user_instruction, instance_id
+            ) VALUES (?, ?, ?, 'pending', ?, ?)""",
             (
                 str(run_id),
                 str(parent_run_id) if parent_run_id else None,
                 thread_id,
                 user_instruction,
+                resolve_instance_id(),
             ),
         )
         await db.commit()

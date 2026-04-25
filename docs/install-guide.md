@@ -173,6 +173,26 @@ are most likely to touch during install and operation are grouped below.
 | `BORG_RULE_ZERO_SHORTCUT` | `true` | Set to `false` to force the full plan path on every prompt (useful for debugging). |
 | `BORG_STREAM_HEARTBEAT_SEC` | `5` | SSE heartbeat cadence so long-running plans don't trip browser idle timeouts. |
 
+### The_Borg_DB compatibility — provenance stamps on every log row
+Every log row, run row, and entity/relation extraction carries three
+provenance stamps so the data can be ingested by The_Borg_DB (or any
+downstream knowledge system) without losing track of where it came from:
+
+| Field | Source | Purpose |
+|---|---|---|
+| `instance_id` | env `BORG_INSTANCE_ID` -> hash(hostname + uid) | Tells apart logs from different devices when aggregated |
+| `source_version` | env `BORG_SOURCE_VERSION` -> `git rev-parse --short HEAD` | Weights confidence as ROUTE evolves |
+| `domain_profile` | env `BORG_DOMAIN_PROFILE` -> `general` | Tags the active vertical (healthcare, legal, ...) |
+
+NER-extracted entities and relations carry `confidence` (0.85 for spaCy
+entities, 0.6 for dependency-parsed relations) and `provenance`
+(`spacy:en_core_web_sm`, `dep_parse:en_core_web_sm`).
+
+A read-only view `borg_db_interactions` denormalizes logs + runs +
+payloads into a single ingestion stream. A `borg_db_export_cursor`
+table tracks per-consumer ingest progress so downstream pulls are
+incremental and idempotent. See BRT-LOG-DB-COMPAT for details.
+
 ### Where settings come from
 BORG resolves each operator-facing setting in this order: **Admin DB (`config`
 table, written via `POST /config`) → `.env` → hardcoded default**. The Admin UI

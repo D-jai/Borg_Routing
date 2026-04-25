@@ -1,0 +1,148 @@
+id: BRT-LOG-DB-COMPAT
+timestamp: 2026-04-25T00:00:00Z
+type: feat
+scope: phase-4
+title: "Make BORG_ROUTE logs ingestible by The_Borg_DB without forcing the integration today"
+
+summary_human: |
+  Forward-compatibility slice. The_Borg_DB (Deej's local-first knowledge
+  intelligence project) extracts SPO triples from text, stores them in a
+  dual SQL+vector architecture, and mines for patterns through a 17-stage
+  farming pipeline. We want BORG_ROUTE's run logs to be ingestible by
+  that pipeline whenever the integration ships — without retroactive
+  backfill and without committing to integration code today.
+
+  Audit found ROUTE was already ~80% DB-conducive: log_entities and
+  log_relations tables already exist, log_payloads has an ner_processed
+  flag, and the runs->subtasks->envelopes->logs causal chain is intact.
+
+  This slice closes the remaining gaps with surgical, additive changes.
+
+  ## What changed
+
+  Schema additions (all via additive ALTER migrations — zero behavioural
+  change for current callers, default values preserve existing semantics):
+
+  1. `runs.instance_id` — stable per-machine identifier so logs from
+     different devices can be told apart when aggregated by DB's
+     hive-collective pattern.
+
+  2. `logs.instance_id`, `logs.source_version`, `logs.domain_profile` —
+     three provenance stamps on every log event. instance_id resolves
+     the same way as on runs; source_version probes git for the current
+     SHA (or env var override); domain_profile defaults to 'general'
+     and supports vertical-aware logging.
+
+  3. `log_entities.{instance_id, confidence, provenance}` and
+     `log_relations.{instance_id, confidence, provenance}` — confidence
+     defaults to 1.0 to preserve current implicit semantics; the NER
+     worker now stamps 0.85 for spaCy entities and 0.6 for dep-parsed
+     SVO relations (the looser score reflects the higher false-positive
+     rate of dependency-parse-based extraction). Provenance carries the
+     extractor identity (`spacy:en_core_web_sm`, `dep_parse:en_core_web_sm`).
+     DB's calibrator stage can adjust these weights over time.
+
+  4. New table `borg_db_export_cursor` — one row per consumer; tracks
+     last_log_id / last_entity_id / last_relation_id ingested so DB
+     pulls are incremental and idempotent. ROUTE never writes to this
+     table; consumers (DB) update their cursor after each successful pull.
+
+  5. New view `borg_db_interactions` — denormalized join of logs + runs
+     + log_payloads(in/out) so DB ingestion can SELECT a single shape
+     instead of running our internal joins. Pulls become:
+     `SELECT * FROM borg_db_interactions WHERE log_id > <cursor>`.
+
+  Code additions:
+
+  6. `src/logging/provenance.py` — three lru_cached singletons
+     (resolve_instance_id, resolve_source_version, resolve_domain_profile)
+     that stamp every log write. Subprocess git probes are guarded with
+     a 1-second timeout and never raise. Includes a `_reset_for_tests()`
+     helper for unit tests that twiddle env vars.
+
+  7. `src/logging/writer.py::write_event` — now reads the three
+     singletons and inserts them into logs.instance_id / source_version /
+     domain_profile.
+
+  8. `src/db/state.py::create_run` — stamps instance_id on the runs row.
+
+  9. `src/logging/ner_worker.py` — every log_entities and log_relations
+     INSERT now carries instance_id, confidence, and provenance.
+
+  Documentation:
+
+  10. `docs/install-guide.md` — new section "The_Borg_DB compatibility"
+      explains the provenance stamps and points to the export_cursor +
+      interactions view.
+
+  ## What this is NOT
+
+  - Not the actual /context or /ingest HTTP integration (that comes later,
+    after the 20-ticket validation experiment).
+  - Not a fusion of the codebases.
+  - Not a UUIDv5 deterministic-id scheme (deferred — DB can dedupe on
+    its end if needed).
+  - Not a change to the decision_json schema (the optional reserved
+    keys 'subjects'/'predicates' are documented as a future convention
+    but not enforced).
+
+  ## Tests
+
+  9 new tests in tests/logging/test_borg_db_compat.py:
+    - TC-DBC-001..006 — provenance singletons + env-var overrides
+    - TC-DBC-002 — write_event stamps the 3 fields end-to-end
+    - TC-DBC-003 — create_run stamps instance_id
+    - TC-DBC-004 — table + view exist after create_all()
+    - TC-DBC-005 — view returns the expected denormalized shape
+    - TC-DBC-007 — log_entities/log_relations carry the new columns
+
+  Suite: 360 -> 369 passed. Zero regressions.
+
+ids:
+  - BRT-LOG-DB-COMPAT
+
+inputs:
+  - audit of src/db/schema.py + src/logging/{writer,ner_worker}.py + src/db/state.py
+  - The_Borg_DB whitepaper.md (architecture — entities, facts, embeddings_metadata, llm_usage, hive-collective, farming pipeline)
+
+outputs:
+  code:
+    - src/db/schema.py
+    - src/db/state.py
+    - src/logging/provenance.py  # new
+    - src/logging/writer.py
+    - src/logging/ner_worker.py
+  tests:
+    - tests/logging/test_borg_db_compat.py  # new
+  docs:
+    - docs/install-guide.md
+  ledger:
+    - .dev/ledger/2026-04-25_log-db-compat.yaml
+
+error_codes_added:
+  - code: BRT-LOG-PROV-001
+    meaning: "git rev-parse subprocess timed out probing source_version; downgraded to 'unknown'. Logged once to stderr; never raised."
+
+checklist:
+  code_changes: yes
+  tests_added: yes        # 9 new
+  docs_updated: yes
+  user_guide_updated: yes
+  presentation_updated: no
+  migration_needed: no    # all migrations are additive ALTERs with safe defaults
+
+learnings:
+  - "Audit before designing. The schema was already 80% DB-conducive
+    (log_entities, log_relations, ner_processed flag, full causal chain).
+    The actual gap was 6 small fields and an export cursor — not a
+    new architecture."
+  - "Stamping provenance at write time (instance_id / source_version /
+    domain_profile via lru_cached singletons) is cheaper and more
+    reliable than reconstructing it from logs after the fact. One env-
+    var read at process start, then free for the lifetime of the run."
+  - "A denormalized read view (borg_db_interactions) decouples ROUTE's
+    internal schema from downstream consumers. We can refactor logs +
+    runs + log_payloads independently as long as the view contract holds."
+  - "Confidence defaults of 0.85 (spaCy NER) and 0.6 (dep-parsed SVO)
+    are industry rules-of-thumb. Document them, ship them, let DB's
+    calibrator stage refine them on real data."

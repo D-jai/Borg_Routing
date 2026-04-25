@@ -23,6 +23,19 @@ _MIGRATIONS = [
     # BRT-PIP-010 — surface run failure reason in the runs table so the
     # API and UI can show why a run failed. NULL for non-failed runs.
     "ALTER TABLE runs ADD COLUMN failure_reason TEXT",
+    # BRT-LOG-DB-COMPAT — additive fields that make BORG_ROUTE's logs
+    # ingestible by The_Borg_DB without breaking any existing call sites.
+    # Every column has a safe default; old code paths keep working.
+    "ALTER TABLE runs ADD COLUMN instance_id TEXT",
+    "ALTER TABLE logs ADD COLUMN instance_id TEXT",
+    "ALTER TABLE logs ADD COLUMN source_version TEXT",
+    "ALTER TABLE logs ADD COLUMN domain_profile TEXT DEFAULT 'general'",
+    "ALTER TABLE log_entities ADD COLUMN instance_id TEXT",
+    "ALTER TABLE log_entities ADD COLUMN confidence REAL DEFAULT 1.0",
+    "ALTER TABLE log_entities ADD COLUMN provenance TEXT",
+    "ALTER TABLE log_relations ADD COLUMN instance_id TEXT",
+    "ALTER TABLE log_relations ADD COLUMN confidence REAL DEFAULT 1.0",
+    "ALTER TABLE log_relations ADD COLUMN provenance TEXT",
 ]
 
 _SCHEMA_SQL = """
@@ -176,6 +189,47 @@ CREATE TABLE IF NOT EXISTS log_relations (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_log_relations_run ON log_relations(run_id);
+
+-- BRT-LOG-DB-COMPAT — incremental export cursor for The_Borg_DB.
+-- One row per consumer (e.g., 'borg_db:default'); tracks the last log /
+-- entity / relation rowid each consumer has ingested. DB updates the
+-- cursor on each successful pull; ROUTE never writes to this table.
+CREATE TABLE IF NOT EXISTS borg_db_export_cursor (
+    consumer_id TEXT PRIMARY KEY,
+    last_log_id INTEGER NOT NULL DEFAULT 0,
+    last_entity_id INTEGER NOT NULL DEFAULT 0,
+    last_relation_id INTEGER NOT NULL DEFAULT 0,
+    last_synced_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- BRT-LOG-DB-COMPAT — denormalized read view that DB can pull from with
+-- a single SELECT. Joins logs + runs + log_payloads(in/out) so The_Borg_DB
+-- ingestion code doesn't need to know our internal schema.
+CREATE VIEW IF NOT EXISTS borg_db_interactions AS
+SELECT
+    l.log_id,
+    l.run_id,
+    r.thread_id,
+    l.envelope_id,
+    l.event_type,
+    l.model_id,
+    l.tokens_input,
+    l.tokens_output,
+    l.dollars,
+    l.latency_ms,
+    l.decision_json,
+    l.created_at,
+    l.instance_id,
+    l.source_version,
+    l.domain_profile,
+    r.user_instruction,
+    r.status AS run_status,
+    p_in.text  AS payload_in,
+    p_out.text AS payload_out
+FROM logs l
+LEFT JOIN runs r ON r.run_id = l.run_id
+LEFT JOIN log_payloads p_in  ON p_in.log_id  = l.log_id AND p_in.direction  = 'in'
+LEFT JOIN log_payloads p_out ON p_out.log_id = l.log_id AND p_out.direction = 'out';
 """
 
 
@@ -217,9 +271,10 @@ async def drop_all(db_path: str = DB_PATH) -> None:
     tables = [
         "log_relations", "log_entities", "log_payloads", "skill_usage_log", "logs",
         "scratch", "envelopes", "subtasks", "run_digests", "runs", "config",
-        "messages", "threads",
+        "messages", "threads", "borg_db_export_cursor",
     ]
     async with aiosqlite.connect(db_path) as db:
+        await db.execute("DROP VIEW IF EXISTS borg_db_interactions")
         for table in tables:
             await db.execute(f"DROP TABLE IF EXISTS {table}")
         await db.commit()

@@ -16,12 +16,24 @@ from typing import Optional
 import aiosqlite
 
 from src.db.schema import DB_PATH
+from src.logging.provenance import resolve_instance_id
 
 _POLL_INTERVAL_SEC = 5.0
 _BATCH_SIZE = 20
 
 # Module-level spaCy model — loaded lazily on first use.
 _nlp = None
+
+# BRT-LOG-DB-COMPAT — provenance + confidence defaults for spaCy outputs.
+# spaCy en_core_web_sm doesn't expose per-entity confidence; 0.85 is the
+# industry rule-of-thumb for statistical NER on general English text.
+# Dependency-parsed SVO relations are notoriously brittle, so 0.6 reflects
+# the higher false-positive rate. The_Borg_DB's calibrator stage can
+# adjust these weights over time based on downstream verification.
+_SPACY_ENTITY_CONFIDENCE = 0.85
+_SPACY_ENTITY_PROVENANCE = "spacy:en_core_web_sm"
+_SPACY_RELATION_CONFIDENCE = 0.6
+_SPACY_RELATION_PROVENANCE = "dep_parse:en_core_web_sm"
 
 
 def _load_nlp():
@@ -124,18 +136,27 @@ async def process_batch(db_path: str = DB_PATH) -> int:
                 log_id = lp_row[0] if lp_row else None
 
                 if log_id is not None:
+                    instance_id = resolve_instance_id()
                     for ent in entities:
                         await db.execute(
-                            """INSERT INTO log_entities(log_id, run_id, text, label, start_char, end_char)
-                               VALUES (?,?,?,?,?,?)""",
+                            """INSERT INTO log_entities(
+                                log_id, run_id, text, label, start_char, end_char,
+                                instance_id, confidence, provenance
+                            ) VALUES (?,?,?,?,?,?,?,?,?)""",
                             (log_id, run_id, ent["text"], ent["label"],
-                             ent["start_char"], ent["end_char"]),
+                             ent["start_char"], ent["end_char"],
+                             instance_id, _SPACY_ENTITY_CONFIDENCE,
+                             _SPACY_ENTITY_PROVENANCE),
                         )
                     for rel in relations:
                         await db.execute(
-                            """INSERT INTO log_relations(log_id, run_id, subject, relation, object)
-                               VALUES (?,?,?,?,?)""",
-                            (log_id, run_id, rel["subject"], rel["relation"], rel["object"]),
+                            """INSERT INTO log_relations(
+                                log_id, run_id, subject, relation, object,
+                                instance_id, confidence, provenance
+                            ) VALUES (?,?,?,?,?,?,?,?)""",
+                            (log_id, run_id, rel["subject"], rel["relation"], rel["object"],
+                             instance_id, _SPACY_RELATION_CONFIDENCE,
+                             _SPACY_RELATION_PROVENANCE),
                         )
 
                 await db.execute(
