@@ -33,6 +33,7 @@ import logging
 import os
 import re
 import time
+from datetime import datetime, timezone
 from typing import Optional
 from uuid import UUID, uuid4
 
@@ -80,6 +81,21 @@ def _get_matrix() -> CapabilityMatrix:
             pass
         _shared_matrix = m
     return _shared_matrix
+
+
+def reload_matrix() -> None:
+    """Invalidate the orchestrator's in-memory matrix cache.
+
+    BUG-023 — operators flipping the `checked` flag via `PATCH /models/.../checked`
+    were seeing the change in `GET /models/matrix` immediately, but the
+    orchestrator engine kept routing to the old set until uvicorn restart
+    because `_shared_matrix` was loaded once at first call and never
+    re-read. Calling this from the PATCH handler forces the next router
+    request to reload from `data/capability_matrix.yaml` (the source of
+    truth that PATCH writes to). Cheap because the file is tiny.
+    """
+    global _shared_matrix
+    _shared_matrix = None
 
 
 def _get_skill_lib() -> SkillLibrary:
@@ -466,6 +482,29 @@ async def _invoke_orchestrator_model(
     }
 
     stage_prompt = _safe_sub(ORCHESTRATOR_SYSTEM_PROMPT, subs)
+
+    # BUG-017 — inject the current wall-clock date so reasoning models
+    # don't fall back to their training-cutoff year when synthesising
+    # time-sensitive web_search queries (e.g. "latest space news today
+    # 2024 NASA" issued in 2026). Kimi K2 Thinking and other models
+    # with mid-2024 cutoffs were observed silently inserting outdated
+    # year tokens into Tavily queries. The date block sits between
+    # governance and the stage prompt so it is read every call without
+    # editing the static prompt template.
+    current_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    date_block = (
+        f"# Wall-Clock Reality\n"
+        f"Today's date is {current_date} (UTC). This is the actual current\n"
+        f"date — NOT your training cutoff. When the user's prompt mentions\n"
+        f"'latest', 'today', 'this week', 'this month', 'now', 'current', or\n"
+        f"any other time-sensitive phrasing, you MUST use this date when\n"
+        f"constructing web_search queries. Never inject a hardcoded year\n"
+        f"that disagrees with this date. If the prompt requires information\n"
+        f"after your training cutoff, trust the retrieved web results over\n"
+        f"your priors.\n\n---\n\n"
+    )
+    stage_prompt = date_block + stage_prompt
+
     system_prompt = build_system_prompt(
         stage_prompt=stage_prompt,
         global_rules=governance["global_rules"],
@@ -931,14 +970,30 @@ async def orchestrate_run(
 
     plan = plan_result.get("plan")
     if not plan or not plan.get("nodes"):
-        # Graceful fallback to compose
+        # Graceful fallback to compose. BUG-020 — pre-fix this path
+        # also fell through to a vague "I was unable" string when the
+        # model returned an action-shaped control signal. Now uses
+        # the shared compose-result decoder so action=fail surfaces
+        # the rationale and action=compose lifts from stage_results.
         compose_result = await _invoke_orchestrator_model(
             mode="compose",
             stage_results={},
             child_scratch_digest={},
             **base_kwargs,
         )
-        return compose_result.get("response", "I was unable to generate a response.")
+        try:
+            return await _handle_compose_result(
+                compose_result=compose_result,
+                results={},
+                run_id=run_id,
+                db_path=db_path,
+            )
+        except ValueError:
+            # _handle_compose_result raises BRT-ORC-009 when nothing is
+            # usable. In the empty-plan branch we still want a graceful
+            # user-facing string rather than a 500, so preserve the
+            # historical default here.
+            return "I was unable to generate a response."
 
     current_nodes = plan["nodes"]
     results: dict[str, InboundEnvelope] = {}
@@ -1174,8 +1229,126 @@ async def orchestrate_run(
         **base_kwargs,
     )
 
-    response = compose_result.get("response")
-    if not response:
-        raise ValueError("BRT-ORC-009: compose mode returned no response")
+    return await _handle_compose_result(
+        compose_result=compose_result,
+        results=results,
+        run_id=run_id,
+        db_path=db_path,
+    )
 
-    return response
+
+async def _handle_compose_result(
+    compose_result: dict,
+    results: dict,
+    run_id: UUID,
+    db_path: str,
+) -> str:
+    """BUG-020 (regression of round-2 BUG-010) — compose-result decoder.
+
+    Compose mode previously only recognised `{"response": "..."}` and
+    `{"direct_answer": "..."}`; when the orchestrator returned a
+    re_plan-shaped control signal in compose mode
+    (`{"action": "fail|compose|continue"}`), every branch fell through
+    and BRT-ORC-009 fired even when stage_results contained a perfectly
+    usable answerer envelope. This decoder explicitly covers all three
+    control-signal shapes plus the `direct_answer` alias, and only
+    raises BRT-ORC-009 when there is genuinely no usable text anywhere
+    in the run. Used by every site that calls compose-mode (the main
+    plan→re_plan→compose loop AND the empty-plan graceful fallback).
+    """
+    response = (
+        compose_result.get("response")
+        or compose_result.get("direct_answer")
+        or ""
+    )
+    if response and response.strip():
+        return response
+
+    action = (compose_result.get("action") or "").lower().strip()
+
+    # action == "fail" — surface rationale instead of silently 500ing.
+    # Run completes (not raises); user sees a coherent decline message.
+    if action == "fail":
+        rationale = (
+            compose_result.get("rationale")
+            or compose_result.get("msg")
+            or "The orchestrator declined to compose a final answer."
+        )
+        try:
+            await write_event(
+                "orchestrator_decision",
+                run_id=run_id,
+                decision={
+                    "code": "BUG-020-COMPOSE-DECLINED",
+                    "msg": "compose returned action=fail; surfacing rationale to user",
+                    "rationale": rationale,
+                },
+                db_path=db_path,
+            )
+        except Exception:
+            pass
+        return rationale
+
+    # action == "compose" or "continue" or anything else WITHOUT a
+    # `response` field — lift the most recent resolved answerer envelope
+    # from stage_results. Pre-fix this path raised BRT-ORC-009 and
+    # discarded all the upstream answerer work.
+    salvaged = _salvage_answer_from_stage_results(results)
+    if salvaged:
+        try:
+            await write_event(
+                "orchestrator_decision",
+                run_id=run_id,
+                decision={
+                    "code": "BUG-020-COMPOSE-USED-STAGE-RESULTS",
+                    "msg": "compose returned no response; lifted answer "
+                           "from a resolved answerer envelope to avoid "
+                           "discarding upstream work",
+                    "compose_action": action or "(missing)",
+                },
+                db_path=db_path,
+            )
+        except Exception:
+            pass
+        return salvaged
+
+    # Genuinely nothing usable anywhere — keep the original error so
+    # operators still see the failure mode when it's real.
+    raise ValueError("BRT-ORC-009: compose mode returned no response")
+
+
+def _salvage_answer_from_stage_results(results: dict) -> Optional[str]:
+    """BUG-020 helper — extract the best textual answer from any resolved
+    envelope in stage_results. Iterates in insertion order and prefers
+    later resolved envelopes (closer to compose); falls back to earlier
+    ones. Recognises `output.response`, `output.answer`, `output.text`,
+    `output.content` plus the bare `output` string for legacy shapes.
+    Returns None if nothing usable is found.
+    """
+    if not results:
+        return None
+
+    candidates: list[str] = []
+    for _node_id, env in results.items():
+        if env is None:
+            continue
+        status = getattr(env, "status", None)
+        if status != "resolved":
+            continue
+        out = getattr(env, "output", None) or {}
+        if isinstance(out, str) and out.strip():
+            candidates.append(out.strip())
+            continue
+        if not isinstance(out, dict):
+            continue
+        for key in ("response", "answer", "text", "content", "summary"):
+            val = out.get(key)
+            if isinstance(val, str) and val.strip():
+                candidates.append(val.strip())
+                break
+
+    if not candidates:
+        return None
+    # Prefer the last (most recent) candidate — matches the temporal
+    # intent of "use what came right before compose".
+    return candidates[-1]

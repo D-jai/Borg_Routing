@@ -143,7 +143,14 @@ async def set_model_checked(
     body: CheckedRequest,
     matrix: CapabilityMatrix = Depends(get_matrix),
 ):
-    """Flip the `checked` flag on a model. Unchecked models are excluded from routing."""
+    """Flip the `checked` flag on a model. Unchecked models are excluded from routing.
+
+    BUG-023 — after writing the YAML, also invalidate the orchestrator
+    engine's in-memory matrix cache so the next routed run honours the
+    new checked state. Without this, operators saw `GET /models/matrix`
+    update immediately but the router kept routing to old (un)checked
+    models until uvicorn was restarted.
+    """
     if matrix.get(model_id) is None:
         raise HTTPException(
             status_code=404,
@@ -151,6 +158,20 @@ async def set_model_checked(
         )
     matrix.set_checked(model_id, body.checked)
     matrix.save()
+
+    # BUG-023 — drop the engine cache so the next route reads fresh state.
+    # Local import to avoid a top-level cycle (engine imports from many
+    # registry modules; the API router is wired in main after engine).
+    try:
+        from src.orchestrator.engine import reload_matrix  # noqa: PLC0415
+        reload_matrix()
+    except Exception as exc:
+        logger.warning(
+            "BUG-023: failed to invalidate orchestrator matrix cache after "
+            "PATCH on model_id=%s: %s. Operator will need to restart "
+            "uvicorn for the change to affect routing.", model_id, exc,
+        )
+
     return CheckedResponse(model_id=model_id, checked=body.checked)
 
 
