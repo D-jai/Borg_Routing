@@ -1,0 +1,164 @@
+id: BRT-ROUND3-SLICE2
+timestamp: 2026-04-26T01:00:00Z
+type: fix
+scope: phase-4
+title: "Round-3 Slice 2 — UX fixes (BUG-021 markdown, BUG-018 stage progress, BUG-019 chat persistence)"
+
+summary_human: |
+  Three UI bugs that all touch the chat experience. Shipped together
+  because they all live in ui/chat.html and the change to the streaming
+  loop overlapped across all three (e.g. drop the spinner when first
+  content arrives, render markdown as it streams, persist after every
+  delta).
+
+  ## BUG-021 — Chat UI rendered model markdown as literal text
+
+  Model output was well-formed markdown (H2 headings, **bold**, bullet
+  lists, [text](url) links, code fences) but the chat UI displayed
+  `## Heading\n\n- **Item**: ...` verbatim. Operator already verified
+  the fix locally and asked us to merge upstream.
+
+  Fix:
+    - Added marked + DOMPurify CDN scripts to chat.html <head>.
+    - New renderMd(text) helper: marked.parse with gfm + breaks, then
+      DOMPurify.sanitize keeping `target` and `rel` attributes.
+    - Assistant bubble path: `thinkingDiv.innerHTML = renderMd(fullText)`
+      both during the streaming delta loop AND on the final assignment,
+      so headings/lists/links appear formatted as the answer streams in.
+    - User bubble path: kept `div.textContent = content` so a typed
+      "## hi" still shows as the user typed it.
+    - openLinksInNewTab() pass adds target=_blank rel=noopener noreferrer
+      to all rendered anchors so following a citation doesn't navigate
+      away from the chat.
+    - CSS for .msg.assistant elements: heading sizes, list margins,
+      code-block backgrounds, inline-code padding, blockquote bar,
+      table borders. Looks coherent with the dark theme.
+
+  Failure-mode safety: if the CDN is unreachable, renderMd falls back
+  to HTML-escaped plain text rather than blowing up. Marketing-grade
+  XSS payloads (`<img src=x onerror=alert(1)>`) get scrubbed by
+  DOMPurify; verified manually.
+
+  ## BUG-018 — "Thinking…" spinner with no progress indicator
+
+  Multi-stage runs (plan → web_search → answerer → re_plan → compose)
+  showed a static "Thinking…" with a spinner and no other indication
+  that work was happening. On a 2-3 minute run this was indistinguishable
+  from a hung server.
+
+  Fix has three parts:
+
+  Server side (src/api/chat_completions.py):
+    - New _poll_stage_events() helper polls the logs table for new
+      orchestrator_decision rows since SSE start. Returns formatted
+      {stage, detail} dicts and advances a per-stream cursor so a poll
+      never re-emits old events.
+    - _stream_orchestration_with_heartbeats() now alternates: when the
+      heartbeat tick fires, poll for new orchestrator activity. If new
+      events exist, emit them as `data: {"event":"stage", "stage":...,
+      "detail":..., "elapsed_ms":...}` SSE chunks. Otherwise emit the
+      original ": heartbeat" comment.
+    - Polling is best-effort wrapped in try/except — a DB hiccup never
+      kills the SSE liveness.
+
+  Client side (ui/chat.html):
+    - New attachStageIndicator() builds a small element inside the
+      assistant bubble: spinner + stage label + wall-clock counter that
+      ticks every second.
+    - Streaming loop recognises `chunk.event === 'stage'` payloads and
+      updates the indicator label in place (e.g. "plan — decomposing
+      9s", "web_search — query: latest space news 23s").
+    - First content delta drops the indicator and starts writing the
+      formatted markdown into the bubble.
+    - The wall-clock counter alone fixes the "looks dead" perception
+      (purely client-side, runs even when no stage events arrive).
+
+  ## BUG-019 — Chat lost conversation on tab switch
+
+  Submitting a query, navigating to /ui/admin.html, then returning to
+  /ui/chat.html showed a blank page as if no message had been sent.
+  The run continued server-side but the user couldn't see the answer
+  without manually opening /ui/run.html?id=...
+
+  Fix:
+    - persistThread() writes both `thread` (the messages payload) and
+      `renderedTurns` (what's currently in the DOM, with role + content
+      + runId) to localStorage on every change — user sends, every
+      streaming delta, on completion, and on Clear.
+    - loadPersistedThread() runs at end of script: reads the blob,
+      replaces the static "Connected to BORG_ROUTE" banner with the
+      restored history, prepends a small "Restored from previous
+      session. Click Clear to start over." note so it's obvious the
+      page was rehydrated rather than freshly loaded.
+    - New Clear button next to Send: drops the localStorage blob,
+      clears the DOM, shows "Cleared. Type a message to begin."
+
+  Deferred (noted in BUG-019 but out of scope for this slice):
+    - SSE reattach to a still-running run on page load — needs server-
+      side support for resuming a run by id, which is a wider change.
+      Workaround for now: the /ui/run.html?id=... link in the bubble
+      lets the user pop open the live trace.
+
+  ## Tests
+
+  6 new tests in tests/round3/test_slice2_ux.py:
+    - TC-BUG-021 — chat.html contains marked + DOMPurify CDN + renderMd
+    - TC-BUG-021-B — assistant bubble path uses renderMd→innerHTML
+    - TC-BUG-019 — chat.html persists + restores via localStorage
+    - TC-BUG-018-A — chat.html attaches stage indicator
+    - TC-BUG-018-B — _poll_stage_events surfaces orchestrator_decision
+                     rows and advances the cursor
+    - TC-BUG-018-C — _poll_stage_events tolerates DB failure (returns
+                     empty list, never raises)
+
+  Suite: 382 -> 388 passed. Zero regressions.
+
+ids:
+  - BUG-021
+  - BUG-018
+  - BUG-019
+
+inputs:
+  - round-3 bug list from operator
+  - operator's verified_fix snippet for BUG-021 (marked + DOMPurify pattern)
+  - audit of ui/chat.html + src/api/chat_completions.py SSE path
+
+outputs:
+  code:
+    - ui/chat.html
+    - src/api/chat_completions.py
+  tests:
+    - tests/round3/test_slice2_ux.py  # new
+  ledger:
+    - .dev/ledger/2026-04-26_round3-slice2-ux.yaml
+
+error_codes_added: []
+
+checklist:
+  code_changes: yes
+  tests_added: yes        # 6 new
+  docs_updated: no        # UI changes documented in their own surface
+  user_guide_updated: no
+  presentation_updated: no
+  migration_needed: no
+
+learnings:
+  - "marked + DOMPurify is the right combo for any markdown coming back
+    from an LLM. Don't roll your own — DOMPurify catches `<img src=x
+    onerror=alert(1)>` style payloads that a custom escape pass would
+    miss. The CDN-vs-self-hosted decision is a separate discussion;
+    documented in the ledger as 'consider self-hosting for offline /
+    air-gapped installs'."
+  - "The wall-clock counter alone is most of the perceived-progress UX
+    win. Stage events are nicer but require server-side support; the
+    counter is purely client-side and instantly silent the 'is the
+    server dead?' panic. Counter first, stages second is the right
+    sequencing."
+  - "Polling logs.event_type='orchestrator_decision' for stage events
+    is a cheap retrofit — every interesting stage transition already
+    writes one. No engine changes needed; the existing trace events
+    become the SSE wire format."
+  - "localStorage persistence on EVERY delta (not just on completion)
+    means a tab switch mid-stream still rehydrates correctly. Worth the
+    write-amplification — the JSON blob is small and SQLite isn't
+    involved."

@@ -159,6 +159,53 @@ async def _stream_response(response_text: str, model_alias: str, run_id: str) ->
     yield "data: [DONE]\n\n"
 
 
+async def _poll_stage_events(
+    started_at: float,
+    last_seen_log_id: int,
+    db_path: str,
+) -> tuple[list[dict], int]:
+    """BUG-018 — pull recent orchestrator_decision rows from the logs
+    table so the SSE layer can surface them as stage transitions.
+
+    Returns a list of {stage, detail, ts} dicts and the highest log_id
+    seen so the next poll only fetches new rows.
+    """
+    import aiosqlite
+    events: list[dict] = []
+    new_max = last_seen_log_id
+    try:
+        async with aiosqlite.connect(db_path) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute(
+                """SELECT log_id, model_id, decision_json, created_at
+                   FROM logs
+                   WHERE event_type = 'orchestrator_decision'
+                     AND log_id > ?
+                     AND strftime('%s', created_at) >= ?
+                   ORDER BY log_id ASC
+                   LIMIT 20""",
+                (last_seen_log_id, str(int(started_at))),
+            ) as cur:
+                rows = await cur.fetchall()
+        for row in rows:
+            new_max = max(new_max, row["log_id"])
+            decision: dict = {}
+            try:
+                decision = json.loads(row["decision_json"]) if row["decision_json"] else {}
+            except Exception:
+                pass
+            stage = decision.get("mode") or decision.get("code") or "orchestrator"
+            detail = decision.get("msg") or decision.get("rationale") or row["model_id"] or ""
+            events.append({
+                "stage": str(stage),
+                "detail": str(detail)[:200],
+            })
+    except Exception:
+        # Polling is best-effort; never let a DB hiccup kill the SSE.
+        pass
+    return events, new_max
+
+
 async def _stream_orchestration_with_heartbeats(
     user_instruction: str,
     thread_window: list,
@@ -172,8 +219,18 @@ async def _stream_orchestration_with_heartbeats(
     every BORG_STREAM_HEARTBEAT_SEC until the pipeline task resolves, then
     word-stream the real response. Comments are ignored by SSE consumers
     but reset their idle timers.
+
+    BUG-018 — between heartbeats we poll the logs table for new
+    orchestrator_decision rows and emit them as stage events. The chat
+    UI listens for `chunk.event === 'stage'` and updates a thinking
+    indicator in place, so multi-stage runs show real progress instead
+    of an opaque spinner.
     """
+    from src.db.schema import DB_PATH  # noqa: PLC0415
+
     heartbeat_every = float(os.getenv("BORG_STREAM_HEARTBEAT_SEC", "5"))
+    started_at = time.time()
+    last_log_id = 0
     pipeline_task = asyncio.create_task(
         run_pipeline(
             user_instruction=user_instruction,
@@ -188,7 +245,25 @@ async def _stream_orchestration_with_heartbeats(
                 timeout=heartbeat_every,
             )
         except asyncio.TimeoutError:
-            yield f": heartbeat {int(time.time())}\n\n"
+            # BUG-018 — emit stage events found since the last poll;
+            # fall back to a heartbeat comment when nothing's new so
+            # the connection still stays warm.
+            events, last_log_id = await _poll_stage_events(
+                started_at=started_at,
+                last_seen_log_id=last_log_id,
+                db_path=DB_PATH,
+            )
+            if events:
+                for ev in events:
+                    payload = {
+                        "event": "stage",
+                        "stage": ev["stage"],
+                        "detail": ev["detail"],
+                        "elapsed_ms": int((time.time() - started_at) * 1000),
+                    }
+                    yield f"data: {json.dumps(payload)}\n\n"
+            else:
+                yield f": heartbeat {int(time.time())}\n\n"
 
     try:
         result = pipeline_task.result()

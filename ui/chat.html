@@ -4,6 +4,10 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Chat — BORG_ROUTE</title>
+  <!-- BUG-021 — marked renders model markdown to HTML; DOMPurify scrubs
+       any XSS payload that sneaks through (operator-verified fix). -->
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js"></script>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: sans-serif; background: #0f0f1a; color: #ddd; display: flex; flex-direction: column; height: 100vh; }
@@ -33,6 +37,32 @@
     #send-btn:hover:not(:disabled) { background: #c73450; }
     .spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid #555; border-top-color: #e94560; border-radius: 50%; animation: spin 0.8s linear infinite; vertical-align: middle; margin-right: 6px; }
     @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* BUG-021 — markdown rendering inside assistant bubbles. Headings,
+       lists, inline code, and links should look right out of the box. */
+    .msg.assistant { white-space: normal; }
+    .msg.assistant h1, .msg.assistant h2, .msg.assistant h3 { margin: 8px 0 4px; line-height: 1.3; }
+    .msg.assistant h1 { font-size: 1.3em; }
+    .msg.assistant h2 { font-size: 1.15em; }
+    .msg.assistant h3 { font-size: 1.05em; }
+    .msg.assistant p { margin: 6px 0; }
+    .msg.assistant ul, .msg.assistant ol { margin: 6px 0 6px 20px; }
+    .msg.assistant li { margin: 2px 0; }
+    .msg.assistant a { color: #4080c0; text-decoration: underline; }
+    .msg.assistant a:hover { color: #6aa0e0; }
+    .msg.assistant code { background: #0a0a14; padding: 1px 4px; border-radius: 3px; font-family: monospace; font-size: 0.92em; }
+    .msg.assistant pre { background: #0a0a14; padding: 8px 10px; border-radius: 4px; overflow-x: auto; margin: 6px 0; }
+    .msg.assistant pre code { background: none; padding: 0; }
+    .msg.assistant blockquote { border-left: 3px solid #444; padding-left: 10px; margin: 6px 0; color: #aaa; }
+    .msg.assistant strong { color: #fff; }
+    .msg.assistant table { border-collapse: collapse; margin: 6px 0; }
+    .msg.assistant th, .msg.assistant td { border: 1px solid #333; padding: 4px 8px; }
+
+    /* BUG-018 — stage indicator surfaces what the orchestrator is doing
+       right now so 2-3 min runs don't look like the server is dead. */
+    .stage-indicator { font-size: 0.85em; color: #888; }
+    .stage-indicator .clock { color: #666; margin-left: 8px; font-variant-numeric: tabular-nums; }
+    .stage-indicator .stage-label { color: #aac; }
   </style>
 </head>
 <body>
@@ -63,6 +93,7 @@
   </select>
   <textarea id="user-input" placeholder="Type a message… (Enter to send, Shift+Enter for newline)" rows="1"></textarea>
   <button id="send-btn">Send</button>
+  <button id="clear-btn" title="Clear conversation history (BUG-019)" style="background:#333;color:#ccc;border:1px solid #444;padding:10px 14px;border-radius:4px;cursor:pointer;">Clear</button>
 </div>
 
 <script>
@@ -70,12 +101,91 @@
   const userInput = document.getElementById('user-input');
   const sendBtn = document.getElementById('send-btn');
   const modelSelect = document.getElementById('model-select');
-  const thread = [];
 
-  function addMsg(role, content, runId) {
+  // BUG-019 — persist the conversation thread across navigations. Without
+  // this, switching tabs to /ui/admin.html and back wipes the page even
+  // if the underlying run is still going. We store the rendered turns
+  // (role + content + runId) in localStorage and restore on load.
+  const THREAD_KEY = 'borg_route_chat_thread_v1';
+  let thread = [];
+  let renderedTurns = [];  // [{role, content, runId}] — what's currently in the DOM
+
+  function persistThread() {
+    try {
+      localStorage.setItem(THREAD_KEY, JSON.stringify({
+        thread,
+        renderedTurns,
+        savedAt: Date.now(),
+      }));
+    } catch (_) { /* quota exceeded etc — non-fatal */ }
+  }
+
+  function loadPersistedThread() {
+    try {
+      const raw = localStorage.getItem(THREAD_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed.thread) || !Array.isArray(parsed.renderedTurns)) return;
+      if (parsed.renderedTurns.length === 0) return;
+      thread = parsed.thread;
+      // Replace the static "Connected to BORG_ROUTE" banner with the
+      // restored history so we don't double-render.
+      chatArea.innerHTML = '';
+      for (const turn of parsed.renderedTurns) {
+        addMsg(turn.role, turn.content, turn.runId, /*persist=*/false);
+      }
+      renderedTurns = parsed.renderedTurns;
+      // Surface a small system note so it's obvious the page was restored
+      // rather than freshly loaded.
+      const note = document.createElement('div');
+      note.className = 'msg system';
+      note.textContent = 'Restored from previous session. Click Clear to start over.';
+      chatArea.insertBefore(note, chatArea.firstChild);
+    } catch (_) { /* corrupted blob — drop it */ }
+  }
+
+  function clearChat() {
+    thread = [];
+    renderedTurns = [];
+    try { localStorage.removeItem(THREAD_KEY); } catch (_) {}
+    chatArea.innerHTML = '';
+    const banner = document.createElement('div');
+    banner.className = 'msg system';
+    banner.textContent = 'Cleared. Type a message to begin.';
+    chatArea.appendChild(banner);
+  }
+
+  // BUG-021 — render markdown to safe HTML for assistant bubbles only.
+  // User bubbles stay literal so a pasted "## hi" appears as the user
+  // typed it, not as a heading.
+  function renderMd(text) {
+    if (typeof marked === 'undefined' || typeof DOMPurify === 'undefined') {
+      // CDN failed — fall back to literal so we never blow up the chat.
+      return (text || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    }
+    const html = marked.parse(text || '', { gfm: true, breaks: true });
+    return DOMPurify.sanitize(html, { ADD_ATTR: ['target', 'rel'] });
+  }
+
+  // Open all rendered links in new tabs so following a citation doesn't
+  // navigate away from the chat (which would currently lose the thread —
+  // BUG-019 mitigates that, but the new-tab habit is still polite).
+  function openLinksInNewTab(container) {
+    container.querySelectorAll('a[href]').forEach(a => {
+      a.target = '_blank';
+      a.rel = 'noopener noreferrer';
+    });
+  }
+
+  function addMsg(role, content, runId, persist = true) {
     const div = document.createElement('div');
     div.className = 'msg ' + role;
-    div.textContent = content;
+    if (role === 'assistant' && content) {
+      div.innerHTML = renderMd(content);
+      openLinksInNewTab(div);
+    } else {
+      div.textContent = content;
+    }
     chatArea.appendChild(div);
     if (runId) {
       const link = document.createElement('div');
@@ -84,7 +194,43 @@
       chatArea.appendChild(link);
     }
     chatArea.scrollTop = chatArea.scrollHeight;
+    if (persist) {
+      renderedTurns.push({ role, content, runId: runId || null });
+      persistThread();
+    }
     return div;
+  }
+
+  // BUG-018 — wall-clock + stage indicator. Builds the small element shown
+  // inside the assistant bubble while we're waiting on the orchestrator.
+  function attachStageIndicator(parent) {
+    const wrap = document.createElement('div');
+    wrap.className = 'stage-indicator';
+    const spinner = document.createElement('span');
+    spinner.className = 'spinner';
+    const label = document.createElement('span');
+    label.className = 'stage-label';
+    label.textContent = 'Thinking…';
+    const clock = document.createElement('span');
+    clock.className = 'clock';
+    clock.textContent = '0s';
+    wrap.appendChild(spinner);
+    wrap.appendChild(label);
+    wrap.appendChild(clock);
+    parent.innerHTML = '';
+    parent.appendChild(wrap);
+
+    const startedAt = Date.now();
+    const tick = setInterval(() => {
+      const secs = Math.floor((Date.now() - startedAt) / 1000);
+      const mm = Math.floor(secs / 60), ss = secs % 60;
+      clock.textContent = mm > 0 ? `${mm}m${String(ss).padStart(2,'0')}s` : `${secs}s`;
+    }, 1000);
+
+    return {
+      setStage(text) { label.textContent = text; },
+      stop() { clearInterval(tick); },
+    };
   }
 
   async function sendMessage() {
@@ -95,10 +241,11 @@
 
     addMsg('user', text);
     thread.push({ role: 'user', content: text });
+    persistThread();
 
     sendBtn.disabled = true;
     const thinkingDiv = addMsg('assistant', '');
-    thinkingDiv.innerHTML = '<span class="spinner"></span>Thinking…';
+    const stage = attachStageIndicator(thinkingDiv);
 
     try {
       const resp = await fetch('/v1/chat/completions', {
@@ -109,13 +256,14 @@
 
       if (!resp.ok || !resp.body) {
         const errData = await resp.json().catch(() => ({}));
+        stage.stop();
         thinkingDiv.textContent = `Error: ${errData.detail?.message || resp.statusText}`;
         return;
       }
 
-      thinkingDiv.textContent = '';
       let fullText = '';
       let runId = null;
+      let firstContentSeen = false;
 
       const reader = resp.body.getReader();
       const decoder = new TextDecoder();
@@ -139,17 +287,40 @@
 
           if (!runId && chunk.id) runId = chunk.id.replace('chatcmpl-', '');
 
+          // BUG-018 — non-content chunks carry orchestrator stage info
+          // (e.g. {"event":"stage","stage":"web_search","detail":"query: ..."}).
+          // Update the indicator label without touching the bubble's
+          // final text.
+          if (chunk.event === 'stage') {
+            const detail = chunk.detail ? ` — ${chunk.detail}` : '';
+            const stageName = chunk.stage || 'orchestrator';
+            stage.setStage(`${stageName}${detail}`);
+            continue;
+          }
+
           const delta = chunk.choices?.[0]?.delta?.content;
           if (delta) {
+            if (!firstContentSeen) {
+              // First real content has arrived — drop the indicator and
+              // start writing into the bubble. Render-as-we-go via marked.
+              stage.stop();
+              thinkingDiv.innerHTML = '';
+              firstContentSeen = true;
+            }
             fullText += delta;
-            thinkingDiv.textContent = fullText;
+            // Re-render incrementally so headings/lists/links appear
+            // formatted as they stream in (BUG-021).
+            thinkingDiv.innerHTML = renderMd(fullText);
+            openLinksInNewTab(thinkingDiv);
             chatArea.scrollTop = chatArea.scrollHeight;
           }
         }
       }
 
+      stage.stop();
       if (!fullText) fullText = '(empty response)';
-      thinkingDiv.textContent = fullText;
+      thinkingDiv.innerHTML = renderMd(fullText);
+      openLinksInNewTab(thinkingDiv);
 
       if (runId) {
         const link = document.createElement('div');
@@ -159,6 +330,11 @@
       }
 
       thread.push({ role: 'assistant', content: fullText });
+      // BUG-019 — record the assistant turn into the persisted log so it
+      // survives a navigation. The empty-bubble add() didn't persist
+      // since content was empty.
+      renderedTurns.push({ role: 'assistant', content: fullText, runId: runId || null });
+      persistThread();
 
       if (runId) {
         const ratingBar = document.createElement('div');
@@ -185,6 +361,7 @@
         thinkingDiv.after(ratingBar);
       }
     } catch (err) {
+      stage.stop();
       thinkingDiv.textContent = `Error: ${err.message}`;
     } finally {
       sendBtn.disabled = false;
@@ -192,6 +369,7 @@
   }
 
   sendBtn.addEventListener('click', sendMessage);
+  document.getElementById('clear-btn').addEventListener('click', clearChat);
   userInput.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
   });
@@ -199,6 +377,10 @@
     userInput.style.height = '42px';
     userInput.style.height = Math.min(userInput.scrollHeight, 160) + 'px';
   });
+
+  // BUG-019 — on page load, rehydrate the persisted thread so navigations
+  // don't wipe the chat.
+  loadPersistedThread();
 </script>
 </body>
 </html>
