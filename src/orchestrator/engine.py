@@ -23,6 +23,9 @@ Error codes:
 - BRT-ORC-018: orchestrator response truncated by max_tokens; auto-retried
                once at doubled cap (info; logged via the existing
                orchestrator_decision write_event path)
+- BRT-ORC-019: no checked model cleared the quality floor for a step's tier
+               and kind of work; the step ran on the run's default model
+               (warning; run continues)
 
 Optimisation hooks (no error code):
 - BRT-ZERO-01: for unambiguously conversational short prompts, skip
@@ -61,6 +64,7 @@ from src.prompts.orchestrator import ORCHESTRATOR_SYSTEM_PROMPT
 from src.registry.capability_matrix import CapabilityMatrix
 from src.registry.model_call import resolve_model_call
 from src.registry.models import ModelInfo
+from src.registry.node_router import DEFAULT_FLOORS, select_model_for_node
 from src.registry.router import select_model
 from src.skills.library import SkillLibrary
 
@@ -676,6 +680,85 @@ async def _invoke_orchestrator_model(
     )
 
 
+async def _load_leaf_floors(db_path: str) -> dict[str, float]:
+    """Minimum score a model needs to serve a step of each tier.
+
+    Config key ``leaf_quality_<tier>`` wins, then env ``LEAF_QUALITY_<TIER>``,
+    then the built-in default. An unreadable value falls back to the default
+    rather than failing the run.
+    """
+    floors: dict[str, float] = {}
+    for tier, default in DEFAULT_FLOORS.items():
+        configured = await get_config(f"leaf_quality_{tier}", db_path=db_path)
+        raw = configured if configured is not None else os.getenv(f"LEAF_QUALITY_{tier.upper()}")
+        try:
+            floors[tier] = float(raw) if raw is not None else default
+        except (TypeError, ValueError):
+            floors[tier] = default
+    return floors
+
+
+def _skill_for_node(node: dict) -> Optional[dict]:
+    """The skill record a plan node invokes, or None."""
+    skill_id = node.get("skill_id")
+    if not skill_id:
+        return None
+    try:
+        return _get_skill_lib().get(skill_id, node.get("skill_version", 1))
+    except Exception:
+        return None
+
+
+async def _log_route(
+    run_id: UUID,
+    node_id: str,
+    envelope_id: UUID,
+    decision: dict,
+    db_path: str,
+) -> None:
+    """Write why a step went to its model into the run trace."""
+    chosen = decision.get("chosen")
+    reason = decision.get("reason")
+    try:
+        await write_event(
+            "orchestrator_decision",
+            run_id=run_id,
+            envelope_id=envelope_id,
+            model_id=chosen,
+            decision={
+                "mode": "route",
+                "node_id": node_id,
+                "msg": f"{node_id} -> {chosen} ({reason})",
+                **decision,
+            },
+            db_path=db_path,
+        )
+        if reason == "fallback_default":
+            await write_event(
+                "error",
+                run_id=run_id,
+                envelope_id=envelope_id,
+                decision={
+                    "code": "BRT-ORC-019",
+                    "severity": "warning",
+                    "msg": (
+                        "no checked model cleared the quality floor for this "
+                        "step; it ran on the run's default model"
+                    ),
+                    "node_id": node_id,
+                    "task_type": decision.get("task_type"),
+                    "tier": decision.get("tier"),
+                    "floor": decision.get("floor"),
+                    "fallback_model": chosen,
+                    "err": decision.get("error"),
+                },
+                db_path=db_path,
+            )
+    except Exception:
+        # Logging must never fail a step.
+        pass
+
+
 def _build_task_from_node(
     node: dict,
     run_id: UUID,
@@ -706,7 +789,7 @@ def _build_task_from_node(
     if node.get("skill_id"):
         try:
             lib = _get_skill_lib()
-            return lib.render(
+            rendered = lib.render(
                 skill_id=node["skill_id"],
                 version=node.get("skill_version", 1),
                 args=node.get("skill_args", {}),
@@ -715,6 +798,11 @@ def _build_task_from_node(
                 max_depth=max_depth,
                 level_path=level_path,
                 trigger_reason=node.get("trigger_reason", "initial_plan"),
+            )
+            # The skill template carries no model; the step's routed model
+            # is stamped here, or the executor fails it with BRT-ANS-001.
+            return rendered.model_copy(
+                update={"model_endpoint": model_endpoint, "model_name": model_name}
             )
         except Exception as exc:
             raise ValueError(f"BRT-ORC-008: skill render failed: {exc}") from exc
@@ -1037,7 +1125,9 @@ async def orchestrate_run(
     child_digests: dict = {}
     loop_count = 0
 
-    # Select a default answerer model. BRT-ORC-02 — make the fallback visible:
+    # Each step is routed to its own model (select_model_for_node, below).
+    # The default model is only the fallback for a step that no checked
+    # model can serve at its floor. BRT-ORC-02 — make that fallback visible:
     # if select_model raises (usually no model meets the quality bar), fall
     # back to the orchestrator model but log a warning event so the run
     # trace shows the demotion.
@@ -1048,11 +1138,8 @@ async def orchestrate_run(
             quality_requirement=quality_req,
             time_cost_per_sec=time_cost,
         )
-        answerer_endpoint = default_model.endpoint or ""
-        answerer_name = default_model.model_id
     except Exception as exc:
-        answerer_endpoint = orch_model.endpoint or ""
-        answerer_name = orch_model.model_id
+        default_model = orch_model
         # Note: logs.event_type has a CHECK constraint; 'warning' is not a
         # permitted value, so BRT-ORC-015 rides on 'error' with its own code
         # in the decision payload. UI/trace filters on the code when they
@@ -1068,13 +1155,15 @@ async def orchestrate_run(
                         "default answerer selection failed; falling back to "
                         "orchestrator model"
                     ),
-                    "fallback_model": answerer_name,
+                    "fallback_model": default_model.model_id,
                     "err": str(exc),
                 },
                 db_path=db_path,
             )
         except Exception:
             pass
+
+    leaf_floors = await _load_leaf_floors(db_path)
 
     while loop_count < MAX_LOOPS:
         loop_count += 1
@@ -1107,6 +1196,28 @@ async def orchestrate_run(
         for i, node in enumerate(ready):
             node_id = node.get("id", f"n{i}")
             level = f"{current_depth+1}{chr(ord('a') + i % 26)}"
+
+            # Route this step to its own model. A state_op calls no model.
+            step_model = default_model
+            route_decision: Optional[dict] = None
+            if node.get("type", "answerer") != "state_op":
+                try:
+                    step_model, route_decision = select_model_for_node(
+                        node=node,
+                        skill=_skill_for_node(node),
+                        matrix=matrix,
+                        floors=leaf_floors,
+                        time_cost_per_sec=time_cost,
+                        default_model=default_model,
+                    )
+                except Exception as exc:
+                    step_model = default_model
+                    route_decision = {
+                        "reason": "fallback_default",
+                        "chosen": default_model.model_id,
+                        "error": f"routing failed: {exc}",
+                    }
+
             try:
                 task = _build_task_from_node(
                     node=node,
@@ -1114,11 +1225,15 @@ async def orchestrate_run(
                     current_depth=current_depth + 1,
                     max_depth=MAX_DEPTH,
                     level_path=level,
-                    model_endpoint=answerer_endpoint,
-                    model_name=answerer_name,
+                    model_endpoint=step_model.endpoint or "",
+                    model_name=step_model.model_id,
                     user_instruction=user_instruction,
                     results=results,
                 )
+                if route_decision is not None:
+                    await _log_route(
+                        run_id, node_id, task.envelope_id, route_decision, db_path
+                    )
                 # BRT-PR-01a — log any depends_on ids that didn't resolve.
                 missing_deps = (task.dependency_input or {}).pop(
                     "_depends_on_missing", None

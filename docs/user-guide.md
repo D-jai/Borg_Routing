@@ -108,6 +108,33 @@ where every second of latency costs you real money. Both settings can be
 changed live from **Admin UI → Settings** — the next run reads the new
 value with no restart.
 
+### How each step gets its model
+The planner and the final answer use the orchestrator model (the quality
+bar above). Every other step in a plan is routed on its own:
+
+1. If the planner names a model for the step (`recommended_model`) and
+   that model is ticked in the pool, the step uses it.
+2. Otherwise the step's **kind of work** (`task_type`: reasoning, coding,
+   summarize, writing, roleplay, agentic, extraction) and **size** (`tier`:
+   light, mid, heavy) decide. The step goes to the cheapest ticked model
+   whose score for that kind of work is at or above the tier's floor. A
+   step that invokes a skill takes the skill's own tier and specialty when
+   the planner gave none. A step with no labels is `reasoning`, `mid`.
+3. If no ticked model clears the floor, the step runs on the run's default
+   model and the trace shows a `BRT-ORC-019` warning.
+
+| Tier | Floor (default) | Setting |
+|---|---|---|
+| light | `6.0` | `LEAF_QUALITY_LIGHT` / config key `leaf_quality_light` |
+| mid | `7.5` | `LEAF_QUALITY_MID` / config key `leaf_quality_mid` |
+| heavy | `9.0` | `LEAF_QUALITY_HEAVY` / config key `leaf_quality_heavy` |
+
+A config key (set through `POST /config`) wins over the `.env` value and
+takes effect on the next run. The run trace records, for every step, why
+its model was chosen: a `route` entry with the kind of work, tier, floor,
+the chosen model and the other models that cleared the floor, cheapest
+first.
+
 ---
 
 ## Researching Model Capabilities (Get Model Info)
