@@ -4,9 +4,18 @@ Where we left off. Updated by whoever worked last. Dates are Toronto time.
 
 ## Status (15-Nov-2026)
 
-Showcase build planned, not started. Branch `showcase` holds the plan documents. No engine, interface or packaging work has been done yet.
+Build under way. Phase 0 is done and Phase 1 is partly done, built by Fable on the evening of 15-Nov-2026 at Deej's request while the Opus weekly limit was spent.
 
-**Next action:** Deej starts the lead session (below). The first open work order is **0.1** in `BUILD.md`.
+| Work order | State |
+|---|---|
+| 0.1, 0.2 | Done (`13f4f4f`, `ff4398c`). Baseline: 391 tests passed |
+| 0.3 permissions preflight | Open (lead) |
+| 1.1 claim test, 1.2 per-step routing | Done (`38efc23`), **not yet reviewed** |
+| 1.4 Law 1 repair | **In progress by Fable** (session `borg-route-d9`). If this row still says "in progress" and the tree has uncommitted changes in `src/agents/executor.py`, `src/orchestrator/engine.py`, `src/envelopes/schema.py`, the sitting was cut off: read the diff, finish or discard it, and say which in the build log |
+| 1.3 planner labels | Next for Fable after 1.4, if the sitting lasts |
+| 1.5, 1.6, 1.7, 1.8, 1.9, 1.10 | Open |
+
+**Next action for the lead (Opus 5.5):** do not start until Deej says the Fable sitting has ended. Then: send `13f4f4f`, `38efc23` and any later Fable commits to fresh reviewer agents, read the builder's notes under the build log in `BUILD.md` section 9, and carry on from the first open work order.
 
 ## Start the build (Deej)
 
@@ -43,6 +52,7 @@ After the build, on Deej's word only: make the repo public, deploy the replay de
 5. Build first, post later.
 6. Deej spends no time testing; every check is done by the build.
 7. Opus 5.5 and Sonnet 5.5, both at medium effort, do the work. Fable plans only.
+8. LM Studio removed (evening of 15-Nov-2026). The local model runs as Ollama in Docker; see `BUILD.md` section 8.
 
 Standing permissions: local commits on `showcase`; pushes of `showcase` to the private `origin`; merge of its pull request into `master` when CI is green and the reviewer has no objection.
 
