@@ -12,7 +12,8 @@ Build under way. Phase 0 is done and Phase 1 is partly done, built by Fable on t
 | 0.3 permissions preflight | Open (lead) |
 | 1.1 claim test, 1.2 per-step routing | Done (`38efc23`), **not yet reviewed** |
 | 1.4 Law 1 repair | Done, **not yet reviewed**. Full suite: 427 passed, 2 xfailed (cost 1.6, streaming 1.7) |
-| 1.3 planner labels | **In progress by Fable** (session `borg-route-d9`). If this row still says "in progress" and the tree has uncommitted changes in `src/prompts/orchestrator.py`, `src/orchestrator/engine.py` or `tests/prompts/`, the sitting was cut off: read the diff, finish or discard it, and say which in the build log |
+| 1.3 planner labels | Done, **not yet reviewed**. Full suite: 437 passed, 2 xfailed (cost 1.6, streaming 1.7) |
+| 2.1 on-premise lane design note | **In progress by Fable** (session `borg-route-d9`): writing `docs/design/on_premise_lane.md`. A document only; no code. If the file is missing or half-written, the sitting was cut off: the lead writes it from `BUILD.md` work order 2.1 |
 | 1.5, 1.6, 1.7, 1.8, 1.9, 1.10 | Open |
 
 **Next action for the lead (Opus 5.5):** do not start until Deej says the Fable sitting has ended. Then: send `13f4f4f`, `38efc23` and any later Fable commits to fresh reviewer agents, read the builder's notes under the build log in `BUILD.md` section 9, and carry on from the first open work order.

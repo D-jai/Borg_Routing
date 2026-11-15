@@ -191,6 +191,8 @@ Your plan is a list of nodes. Each node is one of:
   "output_schema": {{ ... narrow shape you want back ... }},
   "side_effects": ["optional_scratch_table_names"],
   "state_query": "optional SQL run before dispatch; result injected as context",
+  "task_type": "reasoning | coding | summarize | writing | roleplay | agentic | extraction",
+  "tier": "light | mid | heavy (the smallest that does this step well)",
   "recommended_model": "model_id or null (router chooses)",
   "trigger_reason": "initial_plan | escalation_from:id | retry:id | deferral_batch:table"
 }}
@@ -210,6 +212,8 @@ Use this instead of emitting N identical answerers.
   "output_schema": {{ ... per-item shape ... }},
   "concurrency_limit": 20,
   "side_effects": ["deferrals"],
+  "task_type": "reasoning | coding | summarize | writing | roleplay | agentic | extraction",
+  "tier": "light | mid | heavy (the smallest that does this step well)",
   "recommended_model": "model_id or null"
 }}
 ```

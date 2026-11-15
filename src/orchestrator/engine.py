@@ -316,6 +316,77 @@ def _safe_sub(template: str, subs: dict) -> str:
     return result
 
 
+def _undouble_braces(template: str) -> str:
+    """Turn a template's escaped braces (``{{`` and ``}}``) into single ones.
+
+    The orchestrator prompt writes its JSON examples with doubled braces, as
+    str.format would need, but placeholders are filled by plain replacement
+    (``_safe_sub``), so without this the model reads ``{{"type": ...}}``.
+
+    Run this on the template BEFORE substitution, never after: substituted
+    JSON legitimately ends in ``}}``. The prompt also holds plain JSON whose
+    nested close is a real ``}}`` (the web_search example), so a ``}}`` is
+    treated as an escape only when it closes an escaped ``{{``.
+    """
+    out: list[str] = []
+    opens: list[bool] = []          # True for an escaped "{{", False for a plain "{"
+    i, n = 0, len(template)
+    while i < n:
+        ch = template[i]
+        doubled = i + 1 < n and template[i + 1] == ch
+        if ch == "{":
+            opens.append(doubled)
+            out.append("{")
+            i += 2 if doubled else 1
+        elif ch == "}":
+            if doubled and opens and opens[-1]:
+                opens.pop()
+                i += 2
+            else:
+                if opens:
+                    opens.pop()
+                i += 1
+            out.append("}")
+        else:
+            out.append(ch)
+            i += 1
+    return "".join(out)
+
+
+# The prompt as the model should read it; computed once, the template is constant.
+_ORCHESTRATOR_TEMPLATE = _undouble_braces(ORCHESTRATOR_SYSTEM_PROMPT)
+
+_MODELS_BRIEF_LIMIT = 12
+
+
+def _available_models_brief(matrix: CapabilityMatrix) -> str:
+    """The pool as the planner sees it: checked models only, most capable
+    first, each with what it is best at and what it costs.
+
+    Unchecked rows are left out: the planner must not recommend a model the
+    router is not allowed to use.
+    """
+    rows = [m for m in matrix.all() if m.checked and m.endpoint]
+    if not rows:
+        return "(no models are checked in the pool)"
+    rows.sort(key=lambda m: m.task_scores.get("reasoning", 0.0), reverse=True)
+
+    lines = []
+    for m in rows[:_MODELS_BRIEF_LIMIT]:
+        strongest = sorted(m.task_scores.items(), key=lambda kv: kv[1], reverse=True)[:3]
+        strengths = ", ".join(f"{kind} {score:g}" for kind, score in strongest) or "not yet scored"
+        tags = f" [{', '.join(m.specialty_tags)}]" if m.specialty_tags else ""
+        if m.pricing is not None:
+            price = (
+                f"${m.pricing.input_per_token * 1e6:.2f} in / "
+                f"${m.pricing.output_per_token * 1e6:.2f} out per million tokens"
+            )
+        else:
+            price = "runs on this machine, no token price"
+        lines.append(f"- {m.model_id}{tags}: best at {strengths}; {price}")
+    return "\n".join(lines)
+
+
 def _pinned_model(endpoint: str, name: str) -> ModelInfo:
     """Wrap a pinned-config endpoint/name in a synthetic ModelInfo so the
     resolve_model_call helper can handle it uniformly with matrix rows."""
@@ -494,7 +565,7 @@ async def _invoke_orchestrator_model(
         "skills_catalogue": skills_catalogue,
     }
 
-    stage_prompt = _safe_sub(ORCHESTRATOR_SYSTEM_PROMPT, subs)
+    stage_prompt = _safe_sub(_ORCHESTRATOR_TEMPLATE, subs)
 
     # BUG-017 — inject the current wall-clock date so reasoning models
     # don't fall back to their training-cutoff year when synthesising
@@ -1049,9 +1120,8 @@ async def orchestrate_run(
     skills_catalogue = skill_lib.catalogue_for_prompt()
 
     matrix = _get_matrix()
-    available_models_brief = ", ".join(
-        m.model_id for m in matrix.all()[:5]
-    ) or "(none discovered)"
+    # One model per line under the prompt's "Available models:" label.
+    available_models_brief = "\n" + _available_models_brief(matrix)
 
     base_kwargs = dict(
         run_id=run_id,
