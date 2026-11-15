@@ -65,6 +65,8 @@ class StubModels:
 
     plan_nodes:    the nodes the planner returns in plan mode.
     compose_text:  the final answer returned in compose mode.
+    plan_for:      optional ``fn(request) -> nodes``; overrides plan_nodes, so a
+                   child run can be given a different plan from its parent.
     answer_for:    optional ``fn(request) -> dict`` giving an answerer's
                    ``output``; defaults to ``{"result": "done by <model>"}``.
     completion_tokens: reported for every call (prompt tokens are derived
@@ -73,6 +75,7 @@ class StubModels:
     plan_nodes: list[dict]
     compose_text: str = "Final answer."
     answer_for: Optional[Callable[[StubRequest], dict]] = None
+    plan_for: Optional[Callable[[StubRequest], list[dict]]] = None
     completion_tokens: int = 50
     requests: list[StubRequest] = field(default_factory=list)
 
@@ -107,7 +110,8 @@ class StubModels:
         self.requests.append(req)
 
         if kind == "plan":
-            content: Any = {"plan": {"nodes": self.plan_nodes}, "rationale": "scripted plan"}
+            nodes = self.plan_for(req) if self.plan_for else self.plan_nodes
+            content: Any = {"plan": {"nodes": nodes}, "rationale": "scripted plan"}
         elif kind == "re_plan":
             content = {"action": "compose", "rationale": "all steps done"}
         elif kind == "compose":

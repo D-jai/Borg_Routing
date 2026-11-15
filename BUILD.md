@@ -345,6 +345,7 @@ One line per finished work order: date, id, commit, "Done when" result, reviewer
 | 15-Nov-2026 | 0.2 baseline | (none) | Full run on the April tree: **391 passed**, 33 s, Python 3.14.3, packages from the machine's global Python (no `.venv` was made) | n/a |
 | 15-Nov-2026 | 1.1 claim test and stand-in model server | `38efc23` | Failed on the old code as intended: all three steps on the top model; each step given its own text as the "original user instruction". Routing parts now pass; Law 1, cost and streaming parts are `xfail(strict)` for 1.4, 1.6, 1.7 | Not reviewed yet |
 | 15-Nov-2026 | 1.2 per-step routing | `38efc23` | `pytest tests/e2e tests/registry tests/orchestrator tests/agents`: 248 passed, 3 xfailed. Router tests were also run against a deliberately broken router (floor ignored, unchecked models accepted): 11 of 19 failed, as they should | Not reviewed yet |
+| 15-Nov-2026 | 1.4 Law 1 repair | (this commit) | Four Law 1 tests failed before the fix (steps, apply_to_each items and child-run calls were governed by step text). After: `pytest` full run **427 passed, 2 xfailed**. `WrappedTask.governance_instruction` carries the operator's words; `orchestrate_run(root_instruction=...)` keeps a child run governed by them; a child's own sub-task is stated in a "Your Assignment In This Run" block | Not reviewed yet |
 
 **Notes from the builder (Fable, 15-Nov-2026 evening sitting):**
 

@@ -171,6 +171,7 @@ Every piece of work BORG_ROUTE sends to a model is wrapped in a **WrappedTask** 
 
 ### What a WrappedTask contains
 - **instruction** — the exact task the model must perform
+- **governance_instruction** — what the operator originally asked, word for word. Every step, every item of an `apply_to_each` and every call inside a child run shows this in its governance block, so no model is ever told that a step's own text is "the user's instruction" (Law 1). A child run also gets a short "Your Assignment In This Run" block naming its sub-task.
 - **output_schema** — the exact shape the model must return (this is the compression contract)
 - **type** — one of: `orchestrate`, `answerer`, `apply_to_each`, `state_op`
 - **level_path** — where this task sits in the run tree (e.g. `"1a"`, `"2b"`)

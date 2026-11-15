@@ -84,7 +84,6 @@ async def test_planning_and_composing_stay_on_the_top_model(finished_run):
         assert {r.model for r in stub.of_kind(kind)} == {"stub/top"}, kind
 
 
-@pytest.mark.xfail(strict=True, reason="work order 1.4: steps are given their own text, not the operator's")
 @pytest.mark.asyncio
 async def test_every_step_is_told_the_operators_exact_instruction(finished_run):
     """Law 1: governance carries the operator's words verbatim to every call."""

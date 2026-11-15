@@ -99,6 +99,7 @@ def _make_child_task(
         model_endpoint=parent.model_endpoint,
         model_name=parent.model_name,
         instruction=parent.instruction,
+        governance_instruction=parent.governance_instruction,
         context=item_context,
         output_schema=parent.output_schema,
         max_output_tokens=parent.max_output_tokens,

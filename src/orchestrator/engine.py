@@ -442,8 +442,14 @@ async def _invoke_orchestrator_model(
     available_models_brief: str,
     orchestrator_model: ModelInfo,
     db_path: str,
+    governance_instruction: Optional[str] = None,
 ) -> dict:
     """One call to the orchestrator model. Returns parsed JSON dict.
+
+    ``user_instruction`` is what this run must deliver. ``governance_instruction``
+    is the operator's verbatim instruction for the whole job (Law 1); it
+    differs from ``user_instruction`` only inside a child run, and defaults
+    to it.
 
     Raises:
         ValueError: BRT-ORC-001 on HTTP error.
@@ -512,11 +518,26 @@ async def _invoke_orchestrator_model(
     )
     stage_prompt = date_block + stage_prompt
 
+    # Law 1 — in a child run the governance block shows the operator's
+    # instruction, so the child's own assignment is stated here instead.
+    # (Only plan mode sends it as the user message; re_plan and compose send
+    # "continue".) A top-level run needs no such block: the two are the same.
+    governing = governance_instruction or user_instruction
+    if governing.strip() != (user_instruction or "").strip():
+        assignment_block = (
+            "# Your Assignment In This Run\n"
+            "You are orchestrating one sub-task of the operator's request shown\n"
+            "in the governance layer above. The operator's instruction governs\n"
+            "how you work; the sub-task below is what this run must deliver.\n\n"
+            f"{user_instruction}\n\n---\n\n"
+        )
+        stage_prompt = assignment_block + stage_prompt
+
     system_prompt = build_system_prompt(
         stage_prompt=stage_prompt,
         global_rules=governance["global_rules"],
         admin_rules_ledger=governance["admin_rules_ledger"],
-        user_instruction=user_instruction,
+        user_instruction=governing,
     )
 
     url, headers, body_model = resolve_model_call(orchestrator_model)
@@ -769,8 +790,14 @@ def _build_task_from_node(
     model_name: str,
     user_instruction: str,
     results: Optional[dict] = None,
+    governance_instruction: Optional[str] = None,
 ) -> WrappedTask:
     """Convert a plan node dict into a WrappedTask.
+
+    ``user_instruction`` is this run's instruction (the fallback task text
+    for a node with none). ``governance_instruction`` is the operator's
+    verbatim instruction for the whole job and is stamped on every task
+    (Law 1); it defaults to ``user_instruction``.
 
     Handles skill-based nodes (has skill_id) and custom nodes.
     For state_op nodes, packages the op/params/source into dependency_input.
@@ -784,6 +811,7 @@ def _build_task_from_node(
     """
     results = results or {}
     node_type = node.get("type", "answerer")
+    governing = governance_instruction or user_instruction
 
     # If skill node
     if node.get("skill_id"):
@@ -802,7 +830,11 @@ def _build_task_from_node(
             # The skill template carries no model; the step's routed model
             # is stamped here, or the executor fails it with BRT-ANS-001.
             return rendered.model_copy(
-                update={"model_endpoint": model_endpoint, "model_name": model_name}
+                update={
+                    "model_endpoint": model_endpoint,
+                    "model_name": model_name,
+                    "governance_instruction": governing,
+                }
             )
         except Exception as exc:
             raise ValueError(f"BRT-ORC-008: skill render failed: {exc}") from exc
@@ -827,6 +859,7 @@ def _build_task_from_node(
             max_depth=max_depth,
             level_path=level_path,
             instruction=f"Apply state_op: {node.get('op', 'count')}",
+            governance_instruction=governing,
             output_schema={"result": "any"},
             dependency_input=dep_input,
             trigger_reason=node.get("trigger_reason", "initial_plan"),
@@ -872,6 +905,7 @@ def _build_task_from_node(
             model_endpoint=model_endpoint,
             model_name=model_name,
             instruction=node.get("instruction", ""),
+            governance_instruction=governing,
             context=node.get("context", ""),
             output_schema=node.get("output_schema", {}),
             side_effects=node.get("side_effects", []),
@@ -939,6 +973,7 @@ def _build_task_from_node(
         model_endpoint=model_endpoint,
         model_name=model_name,
         instruction=node.get("instruction", user_instruction),
+        governance_instruction=governing,
         context=base_context,
         state_query=node.get("state_query"),
         output_schema=node.get("output_schema", {}),
@@ -960,14 +995,22 @@ async def orchestrate_run(
     rolling_summary: str = "",
     db_path: str = "data/borg_route.db",
     current_depth: int = 0,
+    root_instruction: Optional[str] = None,
 ) -> str:
     """Main orchestration loop. Returns the final response text.
+
+    ``root_instruction`` is the operator's verbatim instruction for the
+    whole job. A child run is given it so every call it makes stays governed
+    by what the operator asked (Law 1) while it plans ``user_instruction``,
+    its own sub-task. A top-level run leaves it None.
 
     Raises:
         ValueError: BRT-ORC-001..009 on fatal failures.
     """
     if thread_window is None:
         thread_window = []
+
+    governance_instruction = root_instruction or user_instruction
 
     governance = await load_governance(lambda key: get_config(key, db_path=db_path))
 
@@ -1022,6 +1065,7 @@ async def orchestrate_run(
         available_models_brief=available_models_brief,
         orchestrator_model=orch_model,
         db_path=db_path,
+        governance_instruction=governance_instruction,
     )
 
     # BRT-ZERO-01 — Rule Zero shortcut. For unambiguously conversational
@@ -1229,6 +1273,7 @@ async def orchestrate_run(
                     model_name=step_model.model_id,
                     user_instruction=user_instruction,
                     results=results,
+                    governance_instruction=governance_instruction,
                 )
                 if route_decision is not None:
                     await _log_route(

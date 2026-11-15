@@ -337,7 +337,9 @@ async def _execute_answerer(task: WrappedTask, db_path: str) -> InboundEnvelope:
         stage_prompt=stage_prompt,
         global_rules=governance["global_rules"],
         admin_rules_ledger=governance["admin_rules_ledger"],
-        user_instruction=task.instruction,
+        # Law 1 — governance shows the operator's verbatim instruction. The
+        # step's own text is the task, carried by {instruction} above.
+        user_instruction=task.governance_instruction or task.instruction,
     )
 
     # Build a ModelInfo for the call. Prefer the matrix row (captures source
@@ -537,6 +539,9 @@ async def execute(task: WrappedTask, db_path: str = "data/borg_route.db") -> Inb
                 user_instruction=task.instruction,
                 db_path=db_path,
                 current_depth=task.current_depth + 1,
+                # Law 1 — the child plans its own step, but is governed by
+                # what the operator asked at the root.
+                root_instruction=task.governance_instruction or task.instruction,
             )
             await update_run_status(child_run_id, "completed", db_path=db_path)
         except Exception as exc:

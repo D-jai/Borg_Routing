@@ -68,6 +68,12 @@ class WrappedTask(BaseModel):
     model_endpoint: Optional[str] = None
     model_name: Optional[str] = None
     instruction: str
+    # Law 1 — the operator's verbatim instruction for the whole run. The
+    # engine stamps it on every task at every depth so the governance block
+    # of each model call shows what the operator asked, never a step's own
+    # text. None only for tasks built outside the engine; the executor then
+    # falls back to ``instruction``.
+    governance_instruction: Optional[str] = None
     context: str = ""
     state_query: Optional[str] = None
     side_effects: list[str] = []
