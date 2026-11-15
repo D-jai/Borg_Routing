@@ -1,0 +1,21 @@
+{
+  "v": 5,
+  "createdOnFiles": {"v": 1, "at": "2026-11-16T02:10:00Z"},
+  "lists": "css",
+  "format": {"v": 1, "shared": ["project/deck.css"]},
+  "title": "BORG_ROUTE: AI with a receipt",
+  "cover": "cover",
+  "order": ["cover", "problem", "idea", "office", "flow", "receipt", "why", "building", "numbers", "limits", "offer"],
+  "sections": {
+    "s1": {"description": "The problem with sending every job to one big model, and the idea that replaces it.", "start": "cover"},
+    "s2": {"description": "How one job moves through BORG_ROUTE and what the receipt shows.", "start": "flow"},
+    "s3": {"description": "Why to trust it: documents that stay local, measured results and stated limits.", "start": "building"},
+    "s4": {"description": "The offer.", "start": "offer"}
+  },
+  "faces": {
+    "space-grotesk": {"family": "Space Grotesk", "href": "https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400..700&display=swap"},
+    "inter": {"family": "Inter", "href": "https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap"},
+    "jetbrains-mono": {"family": "JetBrains Mono", "href": "https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap"}
+  },
+  "designSystems": []
+}

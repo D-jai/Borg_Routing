@@ -1,0 +1,205 @@
+/* BORG_ROUTE deck. Paper and teal ink; gold only as a small accent.
+   Type scale: 104 / 68 / 44 / 32 / 24. */
+
+.slide {
+  background: #F7F5EF;
+  color: #0F3B3F;
+  font-family: 'Inter', Arial, sans-serif;
+  padding: 128px 128px 160px;
+  display: flex;
+  flex-direction: column;
+  gap: 40px;
+}
+.slide.tone { background: #ECE7DA; }
+.slide.dark { background: #0B2A2D; color: #F3EFE4; }
+.slide.center { justify-content: center; }
+
+.slide h1 {
+  font-family: 'Space Grotesk', Arial, sans-serif;
+  font-size: 104px;
+  line-height: 1.08;
+  font-weight: 600;
+  letter-spacing: -2px;
+}
+.slide h2 {
+  font-family: 'Space Grotesk', Arial, sans-serif;
+  font-size: 68px;
+  line-height: 1.12;
+  font-weight: 600;
+  letter-spacing: -1px;
+}
+.slide h3 {
+  font-family: 'Space Grotesk', Arial, sans-serif;
+  font-size: 44px;
+  line-height: 1.15;
+  font-weight: 600;
+}
+
+.eyebrow {
+  font-size: 24px;
+  font-weight: 600;
+  letter-spacing: 4px;
+  text-transform: uppercase;
+  color: #0F5257;
+}
+.dark .eyebrow { color: #E0C25A; }
+
+.lede { font-size: 32px; line-height: 1.45; color: #3E5456; }
+.dark .lede { color: #BFD8D5; }
+.big { font-size: 44px; line-height: 1.3; color: #BFD8D5; }
+.small { font-size: 24px; line-height: 1.4; color: #5A6B69; }
+.dark .small { color: #9DB8B5; }
+
+.goldrule { border-top: 6px solid #C9A227; width: 120px; }
+
+/* Footer band: one pinned row. */
+.foot {
+  position: absolute;
+  left: 128px;
+  bottom: 64px;
+  width: 1664px;
+  display: flex;
+  justify-content: space-between;
+}
+.foot-l, .foot-r { font-size: 24px; color: #6B7C7A; }
+.dark .foot-l, .dark .foot-r { color: #7FA09C; }
+
+/* Cards */
+.cards { display: flex; gap: 32px; }
+.card {
+  flex: 1;
+  background: #FFFDF8;
+  border: 2px solid #D6CFBE;
+  border-radius: 16px;
+  padding: 40px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.ctag { font-size: 24px; font-weight: 600; letter-spacing: 3px; text-transform: uppercase; color: #0F5257; }
+.ctext { font-size: 32px; line-height: 1.4; color: #3E5456; }
+.clist { font-size: 32px; line-height: 1.5; color: #3E5456; }
+
+/* Where a model runs: filled dot = your machine, hollow ring = cloud. */
+.where { display: flex; align-items: center; gap: 12px; }
+.wtext { font-size: 24px; line-height: 1.25; color: #3E5456; }
+.dot-local { width: 20px; height: 20px; background: #0F5257; }
+.dot-cloud { width: 20px; height: 20px; background: #FFFDF8; border: 4px solid #55668A; }
+.dot-none { width: 20px; height: 20px; background: #D6CFBE; }
+
+/* Simple flow diagrams */
+.flowrow { display: flex; align-items: center; gap: 36px; }
+.col { flex: 1; display: flex; flex-direction: column; gap: 16px; }
+.chip {
+  background: #FFFDF8;
+  border: 2px solid #D6CFBE;
+  border-radius: 12px;
+  padding: 18px 28px;
+  font-size: 32px;
+  line-height: 1.3;
+  color: #0F3B3F;
+}
+.bigbox {
+  width: 380px;
+  background: #0F5257;
+  border-radius: 20px;
+  padding: 56px 48px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.bb-title { font-family: 'Space Grotesk', Arial, sans-serif; font-size: 44px; font-weight: 600; line-height: 1.15; color: #F7F5EF; }
+.bb-sub { font-size: 24px; color: #BFD8D5; }
+.arrow { width: 72px; height: 36px; background: #C9A227; }
+.arrow-sm { width: 44px; height: 22px; background: #C9A227; }
+
+/* Step cards for the one-job slide */
+.steps { display: flex; align-items: center; gap: 18px; }
+.step {
+  flex: 1;
+  background: #FFFDF8;
+  border: 2px solid #D6CFBE;
+  border-radius: 16px;
+  padding: 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.snum { font-size: 24px; font-weight: 600; color: #0F5257; }
+.sname { font-family: 'Space Grotesk', Arial, sans-serif; font-size: 32px; font-weight: 600; line-height: 1.2; color: #0F3B3F; }
+
+/* Zones for the building slide */
+.zone {
+  flex: 1;
+  background: #FFFDF8;
+  border: 3px solid #0F5257;
+  border-radius: 20px;
+  padding: 32px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.zone.out { background: #F7F5EF; border: 3px dashed #55668A; }
+.ztitle { font-size: 24px; font-weight: 600; letter-spacing: 3px; text-transform: uppercase; color: #0F5257; }
+.zone.out .ztitle { color: #55668A; }
+.cross { width: 340px; display: flex; flex-direction: column; align-items: center; gap: 16px; }
+.cross-t { font-size: 24px; line-height: 1.35; color: #3E5456; text-align: center; }
+.promise {
+  background: #0F5257;
+  border-radius: 16px;
+  padding: 36px 44px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.promise-t { font-size: 32px; line-height: 1.4; color: #F7F5EF; }
+.promise-s { font-size: 24px; line-height: 1.4; color: #BFD8D5; }
+
+/* Tables */
+.tbl { width: 1664px; font-size: 32px; color: #0F3B3F; }
+.tbl th, .tbl td { padding: 18px 24px; }
+.tbl .hd { background: #0F5257; }
+.tbl th { color: #F7F5EF; text-align: left; }
+.tbl .alt { background: #ECE7DA; }
+.tone .tbl .alt { background: #F7F5EF; }
+
+/* The receipt */
+.receipt {
+  width: 700px;
+  box-sizing: border-box;
+  background: #FFFDF8;
+  color: #1C2B2C;
+  font-family: 'JetBrains Mono', 'Courier New', monospace;
+  padding: 44px 48px;
+  border-radius: 8px;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.35);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.receipt hr { border-top: 2px dashed #9AA5A3; }
+.r-head { display: flex; justify-content: space-between; }
+.r-brand, .r-word { font-size: 32px; font-weight: 700; color: #1C2B2C; }
+.r-job { font-size: 24px; line-height: 1.35; color: #4A5A5B; }
+.r-row { display: flex; gap: 16px; }
+.r-name { flex: 1; font-size: 24px; line-height: 1.3; color: #1C2B2C; }
+.r-who { width: 160px; font-size: 24px; line-height: 1.3; color: #4A5A5B; }
+.r-amt { width: 110px; font-size: 24px; line-height: 1.3; color: #1C2B2C; text-align: right; }
+.r-total { display: flex; justify-content: space-between; }
+.r-tl, .r-ta { font-size: 32px; font-weight: 700; color: #1C2B2C; }
+.r-note { font-size: 24px; line-height: 1.35; color: #4A5A5B; }
+
+/* Cover */
+.cover-text { width: 900px; display: flex; flex-direction: column; gap: 36px; }
+.cover-receipt { position: absolute; right: 128px; top: 200px; transform: rotate(2deg); }
+
+/* Receipt slide */
+.split { display: flex; align-items: center; gap: 96px; }
+.notes { flex: 1; display: flex; flex-direction: column; gap: 28px; }
+.call { display: flex; flex-direction: column; gap: 6px; }
+.call-t { font-size: 32px; font-weight: 600; color: #F3EFE4; }
+.call-x { font-size: 24px; line-height: 1.4; color: #BFD8D5; }
+
+/* Offer */
+.offer-text { width: 1400px; display: flex; flex-direction: column; gap: 36px; }
+.who { font-size: 32px; line-height: 1.45; color: #F3EFE4; }

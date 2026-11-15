@@ -2,6 +2,20 @@
 
 Written 15-Nov-2026 by the planner for work order 6.1. Nine slides. Audience: an owner or IT lead at a company that wants AI on its own machines, and the technical person they forward it to. They have two minutes and no background in agent systems.
 
+## Update, 15-Nov-2026: a first cut exists and it changes the story
+
+Deej asked for a catchy way in. The first cut (11 slides, source in `docs/presentation/draft_v1/project/`, also published as a private slide artifact on Deej's account) is built on three things. Work order 6.1 finishes **that** deck; where it differs from the nine-slide outline below, the first cut wins.
+
+- **The hook: "Your AI should come with a receipt."** A till receipt for one AI job, step by step, is the image for the cover, the post and the video thumbnail.
+- **The one explaining image: an office.** Clerk, associate, partner for light, mid and heavy work. "Most companies have the senior partner sorting the mail." No second metaphor anywhere.
+- **The offer: "Bring one job you run every week. I will send back two receipts."** This is the call to action in the deck and the post.
+
+Slide order of the first cut: cover, problem, idea, office, flow, receipt, why (the reason for each choice), building (documents stay local), numbers, limits, offer.
+
+What 6.1 still has to do: fill every bracketed amount from `bench/results/.../summary.md` (cover, receipt, numbers), replace the April "about 21 times" figure on the limits slide with the fresh short-prompt measurement, add the Run view screenshot and the Aliud Inquisito logo, add the two links on the offer slide once they exist, check every slide in a browser, run the claims check, export the PDF. No bracket may survive into anything shared.
+
+Voice: Deej's deej-voice rules apply to every word (no em dashes, plain words, Canadian spelling, no Oxford comma, each idea said once).
+
 ## Rules for the whole deck
 
 - One idea per slide. A title that is a full statement, one picture, at most 25 words of body text.
