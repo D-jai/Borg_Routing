@@ -14,6 +14,10 @@ Error codes:
 - BRT-ANS-006: model call timed out
 - BRT-ANS-007: governance load failed
 - BRT-ANS-008: unexpected executor error
+- BRT-ANS-009: model output truncated (finish_reason=length) even after the
+               automatic doubled-cap retry — caller must raise
+               ANSWERER_MAX_TOKENS / envelope.max_output_tokens or split
+               the task.
 - BRT-TOOL-001: tool unavailable (caught via ToolInvocationResult, not raised)
 - BRT-TOOL-002: tool runtime failure (BRT-WEB-01)
 """
@@ -37,6 +41,13 @@ from src.registry.model_call import resolve_model_call
 from src.registry.models import ModelInfo
 
 _MODEL_CALL_TIMEOUT_SEC = 120
+
+# BRT-ANS-009 — absolute ceiling for the doubled-cap retry. Bounds runaway
+# token spend if a model is genuinely producing a much larger answer than
+# the cap suggests. 16k matches the practical envelope of "complete spec +
+# code + tests" while staying well under any provider's hard context
+# window.
+_TRUNCATION_RETRY_CEILING = 16000
 
 
 def _extract_json(text: str) -> dict:
@@ -109,42 +120,17 @@ def _resolve_call_model(task: WrappedTask) -> ModelInfo:
     )
 
 
-async def _call_model(
-    model: ModelInfo, system_prompt: str, user_msg: str
-) -> tuple[str, int, int]:
-    """Call model via OpenAI-compat /v1/chat/completions.
-
-    Uses ``resolve_model_call`` so OpenRouter rows get auth headers and the
-    right body model id. Always sends ``max_tokens`` (configurable via
-    ``ANSWERER_MAX_TOKENS``) to avoid OpenRouter 402 ``tokens=0`` rejections.
-
-    Returns:
-        (content_text, input_tokens, output_tokens)
+async def _post_chat_completion(
+    url: str,
+    headers: dict,
+    payload: dict,
+) -> tuple[str, int, int, str]:
+    """Single POST to /v1/chat/completions. Returns
+    (content, tokens_in, tokens_out, finish_reason).
 
     Raises:
-        ValueError: BRT-ANS-006 on timeout.
-        ValueError: BRT-ANS-002 on HTTP error.
+        ValueError: BRT-ANS-006 on timeout, BRT-ANS-002 on HTTP/transport error.
     """
-    url, headers, body_model = resolve_model_call(model)
-    # BRT-ORC-RM — reasoning-family answerers (DeepSeek-R1, Qwen-QwQ,
-    # o1/o3/o4, thinking-prefixed snapshots) burn thousands of hidden
-    # chain-of-thought tokens before emitting visible output; a 2000-token
-    # cap truncates them mid-thought. _resolve_max_tokens_for_model bumps
-    # the cap to >= 8000 for detected reasoning models.
-    from src.orchestrator.engine import _resolve_max_tokens_for_model  # noqa: PLC0415
-
-    max_tokens = _resolve_max_tokens_for_model(
-        model, "ANSWERER_MAX_TOKENS", default=2000
-    )
-    payload = {
-        "model": body_model,
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_msg},
-        ],
-        "temperature": 0.2,
-        "max_tokens": max_tokens,
-    }
     try:
         async with httpx.AsyncClient(timeout=_MODEL_CALL_TIMEOUT_SEC) as client:
             resp = await client.post(url, json=payload, headers=headers)
@@ -159,11 +145,90 @@ async def _call_model(
         raise ValueError(f"BRT-ANS-002: request error calling {url}: {exc}") from exc
 
     body = resp.json()
-    content = body["choices"][0]["message"]["content"]
+    choice = body["choices"][0]
+    content = choice["message"]["content"]
+    finish_reason = (choice.get("finish_reason") or "").strip()
     usage = body.get("usage", {})
     tokens_in = usage.get("prompt_tokens", 0)
     tokens_out = usage.get("completion_tokens", 0)
-    return content, tokens_in, tokens_out
+    return content, tokens_in, tokens_out, finish_reason
+
+
+async def _call_model(
+    model: ModelInfo,
+    system_prompt: str,
+    user_msg: str,
+    requested_max_tokens: Optional[int] = None,
+) -> tuple[str, int, int, str]:
+    """Call model via OpenAI-compat /v1/chat/completions with auto-retry
+    on `finish_reason == "length"` (BRT-ANS-009 / BUG-009).
+
+    The envelope-level ``requested_max_tokens`` (i.e. ``task.max_output_tokens``)
+    acts as a FLOOR over the env-driven cap so plan nodes that legitimately
+    need more headroom can declare it. Reasoning-family models additionally
+    get the 4x bump from ``_resolve_max_tokens_for_model``.
+
+    On the first attempt, if the provider reports the response was cut off
+    by the cap (``finish_reason == "length"``), make ONE more call with the
+    cap doubled (bounded by ``_TRUNCATION_RETRY_CEILING``). The caller is
+    responsible for surfacing BRT-ANS-009 if the retry still truncates —
+    we can't decide here whether downstream JSON parsed cleanly anyway.
+
+    Returns:
+        (content_text, tokens_in_total, tokens_out_total, final_finish_reason)
+
+    Raises:
+        ValueError: BRT-ANS-006 on timeout, BRT-ANS-002 on HTTP error.
+    """
+    url, headers, body_model = resolve_model_call(model)
+    # BRT-ORC-RM — reasoning-family answerers (DeepSeek-R1, Qwen-QwQ,
+    # o1/o3/o4, thinking-prefixed snapshots) burn thousands of hidden
+    # chain-of-thought tokens before emitting visible output; a 2000-token
+    # cap truncates them mid-thought. _resolve_max_tokens_for_model bumps
+    # the cap to >= 8000 for detected reasoning models.
+    from src.orchestrator.engine import _resolve_max_tokens_for_model  # noqa: PLC0415
+
+    base_max = _resolve_max_tokens_for_model(
+        model, "ANSWERER_MAX_TOKENS", default=2000
+    )
+    # Envelope-requested cap acts as a floor (orchestrator may have asked
+    # for more on this specific node).
+    effective_max = max(base_max, int(requested_max_tokens or 0))
+
+    payload = {
+        "model": body_model,
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_msg},
+        ],
+        "temperature": 0.2,
+        "max_tokens": effective_max,
+    }
+
+    content, tokens_in, tokens_out, finish_reason = await _post_chat_completion(
+        url, headers, payload
+    )
+
+    # BRT-ANS-009 — silent-truncation cascade (BUG-009 / BUG-012). When a
+    # provider stops because it hit the cap, the visible text is almost
+    # always a partial JSON object and BRT-ANS-004 then fires on the
+    # unparseable tail. Retry ONCE with the cap doubled so the natural
+    # fix happens automatically instead of failing the run.
+    if finish_reason == "length" and effective_max < _TRUNCATION_RETRY_CEILING:
+        retry_cap = min(effective_max * 2, _TRUNCATION_RETRY_CEILING)
+        if retry_cap > effective_max:
+            retry_payload = {**payload, "max_tokens": retry_cap}
+            (
+                content_retry,
+                retry_in,
+                retry_out,
+                finish_reason,
+            ) = await _post_chat_completion(url, headers, retry_payload)
+            content = content_retry
+            tokens_in += retry_in
+            tokens_out += retry_out
+
+    return content, tokens_in, tokens_out, finish_reason
 
 
 async def _execute_answerer(task: WrappedTask, db_path: str) -> InboundEnvelope:
@@ -280,11 +345,13 @@ async def _execute_answerer(task: WrappedTask, db_path: str) -> InboundEnvelope:
     # prefix and using the endpoint stamped on the task.
     model_for_call = _resolve_call_model(task)
 
-    # Call model
+    # Call model. _call_model honours task.max_output_tokens as a floor
+    # over ANSWERER_MAX_TOKENS and auto-retries once at doubled cap on
+    # finish_reason=="length" (BRT-ANS-009 / BUG-009).
     t0 = time.monotonic()
     try:
-        content, tokens_in, tokens_out = await _call_model(
-            model_for_call, system_prompt, "begin"
+        content, tokens_in, tokens_out, finish_reason = await _call_model(
+            model_for_call, system_prompt, "begin", task.max_output_tokens
         )
     except ValueError:
         raise
@@ -292,6 +359,42 @@ async def _execute_answerer(task: WrappedTask, db_path: str) -> InboundEnvelope:
         raise ValueError(f"BRT-ANS-008: unexpected error calling model: {exc}") from exc
 
     latency_ms = int((time.monotonic() - t0) * 1000)
+
+    # BRT-ANS-009 — even with the doubled-cap retry, the response still
+    # got cut off by the cap. Surface a distinct failure code so operators
+    # see "the cap is too small for this task" instead of the misleading
+    # downstream BRT-ANS-004 (unparseable JSON, which is the symptom not
+    # the cause).
+    if finish_reason == "length":
+        env = InboundEnvelope(
+            envelope_id=task.envelope_id,
+            subtask_id=task.subtask_id,
+            status="failed",
+            output={},
+            failure_reason=(
+                "BRT-ANS-009: model output truncated (finish_reason=length) "
+                "even after auto-retry at doubled cap. Raise "
+                "ANSWERER_MAX_TOKENS or split the task into smaller nodes."
+            ),
+            tokens_used={"input": tokens_in, "output": tokens_out},
+        )
+        await write_event(
+            "model_call",
+            run_id=task.run_id,
+            envelope_id=task.envelope_id,
+            model_id=task.model_name,
+            tokens_input=tokens_in,
+            tokens_output=tokens_out,
+            latency_ms=latency_ms,
+            payload_out=content[:2000],
+            decision={
+                "code": "BRT-ANS-009",
+                "msg": "max_tokens cap exhausted after retry",
+                "envelope_max_output_tokens": task.max_output_tokens,
+            },
+            db_path=db_path,
+        )
+        return env
 
     # Parse response
     try:

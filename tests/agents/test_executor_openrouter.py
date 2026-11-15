@@ -27,7 +27,7 @@ async def test_call_model_openrouter_wiring(monkeypatch):
 
     mock_resp = MagicMock()
     mock_resp.json.return_value = {
-        "choices": [{"message": {"content": "ok"}}],
+        "choices": [{"message": {"content": "ok"}, "finish_reason": "stop"}],
         "usage": {"prompt_tokens": 5, "completion_tokens": 2},
     }
     mock_resp.raise_for_status = MagicMock()
@@ -45,12 +45,14 @@ async def test_call_model_openrouter_wiring(monkeypatch):
         client.__aexit__ = AsyncMock(return_value=None)
         mock_cls.return_value = client
 
-        content, tokens_in, tokens_out = await _call_model(model, "sys", "usr")
+        content, tokens_in, tokens_out, finish_reason = await _call_model(model, "sys", "usr")
 
     assert content == "ok"
     assert tokens_in == 5
     assert tokens_out == 2
+    assert finish_reason == "stop"
     assert post_calls["url"] == "https://openrouter.ai/api/v1/chat/completions"
     assert post_calls["headers"]["Authorization"] == "Bearer sk-or-key"
     assert post_calls["json"]["model"] == "anthropic/claude-sonnet-4"
+    # No envelope-level requested_max_tokens passed, so the env-driven cap wins.
     assert post_calls["json"]["max_tokens"] == 321

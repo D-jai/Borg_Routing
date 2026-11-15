@@ -74,7 +74,14 @@ class WrappedTask(BaseModel):
     tool_requests: list[ToolRequest] = []
     dependency_input: dict = {}
     output_schema: dict
-    max_output_tokens: int = 1000
+    # BRT-ANS-009 — Per-envelope token budget request. The executor uses
+    # this as a FLOOR: effective_max = max(ANSWERER_MAX_TOKENS env, this).
+    # Plan nodes that need more headroom (e.g. "produce a Go impl + 3
+    # tests") can declare a higher cap; the orchestrator stamps it onto
+    # the WrappedTask via _build_task_from_node. Default 4000 keeps small
+    # answers cheap while leaving room for non-trivial JSON outputs
+    # without immediately tripping finish_reason=length.
+    max_output_tokens: int = 4000
     trigger_reason: str = "initial_plan"
     skill_id: Optional[str] = None
     skill_version: Optional[int] = None

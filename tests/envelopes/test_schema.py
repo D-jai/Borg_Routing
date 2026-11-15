@@ -114,7 +114,9 @@ def test_wrapped_task_defaults():
     assert task.context == ""
     assert task.side_effects == []
     assert task.dependency_input == {}
-    assert task.max_output_tokens == 1000
+    # BRT-ANS-009 — schema default bumped from 1000 to 4000 so non-trivial
+    # JSON outputs don't trip finish_reason=length on the first attempt.
+    assert task.max_output_tokens == 4000
     assert task.trigger_reason == "initial_plan"
     assert task.skill_id is None
     assert task.parent_run_id is None

@@ -20,6 +20,9 @@ Error codes:
                run continues, trace shows the DB hiccup)
 - BRT-ORC-017: depends_on id not found in results (warning; node dispatches
                with whatever upstream outputs could be resolved)
+- BRT-ORC-018: orchestrator response truncated by max_tokens; auto-retried
+               once at doubled cap (info; logged via the existing
+               orchestrator_decision write_event path)
 
 Optimisation hooks (no error code):
 - BRT-ZERO-01: for unambiguously conversational short prompts, skip
@@ -538,8 +541,11 @@ async def _invoke_orchestrator_model(
         "response_format": {"type": "json_object"},
     }
 
-    async def _post_and_collect() -> tuple[str, dict, int]:
-        """POST once; return (content, usage, latency_ms). Raises BRT-ORC-001."""
+    async def _post_and_collect() -> tuple[str, dict, int, str]:
+        """POST once; return (content, usage, latency_ms, finish_reason).
+
+        Raises BRT-ORC-001.
+        """
         t_start = time.monotonic()
         try:
             async with httpx.AsyncClient(timeout=_MODEL_CALL_TIMEOUT) as client:
@@ -555,13 +561,31 @@ async def _invoke_orchestrator_model(
             raise ValueError(f"BRT-ORC-001: request error calling orchestrator: {exc}") from exc
         latency = int((time.monotonic() - t_start) * 1000)
         body_resp = resp.json()
-        content_resp = body_resp["choices"][0]["message"]["content"]
+        choice_resp = body_resp["choices"][0]
+        content_resp = choice_resp["message"]["content"]
+        finish_resp = (choice_resp.get("finish_reason") or "").strip()
         usage_resp = body_resp.get("usage", {})
-        return content_resp, usage_resp, latency
+        return content_resp, usage_resp, latency, finish_resp
 
-    content, usage, latency_ms = await _post_and_collect()
+    content, usage, latency_ms, finish_reason = await _post_and_collect()
     tokens_in = usage.get("prompt_tokens", 0)
     tokens_out = usage.get("completion_tokens", 0)
+
+    # BRT-ORC-018 — orchestrator response truncated by the cap (BUG-012).
+    # Retry ONCE with the cap doubled (capped at 16k) before falling
+    # through to the parse-failure retry path. Without this, a "length"
+    # cut produces partial JSON that may or may not parse — and even if
+    # it does, the plan it encodes is broken.
+    if finish_reason == "length" and max_tokens < 16000:
+        retry_max = min(max_tokens * 2, 16000)
+        if retry_max > max_tokens:
+            payload["max_tokens"] = retry_max
+            content_t, usage_t, latency_t, finish_reason = await _post_and_collect()
+            tokens_in += usage_t.get("prompt_tokens", 0)
+            tokens_out += usage_t.get("completion_tokens", 0)
+            latency_ms += latency_t
+            content = content_t
+            max_tokens = retry_max
 
     # BRT-ORC-02b — ALWAYS log the raw payload_out before attempting to
     # parse it. Previously _extract_json raised ValueError before
@@ -610,7 +634,7 @@ async def _invoke_orchestrator_model(
         "object matching the schema described above."
     )
     payload["messages"][0]["content"] = retry_system
-    content_retry, usage_retry, latency_retry = await _post_and_collect()
+    content_retry, usage_retry, latency_retry, _finish_retry = await _post_and_collect()
     tokens_in_retry = usage_retry.get("prompt_tokens", 0)
     tokens_out_retry = usage_retry.get("completion_tokens", 0)
 
@@ -807,7 +831,16 @@ def _build_task_from_node(
                 ToolRequest(tool=str(req["tool"]), args=req.get("args") or {})
             )
 
-    return WrappedTask(
+    # BRT-ANS-009 — honour planner-declared per-node token cap if present.
+    # Schema default (4000) wins when the node didn't ask for one. The
+    # executor treats this value as a FLOOR over ANSWERER_MAX_TOKENS.
+    raw_node_cap = node.get("max_output_tokens")
+    try:
+        node_cap = int(raw_node_cap) if raw_node_cap is not None else None
+    except (TypeError, ValueError):
+        node_cap = None
+
+    task_kwargs = dict(
         envelope_id=uuid4(),
         run_id=run_id,
         subtask_id=uuid4(),
@@ -826,6 +859,10 @@ def _build_task_from_node(
         dependency_input=base_dep_input,
         trigger_reason=node.get("trigger_reason", "initial_plan"),
     )
+    if node_cap and node_cap > 0:
+        task_kwargs["max_output_tokens"] = node_cap
+
+    return WrappedTask(**task_kwargs)
 
 
 async def orchestrate_run(

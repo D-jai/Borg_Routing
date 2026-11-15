@@ -85,6 +85,7 @@
 | BRT-ORC-015 | Default answerer selection failed; fell back to orchestrator model | `src/orchestrator/engine.py::orchestrate_run` | `select_model` could not find a default answerer row, so the orchestrator model was reused. Warning — the run continues. Check that at least one row at or above the configured quality bar is checked on the Models page. |
 | BRT-ORC-016 | Envelope persistence failed | `src/orchestrator/engine.py::orchestrate_run` | `save_envelope` or `update_envelope_inbound` raised. Error logged; the run still completes but the trace may miss an envelope row. Check DB health (`data/borg_route.db`) and disk space. |
 | BRT-ORC-017 | `depends_on` id not found in results | `src/orchestrator/engine.py::_build_task_from_node` | The plan referenced an upstream node id that is not part of the current plan (typo or hallucination). The dependent node dispatches anyway with whatever upstream outputs could be resolved. Check the orchestrator's rationale for the stray id. |
+| BRT-ORC-018 | Orchestrator response cut off by the token cap; retried once at double the cap | `src/orchestrator/engine.py::_invoke_orchestrator_model` | Informational. The first reply ended with `finish_reason=length`, so the call was repeated once with `max_tokens` doubled (ceiling 16000). Not written as its own event: the `orchestrator_decision` event for that call carries the summed tokens of both attempts. Reasoning-family models already start at or above the ceiling, so they never get this retry. Raise `ORCHESTRATOR_MAX_TOKENS` if plans are still cut off. |
 
 ## BRT-APE — apply_to_each Module
 
@@ -139,6 +140,7 @@
 | BRT-ANS-006 | Model call timed out | `src/agents/executor.py::_call_model` | The model did not respond within 120 seconds. Check model server load or increase the timeout. |
 | BRT-ANS-007 | Governance load failed | `src/agents/executor.py::_execute_answerer` | Could not read global_rules or admin_rules_ledger from the config table. Check database connectivity. |
 | BRT-ANS-008 | Unexpected executor error | `src/agents/executor.py::execute` | An unexpected exception occurred. Check the logs for the full traceback. |
+| BRT-ANS-009 | Answer cut off by the token cap, even after one retry at double the cap | `src/agents/executor.py::_execute_answerer` | The model stopped with `finish_reason=length` twice (first call, then one retry at double the cap, ceiling 16000). The step fails with this code instead of the misleading BRT-ANS-004. Raise `ANSWERER_MAX_TOKENS`, have the planner set a larger `max_output_tokens` on the step, or split the step. |
 
 ## BRT-LOG — Logging Module
 
