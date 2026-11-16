@@ -10,16 +10,16 @@ Build under way, run by the lead session (`borg-route-f1`, Opus 5.5) since 02:20
 |---|---|
 | 0.1, 0.2, 0.3 | Done and reviewed (0.1 fixed in `3c62112`) |
 | 1.1, 1.2, 1.3, 1.4 | Done and reviewed (fixes `917cba3`, `30a3071`, `e1861e2`) |
-| 1.8 local addresses | Built `8501113`; review fixes in progress (builder) |
-| 1.9 Law 2 note | Done `13cf807` |
-| 1.6 record cost | In progress (builder) |
-| 1.5 record why, 1.7 demo-path bugs (+ R14), 1.10 Check 1 | Open |
+| 1.5, 1.6, 1.7 (+R14), 1.8, 1.9 | Done and reviewed (see build log) |
+| 1.10 Check 1 | **Blocked** (two failed attempts, US$0.07 spent). See "Blocked" and "Needs planner" below |
 | 2.1 on-premise lane design | Done: attacked by a fresh reviewer (24 findings), revised `8dee12c`, `13a1799` |
-| 2.2, 2.3 and everything after | Open |
+| 2.2, 2.3 lane build and privacy test | In progress (they depend on Phase 1's code, which is done) |
+| 4.1 shared interface assets | In progress |
+| Everything else | Open |
 
-If this session stopped abruptly: `git log` and `git status` show what landed; any uncommitted changes in `src/` belong to the in-progress builders above: read the diff, finish or stash it, record which in the build log.
+If this session stopped abruptly: `git log` and `git status` show what landed; any uncommitted changes in `src/` or `ui/` belong to the in-progress builders above: read the diff, finish or stash it, record which in the build log.
 
-**Next action for the lead:** 1.8 fixes and 1.6 review, then 1.5, 1.7, 1.10 (Check 1, live OpenRouter run), phase-end full run, push.
+**Next action for the lead:** 2.2/2.3 and 4.1; then 4.3, 4.4 (need no proof results). Check 1 waits for the planner's answer. A 5-hour usage limit stopped agents at about 07:00 on 16-Nov-2026; it reset at 07:10.
 
 ## Start the build (Deej)
 
@@ -79,7 +79,7 @@ Standing permissions: local commits on `showcase`; pushes of `showcase` to the p
 
 ## Blocked
 
-(none)
+- **1.10 Check 1 (16-Nov-2026).** Both live runs (temp DBs `borg_smoke_vksjf2ab`, `borg_smoke_uegi1bfr` under `%TEMP%`) failed the same way: the planner points an `apply_to_each` (attempt 1: `inputs_ref: "reviews"`) or a skill step (attempt 2: `extract_fields` with `items_ref: "reviews_list"`) at a list that exists only inside the operator's message. Nothing resolves it, the step runs no model, its dependants never run, and re_plan composes the whole answer on the planner model. Routing per step works (route decisions chose `gpt-5.4-nano` for the extraction step); the steps just never get their items.
 
 ## Needs Deej
 
@@ -87,4 +87,8 @@ Standing permissions: local commits on `showcase`; pushes of `showcase` to the p
 
 ## Needs planner
 
-(none)
+- **How does the planner hand a list that lives in the operator's message to a step? (16-Nov-2026, for 1.10.)** The planner prompt says `inputs_ref` "is resolved from run state" and never says that data in the user's message must go in the node's inline `items`, or be produced by an earlier step. Options the lead sees:
+  - **A (lead's recommendation):** add guidance to `src/prompts/orchestrator.py` (and the `items_ref` wording for skills): "a list that is in the user's message goes in `items` inline; `inputs_ref` names an earlier step's id only". A protected-file edit beyond 1.3, so it needs the planner.
+  - **B:** a reserved ref (for example `"input"`) meaning the operator's message, split by the runtime. Fragile: the runtime must guess item boundaries.
+  - **C:** a runtime fallback that runs the step once over the operator's message. Tried (`a78f6cc`), reverted (`cd9d910`): it covered only the plain path, and it fired early for references to steps in the same plan.
+  - Independently of the choice: an `inputs_ref` naming a step in the same plan should count as a dependency (the ready check waits only on `depends_on`); found by the review of `a78f6cc`.
