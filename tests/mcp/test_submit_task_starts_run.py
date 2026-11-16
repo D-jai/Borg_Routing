@@ -45,7 +45,13 @@ async def test_submit_task_run_reaches_completed(tmp_path, monkeypatch):
 
     resp = await _call({"instruction": "Do one thing."})
     run_id = resp["result"]["_meta"]["run_id"]
-    assert resp["result"]["_meta"]["status"] == "running"
+    # The reply must agree with the database row, as POST /v1/task does.
+    reported = resp["result"]["_meta"]["status"]
+    from src.db.state import get_run
+    import uuid
+    row = await get_run(uuid.UUID(run_id), db_path=db_path)
+    assert reported == "pending"
+    assert row["status"] in (reported, "completed")
 
     run = await _wait_for_end(run_id, db_path)
     assert run["status"] == "completed", run.get("failure_reason")

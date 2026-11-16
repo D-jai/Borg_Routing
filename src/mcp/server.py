@@ -181,7 +181,9 @@ async def _tool_submit_task(args: dict) -> dict:
     return {
         "content": [{"type": "text", "text": f"Task submitted. run_id: {run_id}"}],
         "isError": False,
-        "_meta": {"run_id": str(run_id), "status": "running"},
+        # Same status POST /v1/task returns; the row is "pending" until the
+        # background run ends as completed or failed.
+        "_meta": {"run_id": str(run_id), "status": "pending"},
     }
 
 
