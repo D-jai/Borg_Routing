@@ -1,13 +1,3 @@
-# BORG_ROUTE capability matrix — seeded models.
-#
-# LM Studio / Ollama rows are populated LIVE by POST /models/discover.
-# Do not hand-seed them here (BRT-DS-01). Operators load models in LM Studio
-# and click Discover; the matrix then learns model ids, endpoints, and context
-# lengths from the live server. Run Get Info next to fill task_scores.
-#
-# OpenRouter rows below ARE seeded because the curated 12-model list is a
-# deliberate operator choice surfaced in the UI, not a live-probed truth.
-
 - model_id: openrouter/anthropic/claude-opus-4.7
   source: openrouter
   endpoint: https://openrouter.ai/api
@@ -62,8 +52,8 @@
   endpoint: https://openrouter.ai/api
   context_length: 2000000
   pricing:
-    input_per_token: 2.0e-06
-    output_per_token: 6.0e-06
+    input_per_token: 1.25e-06
+    output_per_token: 2.5e-06
   throughput_tps: 50.0
   task_scores:
     reasoning: 9.5
@@ -184,10 +174,10 @@
 - model_id: openrouter/deepseek/deepseek-v3.2
   source: openrouter
   endpoint: https://openrouter.ai/api
-  context_length: 131072
+  context_length: 163840
   pricing:
-    input_per_token: 2.52e-07
-    output_per_token: 3.78e-07
+    input_per_token: 2.6e-07
+    output_per_token: 3.8e-07
   throughput_tps: 70.0
   task_scores:
     reasoning: 8.3
@@ -203,7 +193,7 @@
   params_b: null
   publisher: deepseek
   notes: Exceptional price/performance. Strong default for mid work.
-  checked: false
+  checked: true
 - model_id: openrouter/x-ai/grok-4.1-fast
   source: openrouter
   endpoint: https://openrouter.ai/api
@@ -249,7 +239,7 @@
   params_b: null
   publisher: openai
   notes: Ultra-cheap OpenAI. Bulk classification / extraction.
-  checked: false
+  checked: true
 - model_id: openrouter/google/gemini-3.1-flash-lite-preview
   source: openrouter
   endpoint: https://openrouter.ai/api
