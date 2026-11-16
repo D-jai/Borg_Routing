@@ -236,6 +236,7 @@ Every piece of work BORG_ROUTE sends to a model is wrapped in a **WrappedTask** 
 - **output_schema** — the exact shape the model must return (this is the compression contract)
 - **type** — one of: `orchestrate`, `answerer`, `apply_to_each`, `state_op`
 - **state_op `source`** — a `state_op` step can name an earlier step (`"source": "n1"`); it then works on the list that step produced (its `items`, `results`, `list` or `result`). If the named step has produced no list, the step fails with BRT-SOP-003 instead of working on an empty list.
+- **skill `items_ref`** — a skill that works on a list (such as `extract_fields`) takes `items_ref` naming the earlier step whose list it should walk (`"items_ref": "n1"`). The items are read from that step's output the same way a plain `apply_to_each` step does. If no such step has produced a list, the step fails with BRT-APE-001.
 - **level_path** — where this task sits in the run tree (e.g. `"1a"`, `"2b"`)
 - **trigger_reason** — why this envelope was created (e.g. `initial_plan`, `escalation_from:env-id`)
 

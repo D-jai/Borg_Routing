@@ -1,4 +1,5 @@
-"""A state_op step works on the list of the earlier step it names as `source` (R4).
+"""Steps that work on an earlier step's list: state_op `source` (R4) and a
+skill apply_to_each step's `items_ref` (R14).
 
 The real engine, executor and router run against the scripted stand-in
 model server. Nothing here needs a key or the network.
@@ -45,6 +46,49 @@ def _lister(req):
 
 LIST_STEP = {"type": "answerer", "id": "n1", "instruction": "List the reviews.",
              "task_type": "extraction", "tier": "light", "output_schema": {"items": "list"}}
+
+
+def _skill_step(items_ref):
+    return {"type": "apply_to_each", "id": "n2", "skill_id": "extract_fields",
+            "skill_args": {"items_ref": items_ref, "concurrency_limit": 3,
+                           "fields": [{"name": "product", "type": "string",
+                                       "description": "the product"}]}}
+
+
+def _per_item_calls(stub):
+    return [r for r in stub.of_kind("answerer") if "Extract the following fields" in r.system]
+
+
+@pytest.mark.asyncio
+async def test_skill_apply_to_each_step_gets_the_items_of_an_earlier_step(env):
+    db_path, mp = env
+    step = _skill_step("n1")
+    stub = StubModels(plan_nodes=[LIST_STEP], answer_for=_lister,
+                      replan_for=_second_wave(step)).install(mp)
+    result = await run_pipeline("Extract the product from each review.", db_path=db_path)
+    await drain_log_writes()
+    assert result["status"] == "completed", result.get("error")
+    per_item = _per_item_calls(stub)
+    assert len(per_item) == len(REVIEWS), f"{len(per_item)} per-item calls"
+    joined = " ".join(r.system for r in per_item)
+    for review in REVIEWS:
+        assert review in joined
+
+
+@pytest.mark.asyncio
+async def test_skill_apply_to_each_with_an_unknown_items_ref_fails_loudly(env):
+    db_path, mp = env
+    stub = StubModels(plan_nodes=[LIST_STEP], answer_for=_lister,
+                      replan_for=_second_wave(_skill_step("nope"))).install(mp)
+    await run_pipeline("Extract.", db_path=db_path)
+    await drain_log_writes()
+    assert not _per_item_calls(stub)
+    with sqlite3.connect(db_path) as conn:
+        row = conn.execute(
+            "SELECT status, inbound_payload FROM envelopes WHERE type='apply_to_each'"
+        ).fetchone()
+    assert row is not None and row[0] == "failed", row
+    assert "BRT-APE-001" in row[1]
 
 
 @pytest.mark.asyncio

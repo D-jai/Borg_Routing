@@ -1094,13 +1094,21 @@ def _build_task_from_node(
             )
             # The skill template carries no model; the step's routed model
             # is stamped here, or the executor fails it with BRT-ANS-001.
-            return rendered.model_copy(
-                update={
-                    "model_endpoint": model_endpoint,
-                    "model_name": model_name,
-                    "governance_instruction": governing,
-                }
-            )
+            update = {
+                "model_endpoint": model_endpoint,
+                "model_name": model_name,
+                "governance_instruction": governing,
+            }
+            if rendered.type == "apply_to_each":
+                # R14 — resolve the items from the earlier step the skill's
+                # items_ref names, as a plan-written apply_to_each node does.
+                dep = dict(rendered.dependency_input or {})
+                if not dep.get("items"):
+                    upstream = _upstream_list(dep.get("inputs_ref"), results)
+                    if upstream is not None:
+                        dep["items"] = upstream
+                        update["dependency_input"] = dep
+            return rendered.model_copy(update=update)
         except Exception as exc:
             raise ValueError(f"BRT-ORC-008: skill render failed: {exc}") from exc
 
