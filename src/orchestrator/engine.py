@@ -33,6 +33,9 @@ Error codes:
 - BRT-ORC-024: a step waits, through its refs or depends_on, on a cycle of
                steps of the same plan, so it can never run; it fails before
                re_plan with no model call and the message names the cycle
+- BRT-ORC-025: a step's depends_on step failed (cycle-failed included); the
+               step fails before any model call and the message names the
+               failed step (an item ref to it keeps BRT-APE-005)
 
 On-premise lane (docs/design/on_premise_lane.md; on only when the run has a
 lane context, see src/lane/context.py):
@@ -1268,15 +1271,62 @@ def _failed_step(ref: object, results: dict) -> bool:
     )
 
 
-def _with_ids(nodes: list) -> list:
-    """The plan's nodes, each with an ``id`` (``n<index>`` when it has none),
-    so a step that ran is never taken for one still waiting."""
+def _with_ids(nodes: list, taken: set) -> list:
+    """The plan's nodes, each with an ``id``, so a step that ran is never
+    taken for one still waiting.
+
+    An explicit planner id is kept unchanged. A node with none gets
+    ``n<index>``, or ``n<index>_<k>`` when that is taken, so a generated id
+    is unique across the whole run: never in ``taken`` (the run's results and
+    every id given earlier in the run), never an id already in this plan.
+    ``taken`` is updated with every id of this plan.
+    """
+    nodes = list(nodes or [])
+    for n in nodes:
+        if isinstance(n, dict) and n.get("id"):
+            taken.add(str(n["id"]))
     out = []
-    for i, n in enumerate(nodes or []):
+    for i, n in enumerate(nodes):
         if isinstance(n, dict) and not n.get("id"):
-            n = {**n, "id": f"n{i}"}
+            new_id, k = f"n{i}", 2
+            while new_id in taken:
+                new_id, k = f"n{i}_{k}", k + 1
+            taken.add(new_id)
+            n = {**n, "id": new_id}
         out.append(n)
     return out
+
+
+def failed_dependency_message(name: object) -> str:
+    """BRT-ORC-025 failure text for a step whose ``depends_on`` step failed.
+
+    Guidance first, the failed step's id last (cut to 40 characters), so the
+    whole text fits the 200-character cap on what re_plan is shown.
+    """
+    return (
+        "BRT-ORC-025: a step in this one's depends_on failed, so it was not run "
+        "and made no model call; re-plan without it or fix that step first. "
+        f"Failed step: '{str(name)[:40]}'"
+    )
+
+
+def _failed_dependency(node: dict, results: dict, documents_reserved: bool) -> Optional[str]:
+    """The first ``depends_on`` step of ``node`` that failed, or None.
+
+    A step the node also reads its items from (``inputs_ref``, ``source``, a
+    skill's ``*_ref``) is left to the item path, which fails it with
+    BRT-APE-005.
+    """
+    deps = node.get("depends_on") or []
+    if not isinstance(deps, list):
+        return None
+    item_refs = set(_node_refs({k: v for k, v in node.items() if k != "depends_on"},
+                               documents_reserved))
+    for dep in deps:
+        dep = str(dep)
+        if dep not in item_refs and _failed_step(dep, results):
+            return dep
+    return None
 
 
 def ref_cycle_message(node_id: str, cycle: Optional[list[str]]) -> str:
@@ -2034,7 +2084,9 @@ async def _orchestrate_run(
     # one of them is raw too (taint follows the data, design note 5.2).
     raw_unstamped: set[str] = set()
 
-    current_nodes = _with_ids(current_nodes)
+    # Every step id this run has used: a generated id never repeats one.
+    run_ids: set = set(results)
+    current_nodes = _with_ids(current_nodes, run_ids)
     # "documents" names the run's documents only while the lane is on; with
     # the lane off it is an ordinary step id and is waited for like any other.
     documents_reserved = lane is not None
@@ -2067,7 +2119,7 @@ async def _orchestrate_run(
         if waiting and not ready:
             # Every step left waits on another step left: a cycle. Its
             # members can never run, so they fail loudly now (BRT-ORC-024);
-            # a step waiting on a member then runs against a failed step.
+            # a step that depends_on a member then fails with BRT-ORC-025.
             await _fail_ref_cycles(
                 waiting, {n["id"]: _waits_on(n) for n in waiting},
                 results, raw_unstamped, run_id, lane, db_path,
@@ -2101,7 +2153,8 @@ async def _orchestrate_run(
                     break
                 # Nothing is held at this point (every step either ran or
                 # failed), so the next wave is re_plan's steps.
-                current_nodes = _with_ids(next_nodes)
+                run_ids.update(results)
+                current_nodes = _with_ids(next_nodes, run_ids)
                 continue
             elif action == "fail":
                 rationale = replan_result.get("rationale", "No rationale provided.")
@@ -2131,6 +2184,39 @@ async def _orchestrate_run(
                         node_docs = _node_document_ids(node, lane)
                     except ValueError:
                         node_docs = []   # the build below fails it loudly (BRT-ORC-008)
+
+            # A step whose depends_on step failed (cycle-failed included)
+            # fails now, before routing or any model call (BRT-ORC-025): a
+            # dead chain stops paying. Item refs keep BRT-APE-005.
+            dead_dep = _failed_dependency(node, results, documents_reserved)
+            if dead_dep is not None:
+                message = failed_dependency_message(dead_dep)
+                if raw:
+                    await _lane_refuse_node(
+                        results, raw_unstamped, run_id, node_id, "BRT-ORC-025",
+                        message, node_docs, db_path,
+                    )
+                    continue
+                results[node_id] = InboundEnvelope(
+                    envelope_id=uuid4(),
+                    subtask_id=uuid4(),
+                    status="failed",
+                    output={},
+                    failure_reason=message,
+                )
+                try:
+                    await write_event(
+                        "error",
+                        run_id=run_id,
+                        decision={"code": "BRT-ORC-025", "msg": message,
+                                  "node_id": node_id, "failed_step": dead_dep},
+                        db_path=db_path,
+                    )
+                except Exception:
+                    pass
+                continue
+
+            if lane is not None:
                 if raw and node.get("type") == "orchestrate" and not all_local:
                     # Its child planner would read the content (design note 5.8).
                     await _lane_refuse_node(
