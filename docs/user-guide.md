@@ -389,6 +389,15 @@ The Admin pages sit in the left menu under **Admin**, starting at `http://localh
 - **Skills** — the skill library with each skill's usage.
 - **Logs** — events, the cost summary, and Stats: run outcomes, tokens by model, feedback and the outlier runs. Outlier runs are ranked by what they cost or how long they took, never by prompt length.
 
+### The admin lock
+
+Pages that change things (keys, settings, rules, models, skills) and the entity and export logs are locked by `BORG_ADMIN_TOKEN` in `.env`.
+
+- **Token set:** the first time you save something, the page shows a box asking for the token. Type it once and press **Save token**; the call is retried and the token is kept until you close the tab. A wrong token is forgotten and asked for again. Overview shows "Admin token set".
+- **Token not set:** only the computer the server runs on can use these pages. From any other computer the page says that remote admin is off and what to set (`BRT-API-046`). Overview shows "Admin token not set".
+- Asking questions and reading a run stay open to everyone. In a run's details, the exact text sent to cloud models is shown only to an admin (the same rule).
+- API clients send `Authorization: Bearer <token>`; a missing or wrong token gets 401 (`BRT-API-045`).
+
 ---
 
 ## Status endpoints (Admin pages)
@@ -396,7 +405,7 @@ The Admin pages sit in the left menu under **Admin**, starting at `http://localh
 These two read-only routes feed the Overview checklist and the Keys page. Neither returns, logs or echoes a key.
 
 ### `GET /keys/status`
-Returns `{"providers": [{"id", "label", "env_var", "saved", "env_file_only"}]}` for OpenRouter and Tavily. `saved` is true only when the running server has the key (set from `.env` at start-up, or by saving it on the Keys page). `env_file_only` is true when the key is a line in `.env` but the running server does not have it yet: restart the server.
+Returns `{"providers": [{"id", "label", "env_var", "saved", "env_file_only"}], "admin_token_set": bool}` for OpenRouter and Tavily. `admin_token_set` says whether `BORG_ADMIN_TOKEN` is set (never the token); Overview uses it. `saved` is true only when the running server has the key (set from `.env` at start-up, or by saving it on the Keys page). `env_file_only` is true when the key is a line in `.env` but the running server does not have it yet: restart the server.
 
 ### `GET /status/local`
 Probes the configured local model servers (Ollama, LM Studio, other local OpenAI-compatible addresses) with a short request and returns `{"reachable": bool, "servers": [{"name", "url", "reachable"}]}`. `reachable` is true when any server answers. No model is loaded by the probe.
@@ -517,7 +526,7 @@ The planner never sees the text. It gets a list: an id per document (`doc_001`),
 
 - `POST /v1/task`: add `"documents": {"folder": "..."}` (or `"files"`) to the body. A refused path returns 400 with **BRT-LANE-001** and creates no run; documents while `lane_mode` is `off` return 400 with **BRT-LANE-005**.
 - `POST /v1/chat/completions`: the same `documents` field, at the top level next to `messages`, with a `borg_route` model. With a direct model id it is refused (**BRT-LANE-005**); in `all_local` every direct-model request is refused.
-- `GET /runs/{run_id}` returns `outbound`: every request this run and its child runs sent off the machine, oldest first, each with `run_id`, `url`, `destination`, `attempt`, `status` and the exact `body`. It is empty when the lane was off. (When the admin token of a later release exists, the bodies move behind it; the hook is `lane_admin_allowed` in `src/api/tasks.py`.)
+- `GET /runs/{run_id}` returns `outbound`: every request this run and its child runs sent off the machine, oldest first, each with `run_id`, `url`, `destination`, `attempt`, `status` and the exact `body`. It is empty when the lane was off. The `body` of each entry is shown only to an admin (a valid `BORG_ADMIN_TOKEN`, or this computer when none is set); other callers get `body: null`. The hook is `lane_admin_allowed` in `src/api/tasks.py`. `GET /logs/entities` and `GET /logs/export` need the same admin access.
 - `POST /runs/{run_id}/resume` is refused for a run that read documents, or for a child of one (409, **BRT-LANE-008**): start a new run with the same documents. If the check itself fails, the resume is refused too. A resume, and a run started with the MCP tool `borg_route.submit_task`, follow the current `lane_mode` exactly as `POST /v1/task` does.
 - **Chat history is the client's job.** The server stores no chat history for `POST /v1/chat/completions`: each request carries its own `messages`. A client must not resend answers given under `all_local` in a later request made under another mode, or those answers go to whatever model that mode allows. The Ask page (work order 4.2, not built yet) will tag each turn with its lane mode and leave `all_local` turns out under another mode; until then, and in every other client, this is up to you.
 - With `lane_mode` `off`, no other lane setting is read or checked: a run is exactly as before the lane existed.

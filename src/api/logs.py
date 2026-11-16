@@ -16,9 +16,10 @@ Error codes:
 import json
 
 import aiosqlite
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import JSONResponse, StreamingResponse
 
+from src.api.auth import require_admin
 from src.db.schema import DB_PATH
 
 router = APIRouter(prefix="/logs", tags=["logs"])
@@ -57,7 +58,7 @@ async def list_logs(
         )
 
 
-@router.get("/entities")
+@router.get("/entities", dependencies=[Depends(require_admin)])
 async def list_entities(
     limit: int = Query(200, ge=1, le=2000),
     run_id: str = Query(None),
@@ -198,7 +199,7 @@ async def outlier_runs(
         )
 
 
-@router.get("/export")
+@router.get("/export", dependencies=[Depends(require_admin)])
 async def export_logs(
     limit: int = Query(1000, ge=1, le=10000),
     run_id: str = Query(None),

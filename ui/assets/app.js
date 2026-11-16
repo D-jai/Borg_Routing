@@ -98,15 +98,45 @@
       try { detail = JSON.stringify(detail); } catch (_) { detail = null; }
     }
     if (status === 401) return 'The admin token is missing or wrong. Enter it again and retry.';
-    if (status === 403) return 'This server does not allow that here' + (detail ? ': ' + detail : '.');
+    if (status === 403) {
+      var code = body && body.detail && body.detail.error;
+      if (code === 'BRT-API-046') return 'Remote admin is off. This server has no BORG_ADMIN_TOKEN set, so only the computer it runs on can change settings. Set BORG_ADMIN_TOKEN in .env on the server, restart it, then enter the token here.';
+      return 'This server does not allow that here' + (detail ? ': ' + detail : '.');
+    }
     if (status === 404) return 'Not found' + (detail ? ': ' + detail : '.');
     if (status >= 500) return 'The server failed' + (detail ? ': ' + detail : '.') + ' Check the Logs page, then retry.';
     return detail ? String(detail) : 'The request failed (HTTP ' + status + ').';
   }
 
+  /* Ask for the admin token once, inline (never alert). Parallel 401s share one form.
+   * Resolves with the token after Save; rejects after Cancel. */
+  var tokenAsk = null;
+  function askToken() {
+    if (tokenAsk) return tokenAsk;
+    tokenAsk = new Promise(function (resolve, reject) {
+      var input = el('input', { type: 'password', id: 'admin-token-input', autocomplete: 'off', 'aria-label': 'Admin token' });
+      var save = el('button', { type: 'button', class: 'btn', text: 'Save token' });
+      var cancel = el('button', { type: 'button', class: 'btn', text: 'Cancel' });
+      var box = el('div', { class: 'notice', role: 'alert' }, [
+        el('div', { text: 'This action needs the admin token (BORG_ADMIN_TOKEN on the server). It is kept for this browser tab only.' }),
+        input, save, cancel
+      ]);
+      function done() { if (box.parentNode) box.parentNode.removeChild(box); tokenAsk = null; }
+      save.addEventListener('click', function () {
+        var v = String(input.value || '').trim();
+        if (!v) return;
+        setToken(v); done(); resolve(v);
+      });
+      cancel.addEventListener('click', function () { done(); reject(new Error('cancelled')); });
+      noticeSlot().appendChild(box);
+    });
+    return tokenAsk;
+  }
+
   /* api(path, opts): returns parsed JSON (or text) on success; on failure shows an inline
    * notice and rejects with an Error that has .status. opts.json is sent as a JSON body.
-   * opts.quiet = true skips the notice. */
+   * opts.quiet = true skips the notice. A 401 from this origin asks for the admin token
+   * once (inline form), keeps it in sessionStorage and retries the call once. */
   function api(path, opts) {
     opts = opts || {};
     var init = { method: opts.method || 'GET', headers: {} };
@@ -135,6 +165,14 @@
       var ctype = res.headers.get('content-type') || '';
       var read = ctype.indexOf('json') >= 0 ? res.json() : res.text();
       return read.catch(function () { return null; }).then(function (body) {
+        if (res.status === 401 && token) setToken(''); // a wrong token is not kept
+        if (res.status === 401 && !opts.retried && sameOrigin(path)) {
+          var again = {};
+          Object.keys(opts).forEach(function (k) { again[k] = opts[k]; });
+          again.retried = true;
+          return askToken().then(function () { return api(path, again); },
+            function () { throw fail(401, typeof body === 'object' ? body : null); });
+        }
         if (!res.ok) throw fail(res.status, typeof body === 'object' ? body : null);
         return body;
       });

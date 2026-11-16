@@ -218,6 +218,8 @@
 | BRT-API-042 | Cost summary failed | `src/api/logs.py::cost_summary` | SQLite aggregation error. Check database connectivity. |
 | BRT-API-043 | Export failed | `src/api/logs.py::export_logs` | SQLite error during JSONL export. Check database connectivity. |
 | BRT-API-044 | Outlier runs failed | `src/api/logs.py::outlier_runs` | SQLite error while ranking root runs by cost or duration. Check database connectivity. |
+| BRT-API-045 | Admin token missing or wrong | `src/api/auth.py::require_admin` | 401. `BORG_ADMIN_TOKEN` is set on the server and the request sent no `Authorization: Bearer <token>` header, or a different token. Enter the token again on the Admin page, or send the header. |
+| BRT-API-046 | Remote admin refused, no admin token set | `src/api/auth.py::require_admin` | 403. The server has no `BORG_ADMIN_TOKEN`, so admin routes answer only to this computer (127.0.0.0/8, ::1). Set `BORG_ADMIN_TOKEN` in `.env`, restart, then send it as a bearer token. Behind a reverse proxy every request looks like the proxy's address: set the token. |
 | BRT-API-050 | Skills load failed | `src/api/skills.py` | Could not load skills.yaml. Check that data/skills.yaml exists. |
 | BRT-API-051 | Skill not found | `src/api/skills.py` | The skill_id does not exist in the library. Check the skill_id. |
 | BRT-API-052 | New-version write failed | `src/api/skills.py::create_skill_version` | Could not write the updated skills.yaml. Check file permissions. |

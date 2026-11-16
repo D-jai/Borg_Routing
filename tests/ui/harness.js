@@ -14,12 +14,17 @@ class FakeEl {
     this.className = '';
     this.textContent = '';
     this.classList = { add() {}, remove() {}, contains() { return false; } };
+    this.handlers = {};
+    this.parentNode = null;
+    this.value = '';
   }
   setAttribute(k, v) { this.attrs[k] = String(v); }
   getAttribute(k) { return k in this.attrs ? this.attrs[k] : null; }
-  appendChild(c) { this.children.push(c); return c; }
-  insertBefore(c) { this.children.unshift(c); return c; }
-  addEventListener() {}
+  appendChild(c) { this.children.push(c); c.parentNode = this; return c; }
+  insertBefore(c) { this.children.unshift(c); c.parentNode = this; return c; }
+  removeChild(c) { this.children = this.children.filter((x) => x !== c); c.parentNode = null; return c; }
+  addEventListener(ev, fn) { (this.handlers[ev] = this.handlers[ev] || []).push(fn); }
+  click() { (this.handlers.click || []).forEach((f) => f()); }
   get firstChild() { return this.children[0] || null; }
 }
 
@@ -29,7 +34,7 @@ function load(opts) {
     readyState: 'loading', // keeps app.js from building the shell; helpers still work
     addEventListener() {},
     createElement: (t) => new FakeEl(t),
-    getElementById: () => null,
+    getElementById: (id) => (doc.body.children.find((c) => c.attrs.id === id) || null),
     documentElement: new FakeEl('html'),
     body: new FakeEl('body'),
   };

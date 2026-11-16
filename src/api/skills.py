@@ -14,10 +14,11 @@ import copy
 
 import aiosqlite
 import yaml
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
+from src.api.auth import require_admin
 from src.db.schema import DB_PATH
 from src.skills.library import SKILLS_PATH, SkillLibrary
 
@@ -132,7 +133,7 @@ async def get_skill(skill_id: str) -> JSONResponse:
     })
 
 
-@router.post("/{skill_id}/version", status_code=201)
+@router.post("/{skill_id}/version", status_code=201, dependencies=[Depends(require_admin)])
 async def create_skill_version(skill_id: str, req: NewVersionRequest) -> JSONResponse:
     """Append a new version of an existing skill to skills.yaml.
 

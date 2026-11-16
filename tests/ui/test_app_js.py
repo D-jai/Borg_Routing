@@ -189,7 +189,11 @@ def test_api_failure_shows_inline_notice_not_alert(tmp_path):
         const h = H.load({fetch});
         h.window.alert = () => { alerts++; };
         let status = null;
-        try { await h.Borg.api('/api/x'); } catch (e) { status = e.status; }
+        const p = h.Borg.api('/api/x').catch((e) => { status = e.status; });
+        await new Promise((r) => setTimeout(r, 0));
+        const slot0 = h.doc.body.children.find((c) => c.attrs.id === 'notice-slot');
+        slot0.children[0].children[3].click(); // Cancel on the inline token form
+        await p;
         const slot = h.doc.body.children.find((c) => c.attrs.id === 'notice-slot');
         const notice = slot && slot.children[0];
         return {alerts, status, text: notice && notice.textContent, cls: notice && notice.className};
@@ -241,3 +245,83 @@ def test_saved_theme_is_applied_and_written(tmp_path):
         """,
     )
     assert out == {"get": "dark"}
+
+
+def _form_js():
+    return """
+        const slotOf = (h) => h.doc.body.children.find((c) => c.attrs.id === 'notice-slot');
+        const tick = () => new Promise((r) => setTimeout(r, 0));
+    """
+
+
+def test_401_asks_for_the_token_once_keeps_it_and_retries(tmp_path):
+    out = run_js(
+        tmp_path,
+        _form_js() + """
+        const calls = [];
+        const fetch = async (url, init) => {
+          const a = init.headers['Authorization'] || null;
+          calls.push(a);
+          const ok = a === 'Bearer good';
+          return {ok, status: ok ? 200 : 401, headers: {get: () => 'application/json'},
+                  json: async () => (ok ? {done: true} : {detail: {error: 'BRT-API-045'}}), text: async () => ''};
+        };
+        const h = H.load({fetch});
+        let alerts = 0; h.window.alert = () => { alerts++; };
+        const first = h.Borg.api('/keys', {method: 'POST', json: {}});
+        const second = h.Borg.api('/config', {method: 'POST', json: {}});
+        await tick(); await tick();
+        const slot = slotOf(h);
+        const forms = slot.children.length;
+        const box = slot.children[0];
+        box.children[1].value = 'good';
+        box.children[2].click(); // Save token
+        const r1 = await first, r2 = await second;
+        return {forms, r1, r2, calls, stored: h.window.sessionStorage.getItem('borg_admin_token'),
+                left: slot.children.length, alerts};
+        """,
+    )
+    assert out["forms"] == 1 and out["left"] == 0 and out["alerts"] == 0
+    assert out["r1"] == {"done": True} and out["r2"] == {"done": True}
+    assert out["stored"] == "good"
+    assert out["calls"] == [None, None, "Bearer good", "Bearer good"]
+
+
+def test_wrong_token_is_dropped_and_retry_happens_only_once(tmp_path):
+    out = run_js(
+        tmp_path,
+        _form_js() + """
+        let n = 0;
+        const fetch = async () => { n++; return {ok: false, status: 401, headers: {get: () => 'application/json'},
+          json: async () => ({detail: 'no'}), text: async () => ''}; };
+        const h = H.load({fetch});
+        h.window.sessionStorage.setItem('borg_admin_token', 'old');
+        let status = null;
+        const p = h.Borg.api('/keys', {method: 'POST', json: {}}).catch((e) => { status = e.status; });
+        await tick(); await tick();
+        const box = slotOf(h).children[0];
+        box.children[1].value = 'typed';
+        box.children[2].click();
+        await p;
+        return {n, status, stored: h.window.sessionStorage.getItem('borg_admin_token')};
+        """,
+    )
+    assert out["n"] == 2 and out["status"] == 401  # first try, one retry, then stop
+    assert out["stored"] == ""  # the wrong token is not kept
+
+
+def test_403_without_a_server_token_explains_remote_admin(tmp_path):
+    out = run_js(
+        tmp_path,
+        """
+        const fetch = async () => ({ok: false, status: 403, headers: {get: () => 'application/json'},
+          json: async () => ({detail: {error: 'BRT-API-046', message: 'x'}}), text: async () => ''});
+        const h = H.load({fetch});
+        let alerts = 0; h.window.alert = () => { alerts++; };
+        let msg = null;
+        try { await h.Borg.api('/config', {method: 'POST', json: {}}); } catch (e) { msg = e.message; }
+        const slot = h.doc.body.children.find((c) => c.attrs.id === 'notice-slot');
+        return {msg, shown: slot.children[0].textContent, alerts};
+        """,
+    )
+    assert "BORG_ADMIN_TOKEN" in out["msg"] and out["shown"] == out["msg"] and out["alerts"] == 0

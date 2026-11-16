@@ -52,9 +52,9 @@ Borg.ready(function () {
     box.appendChild(check(!!(local && local.reachable),
       local && local.reachable ? 'Local model server reachable' : 'Local model server not reachable',
       local ? (up.length ? up.map(function (s) { return s.name + ' at ' + s.url; }).join(', ') : 'Checked ' + local.servers.map(function (s) { return s.name; }).join(', ') + '. Cloud-only use still works.') : 'Could not check.'));
-    // Not set until work order 4.4 adds the admin token.
-    box.appendChild(check(false, 'Admin token not set',
-      'Admin pages are open to this computer only. A token comes with the Admin lock.'));
+    var tokenSet = !!(keys && keys.admin_token_set);
+    box.appendChild(check(tokenSet, tokenSet ? 'Admin token set' : 'Admin token not set',
+      tokenSet ? 'Admin pages ask for it once per browser tab. ' : 'Admin pages are open to this computer only. Set BORG_ADMIN_TOKEN in .env, then restart, before others can reach this server. '));
     var lane = cfg && cfg.settings.filter(function (s) { return s.key === 'lane_mode'; })[0];
     var mode = lane ? lane.value : 'off';
     var words = { off: 'Lane is off: documents are not read', raw_local: 'Lane: raw documents stay local', all_local: 'Lane: nothing leaves this machine' };

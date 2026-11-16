@@ -1,6 +1,6 @@
 """Admin status endpoints: which keys are saved, and which local servers answer.
 
-GET /keys/status          -> {"providers": [{id, label, env_var, saved}]}
+GET /keys/status          -> {"providers": [{id, label, env_var, saved}], "admin_token_set": bool}
 GET /status/local         -> {"reachable": bool, "servers": [{name, url, reachable}]}
 
 Neither endpoint returns, logs or echoes a key value. ``/keys/status`` only
@@ -19,6 +19,7 @@ import httpx
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 
+from src.api.auth import admin_token_set
 from src.registry.discovery import (
     lmstudio_base_urls,
     local_openai_base_urls,
@@ -69,7 +70,9 @@ async def keys_status() -> JSONResponse:
                 "env_file_only": not key_saved(var) and _env_file_has(var),
             }
             for pid, label, var in _PROVIDERS
-        ]
+        ],
+        # Whether BORG_ADMIN_TOKEN is set; never the token itself.
+        "admin_token_set": admin_token_set(),
     })
 
 

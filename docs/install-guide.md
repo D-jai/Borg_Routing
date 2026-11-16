@@ -141,6 +141,15 @@ are most likely to touch during install and operation are grouped below.
 | `OPENROUTER_API_KEY` | (unset) | Required for OpenRouter discovery, the capability scorer, and the Perplexity web-search fallback. |
 | `TAVILY_API_KEY` | (unset) | Optional. When set, Tavily becomes the primary `web_search` provider (cheaper than Perplexity). Without it, `web_search` silently falls back to Perplexity via OpenRouter and logs `BRT-TOOL-DEGRADED` once per process. |
 
+### Admin token
+| Variable | Default | Purpose |
+|---|---|---|
+| `BORG_ADMIN_TOKEN` | (unset) | Locks every route that changes settings, keys, rules, models or skills, plus `GET /logs/entities`, `GET /logs/export` and the request bodies in `GET /runs/{id}`. Clients send `Authorization: Bearer <token>`. |
+
+How to set it: put a long random value in `.env` (`BORG_ADMIN_TOKEN=...`) and restart the server. The Admin pages ask for it the first time a call is refused and keep it for that browser tab only.
+
+The loopback rule: with the variable unset or empty, admin routes answer only to requests from this computer (`127.0.0.0/8` and `::1`). Any other address gets 403 (`BRT-API-046`). Set the token before you let anyone else reach the server, and always when it runs behind a reverse proxy or in Docker, because the server then sees the proxy's address rather than the visitor's. Asking questions (`/v1/chat/completions`, `/v1/task`, the MCP tools) and reading a run stay open. A wrong or missing token gets 401 (`BRT-API-045`).
+
 ### Local model servers
 | Variable | Default | Purpose |
 |---|---|---|

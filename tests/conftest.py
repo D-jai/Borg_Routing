@@ -112,3 +112,27 @@ def _cleanup_db_residue():
     except Exception:
         # Teardown cleanup must never fail the session.
         pass
+
+
+@pytest.fixture(autouse=True)
+def _admin_lock_test_defaults():
+    """Keep the admin lock out of unrelated tests (work order 4.4).
+
+    Starlette's TestClient reports its client as the host name ``testclient``,
+    which is not a loopback address. Treat it as loopback for the whole suite,
+    and make sure no BORG_ADMIN_TOKEN from a developer's ``.env`` leaks in.
+    The auth tests use other client addresses (e.g. 10.0.0.5), which stay
+    refused. This lives in the test suite only, never in production code.
+    It uses its own MonkeyPatch (not the ``monkeypatch`` fixture) so it never
+    shares a test's undo stack or its chdir.
+    """
+    from src.api import auth
+
+    real = auth._is_loopback
+    mp = pytest.MonkeyPatch()
+    mp.setattr(auth, "_is_loopback", lambda host: host == "testclient" or real(host))
+    mp.delenv("BORG_ADMIN_TOKEN", raising=False)
+    try:
+        yield
+    finally:
+        mp.undo()

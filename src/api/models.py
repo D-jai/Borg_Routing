@@ -21,6 +21,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
+from src.api.auth import require_admin
 from src.registry.capability_matrix import CapabilityMatrix
 from src.registry.discovery import discover_all
 from src.registry.models import ModelInfo
@@ -123,7 +124,7 @@ async def _refuse_in_all_local(action: str) -> None:
         )
 
 
-@router.post("/models/discover", response_model=DiscoverResponse)
+@router.post("/models/discover", response_model=DiscoverResponse, dependencies=[Depends(require_admin)])
 async def discover_models(matrix: CapabilityMatrix = Depends(get_matrix)):
     """Probe LM Studio, Ollama, and the curated OpenRouter list; upsert results.
 
@@ -141,7 +142,7 @@ async def discover_models(matrix: CapabilityMatrix = Depends(get_matrix)):
         raise HTTPException(status_code=500, detail=f"Discovery error: {exc}") from exc
 
 
-@router.post("/models/research", response_model=ResearchResponse)
+@router.post("/models/research", response_model=ResearchResponse, dependencies=[Depends(require_admin)])
 async def research_models_endpoint(
     body: ResearchRequest,
     matrix: CapabilityMatrix = Depends(get_matrix),
@@ -172,7 +173,7 @@ async def research_models_endpoint(
     return ResearchResponse(scored=list(scored.keys()))
 
 
-@router.patch("/models/{model_id:path}/checked", response_model=CheckedResponse)
+@router.patch("/models/{model_id:path}/checked", response_model=CheckedResponse, dependencies=[Depends(require_admin)])
 async def set_model_checked(
     model_id: str,
     body: CheckedRequest,
@@ -213,7 +214,7 @@ async def set_model_checked(
 _CANONICAL_KEY_VARS = {"openrouter": "OPENROUTER_API_KEY"}
 
 
-@router.post("/keys", response_model=KeyResponse)
+@router.post("/keys", response_model=KeyResponse, dependencies=[Depends(require_admin)])
 async def add_key(body: KeyRequest):
     """Save an external provider API key to the .env file.
 

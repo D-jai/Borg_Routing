@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import types
 import socket
 import sqlite3
 import threading
@@ -413,10 +414,13 @@ async def test_r9_run_detail_withholds_outbound_bodies_when_admin_is_not_allowed
             "left_machine, body, status) VALUES (?,?,1,'model','https://x.test',1,?,'sent')",
             (str(uuid.uuid4()), run_id, json.dumps({"model": "m", "secret": "BODY-TEXT"})),
         )
-    shown = json.loads((await tasks_api.get_run_state(run_id)).body)
+    loopback = types.SimpleNamespace(client=types.SimpleNamespace(host="127.0.0.1"), headers={})
+    shown = json.loads((await tasks_api.get_run_state(run_id, loopback)).body)
     assert shown["outbound"] and shown["outbound"][0]["body"] is not None
+    # no request at all fails closed
+    assert all(r["body"] is None for r in json.loads((await tasks_api.get_run_state(run_id)).body)["outbound"])
     lane["mp"].setattr(tasks_api, "lane_admin_allowed", lambda request=None: False)
-    hidden = json.loads((await tasks_api.get_run_state(run_id)).body)
+    hidden = json.loads((await tasks_api.get_run_state(run_id, loopback)).body)
     assert hidden["outbound"] and all(r["body"] is None for r in hidden["outbound"])
     assert "BODY-TEXT" not in json.dumps(hidden)
 

@@ -26,7 +26,9 @@ from typing import Any, Optional
 from uuid import uuid4
 
 import aiosqlite
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
+
+from src.api.auth import require_admin
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
@@ -393,7 +395,7 @@ async def get_effective_config() -> JSONResponse:
         )
 
 
-@router.post("")
+@router.post("", dependencies=[Depends(require_admin)])
 async def set_config_entry(req: ConfigSetRequest) -> JSONResponse:
     """Upsert a config key:value pair."""
     if not req.key or not req.key.strip():
@@ -464,7 +466,7 @@ async def list_rules() -> JSONResponse:
         )
 
 
-@router.post("/rules")
+@router.post("/rules", dependencies=[Depends(require_admin)])
 async def append_rule(req: RuleAppendRequest) -> JSONResponse:
     """Append a new rule to the admin rules ledger."""
     if not req.text or not req.text.strip():
@@ -490,7 +492,7 @@ async def append_rule(req: RuleAppendRequest) -> JSONResponse:
         )
 
 
-@router.post("/rules/{rule_id}/retire")
+@router.post("/rules/{rule_id}/retire", dependencies=[Depends(require_admin)])
 async def retire_rule(rule_id: str) -> JSONResponse:
     """Retire a rule by setting its retired_at timestamp.
 

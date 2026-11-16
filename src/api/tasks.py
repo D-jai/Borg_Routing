@@ -25,10 +25,11 @@ import json
 from typing import Optional
 
 import aiosqlite
-from fastapi import APIRouter, BackgroundTasks, HTTPException
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
+from src.api.auth import is_admin
 from src.db.schema import DB_PATH
 from src.db.state import (
     compute_and_save_digest,
@@ -57,15 +58,14 @@ class TaskRequest(BaseModel):
 
 
 def lane_admin_allowed(request=None) -> bool:
-    """THE single hook for the admin token (work order 4.4, not built yet).
+    """THE single hook for the admin lock (work order 4.4).
 
-    With the lane on, the outbound bodies in run detail belong behind the
-    admin token; today GET /runs/{id} is the only caller. The design note
-    also puts /logs/entities and /logs/export behind the token: those routes
-    do not call this hook yet (work order 4.4 wires them). Until 4.4 adds the
-    token this returns True; 4.4 replaces its body with the token check.
+    True when the request is an admin: a valid ``BORG_ADMIN_TOKEN`` bearer
+    token, or loopback when no token is configured (see ``src/api/auth.py``).
+    GET /runs/{id} uses it to show outbound request bodies only to an admin.
+    A call with no request fails closed.
     """
-    return True
+    return is_admin(request)
 
 
 class RatingRequest(BaseModel):
@@ -265,7 +265,7 @@ def _attach_routing(envelopes: list[dict], events: list[dict]) -> None:
 
 
 @router.get("/runs/{run_id}")
-async def get_run_state(run_id: str) -> JSONResponse:
+async def get_run_state(run_id: str, request: Request = None) -> JSONResponse:
     """Return the full run state including envelopes and log events.
 
     Response shape:
@@ -359,7 +359,7 @@ async def get_run_state(run_id: str) -> JSONResponse:
         outbound = await get_outbound_requests(run_uuid, db_path=DB_PATH)
     except Exception:
         outbound = []
-    if not lane_admin_allowed():
+    if not lane_admin_allowed(request):
         outbound = [dict(r, body=None) for r in outbound]
 
     return JSONResponse(content={
