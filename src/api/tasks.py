@@ -45,8 +45,13 @@ async def _run_in_background(
     instruction: str,
     run_id_str: str,
     db_path: str,
+    root_instruction: Optional[str] = None,
 ) -> None:
     """Background task: drive the pipeline for a submitted run.
+
+    ``root_instruction`` is the operator's verbatim instruction when it
+    differs from ``instruction`` (a resumed child run); Law 1 governs every
+    call with it.
 
     Persists ``failure_reason`` on failure so ``GET /runs/<id>`` shows why
     the run failed (BRT-PIP-010). Also emits a trace-visible error event
@@ -68,7 +73,12 @@ async def _run_in_background(
     max_run_seconds = await resolve_max_run_seconds(db_path=db_path)
     try:
         await _asyncio.wait_for(
-            orchestrate_run(run_id=run_id, user_instruction=instruction, db_path=db_path),
+            orchestrate_run(
+                run_id=run_id,
+                user_instruction=instruction,
+                db_path=db_path,
+                root_instruction=root_instruction,
+            ),
             timeout=max_run_seconds,
         )
         await update_run_status(run_id, "completed", db_path=db_path)
@@ -290,6 +300,32 @@ async def stream_run_state(run_id: str) -> StreamingResponse:
     )
 
 
+_MAX_PARENT_HOPS = 32
+
+
+async def _run_instructions(run_uuid, db_path: str) -> tuple[str, str]:
+    """Return (this run's instruction, its root run's instruction).
+
+    Walks ``parent_run_id`` up to the top-level run, whose instruction is
+    the operator's. The walk stops at a missing parent or after
+    ``_MAX_PARENT_HOPS`` rows, keeping the highest instruction found.
+    """
+    run = await get_run(run_uuid, db_path=db_path)
+    own = run.get("user_instruction") or ""
+    root = own
+    parent = run.get("parent_run_id")
+    hops = 0
+    while parent and hops < _MAX_PARENT_HOPS:
+        try:
+            row = await get_run(parent, db_path=db_path)
+        except ValueError:
+            break
+        root = row.get("user_instruction") or root
+        parent = row.get("parent_run_id")
+        hops += 1
+    return own, root
+
+
 @router.post("/runs/{run_id}/resume", status_code=202)
 async def resume_run_endpoint(
     run_id: str,
@@ -327,11 +363,28 @@ async def resume_run_endpoint(
             content={"run_id": run_id, "status": "no_pending_work"},
         )
 
+    # Law 1 — the re-run is governed by the run row's own operator
+    # instruction, never by a step's text (envelopes saved before
+    # governance_instruction existed carry only the step text). A child run
+    # row also gets its root run's instruction as the governing one.
+    try:
+        run_instruction, root_instruction = await _run_instructions(
+            run_uuid, db_path=DB_PATH
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail={"error": "BRT-API-024", "message": f"Resume failed: {exc}"},
+        )
+
     background_tasks.add_task(
         _run_in_background,
-        instruction=tasks_to_retry[0].instruction if tasks_to_retry else "",
+        instruction=run_instruction,
         run_id_str=run_id,
         db_path=DB_PATH,
+        root_instruction=(
+            root_instruction if root_instruction != run_instruction else None
+        ),
     )
 
     return JSONResponse(

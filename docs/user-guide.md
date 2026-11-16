@@ -359,6 +359,11 @@ POST /runs/{run_id}/resume
 ```
 Returns 202 immediately. Poll `GET /runs/{run_id}` for updated status.
 
+The re-run works from the run's own instruction, the words you first sent,
+and every step it makes is governed by those words (Law 1), never by the
+text of a step saved in the failed run. Resuming a child run keeps its own
+sub-task and is governed by the top-level run's instruction.
+
 ### If something goes wrong
 - **"BRT-DB-020"** — The run is already completed and cannot be resumed.
 - **"no_pending_work"** — All envelopes already succeeded; nothing to retry.

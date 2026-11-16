@@ -99,6 +99,49 @@ async def test_a_child_run_is_governed_by_the_operators_instruction_not_its_step
 
 
 @pytest.mark.asyncio
+async def test_a_grandchild_runs_step_is_governed_by_the_operators_instruction(db, env):
+    """Depth 2: root run -> orchestrate step -> child run -> orchestrate step
+    -> grandchild run -> answerer step."""
+    sub_task = "Work out which contract is at risk."
+    sub_sub_task = "Check the alpha contract's end date."
+    leaf = "Read the alpha note and give the end date."
+
+    def plan_for(req):
+        if req.user == ROOT:
+            return [{"type": "orchestrate", "id": "n1", "instruction": sub_task,
+                     "output_schema": {}}]
+        if req.user == sub_task:
+            return [{"type": "orchestrate", "id": "c1", "instruction": sub_sub_task,
+                     "output_schema": {}}]
+        return [{"type": "answerer", "id": "g1", "instruction": leaf,
+                 "tier": "light", "output_schema": {"result": "string"}}]
+
+    stub = await _run(StubModels(plan_nodes=[], plan_for=plan_for), env, db)
+
+    # Three runs planned: root, child, grandchild.
+    assert [r.user for r in stub.of_kind("plan")] == [ROOT, sub_task, sub_sub_task]
+    grandchild_step = stub.step_request(leaf)
+    assert grandchild_step.governance_instruction == ROOT
+    assert ROOT in grandchild_step.system
+    for req in stub.requests:
+        assert req.governance_instruction == ROOT, (
+            f"{req.kind} call was governed by {req.governance_instruction!r}"
+        )
+
+
+@pytest.mark.asyncio
+async def test_a_skill_step_is_governed_by_the_operators_instruction(db, env):
+    plan = [{"type": "answerer", "id": "n1", "skill_id": "verify_claim", "skill_version": 1,
+             "skill_args": {"claim": "Alpha's contract ends Friday.", "evidence_ref": "notes"}}]
+    stub = await _run(StubModels(plan_nodes=plan), env, db)
+
+    steps = stub.of_kind("answerer")
+    assert len(steps) == 1
+    assert steps[0].governance_instruction == ROOT
+    assert "Alpha's contract ends Friday." in steps[0].system   # the skill's task is still there
+
+
+@pytest.mark.asyncio
 async def test_a_parent_runs_own_calls_carry_no_assignment_block(db, env):
     plan = [{"type": "answerer", "id": "n1", "instruction": "Pick the client.",
              "output_schema": {"result": "string"}}]
