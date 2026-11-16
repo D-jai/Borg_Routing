@@ -517,12 +517,15 @@ async def _stream_bypass_relay(
     relay_usage: Optional[dict] = None
     recorded = False
     relay_text: list[str] = []
+    from src.lane.context import current_lane  # noqa: PLC0415
     from src.lane.outbound import record_end, record_start  # noqa: PLC0415
 
     # With the lane on, the relay's request is in the ledger before it is sent.
+    relay_lane = current_lane()
     ledger_id = await record_start(
-        url, payload, left_machine=True, purpose="bypass",
-        destination=model_id,
+        url, payload,
+        left_machine=not (relay_lane is not None and relay_lane.is_local(model_info, url)),
+        purpose="bypass", destination=model_id,
     )
 
     async def _record_relay() -> None:

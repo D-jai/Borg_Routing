@@ -11,6 +11,7 @@ import sqlite3
 from unittest.mock import patch
 from uuid import uuid4
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 
@@ -112,6 +113,25 @@ def test_raw_local_bypass_is_recorded_before_it_is_sent(lane_api):
         rows = conn.execute("SELECT purpose, left_machine, body FROM outbound_requests").fetchall()
     assert len(rows) == 1 and rows[0][0] == "bypass" and rows[0][1] == 1
     assert json.loads(rows[0][2]) == stub.requests[0].body
+
+
+def test_a_streamed_bypass_to_a_local_model_is_recorded_as_local(lane_api):
+    import main
+    from tests.e2e.stub_model_server import stub_model
+
+    lane_api["mp"].setenv("BORG_LANE_MODE", "raw_local")
+    main.matrix.upsert(stub_model("streamer", 8.0, 0, 0, source="ollama"))
+
+    def no_network(self, *args, **kwargs):
+        raise httpx.ConnectError("no network in tests")
+
+    lane_api["mp"].setattr(httpx.AsyncClient, "stream", no_network)
+    lane_api["client"].post("/v1/chat/completions", json={
+        "model": "ollama/stub/streamer", "stream": True,
+        "messages": [{"role": "user", "content": "hello"}]})
+    with sqlite3.connect(lane_api["db"]) as conn:
+        rows = conn.execute("SELECT purpose, left_machine FROM outbound_requests").fetchall()
+    assert rows and rows[0] == ("bypass", 0)
 
 
 # Unhappy path -------------------------------------------------------------------
