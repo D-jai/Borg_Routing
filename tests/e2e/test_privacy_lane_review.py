@@ -262,6 +262,10 @@ async def test_r7_a_resumed_run_in_all_local_stays_on_the_machine(lane):
         model_endpoint="https://openrouter.ai/api", model_name="openrouter/stub/cheap",
         instruction="Summarise.", output_schema={"result": "string"},
     ), db_path=lane["db"])
+    # A run that stopped mid-step is failed; a pending run with work in flight
+    # is refused as still busy (BRT-API-024).
+    from src.db.state import update_run_status
+    await update_run_status(run_id, "failed", db_path=lane["db"])
     background = BackgroundTasks()
     resp = await tasks_api.resume_run_endpoint(str(run_id), background)
     assert resp.status_code == 202

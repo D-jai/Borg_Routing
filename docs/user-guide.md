@@ -413,7 +413,7 @@ If a run fails partway through (network error, model timeout, etc.), you can run
 ### How to run it again
 1. Open `http://localhost:8000/ui/admin_overview.html`.
 2. Find the failed run under **Last runs**.
-3. Click **Run again**. It is offered only for failed runs. It plans the run from the start, with the words you first sent (also when the run failed before it had any steps, for example at planning). It does not continue where the run stopped, and it refuses runs that read documents.
+3. Click **Run again**. It is offered only for failed runs. It plans the run from the start, with the words you first sent (also when the run failed before it had any steps, for example at planning). It does not continue where the run stopped, and it refuses runs that read documents. A run that is running, or that was just submitted and still has work in flight, cannot be run again (409, BRT-API-024); wait for it to finish or fail.
 
 ### Via API
 ```
