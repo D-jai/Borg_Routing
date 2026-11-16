@@ -1,51 +1,88 @@
 """Session-wide test fixtures for BORG_ROUTE.
 
-Several endpoints call `matrix.save()`, which writes the capability matrix
-YAML to disk. Combined with e2e fixtures that flip every row to
-``checked=True`` in memory before tests, this causes the on-disk seed to
-drift between tests. The autouse fixture below snapshots the file before
-every test and restores it afterwards so tests stay isolated regardless of
-order.
-
-BUG-006 residue cleanup: a handful of tests (test_slice6.py,
-test_tasks.py) write directly to the repo-root ``data/borg_route.db``
-rather than tmp_path. That leaks placeholder runs ("stream test
-envelopes", "Test instruction.") into the operator's local DB. The
-``_cleanup_db_residue`` session-scoped fixture below deletes rows with
-well-known residue instructions at the end of the test run. Safer than
-dropping the whole DB; preserves any real runs the operator created
-outside the test suite.
+``_isolated_data`` gives every test a temp database (schema created) and a temp
+copy of the capability matrix, so no test writes ``data/borg_route.db`` or
+``data/capability_matrix.yaml``. ``_restore_shared_matrix`` keeps rows ticked in
+``main.matrix`` from leaking between tests. ``_admin_lock_test_defaults`` keeps
+the admin lock out of unrelated tests.
 """
 from __future__ import annotations
 
+import os
+import shutil
 import sqlite3
+import sys
 from pathlib import Path
 
 import pytest
 
 _MATRIX_PATH = Path("data/capability_matrix.yaml")
-_DB_PATH = Path("data/borg_route.db")
-
-# Instructions used only by the test suite — safe to wipe on teardown.
-_RESIDUE_INSTRUCTIONS = (
-    "stream test completed",
-    "stream test failed",
-    "stream test envelopes",
-    "Test instruction.",
-    "Classify these issues.",
-    "Classify these 10 GitHub issues into buckets.",
-)
+_REPO_DB = "data/borg_route.db"
 
 
 @pytest.fixture(autouse=True)
-def _preserve_matrix_yaml():
-    """Snapshot data/capability_matrix.yaml around every test."""
-    original = _MATRIX_PATH.read_text(encoding="utf-8") if _MATRIX_PATH.exists() else None
+def _isolated_data(tmp_path_factory):
+    """Give every test its own database and its own copy of the matrix.
+
+    No test may write ``data/borg_route.db`` or ``data/capability_matrix.yaml``.
+    The temp database has the schema already (``create_all``). The repo database
+    path is redirected three ways, because modules bind it at import and as
+    default arguments: every module-level ``DB_PATH`` equal to the repo path is
+    repointed, and ``aiosqlite.connect`` / ``sqlite3.connect`` map the repo path
+    (relative or absolute) to the temp file. The matrix default path of
+    ``CapabilityMatrix`` and ``main.matrix`` point at a byte copy of the YAML.
+    Tests that set their own paths still work: their changes sit on top of this
+    one and are undone first. Everything is restored after the test.
+    """
+    import aiosqlite
+    from src.db import schema
+    from src.registry.capability_matrix import CapabilityMatrix
+
+    iso = tmp_path_factory.mktemp("iso")
+    tmp_db = str(iso / "borg_route.db")
+    tmp_matrix = str(iso / "capability_matrix.yaml")
+    if _MATRIX_PATH.exists():
+        shutil.copyfile(_MATRIX_PATH, tmp_matrix)
+
+    real_sqlite_connect = sqlite3.connect
+    conn = real_sqlite_connect(tmp_db)
+    try:
+        conn.executescript(schema._SCHEMA_SQL)
+        for migration in schema._MIGRATIONS:
+            try:
+                conn.execute(migration)
+            except sqlite3.Error:
+                pass  # already applied
+        conn.commit()
+    finally:
+        conn.close()
+
+    repo_db = os.path.normcase(os.path.abspath(_REPO_DB))
+
+    def _redirect(database):
+        try:
+            if os.path.normcase(os.path.abspath(os.fspath(database))) == repo_db:
+                return tmp_db
+        except TypeError:
+            pass
+        return database
+
+    real_aio_connect = aiosqlite.connect
+
+    mp = pytest.MonkeyPatch()
+    mp.setattr(aiosqlite, "connect", lambda database, *a, **k: real_aio_connect(_redirect(database), *a, **k))
+    mp.setattr(sqlite3, "connect", lambda database, *a, **k: real_sqlite_connect(_redirect(database), *a, **k))
+    for name, mod in list(sys.modules.items()):
+        if mod is not None and (name == "main" or name.startswith("src.")) and getattr(mod, "DB_PATH", None) == "data/borg_route.db":
+            mp.setattr(mod, "DB_PATH", tmp_db)
+    mp.setattr(CapabilityMatrix.__init__, "__defaults__", (tmp_matrix,))
+    shared = getattr(sys.modules.get("main"), "matrix", None)
+    if shared is not None:
+        mp.setattr(shared, "_path", Path(tmp_matrix))
     try:
         yield
     finally:
-        if original is not None:
-            _MATRIX_PATH.write_text(original, encoding="utf-8")
+        mp.undo()
 
 
 @pytest.fixture(autouse=True)
@@ -66,52 +103,6 @@ def _restore_shared_matrix():
         shared = getattr(sys.modules.get("main"), "matrix", None)
         if snapshot is not None and shared is not None:
             shared._models = snapshot
-
-
-@pytest.fixture(scope="session", autouse=True)
-def _cleanup_db_residue():
-    """BUG-006 — wipe well-known test-only runs from the repo DB on teardown.
-
-    Runs once at the end of the whole pytest session. Silent no-op if the
-    DB file is missing or the runs table hasn't been created yet (new
-    clones that haven't booted the app).
-    """
-    yield
-    if not _DB_PATH.exists():
-        return
-    try:
-        with sqlite3.connect(str(_DB_PATH)) as conn:
-            # Collect run_ids to cascade-delete related rows.
-            placeholders = ",".join(["?"] * len(_RESIDUE_INSTRUCTIONS))
-            cur = conn.execute(
-                f"SELECT run_id FROM runs WHERE user_instruction IN ({placeholders})",
-                _RESIDUE_INSTRUCTIONS,
-            )
-            run_ids = [row[0] for row in cur.fetchall()]
-            if not run_ids:
-                return
-            rid_ph = ",".join(["?"] * len(run_ids))
-            for table in ("log_payloads",):
-                conn.execute(
-                    f"DELETE FROM {table} WHERE log_id IN "
-                    f"(SELECT log_id FROM logs WHERE run_id IN ({rid_ph}))",
-                    run_ids,
-                )
-            for table in (
-                "log_entities", "log_relations", "logs", "scratch",
-                "envelopes", "subtasks", "run_digests", "messages", "runs",
-            ):
-                try:
-                    conn.execute(
-                        f"DELETE FROM {table} WHERE run_id IN ({rid_ph})",
-                        run_ids,
-                    )
-                except sqlite3.OperationalError:
-                    pass  # Table may not exist in older schemas.
-            conn.commit()
-    except Exception:
-        # Teardown cleanup must never fail the session.
-        pass
 
 
 @pytest.fixture(autouse=True)
