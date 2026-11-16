@@ -115,11 +115,13 @@ Borg.ready(function () {
     Promise.all([loadCost(), B.api('/runs?limit=200', { quiet: true }).catch(function () { return { runs: [] }; })]).then(function (r) {
       var by = (r[0] && r[0].by_model) || [], runs = r[1].runs || [], n = { completed: 0, failed: 0, running: 0 }, up = 0, down = 0;
       runs.forEach(function (x) { if (n[x.status] !== undefined) n[x.status]++; if (x.user_rating === 1) up++; if (x.user_rating === -1) down++; });
+      var c = r[1].counts, total = runs.length;
+      if (c) { n = c; up = c.thumbs_up; down = c.thumbs_down; total = c.total; }  // true totals from the server
       var oc = A.clear(A.$('outcomes'));
-      oc.appendChild(tile('Runs', runs.length)); oc.appendChild(tile('Completed', n.completed));
+      oc.appendChild(tile('Runs', total)); oc.appendChild(tile('Completed', n.completed));
       oc.appendChild(tile('Failed', n.failed)); oc.appendChild(tile('Running', n.running));
       var fb = A.clear(A.$('feedback'));
-      fb.appendChild(tile('Thumbs up', up)); fb.appendChild(tile('Thumbs down', down)); fb.appendChild(tile('Not rated', runs.length - up - down));
+      fb.appendChild(tile('Thumbs up', up)); fb.appendChild(tile('Thumbs down', down)); fb.appendChild(tile('Not rated', total - up - down));
       var lb = A.clear(A.$('leaderboard')), tok = function (x) { return (x.total_tokens_in || 0) + (x.total_tokens_out || 0); };
       var top = by.slice().sort(function (a, b) { return tok(b) - tok(a); }).slice(0, 8), max = top.length ? tok(top[0]) : 0;
       if (!top.length) lb.appendChild(h('p', { class: 'muted small' }, 'No model calls logged yet.'));

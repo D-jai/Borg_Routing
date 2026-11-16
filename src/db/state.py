@@ -216,6 +216,30 @@ async def get_runs_list(
     return [dict(r) for r in rows]
 
 
+async def get_run_counts(db_path: str = DB_PATH, include_bypass: bool = False) -> dict:
+    """True totals over every run (not a page): total, per status, thumbs.
+
+    Direct-to-model (bypass) runs are left out unless ``include_bypass``.
+    """
+    where = "" if include_bypass else "WHERE COALESCE(kind, 'orchestrated') != 'bypass' "
+    counts = {"total": 0, "completed": 0, "failed": 0, "running": 0, "pending": 0,
+              "thumbs_up": 0, "thumbs_down": 0}
+    async with aiosqlite.connect(db_path) as db:
+        async with db.execute(
+            f"SELECT status, COUNT(*), "
+            f"SUM(CASE WHEN user_rating = 1 THEN 1 ELSE 0 END), "
+            f"SUM(CASE WHEN user_rating = -1 THEN 1 ELSE 0 END) "
+            f"FROM runs {where}GROUP BY status"
+        ) as cur:
+            rows = await cur.fetchall()
+    for status, n, up, down in rows:
+        counts["total"] += n
+        counts[status] = counts.get(status, 0) + n
+        counts["thumbs_up"] += up or 0
+        counts["thumbs_down"] += down or 0
+    return counts
+
+
 async def get_envelopes(run_id: UUID, db_path: str = DB_PATH) -> list[dict]:
     """Return all envelope records for a run, ordered by created_at."""
     async with aiosqlite.connect(db_path) as db:
@@ -471,6 +495,14 @@ async def get_config(key: str, db_path: str = DB_PATH) -> Optional[str]:
         return json.loads(value)
     except (json.JSONDecodeError, TypeError):
         return value
+
+
+async def delete_config(key: str, db_path: str = DB_PATH) -> bool:
+    """Delete a saved config key so env/default applies again. True if it existed."""
+    async with aiosqlite.connect(db_path) as db:
+        cur = await db.execute("DELETE FROM config WHERE key=?", (key,))
+        await db.commit()
+        return cur.rowcount > 0
 
 
 async def set_config(key: str, value, db_path: str = DB_PATH) -> None:

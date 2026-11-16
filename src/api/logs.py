@@ -150,12 +150,14 @@ async def outlier_runs(
     sort: str = Query("cost", pattern="^(cost|duration)$"),
     limit: int = Query(5, ge=1, le=50),
 ) -> JSONResponse:
-    """Runs ranked by what they cost or how long they took (never by prompt length).
+    """Root runs ranked by what they cost or how long they took (never by prompt length).
 
-    Cost is the logged dollars of the run's own paid calls (the same rows the
-    cost summary counts). Duration is completed_at minus created_at, so a run
-    that has not finished has no duration and is left out of the duration sort.
-    Direct-to-model (bypass) runs are left out.
+    Only root runs are listed (no ``parent_run_id``): a child run is part of
+    its root. Cost is the logged dollars of the whole run tree (the run and
+    every descendant run, the same rows the cost summary counts). Duration is
+    the span of the tree's logged activity, newest log minus oldest, so a run
+    with no logged activity has no duration and is left out of the duration
+    sort. Direct-to-model (bypass) runs are left out.
     """
     order = "cost DESC" if sort == "cost" else "duration_s DESC"
     where = "WHERE duration_s IS NOT NULL" if sort == "duration" else ""
@@ -163,18 +165,24 @@ async def outlier_runs(
         async with aiosqlite.connect(DB_PATH) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
-                f"""WITH paid AS (
-                      SELECT run_id,
-                             COALESCE(SUM(dollars), 0) AS cost,
-                             COALESCE(SUM(tokens_input), 0) + COALESCE(SUM(tokens_output), 0) AS tokens
-                      FROM logs WHERE {_COST_ROWS} GROUP BY run_id
+                f"""WITH RECURSIVE tree(root, run_id) AS (
+                      SELECT run_id, run_id FROM runs
+                      WHERE parent_run_id IS NULL AND COALESCE(kind, 'orchestrated') != 'bypass'
+                      UNION ALL
+                      SELECT t.root, r.run_id FROM runs r JOIN tree t ON r.parent_run_id = t.run_id
+                    ), totals AS (
+                      SELECT t.root AS run_id,
+                             COALESCE(SUM(CASE WHEN {_COST_ROWS} THEN l.dollars END), 0) AS cost,
+                             COALESCE(SUM(CASE WHEN {_COST_ROWS} THEN l.tokens_input END), 0)
+                               + COALESCE(SUM(CASE WHEN {_COST_ROWS} THEN l.tokens_output END), 0) AS tokens,
+                             (julianday(MAX(l.created_at)) - julianday(MIN(l.created_at))) * 86400.0
+                                 AS duration_s
+                      FROM tree t LEFT JOIN logs l ON l.run_id = t.run_id
+                      GROUP BY t.root
                     ), ranked AS (
                       SELECT r.run_id, r.status, r.user_instruction, r.created_at,
-                             (julianday(r.completed_at) - julianday(r.created_at)) * 86400.0
-                                 AS duration_s,
-                             COALESCE(p.cost, 0) AS cost, COALESCE(p.tokens, 0) AS tokens
-                      FROM runs r LEFT JOIN paid p ON p.run_id = r.run_id
-                      WHERE COALESCE(r.kind, 'orchestrated') != 'bypass'
+                             p.duration_s, p.cost, p.tokens
+                      FROM runs r JOIN totals p ON p.run_id = r.run_id
                     )
                     SELECT * FROM ranked {where}
                     ORDER BY {order}

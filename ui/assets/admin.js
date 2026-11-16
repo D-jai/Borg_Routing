@@ -60,13 +60,13 @@
 
   // Run again: POST /runs/{id}/resume. It re-plans the run from the start (R8).
   var RUN_AGAIN_HELP = 'Run again plans the run from the start, with the words you first sent. ' +
-    'It does not continue where the run stopped, and it refuses runs that read documents.';
+    'It does not continue where the run stopped. It is offered only for failed runs, and it refuses runs that read documents.';
   function runAgainButton(runId, onDone) {
     var b = h('button', { class: 'btn', type: 'button', title: RUN_AGAIN_HELP }, 'Run again');
     b.addEventListener('click', function () {
       b.disabled = true;
       B.api('/runs/' + encodeURIComponent(runId) + '/resume', { method: 'POST', quiet: true }).then(function (res) {
-        if (res && res.status === 'no_pending_work') B.notify('Nothing to run again: no step of this run failed or was left unfinished.');
+        if (res && res.status === 'no_pending_work') B.notify('Nothing to run again: this run has nothing waiting to be done.');
         else B.notify('Run again started. It plans the run from the start; open the run to watch it.', 'ok');
         if (onDone) onDone();
       }, function (err) {

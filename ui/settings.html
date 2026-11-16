@@ -46,14 +46,28 @@ Borg.ready(function () {
       return h('div', { class: 'setting' }, [label, h('div', { class: 'num' }, String(s.value)), h('span', { class: 'small muted' }, 'Set in .env (' + s.env_var + ')'), help]);
     }
     var inp = input(s), msg = h('span', { class: 'small muted', role: 'status' }), btn = h('button', { class: 'btn', type: 'button' }, 'Save');
-    btn.addEventListener('click', function () {
+    var reset = h('button', { class: 'btn', type: 'button', title: 'Forget the saved value: the .env value (or the default) applies again.' }, 'Reset');
+    // Saving an empty value deletes the saved one. Show what applies afterwards.
+    function afterReset() {
+      return B.api('/config/effective').then(function (r) {
+        var now = r.settings.filter(function (x) { return x.key === s.key; })[0];
+        if (!now) return;
+        var fresh = input(now); inp.replaceWith(fresh); inp = fresh;
+        A.$('badge-' + s.key).replaceWith(badge(s.key, now.source));
+        msg.textContent = 'Reset. ' + (now.source === 'env' ? 'The .env value applies again.' : 'The default applies again.');
+      });
+    }
+    function save(value) {
       msg.textContent = 'Saving...';
-      B.api('/config', { json: { key: s.key, value: String(inp.value).trim() } }).then(function () {
+      B.api('/config', { json: { key: s.key, value: value } }).then(function (res) {
+        if (res && res.status === 'reset') return afterReset();
         msg.textContent = 'Saved. Used from the next run.';
         A.$('badge-' + s.key).replaceWith(badge(s.key, 'db'));
       }, function () { msg.textContent = ''; });
-    });
-    return h('div', { class: 'setting' }, [label, inp, h('div', { class: 'actions' }, [btn, msg]), help]);
+    }
+    btn.addEventListener('click', function () { save(String(inp.value).trim()); });
+    reset.addEventListener('click', function () { save(''); });
+    return h('div', { class: 'setting' }, [label, inp, h('div', { class: 'actions' }, [btn, reset, msg]), help]);
   }
   function badge(key, source) {
     var t = SOURCE[source] || [source, ''], c = A.chip(t[0], t[1]); c.id = 'badge-' + key; return c;

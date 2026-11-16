@@ -42,7 +42,7 @@ Borg.ready(function () {
   Promise.all([get('/keys/status'), get('/models/matrix'), get('/status/local'), get('/config/effective')]).then(function (r) {
     var keys = r[0], models = r[1], local = r[2], cfg = r[3], box = A.clear(A.$('checklist'));
     var or = keys && keys.providers.filter(function (p) { return p.id === 'openrouter'; })[0];
-    box.appendChild(check(!!(or && or.saved), or && or.saved ? 'Cloud key saved' : 'Cloud key not saved',
+    box.appendChild(check(!!(or && or.saved), or && or.saved ? 'Cloud key saved' : (or && or.env_file_only ? 'Cloud key in .env, restart needed' : 'Cloud key not saved'),
       'OpenRouter. The key is never shown here. ', ['Keys', 'keys.html']));
     var pool = (models || []).filter(function (m) { return m.checked; });
     var nLocal = pool.filter(A.isLocalModel).length;
@@ -63,11 +63,12 @@ Borg.ready(function () {
 
   Promise.all([get('/logs/cost-summary'), get('/runs?limit=200')]).then(function (r) {
     var cost = r[0] || { by_model: [], totals: {} }, runs = (r[1] && r[1].runs) || [];
-    var failed = runs.filter(function (x) { return x.status === 'failed'; }).length;
+    var counts = (r[1] && r[1].counts) || { total: runs.length, failed: runs.filter(function (x) { return x.status === 'failed'; }).length };
+    var failed = counts.failed;
     var t = cost.totals || {}, tiles = A.clear(A.$('tiles'));
     function tile(k, v, sub) { return h('div', { class: 'tile' }, [h('div', { class: 'k' }, k), h('div', { class: 'v num' }, v), sub ? h('div', { class: 'small muted' }, sub) : null]); }
     tiles.appendChild(tile('Spent, all logged calls', B.money(t.total_cost || 0), (t.total_calls || 0) + ' paid calls'));
-    tiles.appendChild(tile('Runs', String(runs.length), failed + ' failed'));
+    tiles.appendChild(tile('Runs', String(counts.total), failed + ' failed'));
     tiles.appendChild(tile('Tokens', ((t.total_tokens_in || 0) + (t.total_tokens_out || 0)).toLocaleString()));
     var spend = A.clear(A.$('spend')), by = cost.by_model || [];
     var max = by.reduce(function (m, x) { return Math.max(m, Number(x.total_cost) || 0); }, 0);
@@ -82,7 +83,7 @@ Borg.ready(function () {
     var box = A.clear(A.$('runs'));
     if (!runs.length) { box.appendChild(h('p', { class: 'muted small' }, 'No runs yet.')); return; }
     box.appendChild(A.table(['When', 'Question', 'Status', ''], runs.slice(0, 8).map(function (x) {
-      var again = (x.status === 'failed' || x.status === 'running') ? A.runAgainButton(x.run_id, null) : null;
+      var again = x.status === 'failed' ? A.runAgainButton(x.run_id, null) : null;
       var open = h('a', { href: 'run.html?id=' + encodeURIComponent(x.run_id) }, 'Open');
       return h('tr', {}, [A.td(A.ago(x.created_at), 'num'), A.td(h('div', { class: 'clip', title: x.user_instruction || '' }, A.short(x.user_instruction, 90))),
         A.td(A.statusChip(x.status)), A.td(h('div', { class: 'actions' }, [open, again]))]);

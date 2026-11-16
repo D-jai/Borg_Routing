@@ -26,7 +26,8 @@ def client():
 
 
 def test_keys_status_saved_never_a_value(client, tmp_path, monkeypatch):
-    """A key in the environment and a key only in .env both show as saved, with no value."""
+    """A key the running process has is saved; one only in the .env file is not
+    (it needs a restart), and says so. Neither shows a value."""
     monkeypatch.chdir(tmp_path)
     (tmp_path / ".env").write_text(f"# comment\nTAVILY_API_KEY={FAKE_FILE_KEY}\n", encoding="utf-8")
     monkeypatch.setenv("OPENROUTER_API_KEY", FAKE_ENV_KEY)
@@ -37,10 +38,12 @@ def test_keys_status_saved_never_a_value(client, tmp_path, monkeypatch):
     assert res.status_code == 200
     by_id = {p["id"]: p for p in res.json()["providers"]}
     assert by_id["openrouter"]["saved"] is True
-    assert by_id["tavily"]["saved"] is True
+    assert by_id["openrouter"]["env_file_only"] is False
+    assert by_id["tavily"]["saved"] is False
+    assert by_id["tavily"]["env_file_only"] is True
     for secret in (FAKE_ENV_KEY, FAKE_FILE_KEY):
         assert secret not in res.text
-    assert set(by_id["openrouter"]) == {"id", "label", "env_var", "saved"}
+    assert set(by_id["openrouter"]) == {"id", "label", "env_var", "saved", "env_file_only"}
 
 
 def test_keys_status_not_saved(client, tmp_path, monkeypatch):
@@ -54,6 +57,7 @@ def test_keys_status_not_saved(client, tmp_path, monkeypatch):
 
     assert by_id["openrouter"]["saved"] is False
     assert by_id["tavily"]["saved"] is False
+    assert by_id["openrouter"]["env_file_only"] is False
 
 
 def test_keys_status_does_not_log_a_key(client, tmp_path, monkeypatch, caplog):
@@ -105,10 +109,16 @@ async def outlier_db(tmp_path, monkeypatch):
             "VALUES (?, ?, ?, ?, ?)",
             (run_id, "completed" if completed else "running", prompt, created, completed),
         )
+        # the run's logged activity spans created .. completed (open run: one second)
+        end = completed or created[:-2] + "01"
         db.execute(
-            "INSERT INTO logs (run_id, event_type, model_id, tokens_input, tokens_output, dollars) "
-            "VALUES (?, 'model_call', 'm', 10, 5, ?)",
-            (run_id, dollars),
+            "INSERT INTO logs (run_id, event_type, model_id, tokens_input, tokens_output, "
+            "dollars, created_at) VALUES (?, 'model_call', 'm', 10, 5, ?, ?)",
+            (run_id, dollars, created),
+        )
+        db.execute(
+            "INSERT INTO logs (run_id, event_type, created_at) VALUES (?, 'error', ?)",
+            (run_id, end),
         )
     db.commit()
     db.close()
@@ -127,11 +137,63 @@ async def test_outliers_sort_by_cost_not_prompt_length(client, outlier_db):
 async def test_outliers_sort_by_duration(client, outlier_db):
     res = client.get("/logs/outlier-runs?sort=duration&limit=5")
     runs = res.json()["runs"]
-    assert [r["run_id"] for r in runs] == ["r-slow", "r-costly", "r-long"]
+    assert [r["run_id"] for r in runs] == ["r-slow", "r-costly", "r-long", "r-open"]
     assert runs[0]["duration_s"] == pytest.approx(120.0, abs=1)
-    assert "r-open" not in [r["run_id"] for r in runs]  # not finished: no duration
+    assert runs[3]["duration_s"] == pytest.approx(1.0, abs=0.5)
 
 
 @pytest.mark.asyncio
 async def test_outliers_refuse_a_sort_that_is_not_cost_or_duration(client, outlier_db):
     assert client.get("/logs/outlier-runs?sort=prompt_length").status_code == 422
+
+
+@pytest.fixture
+async def tree_db(tmp_path, monkeypatch):
+    """A root run with two costly child runs, a cheap root run, and a bypass run."""
+    path = str(tmp_path / "tree.db")
+    await create_all(path)
+    monkeypatch.setattr(logs_mod, "DB_PATH", path)
+    db = sqlite3.connect(path)
+    runs = [
+        ("root", None, "orchestrated"), ("kid1", "root", "orchestrated"),
+        ("kid2", "root", "orchestrated"), ("cheap", None, "orchestrated"),
+        ("direct", None, "bypass"),
+    ]
+    for run_id, parent, kind in runs:
+        db.execute(
+            "INSERT INTO runs (run_id, status, user_instruction, parent_run_id, kind, created_at) "
+            "VALUES (?, 'completed', ?, ?, ?, '2026-11-16 09:00:00')",
+            (run_id, run_id, parent, kind),
+        )
+    logs = [  # run, dollars, time
+        ("root", 0.01, "2026-11-16 10:00:00"),
+        ("kid1", 0.40, "2026-11-16 10:00:30"),
+        ("kid2", 0.50, "2026-11-16 10:03:00"),
+        ("cheap", 0.05, "2026-11-16 10:00:00"),
+        ("direct", 9.00, "2026-11-16 10:00:00"),
+    ]
+    for run_id, dollars, at in logs:
+        db.execute(
+            "INSERT INTO logs (run_id, event_type, model_id, tokens_input, tokens_output, "
+            "dollars, created_at) VALUES (?, 'model_call', 'm', 10, 5, ?, ?)",
+            (run_id, dollars, at),
+        )
+    db.commit()
+    db.close()
+    return path
+
+
+@pytest.mark.asyncio
+async def test_outliers_list_root_runs_only_with_the_whole_tree_cost(client, tree_db):
+    runs = client.get("/logs/outlier-runs?sort=cost").json()["runs"]
+    assert [r["run_id"] for r in runs] == ["root", "cheap"]  # no child runs, no bypass run
+    assert runs[0]["cost"] == pytest.approx(0.91)
+    assert runs[0]["tokens"] == 45
+
+
+@pytest.mark.asyncio
+async def test_outlier_duration_is_the_span_of_the_trees_logged_activity(client, tree_db):
+    runs = client.get("/logs/outlier-runs?sort=duration").json()["runs"]
+    assert runs[0]["run_id"] == "root"
+    assert runs[0]["duration_s"] == pytest.approx(180.0, abs=1)  # 10:00:00 .. 10:03:00
+    assert [r["run_id"] for r in runs] == ["root", "cheap"]

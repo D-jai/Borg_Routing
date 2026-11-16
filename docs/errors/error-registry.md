@@ -170,7 +170,7 @@
 | BRT-API-032 | MCP tool not found | `src/mcp/server.py::_handle_tools_call` | The tool name is not in the catalogue. Use `tools/list` to see available tools. |
 | BRT-API-033 | MCP tool execution failed | `src/mcp/server.py::_handle_tools_call` | The tool raised an error. Check the `message` field in the JSON-RPC error response. |
 | BRT-API-034 | Missing required tool argument | `src/mcp/server.py::_tool_*` | A required argument was not provided. Check the tool's `inputSchema`. |
-| BRT-API-024 | Resume failed | `src/api/tasks.py::resume_run_endpoint` | Could not resume the run. Check that the run exists and is not completed. |
+| BRT-API-024 | Resume failed | `src/api/tasks.py::resume_run_endpoint` | Could not resume the run. Check that the run exists and is not completed. A run that is still running is refused with 409; wait for it to finish or fail. |
 | BRT-API-025 | Run list failed | `src/api/tasks.py::list_runs` | Could not fetch the list of runs from the database. Check database connectivity. |
 
 ## BRT-ORC — Orchestrator Module (Slice 3 additions)
@@ -196,7 +196,7 @@
 | BRT-ADM-003 | Rule already retired | `src/api/admin.py::retire_rule` | The rule has already been retired. No action needed. |
 | BRT-ADM-004 | Config read failed | `src/api/admin.py` | SQLite read error. Check database file permissions and connectivity. |
 | BRT-ADM-005 | Config write failed | `src/api/admin.py` | SQLite write error. Check database file permissions and disk space. |
-| BRT-ADM-006 | Invalid setting value | `src/api/admin.py` | `POST /config` refused a value that is not valid for that setting (not a number, out of range, not one of the allowed choices) or a setting that is read from `.env` only (`ORCHESTRATOR_MAX_TOKENS`, `ANSWERER_MAX_TOKENS`). Send a valid value, or edit `.env` and restart. |
+| BRT-ADM-006 | Invalid setting value | `src/api/admin.py` | `POST /config` refused a value that is not valid for that setting (not a number, out of range, not one of the allowed choices) a setting that is read from `.env` only (`ORCHESTRATOR_MAX_TOKENS`, `ANSWERER_MAX_TOKENS`), a key that is not a setting, a planner endpoint that is not an http(s) address, or an `admin_rules_ledger` that is not a list of rule objects. Send a valid value, or edit `.env` and restart. |
 
 ## BRT-MEM — Memory Module
 
@@ -216,6 +216,7 @@
 | BRT-API-041 | Entities fetch failed | `src/api/logs.py::list_entities` | SQLite error while reading log_entities. Check database connectivity. |
 | BRT-API-042 | Cost summary failed | `src/api/logs.py::cost_summary` | SQLite aggregation error. Check database connectivity. |
 | BRT-API-043 | Export failed | `src/api/logs.py::export_logs` | SQLite error during JSONL export. Check database connectivity. |
+| BRT-API-044 | Outlier runs failed | `src/api/logs.py::outlier_runs` | SQLite error while ranking root runs by cost or duration. Check database connectivity. |
 | BRT-API-050 | Skills load failed | `src/api/skills.py` | Could not load skills.yaml. Check that data/skills.yaml exists. |
 | BRT-API-051 | Skill not found | `src/api/skills.py` | The skill_id does not exist in the library. Check the skill_id. |
 | BRT-API-052 | New-version write failed | `src/api/skills.py::create_skill_version` | Could not write the updated skills.yaml. Check file permissions. |

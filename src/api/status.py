@@ -5,8 +5,9 @@ GET /status/local         -> {"reachable": bool, "servers": [{name, url, reachab
 
 Neither endpoint returns, logs or echoes a key value. ``/keys/status`` only
 tests whether a variable is present and non-empty, in the process environment
-(which ``load_dotenv`` fills from ``.env`` at start-up) or as a line in the
-``.env`` file (a key saved after start-up).
+(which ``load_dotenv`` fills from ``.env`` at start-up). A key that is only a
+line in the ``.env`` file is not saved yet: the running server does not have
+it, so ``env_file_only`` is true and the page says a restart is needed.
 """
 from __future__ import annotations
 
@@ -53,15 +54,20 @@ def _env_file_has(var: str, env_path: str = ".env") -> bool:
 
 
 def key_saved(var: str) -> bool:
-    return bool((os.environ.get(var) or "").strip()) or _env_file_has(var)
+    """True only when the running process has the key (what the engine reads)."""
+    return bool((os.environ.get(var) or "").strip())
 
 
 @router.get("/keys/status")
 async def keys_status() -> JSONResponse:
-    """Per provider: is a key saved? Never the key itself."""
+    """Per provider: does the running server have a key? Never the key itself."""
     return JSONResponse(content={
         "providers": [
-            {"id": pid, "label": label, "env_var": var, "saved": key_saved(var)}
+            {
+                "id": pid, "label": label, "env_var": var,
+                "saved": key_saved(var),
+                "env_file_only": not key_saved(var) and _env_file_has(var),
+            }
             for pid, label, var in _PROVIDERS
         ]
     })

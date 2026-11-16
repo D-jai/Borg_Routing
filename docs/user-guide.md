@@ -381,13 +381,28 @@ The limit is fixed at 5 in the engine (`MAX_DEPTH` in `src/orchestrator/engine.p
 
 The Admin pages sit in the left menu under **Admin**, starting at `http://localhost:8000/ui/admin_overview.html`. Changes apply from the next run; nothing needs a restart.
 
-- **Overview** — a first-run checklist (cloud key saved, models in the pool, local server reachable, admin token, lane mode), what has been spent, and the last runs. A failed or running run has a **Run again** button.
+- **Overview** — a first-run checklist (cloud key saved, models in the pool, local server reachable, admin token, lane mode), what has been spent, and the last runs. A failed run has a **Run again** button.
 - **Models** — tick the models the router may use. **Discover** finds local models and adds the curated cloud list; **Get Model Info** researches each model and updates its scores. Each row is marked as running on this machine or in the cloud.
-- **Keys** — says whether the OpenRouter key is saved. It never shows a key. Paste a new key to replace the saved one.
+- **Keys** — says whether the OpenRouter key is saved (the running server has it); a key that is only written in `.env` shows as "In .env, restart needed". It never shows a key. Paste a new key to replace the saved one.
 - **Rules** — global rules (free text) and the rules ledger. Both are sent with every model call. A retired rule stops being sent but stays in the ledger.
-- **Settings** — every setting the engine reads: the quality floors for light, mid and heavy steps, the orchestrator quality requirement, time cost per second, the baseline model for cost comparison, a pinned planner, the run time limit, Rule Zero, and the on-premise lane keys. A bad value is refused with `BRT-ADM-006`. The two max-token settings are read from `.env` only and are shown read-only.
+- **Settings** — every setting the engine reads: the quality floors for light, mid and heavy steps, the orchestrator quality requirement, time cost per second, the baseline model for cost comparison, a pinned planner, the run time limit, Rule Zero, and the on-premise lane keys. A bad value is refused with `BRT-ADM-006`. **Reset** (or saving an empty value) forgets the saved value, so the `.env` value, or the built-in default, applies again. Baseline model empty means `BASELINE_MODEL_ID` from `.env` if set, else the ticked model with the highest reasoning score. The pinned planner endpoint must be an `http://` or `https://` address. `POST /config` also refuses a key that is not a setting (`global_rules` and `admin_rules_ledger` excepted) and a rules ledger that is not a list of rule objects, both with `BRT-ADM-006`. The two max-token settings are read from `.env` only and are shown read-only.
 - **Skills** — the skill library with each skill's usage.
 - **Logs** — events, the cost summary, and Stats: run outcomes, tokens by model, feedback and the outlier runs. Outlier runs are ranked by what they cost or how long they took, never by prompt length.
+
+---
+
+## Status endpoints (Admin pages)
+
+These two read-only routes feed the Overview checklist and the Keys page. Neither returns, logs or echoes a key.
+
+### `GET /keys/status`
+Returns `{"providers": [{"id", "label", "env_var", "saved", "env_file_only"}]}` for OpenRouter and Tavily. `saved` is true only when the running server has the key (set from `.env` at start-up, or by saving it on the Keys page). `env_file_only` is true when the key is a line in `.env` but the running server does not have it yet: restart the server.
+
+### `GET /status/local`
+Probes the configured local model servers (Ollama, LM Studio, other local OpenAI-compatible addresses) with a short request and returns `{"reachable": bool, "servers": [{"name", "url", "reachable"}]}`. `reachable` is true when any server answers. No model is loaded by the probe.
+
+### `GET /runs`
+Besides the `runs` page (`limit`, newest first), the response carries `counts`: `total`, `completed`, `failed`, `running`, `pending`, `thumbs_up` and `thumbs_down` over every run, not just the page. The Overview and Logs Stats counts come from there.
 
 ---
 
@@ -398,7 +413,7 @@ If a run fails partway through (network error, model timeout, etc.), you can run
 ### How to run it again
 1. Open `http://localhost:8000/ui/admin_overview.html`.
 2. Find the failed run under **Last runs**.
-3. Click **Run again**. It plans the run from the start, with the words you first sent. It does not continue where the run stopped, and it refuses runs that read documents.
+3. Click **Run again**. It is offered only for failed runs. It plans the run from the start, with the words you first sent (also when the run failed before it had any steps, for example at planning). It does not continue where the run stopped, and it refuses runs that read documents.
 
 ### Via API
 ```
@@ -413,7 +428,8 @@ sub-task and is governed by the top-level run's instruction.
 
 ### If something goes wrong
 - **"BRT-DB-020"** — The run is already completed and cannot be resumed.
-- **"no_pending_work"** — All envelopes already succeeded; nothing to retry.
+- **"BRT-API-024" (409)** — The run is still running. Wait until it finishes or fails.
+- **"no_pending_work"** — The run is not failed and has no failed or unfinished step, so there is nothing to do.
 
 ---
 
@@ -526,7 +542,7 @@ BORG_ROUTE tracks conversation history in **threads**. Each thread stores the se
 ### How threads work
 1. A thread is created automatically when you start a conversation via the Chat UI.
 2. Each user message and assistant response is stored in the thread.
-3. The orchestrator receives the last **Context Window Size** turns as `thread_window`.
+3. The orchestrator receives the thread's recent turns as `thread_window`.
 4. Run IDs are linked to their thread via the `thread_id` field on the run record.
 
 ---
@@ -675,7 +691,7 @@ The Logs page at `http://localhost:8000/ui/logs.html` has three tabs: **Events**
 - **Totals** — runs by outcome, and thumbs up and down.
 - **Tokens by model** — a bar per model (top 8).
 - **Runs and the runs they started** — which runs spawned child runs.
-- **Outlier runs** — the five runs that cost the most, or took the longest (your choice); `GET /logs/outlier-runs?sort=cost|duration`.
+- **Outlier runs** — the five top-level runs that cost the most, or took the longest (your choice); `GET /logs/outlier-runs?sort=cost|duration`. A run's cost is the whole run tree (the run and every run it started); its duration is the span of the tree's logged activity, from the first to the last log row. Runs the router started inside another run are not listed on their own.
 
 ---
 

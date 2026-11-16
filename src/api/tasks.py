@@ -36,6 +36,7 @@ from src.db.state import (
     get_envelopes,
     get_outbound_requests,
     get_run,
+    get_run_counts,
     get_run_documents,
     get_run_digest,
     get_runs_list,
@@ -494,8 +495,11 @@ async def resume_run_endpoint(
     run_id: str,
     background_tasks: BackgroundTasks,
 ) -> JSONResponse:
-    """Re-dispatch all failed or in-flight envelopes for a run.
+    """Run a failed run again: it is planned from the start, from the run's own
+    instruction (it does not continue where it stopped).
 
+    Refused: a running run (409), a completed run (400), a run that read
+    documents (409). A pending run with no saved steps has no pending work.
     Returns 202 immediately. Polling GET /runs/{id} shows updated status.
     """
     import uuid as _uuid
@@ -505,6 +509,22 @@ async def resume_run_endpoint(
         raise HTTPException(
             status_code=400,
             detail={"error": "BRT-API-021", "message": f"Invalid run_id format: {run_id}"},
+        )
+
+    # A run that is still running is never resumed: a second copy would race
+    # the first. (A missing run falls through to the checks below.)
+    try:
+        current = await get_run(run_uuid, db_path=DB_PATH)
+    except ValueError:
+        current = None
+    if current is not None and current["status"] == "running":
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": "BRT-API-024",
+                "message": "this run is still running, so it cannot be run again; "
+                           "wait for it to finish or fail",
+            },
         )
 
     # On-premise lane: a run that read documents is never resumed (design
@@ -556,7 +576,15 @@ async def resume_run_endpoint(
             detail={"error": "BRT-API-024", "message": f"Resume failed: {exc}"},
         )
 
-    if not tasks_to_retry:
+    # A failed run with no saved failed or unfinished step failed before it
+    # had steps (at planning, e.g. BRT-ORC-007): it is planned again from its
+    # own instruction. Anything else with nothing to do has no pending work.
+    replan = (
+        not tasks_to_retry
+        and current is not None
+        and current["status"] == "failed"
+    )
+    if not tasks_to_retry and not replan:
         return JSONResponse(
             status_code=202,
             content={"run_id": run_id, "status": "no_pending_work"},
@@ -640,7 +668,8 @@ async def list_runs(limit: int = 50, include_bypass: bool = False) -> JSONRespon
         runs = await get_runs_list(
             limit=limit, db_path=DB_PATH, include_bypass=include_bypass
         )
-        return JSONResponse(content={"runs": runs})
+        counts = await get_run_counts(db_path=DB_PATH, include_bypass=include_bypass)
+        return JSONResponse(content={"runs": runs, "counts": counts})
     except Exception as exc:
         raise HTTPException(
             status_code=500,

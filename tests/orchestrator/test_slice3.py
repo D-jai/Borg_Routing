@@ -312,15 +312,14 @@ async def test_run_pipeline_with_parent_run_id(db):
 
 def test_config_set_and_get(client):
     """TC-S3-011 — POST /config stores value; GET /config retrieves it."""
-    resp = client.post("/config", json={"key": "test_key_s3", "value": "hello"})
+    resp = client.post("/config", json={"key": "lane_local_allowlist", "value": "hello"})
     assert resp.status_code == 200
     assert resp.json()["status"] == "saved"
 
     get_resp = client.get("/config")
     assert get_resp.status_code == 200
     cfg = get_resp.json()
-    assert "test_key_s3" in cfg
-    assert cfg["test_key_s3"] == "hello"
+    assert cfg["lane_local_allowlist"] == "hello"
 
 
 def test_rule_append_and_retire(client):

@@ -3,9 +3,14 @@
 For each setting the Admin Settings page can edit: read what the engine sees,
 POST /config with a new value, read again in the same process. A stub run
 (real orchestrate_run, fake planner call) records what the engine reads from
-the config table; the others are read through the engine's own reader.
+the config table; the others are read through the engine's own reader. Time cost, quality bar,
+Rule Zero and the pinned planner are asserted on what they drive: the arguments
+of the planner selection, the mode of the first planner call, and the host and
+model the planner request reached on the stand-in model server.
 Temp databases only, never data/borg_route.db.
 """
+from urllib.parse import urlparse
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -18,6 +23,7 @@ from src.pipeline.runner import resolve_max_run_seconds
 from src.registry.capability_matrix import CapabilityMatrix
 from src.registry.cost import resolve_baseline_with_note
 from src.registry.models import ModelInfo
+from tests.e2e.stub_model_server import StubModels, drain_log_writes
 
 
 @pytest.fixture
@@ -78,11 +84,65 @@ async def stub_run(db_path, monkeypatch) -> dict:
     return seen
 
 
-def engine_read(key):
-    """The value the engine read for ``key`` in a stub run."""
+async def run_with_select_spy(db_path, monkeypatch) -> dict:
+    """Run the engine with a fake planner call; return the arguments the
+    planner selection (``select_model``) was given. What the setting drives,
+    not what ``get_config`` returned."""
+    calls: list[dict] = []
+    real_select = engine_mod.select_model
+
+    def spy(*args, **kwargs):
+        calls.append(kwargs)
+        return real_select(*args, **kwargs)
+
+    monkeypatch.setattr(engine_mod, "select_model", spy)
+    await stub_run(db_path, monkeypatch)
+    assert calls, "the planner was never selected"
+    return calls[0]
+
+
+def select_arg(name):
+    """The ``name`` argument the planner selection got (time cost, quality bar)."""
     async def read(db_path, matrix, monkeypatch):
-        return (await stub_run(db_path, monkeypatch)).get(key)
+        return (await run_with_select_spy(db_path, monkeypatch))[name]
     return read
+
+
+async def read_rule_zero_taken(db_path, matrix, monkeypatch):
+    """True when the run answered through the Rule Zero shortcut: its first
+    planner call is a compose, never a plan."""
+    modes: list[str] = []
+
+    async def fake_invoke(**kwargs):
+        modes.append(kwargs["mode"])
+        return {"response": "ok", "direct_answer": "ok", "plan": None}
+
+    monkeypatch.setattr(engine_mod, "_invoke_orchestrator_model", fake_invoke)
+    run_id = await create_run("hi", db_path=db_path)
+    await engine_mod.orchestrate_run(run_id, "hi", db_path=db_path)
+    assert modes
+    return modes[0] == "compose"
+
+
+async def planner_request(db_path, monkeypatch):
+    """The first planner call, as the stand-in model server received it."""
+    stub = StubModels(plan_nodes=[]).install(monkeypatch)
+    run_id = await create_run("hi", db_path=db_path)
+    await engine_mod.orchestrate_run(run_id, "hi", db_path=db_path)
+    await drain_log_writes()
+    calls = [r for r in stub.requests if r.kind in ("plan", "compose")]
+    assert calls, "no planner call reached the model server"
+    return calls[0]
+
+
+async def read_planner_host(db_path, matrix, monkeypatch):
+    """host:port the planner call went to."""
+    return urlparse((await planner_request(db_path, monkeypatch)).url).netloc
+
+
+async def read_planner_model(db_path, matrix, monkeypatch):
+    """The model name the planner call asked for."""
+    return (await planner_request(db_path, monkeypatch)).model
 
 
 def floor_read(tier):
@@ -113,11 +173,12 @@ async def read_baseline(db_path, matrix, monkeypatch):
 # key -> (value to POST, what the engine should then read, reader)
 CASES = {
     "max_run_seconds": ("42", 42, read_max_run_seconds),
-    "time_cost_per_sec": ("0.5", 0.5, engine_read("time_cost_per_sec")),
-    "orchestrator_quality_requirement": ("7.0", 7.0, engine_read("orchestrator_quality_requirement")),
-    "rule_zero_shortcut": ("false", False, engine_read("rule_zero_shortcut")),
-    "orchestrator_endpoint": ("http://pinned.test:9", "http://pinned.test:9", engine_read("orchestrator_endpoint")),
-    "orchestrator_model_name": ("pinned-model", "pinned-model", engine_read("orchestrator_model_name")),
+    # these five are read through what they drive in the engine, not through get_config
+    "time_cost_per_sec": ("0.5", 0.5, select_arg("time_cost_per_sec")),
+    "orchestrator_quality_requirement": ("7.0", 7.0, select_arg("quality_requirement")),
+    "rule_zero_shortcut": ("false", False, read_rule_zero_taken),
+    "orchestrator_endpoint": ("http://pinned.test:9", "pinned.test:9", read_planner_host),
+    "orchestrator_model_name": ("pinned-model", "pinned-model", read_planner_model),
     "leaf_quality_light": ("5.25", 5.25, floor_read("light")),
     "leaf_quality_mid": ("6.5", 6.5, floor_read("mid")),
     "leaf_quality_heavy": ("8.25", 8.25, floor_read("heavy")),
@@ -172,7 +233,7 @@ async def test_setting_takes_effect_on_the_next_run(key, client, db, matrix, mon
     ("max_run_seconds", "1.5"),
     ("max_run_seconds", "0"),
     ("orchestrator_quality_requirement", "11"),
-    ("leaf_quality_mid", ""),
+    ("leaf_quality_mid", "abc"),
     ("rule_zero_shortcut", "maybe"),
     ("lane_mode", "everything"),
     ("lane_max_ngram_share", "2"),
