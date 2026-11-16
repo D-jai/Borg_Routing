@@ -177,7 +177,7 @@
 
 | Code | Description | Origin | Hints |
 |------|-------------|--------|-------|
-| BRT-ORC-020 | Max recursion depth reached — orchestrate node demoted to answerer | `src/agents/executor.py::execute` | The orchestrate node was at `max_depth`. Increase `max_recursion_depth` in Admin config, or flatten the plan. |
+| BRT-ORC-020 | Max recursion depth reached — orchestrate node demoted to answerer | `src/agents/executor.py::execute` | The orchestrate node was at `max_depth`. The depth limit is fixed in `src/orchestrator/engine.py` (`MAX_DEPTH`) and cannot be changed from Admin; flatten the plan. |
 | BRT-ORC-021 | Child run creation failed for orchestrate node | `src/agents/executor.py::execute` | Could not create a child run in the database. Check database connectivity. |
 | BRT-ORC-022 | Child orchestration run failed | `src/agents/executor.py::execute` | The recursive orchestrate_run call raised an error. Inspect the child run trace for details. |
 
@@ -196,6 +196,7 @@
 | BRT-ADM-003 | Rule already retired | `src/api/admin.py::retire_rule` | The rule has already been retired. No action needed. |
 | BRT-ADM-004 | Config read failed | `src/api/admin.py` | SQLite read error. Check database file permissions and connectivity. |
 | BRT-ADM-005 | Config write failed | `src/api/admin.py` | SQLite write error. Check database file permissions and disk space. |
+| BRT-ADM-006 | Invalid setting value | `src/api/admin.py` | `POST /config` refused a value that is not valid for that setting (not a number, out of range, not one of the allowed choices) or a setting that is read from `.env` only (`ORCHESTRATOR_MAX_TOKENS`, `ANSWERER_MAX_TOKENS`). Send a valid value, or edit `.env` and restart. |
 
 ## BRT-MEM — Memory Module
 
