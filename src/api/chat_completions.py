@@ -21,8 +21,17 @@ Error codes:
 - BRT-API-011: model not found (bypass mode)
 - BRT-API-012: pipeline execution failed
 - BRT-API-013: bypass model streaming relay failed
+- BRT-LANE-001: a document path was refused (400)
+- BRT-LANE-005: documents with the lane off or with a bypass model id; bypass
+                while lane_mode is all_local (400)
+
+On-premise lane: an extra top-level ``documents`` field
+(``{"folder": ...}`` or ``{"files": [...]}`` under BORG_DOCS_ROOT) sends
+documents by reference to an orchestrated run. In raw_local a bypass call is
+recorded in the outbound ledger before it is sent.
 """
 import asyncio
+import contextlib
 import json
 import os
 import re
@@ -64,6 +73,8 @@ class ChatRequest(BaseModel):
     stream: bool = False
     max_tokens: Optional[int] = None
     temperature: Optional[float] = None
+    # On-premise lane: documents by reference (extra top-level field).
+    documents: Optional[dict] = None
 
 
 def _parse_model_alias(model: str) -> tuple[str, float, Optional[str], str]:
@@ -264,6 +275,7 @@ async def _stream_orchestration_with_heartbeats(
     user_instruction: str,
     thread_window: list,
     model_alias: str,
+    lane=None,
 ) -> AsyncIterator[str]:
     """BRT-STR-01 — keep the SSE connection alive while the pipeline runs.
 
@@ -291,6 +303,7 @@ async def _stream_orchestration_with_heartbeats(
             thread_window=thread_window,
             run_id=own_run_id,
             **_route_kwargs(model_alias),
+            **({"lane": lane} if lane is not None else {}),
         )
     )
 
@@ -439,8 +452,13 @@ async def _bypass_to_model(
         "messages": [{"role": m.role, "content": m.content} for m in messages],
         "max_tokens": max_tokens,
     }
-    async with httpx.AsyncClient(timeout=120) as client:
-        resp = await client.post(url, json=payload, headers=headers)
+    from src.lane.outbound import send_outbound  # noqa: PLC0415
+
+    # A plain POST with the lane off; with it on, recorded in the ledger.
+    resp = await send_outbound(
+        url, payload, headers, timeout=120, model=model_info,
+        purpose="bypass", destination=model_id,
+    )
     resp.raise_for_status()
     body = resp.json()
     return body["choices"][0]["message"]["content"], body.get("usage")
@@ -499,6 +517,13 @@ async def _stream_bypass_relay(
     relay_usage: Optional[dict] = None
     recorded = False
     relay_text: list[str] = []
+    from src.lane.outbound import record_end, record_start  # noqa: PLC0415
+
+    # With the lane on, the relay's request is in the ledger before it is sent.
+    ledger_id = await record_start(
+        url, payload, left_machine=True, purpose="bypass",
+        destination=model_id,
+    )
 
     async def _record_relay() -> None:
         nonlocal recorded
@@ -561,7 +586,32 @@ async def _stream_bypass_relay(
     finally:
         # Normal end, provider error mid-stream and client disconnect
         # (GeneratorExit) all record the call once, with whatever usage is known.
+        await record_end(ledger_id, "sent" if relay_text else "failed")
         await _record_relay()
+
+
+@contextlib.contextmanager
+def _lane_call(lane, run_id: str):
+    """Run a bypass call inside the lane (ledger) and its run's scope."""
+    if lane is None:
+        yield
+        return
+    from src.lane.context import lane_scope  # noqa: PLC0415
+    from src.lane.outbound import call_scope  # noqa: PLC0415
+
+    with lane_scope(lane), call_scope(uuid.UUID(run_id)):
+        yield
+
+
+async def _lane_wrapped(lane, run_id: str, gen: AsyncIterator[str]) -> AsyncIterator[str]:
+    """Drive a streaming generator inside the lane's scope."""
+    if lane is None:
+        async for chunk in gen:
+            yield chunk
+        return
+    with _lane_call(lane, run_id):
+        async for chunk in gen:
+            yield chunk
 
 
 @router.post("/v1/chat/completions")
@@ -582,6 +632,16 @@ async def chat_completions(request: Request):
     model_alias = chat_req.model
     base_model, quality_req, specialty_hint, strategy = _parse_model_alias(model_alias)
 
+    # On-premise lane: settings and documents are checked before anything runs.
+    from src.lane.context import prepare_lane  # noqa: PLC0415
+    from src.lane.errors import LaneError  # noqa: PLC0415
+    from src.pipeline import runner as _runner  # noqa: PLC0415
+
+    try:
+        lane = await prepare_lane(chat_req.documents, _runner.DB_PATH)
+    except LaneError as exc:
+        raise HTTPException(status_code=400, detail={"error": exc.code, "message": str(exc)})
+
     # Determine user instruction from the last user message
     user_messages = [m for m in chat_req.messages if m.role == "user"]
     if not user_messages:
@@ -600,17 +660,39 @@ async def chat_completions(request: Request):
     # Bypass mode: exact model_id, not a borg_route alias
     if base_model != "borg_route":
         from main import matrix as app_matrix
+        if lane is not None and (lane.all_local or chat_req.documents):
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "error": "BRT-LANE-005",
+                    "message": (
+                        "a direct-to-model request is refused in lane_mode all_local"
+                        if lane.all_local else
+                        "documents cannot be sent with a direct-to-model request; "
+                        "use a borg_route model"
+                    ),
+                },
+            )
         run_id = str(uuid.uuid4())
+        if lane is not None:
+            # raw_local: the bypass call goes through the ledger; its rows are
+            # filed with the bypass run in this endpoint's database.
+            from dataclasses import replace as _replace  # noqa: PLC0415
+
+            await create_all(DB_PATH)
+            lane = _replace(lane, db_path=DB_PATH)
         if chat_req.stream:
             return StreamingResponse(
-                _stream_bypass_relay(app_matrix, base_model, model_alias, chat_req.messages, run_id),
+                _lane_wrapped(lane, run_id, _stream_bypass_relay(
+                    app_matrix, base_model, model_alias, chat_req.messages, run_id)),
                 media_type="text/event-stream",
             )
         t_bypass = time.monotonic()
         try:
-            response_text, bypass_usage = await _bypass_to_model(
-                app_matrix, base_model, chat_req.messages
-            )
+            with _lane_call(lane, run_id):
+                response_text, bypass_usage = await _bypass_to_model(
+                    app_matrix, base_model, chat_req.messages
+                )
         except HTTPException:
             raise
         except Exception as exc:
@@ -640,6 +722,7 @@ async def chat_completions(request: Request):
                 user_instruction=user_instruction,
                 thread_window=thread_window,
                 model_alias=model_alias,
+                lane=lane,
             ),
             media_type="text/event-stream",
         )
@@ -649,6 +732,7 @@ async def chat_completions(request: Request):
             user_instruction=user_instruction,
             thread_window=thread_window,
             **_route_kwargs(model_alias),
+            **({"lane": lane} if lane is not None else {}),
         )
     except Exception as exc:
         raise HTTPException(

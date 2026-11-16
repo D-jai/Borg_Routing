@@ -13,6 +13,8 @@ Error codes:
 - BRT-ADM-003: rule already retired
 - BRT-ADM-004: config read failed
 - BRT-ADM-005: config write failed
+- BRT-LANE-005: an invalid value for a lane setting (lane_mode, lane_manifest,
+                the lane's limits) is refused at POST /config (400)
 """
 import json
 import os
@@ -108,6 +110,64 @@ _EFFECTIVE_SETTINGS: list[dict[str, Any]] = [
         "label": "Default Strategy",
         "help_text": "Router strategy when the caller doesn't pick one. "
                      "SYSTEM_CHOOSE | LOCAL_FIRST.",
+    },
+    # On-premise lane (docs/design/on_premise_lane.md). Read once per run.
+    {
+        "key": "lane_mode",
+        "env_var": "BORG_LANE_MODE",
+        "default": "off",
+        "cast": str,
+        "label": "Lane Mode",
+        "help_text": "off | raw_local (document text only to local models) | "
+                     "all_local (nothing sent to any cloud model).",
+    },
+    {
+        "key": "lane_max_output_chars",
+        "env_var": "BORG_LANE_MAX_OUTPUT_CHARS",
+        "default": 1500,
+        "cast": lambda v: int(float(v)),
+        "label": "Lane: Max Output Characters",
+        "help_text": "Longest output a local step reading documents may pass on (BRT-LANE-004).",
+    },
+    {
+        "key": "lane_max_verbatim_chars",
+        "env_var": "BORG_LANE_MAX_VERBATIM_CHARS",
+        "default": 120,
+        "cast": lambda v: int(float(v)),
+        "label": "Lane: Max Copied Passage",
+        "help_text": "Longest passage copied from a document that may be passed on or sent out.",
+    },
+    {
+        "key": "lane_max_ngram_share",
+        "env_var": "BORG_LANE_MAX_NGRAM_SHARE",
+        "default": 0.10,
+        "cast": float,
+        "label": "Lane: Max Document Coverage",
+        "help_text": "Share of a document's word 8-grams a cloud request may hold (BRT-LANE-006).",
+    },
+    {
+        "key": "lane_manifest",
+        "env_var": "BORG_LANE_MANIFEST",
+        "default": "names",
+        "cast": str,
+        "label": "Lane: Planner Sees",
+        "help_text": "names (file names, types, sizes) | ids (no file names).",
+    },
+    {
+        "key": "lane_local_allowlist",
+        "env_var": "BORG_LANE_LOCAL_ALLOWLIST",
+        "default": "",
+        "cast": str,
+        "label": "Lane: Local Allow-list",
+        "help_text": "Model ids and/or host:port that count as local; empty = every local address.",
+    },
+    {
+        "key": "lane_part_chars",
+        "env_var": "BORG_LANE_PART_CHARS",
+        "default": 8000,
+        "cast": lambda v: int(float(v)),
+        "label": "Lane: Document Part Size",
+        "help_text": "A document longer than this many characters is split into parts.",
     },
     {
         "key": "context_window_size",
@@ -216,6 +276,15 @@ async def set_config_entry(req: ConfigSetRequest) -> JSONResponse:
             status_code=400,
             detail={"error": "BRT-ADM-001", "message": "key is required"},
         )
+    from src.lane.settings import SETTING_KEYS, validate_value  # noqa: PLC0415
+
+    if req.key in SETTING_KEYS:
+        problem = validate_value(req.key, req.value)
+        if problem:
+            raise HTTPException(
+                status_code=400,
+                detail={"error": "BRT-LANE-005", "message": problem},
+            )
     try:
         await set_config(req.key, req.value, db_path=DB_PATH)
         return JSONResponse(content={"key": req.key, "status": "saved"})

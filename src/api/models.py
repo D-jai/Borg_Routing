@@ -102,9 +102,34 @@ async def get_matrix_json(matrix: CapabilityMatrix = Depends(get_matrix)):
     return [m.model_dump() for m in matrix.all()]
 
 
+async def _refuse_in_all_local(action: str) -> None:
+    """On-premise lane: in all_local, admin actions that call out are refused
+    (BRT-LANE-005, design note 6.4)."""
+    from src.db.schema import DB_PATH  # noqa: PLC0415
+    from src.lane.errors import LaneError  # noqa: PLC0415
+    from src.lane.settings import load_lane_settings  # noqa: PLC0415
+
+    try:
+        mode = (await load_lane_settings(DB_PATH)).mode
+    except LaneError as exc:
+        raise HTTPException(status_code=400, detail={"error": exc.code, "message": str(exc)})
+    if mode == "all_local":
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "error": "BRT-LANE-005",
+                "message": f"{action} calls out and is refused while lane_mode is all_local",
+            },
+        )
+
+
 @router.post("/models/discover", response_model=DiscoverResponse)
 async def discover_models(matrix: CapabilityMatrix = Depends(get_matrix)):
-    """Probe LM Studio, Ollama, and the curated OpenRouter list; upsert results."""
+    """Probe LM Studio, Ollama, and the curated OpenRouter list; upsert results.
+
+    Refused (BRT-LANE-005) while lane_mode is all_local.
+    """
+    await _refuse_in_all_local("Discover")
     openrouter_key: Optional[str] = os.getenv("OPENROUTER_API_KEY")
     try:
         count = await discover_all(matrix, openrouter_key=openrouter_key)
@@ -125,8 +150,10 @@ async def research_models_endpoint(
 
     If ``model_ids`` is omitted, every row currently in the matrix is scored.
     Otherwise only the listed model_ids are researched (missing rows are
-    skipped with a log warning).
+    skipped with a log warning). Refused (BRT-LANE-005) while lane_mode is
+    all_local.
     """
+    await _refuse_in_all_local("Get Model Info")
     requested = body.model_ids or [m.model_id for m in matrix.all()]
     if not requested:
         return ResearchResponse(scored=[])

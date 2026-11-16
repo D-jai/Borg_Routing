@@ -504,6 +504,15 @@ The planner never sees the text. It gets a list: an id per document (`doc_001`),
 - Every request a run makes while the lane is on is written to the `outbound_requests` table before it is sent, with its exact body (secret fields such as `api_key` are blanked in the stored copy), and whether it left the machine. If that write fails, the request is not sent (**BRT-LANE-007**). A retry is its own row.
 - Local calls ignore proxy settings (`HTTP_PROXY` and the like), so a proxy cannot carry them off the machine.
 
+### Using the lane from the API
+
+- `POST /v1/task`: add `"documents": {"folder": "..."}` (or `"files"`) to the body. A refused path returns 400 with **BRT-LANE-001** and creates no run; documents while `lane_mode` is `off` return 400 with **BRT-LANE-005**.
+- `POST /v1/chat/completions`: the same `documents` field, at the top level next to `messages`, with a `borg_route` model. With a direct model id it is refused (**BRT-LANE-005**); in `all_local` every direct-model request is refused.
+- `GET /runs/{run_id}` returns `outbound`: every request this run and its child runs sent off the machine, oldest first, each with `run_id`, `url`, `destination`, `attempt`, `status` and the exact `body`. It is empty when the lane was off. (When the admin token of a later release exists, the bodies move behind it; the hook is `lane_admin_allowed` in `src/api/tasks.py`.)
+- `POST /runs/{run_id}/resume` is refused for a run that read documents (409, **BRT-LANE-008**): start a new run with the same documents.
+- Discover and Get Model Info are refused while `lane_mode` is `all_local` (403, **BRT-LANE-005**).
+- The lane settings (`lane_mode`, `lane_max_output_chars`, `lane_max_verbatim_chars`, `lane_max_ngram_share`, `lane_manifest`, `lane_local_allowlist`, `lane_part_chars`) appear in `GET /config/effective` and are saved with `POST /config`; an invalid value is refused (400, **BRT-LANE-005**). A new value applies from the next run.
+
 ### What is not promised
 
 - Your own prompt goes to the planner. Hand documents over by reference; text pasted into the prompt from a document that was also loaded is blocked, text from any other document cannot be recognised.

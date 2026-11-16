@@ -15,6 +15,9 @@ Error codes:
 - BRT-API-025: run list failed
 - BRT-API-028: stream run not found
 - BRT-API-029: stream DB error
+- BRT-LANE-001: a document path was refused (400, no run is created)
+- BRT-LANE-005: documents sent with the lane off, or a bad lane setting (400)
+- BRT-LANE-008: resume refused for a run that read documents (409)
 """
 import asyncio
 import json
@@ -30,7 +33,9 @@ from src.db.state import (
     compute_and_save_digest,
     get_descendant_run_ids,
     get_envelopes,
+    get_outbound_requests,
     get_run,
+    get_run_documents,
     get_run_digest,
     get_runs_list,
     resume_run,
@@ -44,6 +49,20 @@ router = APIRouter()
 class TaskRequest(BaseModel):
     instruction: str
     inputs_ref: Optional[str] = None
+    # On-premise lane: {"folder": "<relative path>"} or {"files": [...]}
+    # under BORG_DOCS_ROOT. Refused while lane_mode is off.
+    documents: Optional[dict] = None
+
+
+def lane_admin_allowed(request=None) -> bool:
+    """THE single hook for the admin token (work order 4.4, not built yet).
+
+    With the lane on, the outbound bodies in run detail (and, per the design
+    note, /logs/entities and /logs/export) belong behind the admin token.
+    Until 4.4 adds the token this returns True; 4.4 replaces its body with
+    the token check, and every caller already goes through it.
+    """
+    return True
 
 
 class RatingRequest(BaseModel):
@@ -56,8 +75,12 @@ async def _run_in_background(
     db_path: str,
     root_instruction: Optional[str] = None,
     route_options: Optional[dict] = None,
+    lane=None,
 ) -> None:
     """Background task: drive the pipeline for a submitted run.
+
+    ``lane`` is the on-premise lane state prepared when the task was
+    submitted (documents already checked and loaded), or None.
 
     ``root_instruction`` is the operator's verbatim instruction when it
     differs from ``instruction`` (a resumed child run); Law 1 governs every
@@ -89,6 +112,7 @@ async def _run_in_background(
                 db_path=db_path,
                 root_instruction=root_instruction,
                 **({"route_options": route_options} if route_options else {}),
+                **({"lane": lane} if lane is not None else {}),
             ),
             timeout=max_run_seconds,
         )
@@ -165,10 +189,26 @@ async def submit_task(
             detail={"error": "BRT-API-020", "message": "instruction is required"},
         )
 
+    # On-premise lane: check and load the documents before a run exists, so
+    # a refused path creates nothing and sends nothing.
+    from src.lane.context import prepare_lane
+    from src.lane.errors import LaneError
+    try:
+        lane = await prepare_lane(task_req.documents, DB_PATH)
+    except LaneError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail={"error": exc.code, "message": str(exc)},
+        )
+
     # Create run record synchronously so the caller gets a valid run_id
     from src.db.state import create_run
     try:
-        run_id = await create_run(task_req.instruction, db_path=DB_PATH)
+        run_id = await create_run(
+            task_req.instruction,
+            db_path=DB_PATH,
+            **({"documents": lane.manifest()} if lane is not None and lane.has_documents else {}),
+        )
     except Exception as exc:
         raise HTTPException(
             status_code=500,
@@ -181,6 +221,7 @@ async def submit_task(
         instruction=task_req.instruction,
         run_id_str=str(run_id),
         db_path=DB_PATH,
+        **({"lane": lane} if lane is not None else {}),
     )
 
     return JSONResponse(
@@ -231,6 +272,10 @@ async def get_run_state(run_id: str) -> JSONResponse:
         "events": [ ...log events... ],
         "digest": {cost_dollars, baseline_dollars, tokens_input, tokens_output,
                    token_count, summary} or null if no digest was saved yet,
+        "outbound": [ ...on-premise lane: every request this run and its child
+                     runs sent off this machine, oldest first, each with its
+                     run_id, url, destination, attempt, status and the exact
+                     body sent; empty when the lane was off... ],
     }
     """
     import uuid as _uuid
@@ -303,12 +348,21 @@ async def get_run_state(run_id: str) -> JSONResponse:
     except Exception:
         digest = None
 
+    # On-premise lane (P3): what left this machine, for the run tree.
+    try:
+        outbound = await get_outbound_requests(run_uuid, db_path=DB_PATH)
+    except Exception:
+        outbound = []
+    if not lane_admin_allowed():
+        outbound = [dict(r, body=None) for r in outbound]
+
     return JSONResponse(content={
         "run": run,
         "envelopes": envelopes,
         "child_envelopes": child_envelopes,
         "events": events,
         "digest": digest,
+        "outbound": outbound,
     })
 
 
@@ -449,6 +503,22 @@ async def resume_run_endpoint(
         raise HTTPException(
             status_code=400,
             detail={"error": "BRT-API-021", "message": f"Invalid run_id format: {run_id}"},
+        )
+
+    # On-premise lane: a run that read documents is never resumed (design
+    # note 5.7); a resume would start a fresh run without its documents.
+    try:
+        read_documents = await get_run_documents(run_uuid, db_path=DB_PATH)
+    except Exception:
+        read_documents = None
+    if read_documents:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": "BRT-LANE-008",
+                "message": "this run read documents, so it cannot be resumed; "
+                           "start a new run with the same documents",
+            },
         )
 
     try:
