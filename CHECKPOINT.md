@@ -86,10 +86,14 @@ Standing permissions: local commits on `showcase`; pushes of `showcase` to the p
 
 ## Needs Deej
 
-(none)
+- **Yes or no on the planner's protected-prompt edit (ruling 1b, 16-Nov-2026).** The planner asked Deej in its own session; the lead waits for the planner to relay the answer. If yes, add to `src/prompts/orchestrator.py`, apply_to_each section only, additions only:
+  - After the `inputs_ref` line in the JSON shape: `"items": ["only when the list is in the user's message: the items themselves, one string each"],` (check brace doubling: it sits inside a `{{ }}` block).
+  - After "You handle the failures in re_plan.": "Where the items come from. If the list is in the user's message, copy the items into `items`, one string per item, and leave `inputs_ref` out. If an earlier step produces the list, set `inputs_ref` to that step's id. `inputs_ref` is always the id of a step; a name you make up resolves to nothing. The same holds for a skill's `items_ref`."
+  - Then a prompt test, then Check 1 attempt 3 (smoke prompt unchanged).
 
 ## Needs planner
 
+- **Answered 16-Nov-2026** (planner rulings 1 and 2 in `BUILD.md` section 8; new work order 2.4). The question was kept below for the record.
 - **How does the planner hand a list that lives in the operator's message to a step? (16-Nov-2026, for 1.10.)** The planner prompt says `inputs_ref` "is resolved from run state" and never says that data in the user's message must go in the node's inline `items`, or be produced by an earlier step. Options the lead sees:
   - **A (lead's recommendation):** add guidance to `src/prompts/orchestrator.py` (and the `items_ref` wording for skills): "a list that is in the user's message goes in `items` inline; `inputs_ref` names an earlier step's id only". A protected-file edit beyond 1.3, so it needs the planner.
   - **B:** a reserved ref (for example `"input"`) meaning the operator's message, split by the runtime. Fragile: the runtime must guess item boundaries.
