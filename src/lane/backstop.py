@@ -11,7 +11,10 @@ Text on both sides is normalised the same way: Unicode NFKC, casefold, then
 every run of characters that are not letters or digits becomes one space.
 A request body is serialised by walking it and joining every key and string
 value (numbers as text) with newlines; ``json.dumps`` is not used, because its
-escapes (``\\n``) would break matches.
+escapes (``\\n``, ``\\u00eb``) would break matches. The walk works on decoded
+values: a string holding JSON (a prompt block built with ``json.dumps``, or
+JSON of JSON) is decoded too, a few levels deep, before normalising. The
+output guard uses the same walk and the same copy rules (``copied_rule``).
 
 A body is flagged for a document when any of these holds:
 
@@ -34,6 +37,7 @@ both ways to its true length.
 """
 from __future__ import annotations
 
+import json
 import re
 import unicodedata
 from dataclasses import dataclass, field
@@ -49,25 +53,87 @@ def normalise(text: str) -> str:
     return _NON_ALNUM.sub(" ", folded).strip()
 
 
+_JSON_ESCAPE = re.compile(r'\\(?:u[0-9a-fA-F]{4}(?:\\u[0-9a-fA-F]{4})?|["\\/bfnrt])')
+_UNESCAPE_LEVELS = 3
+
+
+def _unescape_once(text: str) -> str:
+    """Decode JSON string escapes (``\\n``, ``\\u00eb``, ``\\"``) in ``text``.
+
+    A prompt often holds a ``json.dumps`` block whose escapes split the
+    document's words; decoding them gives back the text as written."""
+    def rep(m: re.Match) -> str:
+        try:
+            return json.loads('"' + m.group(0) + '"')
+        except ValueError:
+            return m.group(0)
+    return _JSON_ESCAPE.sub(rep, text)
+
+
+def _decoded_forms(text: str) -> list[str]:
+    """``text`` plus each further decoding of its escapes (JSON nested in a
+    string, and JSON of JSON), up to a few levels."""
+    forms = [text]
+    current = text
+    for _ in range(_UNESCAPE_LEVELS):
+        if "\\" not in current:
+            break
+        nxt = _unescape_once(current)
+        if nxt == current:
+            break
+        forms.append(nxt)
+        current = nxt
+    return forms
+
+
 def serialise(body: object) -> str:
-    """Every key and every string or number in ``body``, one per line."""
+    """Every key and every string or number in ``body``, one per line.
+
+    Works on decoded values, never on escaped JSON text: a string that is
+    itself JSON is parsed and walked too, and every string is also added
+    with its JSON escapes decoded (see ``_decoded_forms``). A ``str`` body is
+    parsed as JSON first when it is JSON.
+    """
     out: list[str] = []
 
-    def walk(value: object) -> None:
+    def walk(value: object, depth: int = 0) -> None:
         if isinstance(value, dict):
             for key, item in value.items():
-                out.append(str(key))
-                walk(item)
+                walk(str(key), depth)
+                walk(item, depth)
         elif isinstance(value, (list, tuple)):
             for item in value:
-                walk(item)
+                walk(item, depth)
         elif isinstance(value, str):
-            out.append(value)
+            out.extend(_decoded_forms(value))
+            stripped = value.strip()
+            if depth < _UNESCAPE_LEVELS and stripped[:1] in ("{", "[", '"'):
+                try:
+                    parsed = json.loads(stripped)
+                except ValueError:
+                    return
+                if parsed != value:
+                    walk(parsed, depth + 1)
         elif isinstance(value, (int, float)) and not isinstance(value, bool):
             out.append(str(value))
 
     walk(body)
     return "\n".join(out)
+
+
+def copied_rule(doc: "DocIndex", body_norm: str, max_verbatim_chars: int) -> Optional[str]:
+    """The copy rule ``body_norm`` breaks for ``doc``, else None.
+
+    "short_document" when a document of at least 24 and under
+    ``max_verbatim_chars`` normalised characters occurs whole; "verbatim"
+    when a run of ``max_verbatim_chars`` is shared. Used by the backstop
+    and by the output guard, so both apply the same rules."""
+    n = len(doc.norm)
+    if n < MIN_SHORT_DOC_CHARS:
+        return None
+    if n < max_verbatim_chars:
+        return "short_document" if doc.norm in body_norm else None
+    return "verbatim" if doc.shares_run(body_norm, max_verbatim_chars) else None
 
 
 def _grams(words: list[str]) -> set[tuple[str, ...]]:
@@ -136,8 +202,7 @@ def find_leak(
 
     ``body`` is a request body (dict/list) or a plain string.
     """
-    text = body if isinstance(body, str) else serialise(body)
-    body_norm = normalise(text)
+    body_norm = normalise(serialise(body))
     if not body_norm:
         return None
     body_grams: Optional[set] = None
@@ -145,12 +210,11 @@ def find_leak(
         n = len(doc.norm)
         if n < MIN_SHORT_DOC_CHARS:
             continue
+        rule = copied_rule(doc, body_norm, max_verbatim_chars)
+        if rule is not None:
+            return doc.doc_id, rule
         if n < max_verbatim_chars:
-            if doc.norm in body_norm:
-                return doc.doc_id, "short_document"
             continue
-        if doc.shares_run(body_norm, max_verbatim_chars):
-            return doc.doc_id, "verbatim"
         if doc.grams:
             if body_grams is None:
                 body_grams = _grams(body_norm.split())

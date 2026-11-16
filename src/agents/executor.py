@@ -44,8 +44,10 @@ from src.db.scratch import apply_cleanup_directives
 from src.db.state import create_run, get_config, sum_run_tree, update_run_status
 from src.envelopes.schema import InboundEnvelope, WrappedTask
 from src.envelopes.validator import validate_inbound
-from src.lane.context import current_lane, failed_envelope, failure_of, guard_envelope
-from src.lane.errors import LaneError, code_of
+from src.lane.context import (
+    current_lane, failed_envelope, failure_of, guard_envelope, raw_failure_code,
+)
+from src.lane.errors import LaneError
 from src.lane.outbound import call_scope, send_outbound
 from src.logging.writer import write_event
 from src.prompts.answerer import ANSWERER_SYSTEM_PROMPT
@@ -654,7 +656,7 @@ async def _execute_raw_answerer(task: WrappedTask, db_path: str, lane) -> Inboun
     except LaneError:
         raise
     except Exception as exc:
-        code = code_of(exc)
+        code = raw_failure_code(exc, "BRT-ANS-008")
         failure = failure_of(code, list(task.documents))
         try:
             await write_event(

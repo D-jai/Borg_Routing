@@ -125,7 +125,7 @@ async def lane(tmp_path, monkeypatch):
 
 
 async def _run(lane, mode, matrix, plan=PLAN_RAW, documents={"folder": "."},
-               instruction=OPERATOR, **stub_kwargs):
+               instruction=OPERATOR, stub_cls=StubModels, **stub_kwargs):
     lane["mp"].setenv("BORG_LANE_MODE", mode)
     lane["mp"].setattr(engine, "_shared_matrix", matrix)
     stub_kwargs.setdefault("answer_for", _answers)
@@ -142,7 +142,7 @@ async def _run(lane, mode, matrix, plan=PLAN_RAW, documents={"folder": "."},
             return {"action": "continue", "next_nodes": waiting, "rationale": "wave 2"}
 
         stub_kwargs["replan_for"] = replan_for
-    stub = StubModels(plan_nodes=plan, **stub_kwargs).install(lane["mp"])
+    stub = stub_cls(plan_nodes=plan, **stub_kwargs).install(lane["mp"])
     result = await run_pipeline(instruction, db_path=lane["db"], documents=documents)
     await drain_log_writes()
     return stub, result

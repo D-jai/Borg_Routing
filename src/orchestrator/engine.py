@@ -75,8 +75,8 @@ from src.db.state import (
     update_run_status,
 )
 from src.envelopes.schema import InboundEnvelope, ToolRequest, WrappedTask
-from src.lane.context import LaneContext, current_lane, failure_of
-from src.lane.errors import LaneError, code_of
+from src.lane.context import LaneContext, current_lane, failure_of, raw_failure_code
+from src.lane.errors import LaneError
 from src.lane.outbound import call_scope, send_outbound
 from src.logging.writer import write_event
 from src.orchestrator.apply_to_each import _resolve_items
@@ -350,7 +350,7 @@ def _safe_sub(template: str, subs: dict) -> str:
     result = template
     for key, value in subs.items():
         if isinstance(value, (dict, list)):
-            value_str = json.dumps(value)
+            value_str = json.dumps(value, ensure_ascii=False)
         else:
             value_str = str(value)
         result = result.replace("{" + key + "}", value_str)
@@ -609,7 +609,7 @@ async def _invoke_orchestrator_model(
         ValueError: BRT-ORC-002 on JSON parse failure.
     """
     stage_results_str = json.dumps(
-        {k: v.output for k, v in stage_results.items()}, indent=2
+        {k: v.output for k, v in stage_results.items()}, indent=2, ensure_ascii=False
     ) if stage_results else "(none)"
 
     # BRT-WEB-02 — surface raw tool_results (web_search citations, etc.)
@@ -626,7 +626,7 @@ async def _invoke_orchestrator_model(
                     "results": results,
                 })
         tool_results_str = (
-            json.dumps(aggregated_tools, indent=2, default=str)
+            json.dumps(aggregated_tools, indent=2, default=str, ensure_ascii=False)
             if aggregated_tools else "(none)"
         )
     else:
@@ -638,11 +638,11 @@ async def _invoke_orchestrator_model(
         "current_depth": str(current_depth),
         "max_depth": str(max_depth),
         "available_models_brief": available_models_brief,
-        "thread_window": json.dumps(thread_window, indent=2),
+        "thread_window": json.dumps(thread_window, indent=2, ensure_ascii=False),
         "rolling_summary": rolling_summary or "(none)",
         "stage_results": stage_results_str,
         "tool_results": tool_results_str,
-        "child_scratch_digest": json.dumps(child_scratch_digest) if child_scratch_digest else "(none)",
+        "child_scratch_digest": json.dumps(child_scratch_digest, ensure_ascii=False) if child_scratch_digest else "(none)",
         "context_budget_hint": "(unknown — use cascading distillation if context feels dense)",
         "skills_catalogue": skills_catalogue,
     }
@@ -1413,7 +1413,7 @@ def _build_task_from_node(
         if upstream_results:
             base_dep_input["upstream_results"] = upstream_results
             block = "\n\nUpstream stage outputs (from depends_on):\n" + json.dumps(
-                upstream_results, indent=2
+                upstream_results, indent=2, ensure_ascii=False
             )
             base_context = (base_context or "") + block
         if missing:
@@ -1836,7 +1836,7 @@ async def _orchestrate_run(
                     if local_only:
                         await _lane_refuse_node(
                             results, raw_unstamped if raw else None, run_id, node_id,
-                            code_of(exc, "BRT-LANE-002"), f"routing failed: {exc}",
+                            raw_failure_code(exc, "BRT-LANE-002"), f"routing failed: {exc}",
                             node_docs, db_path,
                         )
                         continue
@@ -1906,7 +1906,7 @@ async def _orchestrate_run(
                 # Node build failed — record as failed result
                 if raw:
                     await _lane_refuse_node(
-                        results, raw_unstamped, run_id, node_id, code_of(exc, "BRT-ORC-008"),
+                        results, raw_unstamped, run_id, node_id, raw_failure_code(exc, "BRT-ORC-008"),
                         f"node build failed: {exc}", node_docs, db_path,
                     )
                     continue
@@ -1949,7 +1949,7 @@ async def _orchestrate_run(
                     # full error stays in the local trace (design note 5.4).
                     from src.lane.context import failed_envelope  # noqa: PLC0415
 
-                    code = code_of(exc, "BRT-ORC-004")
+                    code = raw_failure_code(exc, "BRT-ORC-004")
                     try:
                         await write_event(
                             "error",

@@ -30,6 +30,7 @@ from typing import Any, Optional
 
 import httpx
 
+from src.lane.context import current_lane
 from src.lane.outbound import send_outbound
 from src.tools.base import BaseTool, ToolError, ToolInvocationResult
 
@@ -69,6 +70,14 @@ def _timeout_sec() -> float:
         return float(os.getenv("BORG_WEB_SEARCH_TIMEOUT_SEC", "8"))
     except ValueError:
         return 8.0
+
+
+def _must_stay_local() -> bool:
+    """In ``all_local`` every call must stay on the machine, tool calls
+    included: the call guard refuses a search at the door (BRT-LANE-003)
+    even if the executor's own ``all_local`` refusal were bypassed."""
+    lane = current_lane()
+    return lane is not None and lane.all_local
 
 
 class WebSearchTool(BaseTool):
@@ -148,6 +157,7 @@ class WebSearchTool(BaseTool):
             # on, a plain POST otherwise (src/lane/outbound.py).
             resp = await send_outbound(
                 _TAVILY_URL, payload, timeout=_timeout_sec(),
+                must_stay_local=_must_stay_local(),
                 purpose="tool", destination="tool:web_search:tavily",
             )
             resp.raise_for_status()
@@ -226,6 +236,7 @@ class WebSearchTool(BaseTool):
         try:
             resp = await send_outbound(
                 _PERPLEXITY_URL, payload, headers, timeout=_timeout_sec(),
+                must_stay_local=_must_stay_local(),
                 purpose="tool", destination="tool:web_search:perplexity",
             )
             resp.raise_for_status()

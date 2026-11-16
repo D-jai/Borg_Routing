@@ -93,6 +93,10 @@ def floor_read(tier):
 
 def lane_read(attr):
     async def read(db_path, matrix, monkeypatch):
+        # With lane_mode off no other lane setting is read (Phase 1 exactly),
+        # so the other lane keys are read with the lane on.
+        if attr != "mode":
+            monkeypatch.setenv("BORG_LANE_MODE", "raw_local")
         return getattr(await load_lane_settings(db_path), attr)
     return read
 

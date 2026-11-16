@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import contextvars
 import json
+import re
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Iterator, Optional
@@ -28,9 +29,9 @@ from src.envelopes.schema import InboundEnvelope, WrappedTask
 from src.registry.locality import is_local_endpoint, is_local_model
 from src.registry.models import ModelInfo
 
-from .backstop import DocIndex, normalise
+from .backstop import DocIndex, copied_rule, normalise, serialise
 from .documents import LoadedDocuments, load_documents
-from .errors import LaneError, code_of
+from .errors import LaneError
 from .settings import LaneSettings, load_lane_settings
 
 _current: contextvars.ContextVar[Optional["LaneContext"]] = contextvars.ContextVar(
@@ -232,36 +233,47 @@ def failed_envelope(task: WrappedTask, code: str, base: Optional[InboundEnvelope
     )
 
 
-def failure_code_of(reason: object) -> str:
-    """The code of a failure reason that may already be a lane failure (JSON)."""
-    if isinstance(reason, dict) and reason.get("code"):
-        return str(reason["code"])
-    try:
-        parsed = json.loads(str(reason))
-        if isinstance(parsed, dict) and parsed.get("code"):
-            return str(parsed["code"])
-    except (TypeError, ValueError):
-        pass
-    return code_of(reason)
+_RAW_CODE_RE = re.compile(r"BRT-[A-Z]+-\d+")
+_RAW_CODE_MAX = 16          # registry codes are like BRT-LANE-004 (12 characters)
+RAW_FAILURE_DEFAULT = "BRT-LANE-004"
+
+
+def raw_failure_code(reason: object, default: str = RAW_FAILURE_DEFAULT) -> str:
+    """The code a raw step's failure shows upward.
+
+    Never parsed from model text: the first match of ``BRT-[A-Z]+-\\d+`` in
+    the reason (as text), when it is code-sized, else the fixed ``default``
+    (``BRT-LANE-004``: the step's output and reason were withheld). A model
+    that writes ``{"code": "<document text>"}`` therefore sends nothing on.
+    """
+    if isinstance(reason, LaneError):
+        return reason.code
+    m = _RAW_CODE_RE.search(str(reason or ""))
+    if m and len(m.group(0)) <= _RAW_CODE_MAX:
+        return m.group(0)
+    return default
 
 
 def guard_envelope(env: InboundEnvelope, task: WrappedTask, ctx: LaneContext) -> InboundEnvelope:
     """The output guard (P2), applied to a raw envelope whatever its status.
 
     A resolved envelope passes when its serialised output is at most
-    ``lane_max_output_chars`` long and copies no run of
-    ``lane_max_verbatim_chars`` characters from the documents the task read
-    (all of the run's documents when it read none directly). A passed envelope
+    ``lane_max_output_chars`` long and breaks none of the backstop's copy
+    rules (``backstop.copied_rule``) for the documents the task read (all of
+    the run's documents when it read none directly): no run of
+    ``lane_max_verbatim_chars`` characters shared, and no short document
+    (24 to the limit, normalised) present whole. The check walks the decoded
+    output values, keys included, never escaped JSON text. A passed envelope
     is stamped ``lane_guarded``. Anything else, including a failed or partial
     envelope, is replaced by a failure carrying a code and document ids only.
     """
     if env.status != "resolved":
-        return failed_envelope(task, failure_code_of(env.failure_reason), base=env)
+        return failed_envelope(task, raw_failure_code(env.failure_reason), base=env)
     serialised = json.dumps(env.output, ensure_ascii=False)
     if len(serialised) > ctx.settings.max_output_chars:
         return failed_envelope(task, "BRT-LANE-004", base=env)
-    out_norm = normalise(serialised)
+    out_norm = normalise(serialise(env.output))
     for doc in ctx.indexes(list(task.documents) or None):
-        if doc.shares_run(out_norm, ctx.settings.max_verbatim_chars):
+        if copied_rule(doc, out_norm, ctx.settings.max_verbatim_chars):
             return failed_envelope(task, "BRT-LANE-004", base=env)
     return env.model_copy(update={"lane_guarded": True})

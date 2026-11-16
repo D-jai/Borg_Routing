@@ -1,7 +1,8 @@
 """The lane's settings: config key first, then env, then the default.
 
 Same resolution order as every other engine setting (``get_config`` pattern).
-Read once per run, when the run starts (``prepare_lane``).
+Read once per run, when the run starts (``prepare_lane``). ``lane_mode`` is
+read first; while it is ``off`` no other lane setting is read or validated.
 
 | Config key              | Env                          | Default | Meaning |
 |-------------------------|------------------------------|---------|---------|
@@ -104,14 +105,28 @@ async def _raw(key: str, db_path: str):
 
 
 async def load_lane_settings(db_path: str) -> LaneSettings:
-    """Resolve every lane setting. An invalid value raises (G4: no guessing).
+    """Resolve the lane settings. An invalid value raises (G4: no guessing).
+
+    ``lane_mode`` is read and validated first. When it is ``off`` nothing
+    else is read or validated (no other config row, no other env variable),
+    so a run with the lane off is exactly Phase 1 whatever the other lane
+    settings hold.
 
     Raises:
         LaneError: BRT-LANE-005 for an unknown lane_mode or manifest value,
-            or a limit that is not a valid number.
+            or a limit that is not a valid number (the last two only while
+            the lane is on).
     """
-    values = {}
+    mode_raw = await _raw("lane_mode", db_path)
+    problem = validate_value("lane_mode", mode_raw)
+    if problem:
+        raise LaneError("BRT-LANE-005", f"invalid lane setting: {problem}")
+    if str(mode_raw).strip().lower() == "off":
+        return LaneSettings(mode="off")
+    values = {"lane_mode": mode_raw}
     for key in SETTING_KEYS:
+        if key == "lane_mode":
+            continue
         raw = await _raw(key, db_path)
         problem = validate_value(key, raw) if key != "lane_local_allowlist" else None
         if problem:

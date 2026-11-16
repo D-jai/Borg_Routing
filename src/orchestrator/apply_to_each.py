@@ -129,9 +129,11 @@ def _failure_reason(child: WrappedTask, reason: object) -> object:
     """A raw child's failure as seen upward: code plus document id only."""
     if child.data_scope != "raw":
         return reason
-    from src.lane.context import failure_code_of, failure_of  # noqa: PLC0415
+    from src.lane.context import failure_of, raw_failure_code  # noqa: PLC0415
 
-    return failure_of(failure_code_of(reason), list(child.documents))
+    # The code comes only from a code-shaped match or a fixed code, never
+    # from parsed model text (a JSON "code" may hold document text).
+    return failure_of(raw_failure_code(reason), list(child.documents))
 
 
 async def _dispatch_child(

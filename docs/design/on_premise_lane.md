@@ -86,7 +86,7 @@ Every local call is built with `httpx.AsyncClient(trust_env=False)`, so a `HTTP_
 
 When `lane_mode` is not `off` and the run has documents, **every request body headed for a non-local URL** is checked against the run's loaded document text before it is sent. One helper, `send_outbound()`, owns every such call: the answerer's `_call_model`, the orchestrator's `_post_and_collect`, the Tavily and Perplexity calls in `web_search`, the bypass relay in `chat_completions`, and the thread compressor. A hit refuses the call with `BRT-LANE-006` and nothing is sent.
 
-- **Serialise.** Walk the whole body and join every key and every string value (numbers as text) with newlines into one string. (Not `json.dumps`: its escapes, such as `\n`, would break matches.)
+- **Serialise.** Walk the whole body and join every key and every string value (numbers as text) with newlines into one string. (Not `json.dumps`: its escapes, such as `\n`, would break matches.) A string that itself holds JSON, such as a prompt block built with `json.dumps`, is decoded as well, a few levels deep, and the engine builds those blocks with `ensure_ascii=False`.
 - **Normalise** body and documents alike: Unicode NFKC, casefold, then every run of characters that are not letters or digits (punctuation, whitespace, line breaks) becomes one space.
 - **Flag** when any of these holds for any document of the run (child runs included):
   - (a) **Verbatim:** the body shares a run of `lane_max_verbatim_chars` (default 120) or more consecutive normalised characters with the document.
@@ -99,7 +99,7 @@ When `lane_mode` is not `off` and the run has documents, **every request body he
 Applied to every raw envelope **whatever its status** (success, partial or failed: the output text, each item output and any partial output), before any of it can be placed in another request:
 
 - **Size cap.** Serialised output longer than `lane_max_output_chars` (default 1500): the item fails with `BRT-LANE-004`.
-- **Verbatim guard.** Any run of `lane_max_verbatim_chars` or more characters shared with the source document, after the section 7 normalisation: the item fails with `BRT-LANE-004`.
+- **Verbatim guard.** Any run of `lane_max_verbatim_chars` or more characters shared with the source document, or a short document (section 7 rule c) present whole, after the section 7 serialisation and normalisation (decoded values, never escaped JSON text): the item fails with `BRT-LANE-004`. (Added 16-Nov-2026 after the 2.2 runtime review.)
 - A failed item goes into `failures[]` as code plus id (section 5.4). Its output is not passed on.
 - Both limits are settings, because a false refusal is also a failure. The checks run in code on the local machine; they are not instructions to a model.
 
