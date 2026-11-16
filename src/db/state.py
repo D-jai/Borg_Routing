@@ -121,6 +121,7 @@ async def update_envelope_inbound(
     dollars: Optional[float] = None,
     latency_ms: Optional[int] = None,
     db_path: str = DB_PATH,
+    baseline_dollars: Optional[float] = None,
 ) -> None:
     """Store the inbound envelope payload and mark the envelope completed."""
     async with aiosqlite.connect(db_path) as db:
@@ -132,6 +133,7 @@ async def update_envelope_inbound(
                 tokens_output=?,
                 dollars=?,
                 latency_ms=?,
+                baseline_dollars=?,
                 completed_at=CURRENT_TIMESTAMP
                WHERE envelope_id=?""",
             (
@@ -141,6 +143,7 @@ async def update_envelope_inbound(
                 tokens_output,
                 dollars,
                 latency_ms,
+                baseline_dollars,
                 str(envelope_id),
             ),
         )
@@ -226,25 +229,40 @@ async def resume_run(run_id: UUID, db_path: str = DB_PATH) -> list:
 
 
 async def compute_and_save_digest(run_id: UUID, db_path: str = DB_PATH) -> dict:
-    """Aggregate envelope cost/tokens for a run and persist to run_digests.
+    """Aggregate cost/tokens for a run from its logged calls and persist to run_digests.
 
-    Returns the digest dict: {run_id, summary, cost_dollars, token_count}.
+    Totals are the sums over the run's logged ``model_call`` and
+    ``orchestrator_decision`` rows, so the digest equals what the log shows.
+    The envelope count still comes from the envelopes table.
+
+    Returns the digest dict: {run_id, summary, cost_dollars, token_count,
+    tokens_input, tokens_output, baseline_dollars}.
     Safe to call multiple times — upserts on conflict.
     """
     async with aiosqlite.connect(db_path) as db:
         db.row_factory = aiosqlite.Row
         async with db.execute(
-            """SELECT COUNT(*) as cnt,
-                      COALESCE(SUM(tokens_input), 0) + COALESCE(SUM(tokens_output), 0) AS total_tokens,
-                      COALESCE(SUM(dollars), 0) AS total_cost
-               FROM envelopes WHERE run_id=?""",
+            "SELECT COUNT(*) AS cnt FROM envelopes WHERE run_id=?",
+            (str(run_id),),
+        ) as cur:
+            env_row = await cur.fetchone()
+        async with db.execute(
+            """SELECT COALESCE(SUM(tokens_input), 0) AS tin,
+                      COALESCE(SUM(tokens_output), 0) AS tout,
+                      COALESCE(SUM(dollars), 0) AS total_cost,
+                      COALESCE(SUM(baseline_dollars), 0) AS total_baseline
+               FROM logs
+               WHERE run_id=? AND event_type IN ('model_call','orchestrator_decision')""",
             (str(run_id),),
         ) as cur:
             row = await cur.fetchone()
 
-    envelope_count = row["cnt"] if row else 0
-    token_count = int(row["total_tokens"]) if row else 0
+    envelope_count = env_row["cnt"] if env_row else 0
+    tokens_in_total = int(row["tin"]) if row else 0
+    tokens_out_total = int(row["tout"]) if row else 0
+    token_count = tokens_in_total + tokens_out_total
     cost_dollars = float(row["total_cost"]) if row else 0.0
+    baseline_total = float(row["total_baseline"]) if row else 0.0
 
     summary = (
         f"{envelope_count} envelope(s) dispatched; "
@@ -269,6 +287,9 @@ async def compute_and_save_digest(run_id: UUID, db_path: str = DB_PATH) -> dict:
         "summary": summary,
         "cost_dollars": cost_dollars,
         "token_count": token_count,
+        "tokens_input": tokens_in_total,
+        "tokens_output": tokens_out_total,
+        "baseline_dollars": baseline_total,
     }
 
 

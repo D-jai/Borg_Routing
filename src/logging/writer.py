@@ -52,6 +52,7 @@ async def _write_event_task(
     source_version: Optional[str],
     domain_profile: Optional[str],
     db_path: str,
+    baseline_dollars: Optional[float] = None,
 ) -> None:
     """Internal coroutine that does the actual DB writes.
 
@@ -66,12 +67,12 @@ async def _write_event_task(
                 """INSERT INTO logs(
                     run_id, envelope_id, event_type, model_id,
                     tokens_input, tokens_output, dollars, latency_ms, decision_json,
-                    instance_id, source_version, domain_profile
-                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    instance_id, source_version, domain_profile, baseline_dollars
+                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (
                     run_id, envelope_id, event_type, model_id,
                     tokens_input, tokens_output, dollars, latency_ms, decision_json,
-                    instance_id, source_version, domain_profile,
+                    instance_id, source_version, domain_profile, baseline_dollars,
                 ),
             )
             log_id = cur.lastrowid
@@ -104,6 +105,7 @@ async def write_event(
     payload_in: Optional[str] = None,
     payload_out: Optional[str] = None,
     db_path: str = DB_PATH,
+    baseline_dollars: Optional[float] = None,
 ) -> None:
     """Schedule a non-blocking log write via asyncio.create_task.
 
@@ -118,7 +120,7 @@ async def write_event(
 
     decision_json = json.dumps(decision) if decision is not None else None
 
-    asyncio.create_task(
+    task = asyncio.create_task(
         _write_event_task(
             event_type=event_type,
             run_id=str(run_id) if run_id else None,
@@ -135,5 +137,23 @@ async def write_event(
             source_version=resolve_source_version(),
             domain_profile=resolve_domain_profile(),
             db_path=db_path,
+            baseline_dollars=baseline_dollars,
         )
     )
+    _pending.add(task)
+    task.add_done_callback(_pending.discard)
+
+
+# Log writes in flight. ``flush_pending`` lets a caller that reads the logs
+# back (the run digest) wait until every write it scheduled has landed.
+_pending: set = set()
+
+
+async def flush_pending() -> None:
+    """Wait for all scheduled log writes to finish. Never raises."""
+    loop = asyncio.get_running_loop()
+    for _ in range(10):
+        live = [t for t in _pending if not t.done() and t.get_loop() is loop]
+        if not live:
+            return
+        await asyncio.gather(*live, return_exceptions=True)

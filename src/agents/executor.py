@@ -38,6 +38,7 @@ from src.envelopes.validator import validate_inbound
 from src.logging.writer import write_event
 from src.prompts.answerer import ANSWERER_SYSTEM_PROMPT
 from src.prompts.base import build_system_prompt, load_governance
+from src.registry.cost import price_with_baseline
 from src.registry.model_call import resolve_model_call
 from src.registry.models import ModelInfo
 
@@ -310,6 +311,9 @@ async def _execute_answerer(task: WrappedTask, db_path: str) -> InboundEnvelope:
                     run_id=task.run_id,
                     envelope_id=task.envelope_id,
                     model_id=f"tool:{name}",
+                    # No tool carries a price today; a priced tool would set
+                    # its dollars here. Unpriced means 0.0, never None.
+                    dollars=0.0,
                     latency_ms=r.latency_ms,
                     payload_in=json.dumps({"tool": name, "args": r.args})[:2000],
                     payload_out=(r.error or "")[:2000] if r.status == "failed"
@@ -377,6 +381,13 @@ async def _execute_answerer(task: WrappedTask, db_path: str) -> InboundEnvelope:
 
     latency_ms = int((time.monotonic() - t0) * 1000)
 
+    # Work order 1.6 — dollars from the serving model's prices (0.0 when it
+    # has none) and the same tokens at the baseline model's prices. Tokens
+    # already include both attempts of a truncation retry.
+    dollars, baseline_dollars = await price_with_baseline(
+        model_for_call, tokens_in, tokens_out, db_path
+    )
+
     # BRT-ANS-009 — even with the doubled-cap retry, the response still
     # got cut off by the cap. Surface a distinct failure code so operators
     # see "the cap is too small for this task" instead of the misleading
@@ -414,6 +425,8 @@ async def _execute_answerer(task: WrappedTask, db_path: str) -> InboundEnvelope:
             model_id=task.model_name,
             tokens_input=tokens_in,
             tokens_output=tokens_out,
+            dollars=dollars,
+            baseline_dollars=baseline_dollars,
             latency_ms=latency_ms,
             payload_out=content[:2000],
             decision={
@@ -448,6 +461,8 @@ async def _execute_answerer(task: WrappedTask, db_path: str) -> InboundEnvelope:
             model_id=task.model_name,
             tokens_input=tokens_in,
             tokens_output=tokens_out,
+            dollars=dollars,
+            baseline_dollars=baseline_dollars,
             latency_ms=latency_ms,
             payload_out=content[:2000],
             db_path=db_path,
@@ -495,10 +510,6 @@ async def _execute_answerer(task: WrappedTask, db_path: str) -> InboundEnvelope:
     if env.scratch_cleanup:
         await apply_cleanup_directives(task.run_id, env.scratch_cleanup, db_path=db_path)
 
-    # Compute cost
-    dollars: Optional[float] = None
-    # (Cost computed by pipeline runner once model pricing is resolved)
-
     # Log model_call event (fire-and-forget)
     await write_event(
         "model_call",
@@ -508,6 +519,7 @@ async def _execute_answerer(task: WrappedTask, db_path: str) -> InboundEnvelope:
         tokens_input=tokens_in,
         tokens_output=tokens_out,
         dollars=dollars,
+        baseline_dollars=baseline_dollars,
         latency_ms=latency_ms,
         payload_in=system_prompt[:2000],
         payload_out=content[:2000],

@@ -67,6 +67,7 @@ from src.orchestrator.fold_in import fold_in
 from src.prompts.base import build_system_prompt, load_governance
 from src.prompts.orchestrator import ORCHESTRATOR_SYSTEM_PROMPT
 from src.registry.capability_matrix import CapabilityMatrix
+from src.registry.cost import price_with_baseline
 from src.registry.model_call import resolve_model_call
 from src.registry.models import ModelInfo
 from src.registry.node_router import (
@@ -725,6 +726,12 @@ async def _invoke_orchestrator_model(
     except ValueError as exc:
         parse_error = exc
 
+    # Work order 1.6 — price the call(s) behind this event. tokens_in/out
+    # already sum both attempts when a length retry happened.
+    dollars, baseline_dollars = await price_with_baseline(
+        orchestrator_model, tokens_in, tokens_out, db_path
+    )
+
     try:
         await write_event(
             "orchestrator_decision",
@@ -732,6 +739,8 @@ async def _invoke_orchestrator_model(
             model_id=orchestrator_model.model_id,
             tokens_input=tokens_in,
             tokens_output=tokens_out,
+            dollars=dollars,
+            baseline_dollars=baseline_dollars,
             latency_ms=latency_ms,
             decision={
                 "mode": mode,
@@ -785,6 +794,10 @@ async def _invoke_orchestrator_model(
     except ValueError as exc:
         retry_error = exc
 
+    dollars_retry, baseline_retry = await price_with_baseline(
+        orchestrator_model, tokens_in_retry, tokens_out_retry, db_path
+    )
+
     try:
         await write_event(
             "orchestrator_decision",
@@ -792,6 +805,8 @@ async def _invoke_orchestrator_model(
             model_id=orchestrator_model.model_id,
             tokens_input=tokens_in_retry,
             tokens_output=tokens_out_retry,
+            dollars=dollars_retry,
+            baseline_dollars=baseline_retry,
             latency_ms=latency_retry,
             decision={
                 "mode": mode,
@@ -1487,7 +1502,24 @@ async def orchestrate_run(
                     failure_reason=f"BRT-ORC-004: {exc}",
                 )
             try:
-                await update_envelope_inbound(task.envelope_id, env, db_path=db_path)
+                # Work order 1.6 — token counts and dollars on the envelope row.
+                tok_in = env.tokens_used.get("input") if env.tokens_used else None
+                tok_out = env.tokens_used.get("output") if env.tokens_used else None
+                env_dollars = env_baseline = None
+                if tok_in is not None or tok_out is not None:
+                    env_dollars, env_baseline = await price_with_baseline(
+                        _get_matrix().get(task.model_name or ""),
+                        tok_in, tok_out, db_path,
+                    )
+                await update_envelope_inbound(
+                    task.envelope_id,
+                    env,
+                    tokens_input=tok_in,
+                    tokens_output=tok_out,
+                    dollars=env_dollars,
+                    baseline_dollars=env_baseline,
+                    db_path=db_path,
+                )
             except Exception as exc:
                 try:
                     await write_event(

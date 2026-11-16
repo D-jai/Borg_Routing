@@ -214,13 +214,30 @@ async def run_pipeline(
     except Exception:
         envelope_count = 0
 
-    # Fire-and-forget digest at completion
+    # Digest at completion. Totals come from the logged rows, so wait for the
+    # fire-and-forget log writes first.
+    usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+    cost_dollars = 0.0
+    baseline_dollars = 0.0
     try:
-        await compute_and_save_digest(run_id, db_path=db_path)
+        from src.logging.writer import flush_pending  # noqa: PLC0415
+
+        await flush_pending()
+        digest = await compute_and_save_digest(run_id, db_path=db_path)
+        usage = {
+            "prompt_tokens": digest["tokens_input"],
+            "completion_tokens": digest["tokens_output"],
+            "total_tokens": digest["token_count"],
+        }
+        cost_dollars = digest["cost_dollars"]
+        baseline_dollars = digest["baseline_dollars"]
     except Exception:
         pass
 
     return {
+        "usage": usage,
+        "cost_dollars": cost_dollars,
+        "baseline_dollars": baseline_dollars,
         "run_id": str(run_id),
         "response": response,
         "status": status,

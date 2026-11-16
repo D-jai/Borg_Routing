@@ -108,6 +108,30 @@ where every second of latency costs you real money. Both settings can be
 changed live from **Admin UI → Settings** — the next run reads the new
 value with no restart.
 
+### Where cost appears and how it is computed
+Every model call (each step, and the orchestrator's plan, re-plan and compose
+calls) is logged with its token counts and its **dollars**:
+
+`dollars = input tokens x the model's input price + output tokens x its output price`
+
+The prices come from the capability-matrix row of the model that served the call.
+A model with no pricing (a local model) costs `0.0`, and so does a model the
+matrix does not know; the call is never left blank. A call that was retried
+after being cut off counts the tokens of both attempts. The tools do not carry
+a price today, so tool calls log `0.0`.
+
+- **Run total:** the run digest (`run_digests`, shown in the run's cost summary)
+  is the sum of the logged calls' dollars and tokens, so it always matches the log.
+- **Reply:** the `usage` block of the chat reply (`prompt_tokens`,
+  `completion_tokens`, `total_tokens`) is the run's total across every call.
+  Streamed replies and direct-to-model requests do not report usage yet.
+- **Baseline (an estimate):** each call also stores `baseline_dollars`, the same
+  tokens priced as if the baseline model had done the work. This is what the
+  savings comparison uses. It is an estimate: the baseline model might have
+  needed more or fewer tokens, so treat the gap as indicative. The baseline is
+  the checked model with the highest `reasoning` score; set `baseline_model_id`
+  (Admin config) or `BASELINE_MODEL_ID` in `.env` to pick another.
+
 ### How each step gets its model
 The planner and the final answer use the orchestrator model (the quality
 bar above). The planner is shown only the models that are ticked in the

@@ -493,4 +493,13 @@ async def chat_completions(request: Request):
     else:
         response_text = result["response"]
 
-    return JSONResponse(content=_build_openai_response(run_id, model_alias, response_text))
+    usage = result.get("usage") or {}
+    return JSONResponse(
+        content=_build_openai_response(
+            run_id,
+            model_alias,
+            response_text,
+            prompt_tokens=int(usage.get("prompt_tokens", 0)),
+            completion_tokens=int(usage.get("completion_tokens", 0)),
+        )
+    )

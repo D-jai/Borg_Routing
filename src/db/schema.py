@@ -36,6 +36,9 @@ _MIGRATIONS = [
     "ALTER TABLE log_relations ADD COLUMN instance_id TEXT",
     "ALTER TABLE log_relations ADD COLUMN confidence REAL DEFAULT 1.0",
     "ALTER TABLE log_relations ADD COLUMN provenance TEXT",
+    # Work order 1.6 — what the same tokens would have cost on the baseline model.
+    "ALTER TABLE logs ADD COLUMN baseline_dollars NUMERIC",
+    "ALTER TABLE envelopes ADD COLUMN baseline_dollars NUMERIC",
 ]
 
 _SCHEMA_SQL = """
@@ -82,7 +85,8 @@ CREATE TABLE IF NOT EXISTS envelopes (
     dollars NUMERIC,
     latency_ms INTEGER,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    completed_at TIMESTAMP
+    completed_at TIMESTAMP,
+    baseline_dollars NUMERIC
 );
 
 CREATE TABLE IF NOT EXISTS scratch (
@@ -110,7 +114,8 @@ CREATE TABLE IF NOT EXISTS logs (
     dollars NUMERIC,
     latency_ms INTEGER,
     decision_json TEXT,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    baseline_dollars NUMERIC
 );
 CREATE INDEX IF NOT EXISTS idx_logs_run ON logs(run_id);
 CREATE INDEX IF NOT EXISTS idx_logs_event_type ON logs(event_type);

@@ -9,7 +9,108 @@ Unified formula works for local, external, and mixed setups:
 Error codes:
 - BRT-REG-013: zero or negative throughput_tps on a local model
 """
+import os
+from typing import Optional
+
 from .models import ModelInfo
+
+# Config key (and env fallback BASELINE_MODEL_ID) that pins the baseline model.
+BASELINE_CONFIG_KEY = "baseline_model_id"
+
+
+def call_dollars(
+    model: Optional[ModelInfo],
+    tokens_in: Optional[int],
+    tokens_out: Optional[int],
+) -> float:
+    """Dollars one call cost: tokens at the serving model's per-token prices.
+
+    0.0 for a model with no pricing (local), an unknown model (None), or
+    missing token counts. Never raises.
+    """
+    if model is None or model.pricing is None:
+        return 0.0
+    return (
+        (tokens_in or 0) * model.pricing.input_per_token
+        + (tokens_out or 0) * model.pricing.output_per_token
+    )
+
+
+def select_baseline_model(matrix, configured_id: Optional[str] = None) -> Optional[ModelInfo]:
+    """The model a run is compared against: "what if the best model did every call".
+
+    ``configured_id`` (when it names a row in the matrix) wins. Otherwise the
+    checked model with the highest ``reasoning`` score; ties go to the
+    lexicographically smaller id so the choice is stable. None if no checked
+    row exists.
+    """
+    if configured_id:
+        row = matrix.get(configured_id)
+        if row is not None:
+            return row
+    checked = [m for m in matrix.all() if m.checked]
+    if not checked:
+        return None
+    return max(
+        checked,
+        key=lambda m: (m.task_scores.get("reasoning", 0.0), [-ord(c) for c in m.model_id]),
+    )
+
+
+async def resolve_baseline_model(matrix, db_path: str) -> Optional[ModelInfo]:
+    """Baseline model using config key ``baseline_model_id``, then env
+    ``BASELINE_MODEL_ID``, then the highest-reasoning checked model.
+
+    Shared by cost recording (1.6) and the routing record (1.5).
+    """
+    from src.db.state import get_config  # noqa: PLC0415 - avoid import cycle
+
+    configured = None
+    try:
+        configured = await get_config(BASELINE_CONFIG_KEY, db_path=db_path)
+    except Exception:
+        configured = None
+    if not configured:
+        configured = os.getenv("BASELINE_MODEL_ID") or None
+    return select_baseline_model(matrix, str(configured) if configured else None)
+
+
+def price_call(
+    model: Optional[ModelInfo],
+    baseline: Optional[ModelInfo],
+    tokens_in: Optional[int],
+    tokens_out: Optional[int],
+) -> tuple[float, Optional[float]]:
+    """(dollars, baseline_dollars) for one call. baseline_dollars is None when
+    there is no baseline model to compare against."""
+    dollars = call_dollars(model, tokens_in, tokens_out)
+    baseline_dollars = None if baseline is None else call_dollars(baseline, tokens_in, tokens_out)
+    return dollars, baseline_dollars
+
+
+async def price_with_baseline(
+    model: Optional[ModelInfo],
+    tokens_in: Optional[int],
+    tokens_out: Optional[int],
+    db_path: str,
+    matrix=None,
+) -> tuple[float, Optional[float]]:
+    """``price_call`` with the baseline looked up from the shared matrix.
+
+    Never raises: any failure to find a baseline leaves baseline_dollars None
+    and the call's own dollars still computed.
+    """
+    baseline = None
+    try:
+        if matrix is None:
+            from src.orchestrator.engine import _get_matrix  # noqa: PLC0415
+
+            matrix = _get_matrix()
+        baseline = await resolve_baseline_model(matrix, db_path)
+    except Exception:
+        baseline = None
+    return price_call(model, baseline, tokens_in, tokens_out)
+
 
 # Primary: single developer running locally (electricity + modest respect for
 # wait time). Override: TIME_COST_PER_SEC env var, or Admin UI → time-cost

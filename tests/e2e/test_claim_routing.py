@@ -94,7 +94,6 @@ async def test_every_step_is_told_the_operators_exact_instruction(finished_run):
         )
 
 
-@pytest.mark.xfail(strict=True, reason="work order 1.6: cost per call is not recorded yet")
 @pytest.mark.asyncio
 async def test_every_model_call_is_priced_and_the_run_total_is_their_sum(finished_run):
     _stub, result, db_path = finished_run
