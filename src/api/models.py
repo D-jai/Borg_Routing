@@ -39,6 +39,12 @@ def get_matrix(request: Request) -> CapabilityMatrix:
     return request.app.state.matrix if hasattr(request.app.state, "matrix") else _get_main_matrix()
 
 
+def _share_with_engine(matrix: CapabilityMatrix) -> None:
+    """R2: after a change, make sure the engine routes on this matrix object."""
+    from src.orchestrator.engine import reload_matrix  # noqa: PLC0415
+    reload_matrix(matrix)
+
+
 def _get_main_matrix() -> CapabilityMatrix:
     """Fallback: import the singleton from main.py."""
     from main import matrix  # noqa: PLC0415
@@ -103,6 +109,7 @@ async def discover_models(matrix: CapabilityMatrix = Depends(get_matrix)):
     try:
         count = await discover_all(matrix, openrouter_key=openrouter_key)
         matrix.save()
+        _share_with_engine(matrix)
         return DiscoverResponse(upserted=count)
     except Exception as exc:
         logger.error("Discovery failed: %s", exc)
@@ -134,6 +141,7 @@ async def research_models_endpoint(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     matrix.save()
+    _share_with_engine(matrix)
     return ResearchResponse(scored=list(scored.keys()))
 
 
@@ -159,12 +167,12 @@ async def set_model_checked(
     matrix.set_checked(model_id, body.checked)
     matrix.save()
 
-    # BUG-023 — drop the engine cache so the next route reads fresh state.
+    # BUG-023 / R2 — point the engine at this matrix so the next route sees it.
     # Local import to avoid a top-level cycle (engine imports from many
     # registry modules; the API router is wired in main after engine).
     try:
         from src.orchestrator.engine import reload_matrix  # noqa: PLC0415
-        reload_matrix()
+        reload_matrix(matrix)
     except Exception as exc:
         logger.warning(
             "BUG-023: failed to invalidate orchestrator matrix cache after "

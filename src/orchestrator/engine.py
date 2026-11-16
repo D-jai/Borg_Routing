@@ -101,19 +101,25 @@ def _get_matrix() -> CapabilityMatrix:
     return _shared_matrix
 
 
-def reload_matrix() -> None:
-    """Invalidate the orchestrator's in-memory matrix cache.
+def reload_matrix(matrix: Optional[CapabilityMatrix] = None) -> None:
+    """Make the engine see the API's capability matrix (R2, BUG-023).
 
-    BUG-023 — operators flipping the `checked` flag via `PATCH /models/.../checked`
-    were seeing the change in `GET /models/matrix` immediately, but the
-    orchestrator engine kept routing to the old set until uvicorn restart
-    because `_shared_matrix` was loaded once at first call and never
-    re-read. Calling this from the PATCH handler forces the next router
-    request to reload from `data/capability_matrix.yaml` (the source of
-    truth that PATCH writes to). Cheap because the file is tiny.
+    The API (Discover, Get Model Info, the checkbox) and the engine must work
+    on one matrix object, or a change made in the UI is not routed until a
+    restart. ``main.py`` hands the engine its matrix at start-up; after each
+    change the API calls this with its own object, so the two stay one even if
+    something replaced the engine's copy. With no argument the shared object is
+    re-read from its YAML file in place (it is never swapped for a second copy).
     """
     global _shared_matrix
-    _shared_matrix = None
+    if matrix is not None:
+        _shared_matrix = matrix
+        return
+    if _shared_matrix is not None:
+        try:
+            _shared_matrix.load()
+        except Exception:
+            pass
 
 
 def _get_skill_lib() -> SkillLibrary:

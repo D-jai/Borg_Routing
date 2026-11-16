@@ -83,6 +83,7 @@ the operator opts models into the pool explicitly.
 2. Tick the checkbox next to each model you want the orchestrator to be able to pick today. Typical: 3-6 total.
 3. Unchecking removes a model from the pool immediately. Scores are preserved — re-ticking restores instantly.
 4. State persists in `data/capability_matrix.yaml`; it survives restarts.
+5. Discover Models, Get Model Info and the checkboxes all change the one matrix the router uses, so the next run sees them with no restart.
 
 ### If something goes wrong
 - **"BRT-REG-020: no model found"** — No row is checked, or none meets the quality bar. Tick at least one row that has been researched.

@@ -17,6 +17,12 @@ load_dotenv()
 # Shared capability matrix — loaded at startup, reused by all API handlers.
 matrix = CapabilityMatrix()
 
+# The engine routes on this same object, so Discover, Get Model Info and the
+# checkbox take effect on the next run without a restart (R2).
+from src.orchestrator.engine import reload_matrix as _share_matrix  # noqa: E402
+
+_share_matrix(matrix)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):

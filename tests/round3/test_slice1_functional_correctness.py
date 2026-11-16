@@ -20,16 +20,21 @@ from src.envelopes.schema import InboundEnvelope
 # BUG-023 — router cache invalidation
 # ============================================================
 
-def test_reload_matrix_resets_cache():
-    """TC-BUG-023-A — reload_matrix() drops the cached _shared_matrix
-    so the next _get_matrix() call re-reads from YAML."""
+def test_reload_matrix_keeps_one_shared_object():
+    """TC-BUG-023-A (R2) — reload_matrix() adopts the API's matrix object, and
+    with no argument re-reads the shared one in place (never a second copy)."""
     from src.orchestrator import engine as engine_mod
+    from src.registry.capability_matrix import CapabilityMatrix
 
-    sentinel = object()
-    engine_mod._shared_matrix = sentinel  # type: ignore[assignment]
-
-    engine_mod.reload_matrix()
-    assert engine_mod._shared_matrix is None
+    original = engine_mod._shared_matrix
+    try:
+        mine = CapabilityMatrix()
+        engine_mod.reload_matrix(mine)
+        assert engine_mod._get_matrix() is mine
+        engine_mod.reload_matrix()
+        assert engine_mod._get_matrix() is mine
+    finally:
+        engine_mod._shared_matrix = original
 
 
 @pytest.mark.asyncio
