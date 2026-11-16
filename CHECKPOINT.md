@@ -13,15 +13,16 @@ Build under way, run by the lead session (`borg-route-f1`, Opus 5.5) since 02:20
 | 1.5, 1.6, 1.7 (+R14), 1.8, 1.9 | Done and reviewed (see build log) |
 | 1.10 Check 1 | **Blocked** (two failed attempts, US$0.07 spent). See "Blocked" and "Needs planner" below |
 | 2.1 on-premise lane design | Done: attacked by a fresh reviewer (24 findings), revised `8dee12c`, `13a1799` |
-| 2.2, 2.3 lane build and privacy test | Built and fixed after two fresh reviews (fixes `147d505`, `5146b3a`, `0e2f2f2`); full suite **871 passed** (Phase 2 phase-end run). Second-round review in progress |
+| 2.2, 2.3 lane build and privacy test | **Done** after two review rounds (Check 2). Full suite **919 passed** at `99bba7d` |
 | 4.1 shared interface assets | Done and reviewed |
 | 5.7 MCP | Done and reviewed |
-| 4.3 Admin pages | Built (`760dbf1`, `c4d9f8c`, `5ea2835`, `c2f7498`); review fixes in progress (builder) |
+| 4.3 Admin pages | Done after two review rounds |
+| 4.4 Admin lock | In progress |
 | Everything else | Open |
 
 If this session stopped abruptly: `git log` and `git status` show what landed; any uncommitted changes in `src/` or `ui/` belong to the in-progress builders above: read the diff, finish or stash it, record which in the build log.
 
-**Next action for the lead:** 2.2/2.3 and 4.1; then 4.3, 4.4 (need no proof results). Check 1 waits for the planner's answer. A 5-hour usage limit stopped agents at about 07:00 on 16-Nov-2026; it reset at 07:10.
+**Next action for the lead:** 4.4 (admin lock; also wire `/logs/entities` and `/logs/export` into `lane_admin_allowed`), then 5.2 parts that need no replay, 5.3. Work that needs proof results (3.x, 4.2 receipt numbers, 4.5 replay, 5.1 README numbers, 6.1 deck numbers) waits for Check 1, which waits for the planner's answer. A 5-hour usage limit stopped agents at about 07:00 on 16-Nov-2026; it reset at 07:10.
 
 ## Start the build (Deej)
 
