@@ -401,6 +401,16 @@ sub-task and is governed by the top-level run's instruction.
 
 ---
 
+## Reading why each step used its model
+
+`GET /runs/{run_id}` returns `run`, `envelopes` and `events`. Each envelope (one per step) now carries:
+
+- `routing`: why the step went to its model. It holds `chosen`, `reason` (`routed`, `planner_pick` or `fallback_default`), `task_type`, `tier`, `floor`, `candidates` (the models that cleared the floor, cheapest first, each with a score and `est_cost`), `baseline` (the model the run is compared against: the best-reasoning checked model, or the one set by the `baseline_model_id` config key / `BASELINE_MODEL_ID`) and `baseline_est_cost`. `baseline_est_cost` is an estimate: the step's estimated input and output tokens priced at the baseline model's prices, not what a real call cost. It is `null` for an envelope that was not routed (or whose route record is missing).
+- `dollars`: what the step's call actually cost.
+- `latency_ms`: how long the step took, in milliseconds.
+
+---
+
 ## Multi-turn Conversations (Threads)
 
 BORG_ROUTE tracks conversation history in **threads**. Each thread stores the sequence of user and assistant messages. When a new run is created within a thread, the last N messages are passed to the orchestrator as context, enabling coherent multi-turn conversations.

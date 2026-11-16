@@ -67,7 +67,7 @@ from src.orchestrator.fold_in import fold_in
 from src.prompts.base import build_system_prompt, load_governance
 from src.prompts.orchestrator import ORCHESTRATOR_SYSTEM_PROMPT
 from src.registry.capability_matrix import CapabilityMatrix
-from src.registry.cost import price_with_baseline
+from src.registry.cost import call_dollars, price_with_baseline, resolve_baseline_model
 from src.registry.model_call import resolve_model_call
 from src.registry.models import ModelInfo
 from src.registry.node_router import (
@@ -897,6 +897,23 @@ async def _log_route(
     chosen = decision.get("chosen")
     reason = decision.get("reason")
     try:
+        # Work order 1.5 - what the same step would cost on the baseline model.
+        decision = dict(decision)
+        baseline = await resolve_baseline_model(_get_matrix(), db_path)
+        decision["baseline"] = baseline.model_id if baseline else None
+        decision["baseline_est_cost"] = (
+            call_dollars(
+                baseline,
+                decision.get("est_input_tokens"),
+                decision.get("est_output_tokens"),
+            )
+            if baseline
+            else None
+        )
+    except Exception:
+        decision.setdefault("baseline", None)
+        decision.setdefault("baseline_est_cost", None)
+    try:
         await write_event(
             "orchestrator_decision",
             run_id=run_id,
@@ -1491,6 +1508,7 @@ async def orchestrate_run(
                     )
                 except Exception:
                     pass
+            t_start = time.monotonic()
             try:
                 env = await execute(task, db_path=db_path)
             except Exception as exc:
@@ -1517,6 +1535,7 @@ async def orchestrate_run(
                     tokens_input=tok_in,
                     tokens_output=tok_out,
                     dollars=env_dollars,
+                    latency_ms=int((time.monotonic() - t_start) * 1000),
                     baseline_dollars=env_baseline,
                     db_path=db_path,
                 )

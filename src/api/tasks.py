@@ -220,6 +220,21 @@ async def get_run_state(run_id: str) -> JSONResponse:
     except Exception:
         pass
 
+    # Work order 1.5 - each envelope carries why its model was chosen.
+    # Only a routed step has a route event; any other envelope gets null.
+    routes: dict[str, dict] = {}
+    for ev in events:
+        if ev.get("event_type") != "orchestrator_decision" or not ev.get("envelope_id"):
+            continue
+        try:
+            decision = json.loads(ev.get("decision_json") or "null")
+        except (TypeError, ValueError):
+            continue
+        if isinstance(decision, dict) and decision.get("mode") == "route":
+            routes[ev["envelope_id"]] = decision
+    for env in envelopes:
+        env["routing"] = routes.get(env.get("envelope_id"))
+
     return JSONResponse(content={
         "run": run,
         "envelopes": envelopes,
