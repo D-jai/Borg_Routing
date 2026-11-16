@@ -663,6 +663,8 @@ become worth the cost — nothing else in the pipeline depends on it.
 - Within one plan, steps run in waves until none is ready; only then does the planner re-plan. A step that waits on another step of the plan (through `inputs_ref`, a skill's `items_ref`, `source` or `depends_on`) runs in the same plan once that step finishes.
 - Steps that wait on each other in a loop (n1 reads n2 and n2 reads n1) can never run: they fail with BRT-ORC-024 before re-planning, the message names the loop, and no model is called.
 - A step that takes its items from a step that failed fails with BRT-APE-005, naming that step, and makes no model call.
+- If a step that a later step `depends_on` failed (including one that failed in a loop, BRT-ORC-024), the later step fails with BRT-ORC-025 before any model is called, naming the failed step, so a chain of dependent steps stops costing money at the first failure.
+- When a step has no id, it gets one no other step in the run has used, so a step added at re-planning always runs and keeps its own result. Ids the planner writes are kept exactly as written.
 - A list can be given in place of a ref: `inputs_ref`, `items_ref` or `failed_items_ref` written as a list of strings is the step's items. An empty list fails with BRT-APE-005; a number or an object fails with BRT-APE-006.
 - A ref names a step of this run only. A child run (an `orchestrate` step) cannot name its parent's steps.
 - `documents` names the run's documents only while the on-premise lane is on; with the lane off it is an ordinary step id.
