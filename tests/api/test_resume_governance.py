@@ -118,6 +118,23 @@ async def test_resume_reuses_the_alias_the_run_started_with(db, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_resuming_a_child_run_reuses_its_roots_alias(db, monkeypatch):
+    # Child runs never store an alias of their own; resume must find the root's.
+    alias = {"alias": "borg_route:light", "tier": "light"}
+    root_id = await create_run(OPERATOR, db_path=db, route_options=alias)
+    child_id = await create_run("Work out which contract is at risk.",
+                                parent_run_id=root_id, db_path=db)
+    await _save_pre_fix_step(child_id, db)
+    plan = [{"type": "answerer", "id": "c1", "instruction": RE_RUN_STEP,
+             "task_type": "extraction", "tier": "heavy", "output_schema": {"result": "string"}}]
+    stub = StubModels(plan_nodes=plan).install(monkeypatch)
+
+    await _resume(child_id)
+
+    assert {r.model for r in stub.of_kind("answerer")} == {"stub/cheap"}
+
+
+@pytest.mark.asyncio
 async def test_resume_of_a_run_without_an_alias_routes_as_planned(db, monkeypatch):
     run_id = await create_run(OPERATOR, db_path=db)
     await _save_pre_fix_step(run_id, db)
