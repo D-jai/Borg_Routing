@@ -36,7 +36,11 @@ MIN_PRICED_MODELS = 3
 PROMPT = (
     "From the 12 short product reviews below, extract product and sentiment for "
     "each, write a Python function that tallies them, and recommend which "
-    "product to stock.\n\n"
+    "product to stock.\n"
+    "I need three separate deliverables: (1) a JSON list with one "
+    "{product, sentiment} object per review; (2) a Python module with a "
+    "tally function and a docstring; (3) a short written recommendation "
+    "with reasons.\n\n"
     "1. Brewmaster kettle: boils fast and looks great, love it.\n"
     "2. Brewmaster kettle: the lid cracked after two weeks, very disappointed.\n"
     "3. Brewmaster kettle: does the job, nothing special.\n"
