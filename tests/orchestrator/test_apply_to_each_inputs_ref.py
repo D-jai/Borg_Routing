@@ -89,11 +89,11 @@ async def test_empty_items_raises_005(db):
     assert env.output["success_count"] == 0
 
 
-def test_inputs_ref_unknown_falls_through_to_001():
+def test_inputs_ref_unknown_runs_once_over_the_operators_input():
     """TC-APE-012 — inputs_ref references a node not in results; node has
-    no inline items. Built task still has empty items; expand_and_run
-    surfaces BRT-APE-005 (empty list is what the orchestrator will see,
-    which is visible rather than silent)."""
+    no inline items. Since the Check 1 ruling (16-Nov-2026) the step is
+    built as one answerer task over the operator's input, never a silent
+    empty fan-out (BRT-ORC-024; the dispatch loop logs it)."""
     node = {
         "type": "apply_to_each",
         "id": "n2",
@@ -115,7 +115,9 @@ def test_inputs_ref_unknown_falls_through_to_001():
         results=results,
     )
 
-    # dependency_input.items remains empty — downstream _resolve_items will
-    # raise BRT-APE-005 which surfaces as a failed envelope.
-    assert task.dependency_input["items"] == []
-    assert task.dependency_input["inputs_ref"] == "does_not_exist"
+    assert task.type == "answerer"
+    assert task.instruction.endswith(": x")
+    assert task.context.startswith("root prompt")
+    assert task.governance_instruction == "root prompt"
+    assert task.output_schema == {"results": [{"ok": "bool"}]}
+    assert task.dependency_input == {"_unresolved_inputs_ref": "does_not_exist"}
