@@ -13,8 +13,10 @@ Build under way, run by the lead session (`borg-route-f1`, Opus 5.5) since 02:20
 | 1.5, 1.6, 1.7 (+R14), 1.8, 1.9 | Done and reviewed (see build log) |
 | 1.10 Check 1 | **Blocked** (two failed attempts, US$0.07 spent). See "Blocked" and "Needs planner" below |
 | 2.1 on-premise lane design | Done: attacked by a fresh reviewer (24 findings), revised `8dee12c`, `13a1799` |
-| 2.2, 2.3 lane build and privacy test | In progress (they depend on Phase 1's code, which is done) |
-| 4.1 shared interface assets | In progress |
+| 2.2, 2.3 lane build and privacy test | Built and fixed after two fresh reviews (fixes `147d505`, `5146b3a`, `0e2f2f2`); full suite **871 passed** (Phase 2 phase-end run). Second-round review in progress |
+| 4.1 shared interface assets | Done and reviewed |
+| 5.7 MCP | Done and reviewed |
+| 4.3 Admin pages | Built (`760dbf1`, `c4d9f8c`, `5ea2835`, `c2f7498`); review fixes in progress (builder) |
 | Everything else | Open |
 
 If this session stopped abruptly: `git log` and `git status` show what landed; any uncommitted changes in `src/` or `ui/` belong to the in-progress builders above: read the diff, finish or stash it, record which in the build log.
@@ -79,7 +81,7 @@ Standing permissions: local commits on `showcase`; pushes of `showcase` to the p
 
 ## Blocked
 
-- **1.10 Check 1 (16-Nov-2026).** Both live runs (temp DBs `borg_smoke_vksjf2ab`, `borg_smoke_uegi1bfr` under `%TEMP%`) failed the same way: the planner points an `apply_to_each` (attempt 1: `inputs_ref: "reviews"`) or a skill step (attempt 2: `extract_fields` with `items_ref: "reviews_list"`) at a list that exists only inside the operator's message. Nothing resolves it, the step runs no model, its dependants never run, and re_plan composes the whole answer on the planner model. Routing per step works (route decisions chose `gpt-5.4-nano` for the extraction step); the steps just never get their items.
+- **1.10 Check 1 (16-Nov-2026).** Both live runs (temp DBs `borg_smoke_vksjf2ab`, `borg_smoke_uegi1bfr` under `%TEMP%`) failed the same way: the planner points an `apply_to_each` (attempt 1: `inputs_ref: "reviews"`) or a skill step (attempt 2: `extract_fields` with `items_ref: "reviews_list"`) at a list that exists only inside the operator's message. Nothing resolves it, the step runs no model, its dependants never run, and re_plan composes the whole answer on the planner model. Routing per step works (route decisions chose `gpt-5.4-nano` for the extraction step); the steps just never get their items. **When resuming:** `scripts/smoke_live.py` must check its cheap models (`deepseek-v3.2`, `gpt-5.4-nano`, both live on OpenRouter) in a temporary copy of the matrix; the shipped `data/capability_matrix.yaml` keeps only the two cold-start defaults checked (`tests/registry/test_cold_start_defaults.py`).
 
 ## Needs Deej
 
