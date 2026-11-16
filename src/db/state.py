@@ -25,11 +25,13 @@ async def create_run(
     run_id: Optional[UUID] = None,
     kind: str = "orchestrated",
     route_options: Optional[dict] = None,
+    documents: Optional[list] = None,
 ) -> UUID:
     """Insert a new run record with status=pending. Returns the new run_id.
 
     ``run_id`` is for a caller that already issued the id (a bypass request);
-    omit it to get a fresh one.
+    omit it to get a fresh one. ``documents`` is the manifest of a run that
+    reads documents (on-premise lane); such a run is never resumed.
 
     BRT-LOG-DB-COMPAT — also stamps instance_id so The_Borg_DB can tell
     apart runs from different devices when aggregated via hive-collective.
@@ -40,21 +42,39 @@ async def create_run(
 
     run_id = run_id or uuid4()
     async with aiosqlite.connect(db_path) as db:
-        await db.execute(
-            """INSERT INTO runs(
-                run_id, parent_run_id, thread_id, status, user_instruction, instance_id, kind,
-                route_options
-            ) VALUES (?, ?, ?, 'pending', ?, ?, ?, ?)""",
-            (
-                str(run_id),
-                str(parent_run_id) if parent_run_id else None,
-                thread_id,
-                user_instruction,
-                resolve_instance_id(),
-                kind,
-                json.dumps(route_options) if route_options else None,
-            ),
-        )
+        if documents:
+            await db.execute(
+                """INSERT INTO runs(
+                    run_id, parent_run_id, thread_id, status, user_instruction, instance_id,
+                    kind, route_options, documents
+                ) VALUES (?, ?, ?, 'pending', ?, ?, ?, ?, ?)""",
+                (
+                    str(run_id),
+                    str(parent_run_id) if parent_run_id else None,
+                    thread_id,
+                    user_instruction,
+                    resolve_instance_id(),
+                    kind,
+                    json.dumps(route_options) if route_options else None,
+                    json.dumps(documents),
+                ),
+            )
+        else:
+            await db.execute(
+                """INSERT INTO runs(
+                    run_id, parent_run_id, thread_id, status, user_instruction, instance_id,
+                    kind, route_options
+                ) VALUES (?, ?, ?, 'pending', ?, ?, ?, ?)""",
+                (
+                    str(run_id),
+                    str(parent_run_id) if parent_run_id else None,
+                    thread_id,
+                    user_instruction,
+                    resolve_instance_id(),
+                    kind,
+                    json.dumps(route_options) if route_options else None,
+                ),
+            )
         await db.commit()
     return run_id
 
@@ -281,6 +301,53 @@ async def get_descendant_run_ids(run_id: UUID, db_path: str = DB_PATH) -> list[s
         ) as cur:
             rows = await cur.fetchall()
     return [r[0] for r in rows]
+
+
+async def get_outbound_requests(
+    run_id, db_path: str = DB_PATH, left_machine_only: bool = True
+) -> list[dict]:
+    """On-premise lane: "what left this machine" for a run and every
+    descendant run (via parent_run_id), oldest first. Each row holds the exact
+    body that was sent. ``left_machine_only=False`` adds the local calls."""
+    where = "AND left_machine = 1" if left_machine_only else ""
+    async with aiosqlite.connect(db_path) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            f"""WITH RECURSIVE tree(run_id) AS (
+                   SELECT ?
+                   UNION
+                   SELECT r.run_id FROM runs r JOIN tree t ON r.parent_run_id = t.run_id
+               )
+               SELECT * FROM outbound_requests
+               WHERE run_id IN (SELECT run_id FROM tree) {where}
+               ORDER BY started_at, rowid""",
+            (str(run_id),),
+        ) as cur:
+            rows = await cur.fetchall()
+    return [dict(r) for r in rows]
+
+
+async def get_run_documents(run_id, db_path: str = DB_PATH) -> Optional[list]:
+    """The document manifest of a run or of any run above it, else None.
+    A run that read documents is never resumed (on-premise lane)."""
+    current = str(run_id)
+    for _ in range(33):
+        async with aiosqlite.connect(db_path) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute("SELECT * FROM runs WHERE run_id=?", (current,)) as cur:
+                row = await cur.fetchone()
+        if row is None:
+            return None
+        row = dict(row)
+        if row.get("documents"):
+            try:
+                return json.loads(row["documents"])
+            except (TypeError, ValueError):
+                return [{"status": "unreadable manifest"}]
+        if not row.get("parent_run_id"):
+            return None
+        current = row["parent_run_id"]
+    return None
 
 
 async def sum_run_tree(run_id: UUID, db_path: str = DB_PATH) -> dict:

@@ -69,8 +69,16 @@ async def run_pipeline(
     thread_id: Optional[str] = None,
     run_id: Optional[UUID] = None,
     route_options: Optional[dict] = None,
+    documents: Optional[dict] = None,
+    lane=None,
 ) -> dict:
     """Create a run, orchestrate it, return a summary.
+
+    On-premise lane: ``documents`` (``{"folder": ...}`` or ``{"files": [...]}``
+    under ``BORG_DOCS_ROOT``) are checked and loaded before the run starts;
+    a caller that already prepared the lane passes ``lane`` instead. A lane
+    refusal (BRT-LANE-001 path, BRT-LANE-005 lane off) returns a failed
+    summary with no run created and nothing sent.
 
     Returns:
         {
@@ -104,6 +112,23 @@ async def run_pipeline(
             "error": "BRT-PIP-004: user_instruction is empty",
         }
 
+    if lane is None:
+        from src.lane.context import prepare_lane  # noqa: PLC0415
+        from src.lane.errors import LaneError  # noqa: PLC0415
+
+        try:
+            lane = await prepare_lane(documents, db_path)
+        except Exception as exc:
+            return {
+                "run_id": None,
+                "response": "",
+                "status": "failed",
+                "latency_ms": 0,
+                "envelope_count": 0,
+                "error": str(exc) if isinstance(exc, LaneError)
+                else f"BRT-PIP-001: run setup failed: {exc}",
+            }
+
     # Create run record
     try:
         run_id = await create_run(
@@ -113,6 +138,7 @@ async def run_pipeline(
             db_path=db_path,
             run_id=run_id,
             route_options=route_options,
+            **({"documents": lane.manifest()} if lane is not None and lane.has_documents else {}),
         )
     except Exception as exc:
         return {
@@ -148,6 +174,7 @@ async def run_pipeline(
                 db_path=db_path,
                 current_depth=current_depth,
                 **({"route_options": route_options} if route_options else {}),
+                **({"lane": lane} if lane is not None else {}),
             ),
             timeout=max_run_seconds,
         )

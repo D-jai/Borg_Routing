@@ -30,6 +30,7 @@ from typing import Any, Optional
 
 import httpx
 
+from src.lane.outbound import send_outbound
 from src.tools.base import BaseTool, ToolError, ToolInvocationResult
 
 logger = logging.getLogger(__name__)
@@ -143,8 +144,12 @@ class WebSearchTool(BaseTool):
             "search_depth": "basic",
         }
         try:
-            async with httpx.AsyncClient(timeout=_timeout_sec()) as client:
-                resp = await client.post(_TAVILY_URL, json=payload)
+            # Through the lane's door: backstop and ledger when the lane is
+            # on, a plain POST otherwise (src/lane/outbound.py).
+            resp = await send_outbound(
+                _TAVILY_URL, payload, timeout=_timeout_sec(),
+                purpose="tool", destination="tool:web_search:tavily",
+            )
             resp.raise_for_status()
         except httpx.TimeoutException as exc:
             raise ToolError("BRT-TOOL-002", f"Tavily timeout: {exc}") from exc
@@ -219,8 +224,10 @@ class WebSearchTool(BaseTool):
         }
         headers = {"Authorization": f"Bearer {api_key}"}
         try:
-            async with httpx.AsyncClient(timeout=_timeout_sec()) as client:
-                resp = await client.post(_PERPLEXITY_URL, json=payload, headers=headers)
+            resp = await send_outbound(
+                _PERPLEXITY_URL, payload, headers, timeout=_timeout_sec(),
+                purpose="tool", destination="tool:web_search:perplexity",
+            )
             resp.raise_for_status()
         except httpx.TimeoutException as exc:
             raise ToolError("BRT-TOOL-002", f"Perplexity timeout: {exc}") from exc

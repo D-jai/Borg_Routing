@@ -31,6 +31,18 @@ Error codes:
                and kind of work; the step ran on the run's default model
                (warning; run continues)
 
+On-premise lane (docs/design/on_premise_lane.md; on only when the run has a
+lane context, see src/lane/context.py):
+- BRT-LANE-002: no local model for a step that must stay local, or for the
+               planner in all_local (the step, or the run, fails; no fallback)
+- BRT-LANE-005: documents on an orchestrate step outside all_local
+- BRT-ORC-003 (documents): a planner direct_answer or an empty plan is
+               rejected when the run has documents
+Raw marking: a step is raw when its node names documents (``documents``,
+``"inputs_ref": "documents"``, a skill's ``items_ref: documents``) or reads,
+through ``depends_on``, ``inputs_ref`` or ``source``, a raw step whose output
+did not pass the output guard. Raw steps are routed to local models only.
+
 Optimisation hooks (no error code):
 - BRT-ZERO-01: for unambiguously conversational short prompts, skip
                plan/re_plan and go straight to compose (saves ~2-3
@@ -63,6 +75,9 @@ from src.db.state import (
     update_run_status,
 )
 from src.envelopes.schema import InboundEnvelope, ToolRequest, WrappedTask
+from src.lane.context import LaneContext, current_lane, failure_of
+from src.lane.errors import LaneError, code_of
+from src.lane.outbound import call_scope, send_outbound
 from src.logging.writer import write_event
 from src.orchestrator.apply_to_each import _resolve_items
 from src.orchestrator.fold_in import fold_in
@@ -75,6 +90,7 @@ from src.registry.models import ModelInfo
 from src.registry.node_router import (
     DEFAULT_FLOORS,
     fallback_decision,
+    local_view,
     select_model_for_node,
 )
 from src.registry.router import select_model
@@ -449,6 +465,7 @@ async def _select_orchestrator_model(
     quality_requirement: float = 9.0,
     time_cost_per_sec: Optional[float] = None,
     run_id: Optional[UUID] = None,
+    local_filter=None,
 ) -> ModelInfo:
     """Select the orchestrator ModelInfo row.
 
@@ -459,19 +476,33 @@ async def _select_orchestrator_model(
          (when `run_id` is provided) so the dashboard can flag the run.
       4. Raises BRT-ORC-007.
 
+    ``local_filter`` (lane_mode all_local): every step above, the pinned
+    endpoint and the degraded path included, sees local models only, and a
+    miss raises BRT-LANE-002 instead of BRT-ORC-007.
+
     Returns: ModelInfo
 
     Raises:
         ValueError: BRT-ORC-007 if no model available.
+        LaneError: BRT-LANE-002 if ``local_filter`` is set and no local model qualifies.
     """
     # Check config for a pinned orchestrator endpoint
     pinned = await get_config("orchestrator_endpoint", db_path=db_path)
     if pinned:
         name = await get_config("orchestrator_model_name", db_path=db_path) or "orchestrator"
-        return _pinned_model(pinned, name)
+        pinned_model = _pinned_model(pinned, name)
+        if local_filter is not None and not local_filter(pinned_model):
+            raise LaneError(
+                "BRT-LANE-002",
+                f"the pinned orchestrator endpoint {pinned} is not local; "
+                "lane_mode all_local needs a local planner",
+            )
+        return pinned_model
 
     # Try to select from capability matrix
     matrix = _get_matrix()
+    if local_filter is not None:
+        matrix = local_view(matrix, local_filter)
     select_kwargs: dict = {}
     if time_cost_per_sec is not None:
         select_kwargs["time_cost_per_sec"] = time_cost_per_sec
@@ -536,6 +567,12 @@ async def _select_orchestrator_model(
     except Exception:
         pass
 
+    if local_filter is not None:
+        raise LaneError(
+            "BRT-LANE-002",
+            "no local model can plan this run (lane_mode all_local); tick a local "
+            "model, or score one, so it clears the orchestrator bar or 5.1",
+        )
     raise ValueError(
         "BRT-ORC-007: no orchestrator model available. "
         "Check that at least one model is checked on the Models page, "
@@ -634,6 +671,13 @@ async def _invoke_orchestrator_model(
     )
     stage_prompt = date_block + stage_prompt
 
+    # On-premise lane — the planner, re_plan and compose see a manifest of
+    # the run's documents (ids, types, sizes, names unless hidden), never
+    # their text. Added in code: the prompt file is protected.
+    lane = current_lane()
+    if lane is not None and lane.has_documents:
+        stage_prompt = lane.manifest_block() + stage_prompt
+
     # Law 1 — in a child run the governance block shows the operator's
     # instruction, so the child's own assignment is stated here instead.
     # (Only plan mode sends it as the user message; re_plan and compose send
@@ -682,15 +726,28 @@ async def _invoke_orchestrator_model(
         "response_format": {"type": "json_object"},
     }
 
+    attempts = [0]
+
     async def _post_and_collect() -> tuple[str, dict, int, str]:
         """POST once; return (content, usage, latency_ms, finish_reason).
 
-        Raises BRT-ORC-001.
+        Every attempt goes through ``send_outbound`` (the lane's checks; a
+        plain POST when the lane is off).
+
+        Raises BRT-ORC-001; LaneError (BRT-LANE-*) when the lane refuses.
         """
         t_start = time.monotonic()
+        attempts[0] += 1
         try:
-            async with httpx.AsyncClient(timeout=_MODEL_CALL_TIMEOUT) as client:
-                resp = await client.post(url, json=payload, headers=headers)
+            with call_scope(run_id):
+                resp = await send_outbound(
+                    url, payload, headers,
+                    timeout=_MODEL_CALL_TIMEOUT,
+                    model=orchestrator_model,
+                    must_stay_local=lane is not None and lane.all_local,
+                    purpose=f"orchestrator:{mode}",
+                    attempt=attempts[0],
+                )
             resp.raise_for_status()
         except httpx.TimeoutException as exc:
             raise ValueError(f"BRT-ORC-001: orchestrator call timed out") from exc
@@ -1058,6 +1115,96 @@ def _upstream_list(ref: object, results: dict) -> Optional[list]:
     return None
 
 
+_DOCUMENTS_REF = "documents"
+
+
+def _node_reads_documents(node: dict) -> bool:
+    """True when a plan node names the run's documents (by id or as a set).
+
+    ``"inputs_ref": "documents"`` is a reserved word for the document set,
+    never a step id; a skill names it through ``items_ref``. A ``data_scope``
+    key written on the node is ignored: the runtime decides (design note 5.2).
+    """
+    if node.get("documents"):
+        return True
+    if node.get("inputs_ref") == _DOCUMENTS_REF:
+        return True
+    skill_args = node.get("skill_args") or {}
+    return isinstance(skill_args, dict) and _DOCUMENTS_REF in (
+        skill_args.get("items_ref"), skill_args.get("inputs_ref")
+    )
+
+
+def _node_refs(node: dict) -> list[str]:
+    """Every earlier step a node reads: depends_on, inputs_ref, source."""
+    refs: list[str] = []
+    deps = node.get("depends_on") or []
+    if isinstance(deps, list):
+        refs.extend(str(d) for d in deps)
+    for key in ("inputs_ref", "source", "source_ref"):
+        value = node.get(key)
+        if isinstance(value, str) and value and value != _DOCUMENTS_REF:
+            refs.append(value)
+    skill_args = node.get("skill_args") or {}
+    if isinstance(skill_args, dict):
+        ref = skill_args.get("items_ref")
+        if isinstance(ref, str) and ref and ref != _DOCUMENTS_REF:
+            refs.append(ref)
+    return refs
+
+
+def _node_document_ids(node: dict, lane: LaneContext) -> list[str]:
+    """The part ids a node reads. Raises BRT-ORC-008 for an unknown id."""
+    if node.get("documents"):
+        return lane.expand(node["documents"])
+    return lane.all_part_ids()
+
+
+def _doc_tokens(node: dict, part_ids: list[str], lane: Optional[LaneContext]) -> int:
+    """Token estimate of the document text a raw step reads: the largest part
+    for a per-item step, all of them for a step that reads them together."""
+    if lane is None or not part_ids:
+        return 0
+    per_item = node.get("type") == "apply_to_each" or not node.get("documents")
+    if per_item:
+        return max(lane.chars_of([p]) for p in part_ids) // 4
+    return lane.chars_of(part_ids) // 4
+
+
+async def _lane_refuse_node(
+    results: dict,
+    raw_unstamped: Optional[set],
+    run_id: UUID,
+    node_id: str,
+    code: str,
+    message: str,
+    part_ids: list[str],
+    db_path: str,
+) -> None:
+    """Fail one step for a lane rule: nothing is sent. Upward the step shows a
+    code and document ids only; the message goes to the local trace."""
+    failure = failure_of(code, part_ids)
+    results[node_id] = InboundEnvelope(
+        envelope_id=uuid4(),
+        subtask_id=uuid4(),
+        status="failed",
+        output={"failure": failure},
+        failure_reason=json.dumps(failure),
+        lane_guarded=False,
+    )
+    if raw_unstamped is not None:
+        raw_unstamped.add(node_id)
+    try:
+        await write_event(
+            "error",
+            run_id=run_id,
+            decision={"code": code, "msg": message, "node_id": node_id, "doc": failure["doc"]},
+            db_path=db_path,
+        )
+    except Exception:
+        pass
+
+
 def _build_task_from_node(
     node: dict,
     run_id: UUID,
@@ -1069,8 +1216,17 @@ def _build_task_from_node(
     user_instruction: str,
     results: Optional[dict] = None,
     governance_instruction: Optional[str] = None,
+    data_scope: str = "derived",
+    lane: Optional[LaneContext] = None,
 ) -> WrappedTask:
     """Convert a plan node dict into a WrappedTask.
+
+    On-premise lane (``lane`` given): ``data_scope`` is stamped on the task,
+    and a node that names documents gets their part ids, never their text:
+    ``"inputs_ref": "documents"`` (or a skill's ``items_ref: documents``) on
+    an apply_to_each makes one item per document part; ``documents`` on any
+    node names the ids it reads. ``"documents"`` is never looked up as a
+    step id; with no documents loaded it fails the node (BRT-ORC-008).
 
     ``user_instruction`` is this run's instruction (the fallback task text
     for a node with none). ``governance_instruction`` is the operator's
@@ -1090,6 +1246,21 @@ def _build_task_from_node(
     results = results or {}
     node_type = node.get("type", "answerer")
     governing = governance_instruction or user_instruction
+
+    def _all_parts() -> list[str]:
+        if lane is None or not lane.has_documents:
+            raise ValueError(
+                "BRT-ORC-008: inputs_ref 'documents' names the run's documents, "
+                "but this run has none"
+            )
+        return lane.all_part_ids()
+
+    named_docs: list[str] = []
+    if lane is not None and node.get("documents"):
+        if not lane.has_documents:
+            raise ValueError("BRT-ORC-008: the step names documents, but this run has none")
+        named_docs = lane.expand(node["documents"])
+    lane_fields = {"data_scope": data_scope} if lane is not None else {}
 
     # If skill node
     if node.get("skill_id"):
@@ -1111,16 +1282,24 @@ def _build_task_from_node(
                 "model_endpoint": model_endpoint,
                 "model_name": model_name,
                 "governance_instruction": governing,
+                **lane_fields,
             }
             if rendered.type == "apply_to_each":
                 # R14 — resolve the items from the earlier step the skill's
                 # items_ref names, as a plan-written apply_to_each node does.
                 dep = dict(rendered.dependency_input or {})
-                if not dep.get("items"):
+                if lane is not None and (named_docs or dep.get("inputs_ref") == _DOCUMENTS_REF):
+                    # The run's documents, by part id (on-premise lane).
+                    dep["items"] = named_docs or _all_parts()
+                    update["dependency_input"] = dep
+                    update["documents"] = dep["items"]
+                elif not dep.get("items"):
                     upstream = _upstream_list(dep.get("inputs_ref"), results)
                     if upstream is not None:
                         dep["items"] = upstream
                         update["dependency_input"] = dep
+            elif named_docs:
+                update["documents"] = named_docs
             return rendered.model_copy(update=update)
         except Exception as exc:
             raise ValueError(f"BRT-ORC-008: skill render failed: {exc}") from exc
@@ -1159,6 +1338,7 @@ def _build_task_from_node(
             output_schema={"result": "any"},
             dependency_input=dep_input,
             trigger_reason=node.get("trigger_reason", "initial_plan"),
+            **lane_fields,
         )
 
     # apply_to_each node
@@ -1171,7 +1351,12 @@ def _build_task_from_node(
         inputs_ref_raw = node.get("inputs_ref", "")
         items_from_node = node.get("items", [])
         resolved_items = items_from_node
-        if (
+        if lane is not None and (named_docs or inputs_ref_raw == _DOCUMENTS_REF):
+            # On-premise lane: one item per document part, by id. Handled
+            # here explicitly: "documents" is never a step id.
+            resolved_items = named_docs or _all_parts()
+            named_docs = resolved_items
+        elif (
             isinstance(inputs_ref_raw, str)
             and inputs_ref_raw
             and inputs_ref_raw in results
@@ -1203,6 +1388,8 @@ def _build_task_from_node(
             side_effects=node.get("side_effects", []),
             dependency_input=dep_input,
             trigger_reason=node.get("trigger_reason", "initial_plan"),
+            **lane_fields,
+            **({"documents": named_docs} if named_docs else {}),
         )
 
     # answerer or orchestrate
@@ -1273,7 +1460,10 @@ def _build_task_from_node(
         tool_requests=tool_requests,
         dependency_input=base_dep_input,
         trigger_reason=node.get("trigger_reason", "initial_plan"),
+        **lane_fields,
     )
+    if named_docs:
+        task_kwargs["documents"] = named_docs
     if node_cap and node_cap > 0:
         task_kwargs["max_output_tokens"] = node_cap
 
@@ -1289,11 +1479,16 @@ async def orchestrate_run(
     current_depth: int = 0,
     root_instruction: Optional[str] = None,
     route_options: Optional[dict] = None,
+    lane: Optional[LaneContext] = None,
 ) -> str:
     """Main orchestration loop. Returns the final response text.
 
     ``route_options`` carries a chat alias (``borg_route:light`` and so on)
     into step routing for this run and the child runs it starts.
+
+    ``lane`` is the on-premise lane state of a top-level run (from
+    ``src.lane.context.prepare_lane``); child runs inherit it. None (the
+    lane off) leaves every path exactly as in Phase 1.
 
     ``root_instruction`` is the operator's verbatim instruction for the
     whole job. A child run is given it so every call it makes stays governed
@@ -1308,6 +1503,14 @@ async def orchestrate_run(
     # inherits its parent's value untouched.
     token = _route_options.set(route_options) if route_options is not None else None
     try:
+        if lane is not None:
+            from src.lane.context import lane_scope  # noqa: PLC0415
+
+            with lane_scope(lane):
+                return await _orchestrate_run(
+                    run_id, user_instruction, thread_window, rolling_summary, db_path,
+                    current_depth, root_instruction,
+                )
         return await _orchestrate_run(
             run_id, user_instruction, thread_window, rolling_summary, db_path,
             current_depth, root_instruction,
@@ -1356,12 +1559,19 @@ async def _orchestrate_run(
     # the run row flips to failed with a real reason.
     # `run_id` is threaded so the degrade path can emit BRT-ORC-NO-FRONTIER
     # to the run trace.
+    # On-premise lane: in all_local the planner, compose, the default model
+    # and every step are local models only (design note 6.1).
+    lane = current_lane()
+    all_local = lane is not None and lane.all_local
+    has_documents = lane is not None and lane.has_documents
+    local_filter = lane.is_local if lane is not None else None
     orch_model = await _select_orchestrator_model(
         "reasoning",
         db_path=db_path,
         quality_requirement=quality_req,
         time_cost_per_sec=time_cost,
         run_id=run_id,
+        **({"local_filter": local_filter} if all_local else {}),
     )
 
     skill_lib = _get_skill_lib()
@@ -1369,7 +1579,9 @@ async def _orchestrate_run(
 
     matrix = _get_matrix()
     # One model per line under the prompt's "Available models:" label.
-    available_models_brief = "\n" + _available_models_brief(matrix)
+    available_models_brief = "\n" + _available_models_brief(
+        local_view(matrix, local_filter) if all_local else matrix
+    )
 
     base_kwargs = dict(
         run_id=run_id,
@@ -1396,7 +1608,9 @@ async def _orchestrate_run(
         shortcut_enabled = os.getenv("BORG_RULE_ZERO_SHORTCUT", "true").strip().lower() != "false"
     else:
         shortcut_enabled = str(shortcut_cfg).strip().lower() != "false"
-    if shortcut_enabled and _is_trivial_conversational(user_instruction):
+    # A run with documents never takes the shortcut: an answer about
+    # documents must come from steps that read them (design note 5.5).
+    if shortcut_enabled and not has_documents and _is_trivial_conversational(user_instruction):
         try:
             await write_event(
                 "orchestrator_decision",
@@ -1452,10 +1666,17 @@ async def _orchestrate_run(
         **base_kwargs,
     )
 
+    plan = plan_result.get("plan")
+    if has_documents and (plan_result.get("direct_answer") or not plan or not plan.get("nodes")):
+        # Design note 5.5: no path skips the plan when documents are present.
+        raise ValueError(
+            "BRT-ORC-003: the planner answered without a plan, but this run has "
+            "documents; an answer about documents must come from steps that read them"
+        )
+
     if plan_result.get("direct_answer"):
         return plan_result["direct_answer"]
 
-    plan = plan_result.get("plan")
     if not plan or not plan.get("nodes"):
         # Graceful fallback to compose. BUG-020 — pre-fix this path
         # also fell through to a vague "I was unable" string when the
@@ -1495,7 +1716,7 @@ async def _orchestrate_run(
     # trace shows the demotion.
     try:
         default_model = select_model(
-            matrix=matrix,
+            matrix=local_view(matrix, local_filter) if all_local else matrix,
             task_type="reasoning",
             quality_requirement=quality_req,
             time_cost_per_sec=time_cost,
@@ -1526,6 +1747,9 @@ async def _orchestrate_run(
             pass
 
     leaf_floors = await _load_leaf_floors(db_path)
+    # Raw steps whose output did not pass the output guard: a step that reads
+    # one of them is raw too (taint follows the data, design note 5.2).
+    raw_unstamped: set[str] = set()
 
     while loop_count < MAX_LOOPS:
         loop_count += 1
@@ -1559,11 +1783,37 @@ async def _orchestrate_run(
             node_id = node.get("id", f"n{i}")
             level = f"{current_depth+1}{chr(ord('a') + i % 26)}"
 
+            # On-premise lane: is this step raw, and must it stay local?
+            raw = False
+            local_only = False
+            node_docs: list[str] = []
+            if lane is not None:
+                reads_docs = _node_reads_documents(node)
+                raw = reads_docs or any(ref in raw_unstamped for ref in _node_refs(node))
+                local_only = all_local or raw
+                if reads_docs and has_documents:
+                    try:
+                        node_docs = _node_document_ids(node, lane)
+                    except ValueError:
+                        node_docs = []   # the build below fails it loudly (BRT-ORC-008)
+                if raw and node.get("type") == "orchestrate" and not all_local:
+                    # Its child planner would read the content (design note 5.8).
+                    await _lane_refuse_node(
+                        results, raw_unstamped, run_id, node_id, "BRT-LANE-005",
+                        "documents on an orchestrate step are refused outside all_local",
+                        node_docs, db_path,
+                    )
+                    continue
+
             # Route this step to its own model. A state_op calls no model.
             step_model = default_model
             route_decision: Optional[dict] = None
             if node.get("type", "answerer") != "state_op":
                 node_skill = await _skill_for_node(node, run_id, node_id, db_path)
+                lane_kwargs: dict = {}
+                if local_only:
+                    lane_kwargs["local_filter"] = local_filter
+                    lane_kwargs["extra_input_tokens"] = _doc_tokens(node, node_docs, lane)
                 try:
                     step_model, route_decision = select_model_for_node(
                         node=node,
@@ -1573,8 +1823,23 @@ async def _orchestrate_run(
                         time_cost_per_sec=time_cost,
                         default_model=default_model,
                         run_options=_route_options.get(),
+                        **lane_kwargs,
                     )
+                except LaneError as exc:
+                    # No local model: the step fails; it never falls back.
+                    await _lane_refuse_node(
+                        results, raw_unstamped if raw else None, run_id, node_id,
+                        exc.code, str(exc), node_docs, db_path,
+                    )
+                    continue
                 except Exception as exc:
+                    if local_only:
+                        await _lane_refuse_node(
+                            results, raw_unstamped if raw else None, run_id, node_id,
+                            code_of(exc, "BRT-LANE-002"), f"routing failed: {exc}",
+                            node_docs, db_path,
+                        )
+                        continue
                     step_model = default_model
                     route_decision = fallback_decision(
                         node=node,
@@ -1597,6 +1862,8 @@ async def _orchestrate_run(
                     user_instruction=user_instruction,
                     results=results,
                     governance_instruction=governance_instruction,
+                    **({"data_scope": "raw" if raw else "derived", "lane": lane}
+                       if lane is not None else {}),
                 )
                 if route_decision is not None:
                     # The built task's type, not the plan node's: a skill
@@ -1637,6 +1904,12 @@ async def _orchestrate_run(
                 tasks_to_dispatch.append((node_id, node, task))
             except Exception as exc:
                 # Node build failed — record as failed result
+                if raw:
+                    await _lane_refuse_node(
+                        results, raw_unstamped, run_id, node_id, code_of(exc, "BRT-ORC-008"),
+                        f"node build failed: {exc}", node_docs, db_path,
+                    )
+                    continue
                 results[node_id] = InboundEnvelope(
                     envelope_id=uuid4(),
                     subtask_id=uuid4(),
@@ -1671,13 +1944,32 @@ async def _orchestrate_run(
             try:
                 env = await execute(task, db_path=db_path)
             except Exception as exc:
-                env = InboundEnvelope(
-                    envelope_id=task.envelope_id,
-                    subtask_id=task.subtask_id,
-                    status="failed",
-                    output={},
-                    failure_reason=f"BRT-ORC-004: {exc}",
-                )
+                if task.data_scope == "raw":
+                    # Upward a raw failure is a code plus document ids; the
+                    # full error stays in the local trace (design note 5.4).
+                    from src.lane.context import failed_envelope  # noqa: PLC0415
+
+                    code = code_of(exc, "BRT-ORC-004")
+                    try:
+                        await write_event(
+                            "error",
+                            run_id=run_id,
+                            envelope_id=task.envelope_id,
+                            decision={"code": code, "node_id": node_id,
+                                      "msg": "raw step failed", "error": str(exc)[:2000]},
+                            db_path=db_path,
+                        )
+                    except Exception:
+                        pass
+                    env = failed_envelope(task, code)
+                else:
+                    env = InboundEnvelope(
+                        envelope_id=task.envelope_id,
+                        subtask_id=task.subtask_id,
+                        status="failed",
+                        output={},
+                        failure_reason=f"BRT-ORC-004: {exc}",
+                    )
             # Latency is the step's own run time: stop the clock before any
             # pricing or database work.
             elapsed_ms = int((time.monotonic() - t_start) * 1000)
@@ -1733,13 +2025,15 @@ async def _orchestrate_run(
                 if digest:
                     child_digests[node_id] = digest
 
-            return node_id, env
+            return node_id, env, task
 
         dispatched = await asyncio.gather(
             *[_dispatch_one(nid, n, t) for nid, n, t in tasks_to_dispatch]
         )
-        for nid, env in dispatched:
+        for nid, env, done_task in dispatched:
             results[nid] = env
+            if done_task.data_scope == "raw" and not env.lane_guarded:
+                raw_unstamped.add(nid)
 
         # Check if all nodes dispatched
         all_node_ids = {n.get("id", f"n{i}") for i, n in enumerate(current_nodes)}

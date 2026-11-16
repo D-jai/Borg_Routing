@@ -92,6 +92,15 @@ class WrappedTask(BaseModel):
     skill_id: Optional[str] = None
     skill_version: Optional[int] = None
     skill_args: Optional[dict] = None
+    # On-premise lane (docs/design/on_premise_lane.md section 5). Set by the
+    # runtime, never by the planner: "raw" when the task reads document
+    # content or the unguarded output of a raw step. A raw task is routed to
+    # local models only and its output passes the output guard.
+    data_scope: Literal["raw", "derived"] = "derived"
+    # Document or part ids this task reads ("doc_001", "doc_001#2"). Ids only:
+    # the text is loaded inside the executing task, right before its own
+    # (local) request is built.
+    documents: list[str] = []
 
     @field_validator("type", mode="before")
     @classmethod
@@ -142,3 +151,7 @@ class InboundEnvelope(BaseModel):
     #   {"web_search": [{"title":..., "url":..., "snippet":...}, ...], ...}
     # Empty dict when no tools were invoked.
     tool_results: dict = {}
+    # On-premise lane: True when a raw envelope's output passed the output
+    # guard; a step reading an unguarded raw output is raw itself. None for
+    # an envelope the guard never saw (any derived step).
+    lane_guarded: Optional[bool] = None

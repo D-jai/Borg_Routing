@@ -21,6 +21,15 @@ Error codes:
                the task.
 - BRT-TOOL-001: tool unavailable (caught via ToolInvocationResult, not raised)
 - BRT-TOOL-002: tool runtime failure (BRT-WEB-01)
+- BRT-LANE-003: a call that must stay local was headed off the machine (raised
+               by send_outbound; the call guard)
+- BRT-LANE-004: a raw step's output was withheld by the output guard
+- BRT-LANE-005: tool_requests refused in lane_mode all_local
+
+On-premise lane: a raw answerer (``task.data_scope == "raw"``) has its
+document text loaded here, from ids, right before its own request is built;
+its every failure leaves as a code plus document ids, and its output passes
+the output guard (``src/lane/context.py::guard_envelope``).
 """
 import json
 import os
@@ -35,6 +44,9 @@ from src.db.scratch import apply_cleanup_directives
 from src.db.state import create_run, get_config, sum_run_tree, update_run_status
 from src.envelopes.schema import InboundEnvelope, WrappedTask
 from src.envelopes.validator import validate_inbound
+from src.lane.context import current_lane, failed_envelope, failure_of, guard_envelope
+from src.lane.errors import LaneError, code_of
+from src.lane.outbound import call_scope, send_outbound
 from src.logging.writer import write_event
 from src.prompts.answerer import ANSWERER_SYSTEM_PROMPT
 from src.prompts.base import build_system_prompt, load_governance
@@ -126,16 +138,29 @@ async def _post_chat_completion(
     url: str,
     headers: dict,
     payload: dict,
+    model: Optional[ModelInfo] = None,
+    must_stay_local: bool = False,
+    attempt: int = 1,
 ) -> tuple[str, int, int, str]:
     """Single POST to /v1/chat/completions. Returns
     (content, tokens_in, tokens_out, finish_reason).
 
+    Goes through ``send_outbound`` (the lane's call guard; a plain POST when
+    the lane is off).
+
     Raises:
         ValueError: BRT-ANS-006 on timeout, BRT-ANS-002 on HTTP/transport error.
+        LaneError: BRT-LANE-003 when a call that must stay local is not local.
     """
     try:
-        async with httpx.AsyncClient(timeout=_MODEL_CALL_TIMEOUT_SEC) as client:
-            resp = await client.post(url, json=payload, headers=headers)
+        resp = await send_outbound(
+            url, payload, headers,
+            timeout=_MODEL_CALL_TIMEOUT_SEC,
+            model=model,
+            must_stay_local=must_stay_local,
+            purpose="answerer",
+            attempt=attempt,
+        )
         resp.raise_for_status()
     except httpx.TimeoutException as exc:
         raise ValueError(f"BRT-ANS-006: model call timed out ({url})") from exc
@@ -189,9 +214,13 @@ async def _call_model(
     system_prompt: str,
     user_msg: str,
     requested_max_tokens: Optional[int] = None,
+    must_stay_local: bool = False,
 ) -> tuple[str, int, int, str]:
     """Call model via OpenAI-compat /v1/chat/completions with auto-retry
     on `finish_reason == "length"` (BRT-ANS-009 / BUG-009).
+
+    ``must_stay_local`` (a raw task, or any call in ``all_local``) makes
+    every attempt, the retry included, pass the lane's call guard.
 
     The envelope-level ``requested_max_tokens`` (i.e. ``task.max_output_tokens``)
     acts as a FLOOR over the env-driven cap so plan nodes that legitimately
@@ -229,8 +258,12 @@ async def _call_model(
         "max_tokens": effective_max,
     }
 
+    lane_kwargs = (
+        {"model": model, "must_stay_local": must_stay_local}
+        if current_lane() is not None else {}
+    )
     content, tokens_in, tokens_out, finish_reason = await _post_chat_completion(
-        url, headers, payload
+        url, headers, payload, **lane_kwargs
     )
 
     # BRT-ANS-009 — silent-truncation cascade (BUG-009 / BUG-012). When a
@@ -246,7 +279,10 @@ async def _call_model(
                 retry_in,
                 retry_out,
                 finish_reason,
-            ) = await _post_chat_completion(url, headers, retry_payload)
+            ) = await _post_chat_completion(
+                url, headers, retry_payload,
+                **({**lane_kwargs, "attempt": 2} if lane_kwargs else {}),
+            )
         except ValueError as exc:
             # The first attempt was billed even though the retry failed.
             # Hand its tokens to the caller so the paid call is still logged.
@@ -276,13 +312,31 @@ async def _execute_answerer(task: WrappedTask, db_path: str) -> InboundEnvelope:
     except Exception as exc:
         raise ValueError(f"BRT-ANS-007: governance load failed: {exc}") from exc
 
+    lane = current_lane()
+    # On-premise lane: in all_local nothing may leave the machine, so a
+    # step's tools are refused before any of them runs (design note 6.4).
+    if lane is not None and lane.all_local and task.tool_requests:
+        await write_event(
+            "error",
+            run_id=task.run_id,
+            envelope_id=task.envelope_id,
+            decision={
+                "code": "BRT-LANE-005",
+                "msg": "tool_requests are refused in lane_mode all_local; nothing was sent",
+                "tools": [r.tool for r in task.tool_requests],
+            },
+            db_path=db_path,
+        )
+        return failed_envelope(task, "BRT-LANE-005")
+
     # BRT-WEB-01 — run tool_requests BEFORE the LLM call. Results land in
     # dependency_input['tool_results'] so the prompt can read them.
     if task.tool_requests:
         from src.tools import run_tool_requests  # noqa: PLC0415
 
         try:
-            tool_outcomes = await run_tool_requests(task.tool_requests)
+            with call_scope(task.run_id, task.envelope_id):
+                tool_outcomes = await run_tool_requests(task.tool_requests)
         except Exception as exc:
             return InboundEnvelope(
                 envelope_id=task.envelope_id,
@@ -382,10 +436,16 @@ async def _execute_answerer(task: WrappedTask, db_path: str) -> InboundEnvelope:
     # over ANSWERER_MAX_TOKENS and auto-retries once at doubled cap on
     # finish_reason=="length" (BRT-ANS-009 / BUG-009).
     t0 = time.monotonic()
+    call_kwargs = {}
+    if lane is not None:
+        # The call guard: a raw task, or any call in all_local, must stay local.
+        call_kwargs["must_stay_local"] = lane.all_local or task.data_scope == "raw"
     try:
-        content, tokens_in, tokens_out, finish_reason = await _call_model(
-            model_for_call, system_prompt, "begin", task.max_output_tokens
-        )
+        with call_scope(task.run_id, task.envelope_id):
+            content, tokens_in, tokens_out, finish_reason = await _call_model(
+                model_for_call, system_prompt, "begin", task.max_output_tokens,
+                **call_kwargs,
+            )
     except ValueError as exc:
         paid = getattr(exc, "paid_tokens", None)
         if paid:
@@ -573,6 +633,55 @@ async def _execute_answerer(task: WrappedTask, db_path: str) -> InboundEnvelope:
     return env
 
 
+async def _execute_raw_answerer(task: WrappedTask, db_path: str, lane) -> InboundEnvelope:
+    """A raw answerer: load its documents, call (locally), guard the output.
+
+    The document text is added to this task's own context here, after the
+    envelope was saved with ids only. A failure leaves as a code plus the
+    document ids; the full error stays in the local trace.
+
+    Raises:
+        LaneError: BRT-LANE-003 from the call guard (the message holds no
+            document text), or the failure's own code with ids only.
+    """
+    block = lane.text_block(list(task.documents))
+    loaded = (
+        task.model_copy(update={"context": f"{task.context}\n\n{block}" if task.context else block})
+        if block else task
+    )
+    try:
+        env = await _execute_answerer(loaded, db_path)
+    except LaneError:
+        raise
+    except Exception as exc:
+        code = code_of(exc)
+        failure = failure_of(code, list(task.documents))
+        try:
+            await write_event(
+                "error",
+                run_id=task.run_id,
+                envelope_id=task.envelope_id,
+                decision={
+                    "code": code,
+                    "msg": "a raw step failed; the full error stays in this local trace",
+                    "error": str(exc)[:2000],
+                    "doc": failure["doc"],
+                },
+                db_path=db_path,
+            )
+        except Exception:
+            pass
+        raise LaneError(code, "a raw step failed; see the local trace", doc=failure["doc"]) from None
+    return guard_envelope(env, task, lane)
+
+
+async def _run_answerer(task: WrappedTask, db_path: str) -> InboundEnvelope:
+    lane = current_lane()
+    if lane is not None and task.data_scope == "raw":
+        return await _execute_raw_answerer(task, db_path, lane)
+    return await _execute_answerer(task, db_path)
+
+
 async def execute(task: WrappedTask, db_path: str = "data/borg_route.db") -> InboundEnvelope:
     """Dispatch a WrappedTask to the appropriate handler.
 
@@ -581,7 +690,7 @@ async def execute(task: WrappedTask, db_path: str = "data/borg_route.db") -> Inb
         NotImplementedError: for types not yet implemented in this slice.
     """
     if task.type == "answerer":
-        return await _execute_answerer(task, db_path)
+        return await _run_answerer(task, db_path)
     elif task.type == "state_op":
         from src.orchestrator.state_ops import dispatch_state_op
         return await dispatch_state_op(task, db_path=db_path)
@@ -606,7 +715,7 @@ async def execute(task: WrappedTask, db_path: str = "data/borg_route.db") -> Inb
                 db_path=db_path,
             )
             demoted = task.model_copy(update={"type": "answerer"})
-            return await _execute_answerer(demoted, db_path)
+            return await _run_answerer(demoted, db_path)
 
         # Spawn child run linked to parent — BRT-ORC-021
         try:

@@ -79,11 +79,25 @@ def _make_child_task(
     index: int,
     level_suffix: str,
 ) -> WrappedTask:
-    """Create a child answerer WrappedTask for one item."""
+    """Create a child answerer WrappedTask for one item.
+
+    On-premise lane: a child inherits its parent's ``data_scope``. An item
+    that is a document (part) id becomes the child's ``documents``; its
+    context names the id only, and the executor loads the text.
+    """
     if isinstance(item, dict):
         item_context = str(item)
     else:
         item_context = str(item)
+
+    documents: list[str] = []
+    if parent.data_scope == "raw":
+        from src.lane.context import current_lane  # noqa: PLC0415
+
+        lane = current_lane()
+        if lane is not None and lane.is_part_id(item):
+            documents = [item]
+            item_context = f"Document id: {item}"
 
     child_level = parent.level_path + level_suffix
 
@@ -106,7 +120,18 @@ def _make_child_task(
         trigger_reason=f"apply_to_each:{parent.envelope_id}:item_{index}",
         skill_id=parent.skill_id,
         skill_version=parent.skill_version,
+        data_scope=parent.data_scope,
+        documents=documents,
     )
+
+
+def _failure_reason(child: WrappedTask, reason: object) -> object:
+    """A raw child's failure as seen upward: code plus document id only."""
+    if child.data_scope != "raw":
+        return reason
+    from src.lane.context import failure_code_of, failure_of  # noqa: PLC0415
+
+    return failure_of(failure_code_of(reason), list(child.documents))
 
 
 async def _dispatch_child(
@@ -185,6 +210,7 @@ async def expand_and_run(
     failures = []
     # Tokens and dollars of every item call, summed onto this envelope.
     totals = {"input": 0, "output": 0, "dollars": 0.0, "baseline": 0.0}
+    guarded = [0]   # raw items whose output passed the lane's output guard
 
     async def _run_one(index: int, item: object) -> None:
         suffix = _level_suffix(index)
@@ -203,18 +229,20 @@ async def expand_and_run(
                         "output": env.output,
                         "confidence": env.confidence,
                     })
+                    if env.lane_guarded:
+                        guarded[0] += 1
                 else:
                     failures.append({
                         "index": index,
                         "item": item,
-                        "reason": env.failure_reason or "status=failed",
+                        "reason": _failure_reason(child, env.failure_reason or "status=failed"),
                         "model_id": child.model_name,
                     })
             except Exception as exc:
                 failures.append({
                     "index": index,
                     "item": item,
-                    "reason": f"BRT-APE-002: {exc}",
+                    "reason": _failure_reason(child, f"BRT-APE-002: {exc}"),
                     "model_id": child.model_name,
                 })
 
@@ -238,6 +266,11 @@ async def expand_and_run(
         tokens_used={"input": totals["input"], "output": totals["output"]},
         dollars=totals["dollars"],
         baseline_dollars=totals["baseline"],
+        # A raw aggregate is guard-stamped only when every item passed the
+        # guard; one withheld item keeps the steps that read it raw.
+        lane_guarded=(
+            (not failures and guarded[0] == len(items)) if task.data_scope == "raw" else None
+        ),
     )
 
 

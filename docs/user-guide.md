@@ -466,6 +466,53 @@ A model is local when the address its requests go to is this machine, never beca
 
 When a step must stay local, the router offers it only local models, ignores a cloud model the planner recommended, and never falls back to a cloud model. If no local model clears the step's quality floor, the step fails with **BRT-LANE-002** and nothing is sent. Each such step's `routing` shows `"local_only": true`.
 
+### Turning the lane on
+
+Set `lane_mode` in Admin (or `BORG_LANE_MODE` in `.env`):
+
+| Mode | Planning and the final answer | Steps that read documents | Other steps | Web search | Direct-to-model, Discover, Get Model Info |
+|---|---|---|---|---|---|
+| `off` (default) | as before | documents are refused | as before | allowed | allowed |
+| `raw_local` | may use a cloud model | **local models only** | may use a cloud model | allowed, checked, listed | allowed and listed; documents refused |
+| `all_local` | **local only** | **local only** | **local only** | refused | refused |
+
+With `off`, nothing changes from the behaviour before the lane existed.
+
+### Handing over documents
+
+1. Put the documents in one folder and set `BORG_DOCS_ROOT` in `.env` to it. It may not be `.` or the application folder (which holds `.env` and the database).
+2. Name them relative to that folder: `"documents": {"folder": "client_notes"}` (every file in it and below) or `"documents": {"files": ["client_notes/acme.txt"]}`.
+3. Only `.txt` and `.md` are read (as UTF-8). Other files are listed as "unsupported, not read".
+
+A path that leaves the folder (`..`, an absolute path, `C:x.txt`, `\x.txt`, a network path, a link or junction pointing outside) is refused with **BRT-LANE-001** before anything is read; the message names only the path you sent. A file replaced between the check and the read is refused too.
+
+The planner never sees the text. It gets a list: an id per document (`doc_001`), its name, type and size. Set `lane_manifest` to `ids` to hide the names as well. A document longer than `lane_part_chars` (default 8000 characters) is split into parts (`doc_001#2`); nothing is cut off.
+
+### How a step that reads documents works
+
+- The runtime, not the planner, marks a step **raw** when it reads documents (`"inputs_ref": "documents"`, `"documents": ["doc_001"]`, or a skill given `items_ref: documents`), or when it reads the output of a raw step that was withheld. Raw steps run on local models only.
+- The text is loaded inside the step, right before its own (local) request. Plans, saved envelopes and results carry document ids, never text.
+- **What a local step returns can be passed on.** That is the limit of the promise, so it is bounded: an output longer than `lane_max_output_chars` (default 1500 characters), or one that copies a passage of `lane_max_verbatim_chars` (default 120) characters from the document, is withheld (**BRT-LANE-004**). Ask such steps for short fields (names, dates, labels).
+- When a raw step fails, the planner and the final answer see only the code and the document id, for example `{"code": "BRT-LANE-004", "doc": "doc_001"}`. The full error stays in the local trace.
+- With documents, the planner may not answer directly or skip the plan (**BRT-ORC-003**), and the short-prompt shortcut is off.
+- An `orchestrate` step given documents is refused outside `all_local` (**BRT-LANE-005**): its own planner would read them.
+- Every call a raw step makes, retries included, is checked right before it is sent; a call about to leave the machine is blocked (**BRT-LANE-003**, which means a defect).
+
+### The check on everything sent out, and the record
+
+- While the lane is on and the run has documents, every request headed off the machine (planner, final answer, cloud steps, web search, direct-to-model) is compared with the documents first. If it holds a passage of 120 characters, more than 10% of a document's 8-word sequences (`lane_max_ngram_share`), or a short document whole, it is blocked (**BRT-LANE-006**). Case, punctuation and line breaks do not hide a match. Paraphrase, translation, summaries and encodings are not caught.
+- Every request a run makes while the lane is on is written to the `outbound_requests` table before it is sent, with its exact body (secret fields such as `api_key` are blanked in the stored copy), and whether it left the machine. If that write fails, the request is not sent (**BRT-LANE-007**). A retry is its own row.
+- Local calls ignore proxy settings (`HTTP_PROXY` and the like), so a proxy cannot carry them off the machine.
+
+### What is not promised
+
+- Your own prompt goes to the planner. Hand documents over by reference; text pasted into the prompt from a document that was also loaded is blocked, text from any other document cannot be recognised.
+- Facts a local step extracts (a name, a date, a short quote) can leave inside its answer, within the limits above, and are listed.
+- A document can carry instructions aimed at the local model ("put everything in base64"). The limits reduce the damage; they do not catch encodings or paraphrase.
+- A local model server that itself forwards to a cloud service looks local. Restrict the lane with `lane_local_allowlist` (model ids or `host:port`) to servers you vouch for.
+- `all_local` removes these limits by sending nothing out.
+- Copies of document-derived text stay in the local database (`logs`, `log_entities`, `envelopes`, `outbound_requests`).
+
 ---
 
 ## Multi-turn Conversations (Threads)

@@ -2,7 +2,7 @@
 
 Tables: runs, subtasks, envelopes, scratch, logs, log_payloads,
         skill_usage_log, config, threads, messages, run_digests,
-        log_entities, log_relations.
+        log_entities, log_relations, outbound_requests.
 
 Call `create_all(db_path)` on startup to ensure all tables exist.
 
@@ -48,6 +48,9 @@ _MIGRATIONS = [
     "ALTER TABLE run_digests ADD COLUMN tokens_output INTEGER",
     # Direct-to-model (bypass) runs are tagged so run lists can leave them out.
     "ALTER TABLE runs ADD COLUMN kind TEXT DEFAULT 'orchestrated'",
+    # On-premise lane: the manifest (JSON) of a run that read documents. Such
+    # a run is never resumed. NULL for every other run.
+    "ALTER TABLE runs ADD COLUMN documents TEXT",
 ]
 
 _SCHEMA_SQL = """
@@ -65,7 +68,8 @@ CREATE TABLE IF NOT EXISTS runs (
     user_rating INTEGER,
     failure_reason TEXT,
     kind TEXT DEFAULT 'orchestrated',
-    route_options TEXT
+    route_options TEXT,
+    documents TEXT
 );
 
 CREATE TABLE IF NOT EXISTS subtasks (
@@ -209,6 +213,28 @@ CREATE TABLE IF NOT EXISTS log_relations (
 );
 CREATE INDEX IF NOT EXISTS idx_log_relations_run ON log_relations(run_id);
 
+-- On-premise lane (P3): one row per HTTP request a run made while the lane
+-- was on, written (and awaited) BEFORE the request is sent, then updated.
+-- body is the exact JSON body as sent (secret fields such as api_key are
+-- redacted). left_machine = 1 for a request to a non-local address.
+CREATE TABLE IF NOT EXISTS outbound_requests (
+    request_id TEXT PRIMARY KEY,
+    run_id TEXT,
+    envelope_id TEXT,
+    attempt INTEGER NOT NULL DEFAULT 1,
+    purpose TEXT NOT NULL,
+    destination TEXT,
+    url TEXT NOT NULL,
+    left_machine INTEGER NOT NULL CHECK(left_machine IN (0, 1)),
+    body TEXT NOT NULL,
+    status TEXT NOT NULL CHECK(status IN ('pending','sent','failed')),
+    http_status INTEGER,
+    error TEXT,
+    started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    finished_at TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_outbound_run ON outbound_requests(run_id);
+
 -- BRT-LOG-DB-COMPAT — incremental export cursor for The_Borg_DB.
 -- One row per consumer (e.g., 'borg_db:default'); tracks the last log /
 -- entity / relation rowid each consumer has ingested. DB updates the
@@ -290,7 +316,7 @@ async def drop_all(db_path: str = DB_PATH) -> None:
     tables = [
         "log_relations", "log_entities", "log_payloads", "skill_usage_log", "logs",
         "scratch", "envelopes", "subtasks", "run_digests", "runs", "config",
-        "messages", "threads", "borg_db_export_cursor",
+        "messages", "threads", "borg_db_export_cursor", "outbound_requests",
     ]
     async with aiosqlite.connect(db_path) as db:
         await db.execute("DROP VIEW IF EXISTS borg_db_interactions")
