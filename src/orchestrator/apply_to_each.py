@@ -16,12 +16,26 @@ Error codes:
 - BRT-APE-003: concurrency_limit invalid
 - BRT-APE-004: max_depth would be exceeded by child envelopes
 - BRT-APE-005: no items to process (empty list)
+- BRT-APE-006: the step's inputs_ref / items_ref names no step (not a step
+               id of this plan or an earlier one) and it has no inline items;
+               failed before any model call (planner ruling 1a)
 """
 import asyncio
 import uuid
 from typing import Optional
 
 from src.envelopes.schema import InboundEnvelope, WrappedTask
+
+
+def unresolved_ref_message(name: object) -> str:
+    """BRT-APE-006 failure text for a ref that names no step."""
+    return (
+        f"BRT-APE-006: '{name}' is not a step id: no step in this plan or an "
+        f"earlier one has that id, so this step has no items and made no model "
+        f"call. A list from the user's message belongs in `items` on the step "
+        f"(one string per item); `inputs_ref` and a skill's `items_ref` name "
+        f"an earlier step's id."
+    )
 
 
 def _resolve_items(task: WrappedTask) -> list:
@@ -34,7 +48,13 @@ def _resolve_items(task: WrappedTask) -> list:
     Raises:
         ValueError: BRT-APE-001 if items cannot be resolved.
         ValueError: BRT-APE-005 if the resolved items list is empty.
+        ValueError: BRT-APE-006 if the step's ref names no step and it has
+            no items of its own.
     """
+    unresolved = task.dependency_input.get("unresolved_ref")
+    if unresolved and not task.dependency_input.get("items"):
+        raise ValueError(unresolved_ref_message(unresolved))
+
     # Direct items list (preferred — already resolved by state_op, or by
     # _build_task_from_node when inputs_ref pointed at a prior node).
     items = task.dependency_input.get("items")
@@ -183,7 +203,7 @@ async def expand_and_run(
     try:
         items = _resolve_items(task)
     except ValueError as exc:
-        if "BRT-APE-005" in str(exc):
+        if "BRT-APE-005" in str(exc) or "BRT-APE-006" in str(exc):
             return InboundEnvelope(
                 envelope_id=task.envelope_id,
                 subtask_id=task.subtask_id,
@@ -194,6 +214,9 @@ async def expand_and_run(
                     "total": 0,
                     "success_count": 0,
                     "failure_count": 0,
+                    # re_plan reads a step's output, not its failure_reason:
+                    # the reason goes here too so the planner can act on it.
+                    "failure": str(exc),
                 },
                 failure_reason=str(exc),
             )

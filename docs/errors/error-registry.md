@@ -98,6 +98,7 @@
 | BRT-APE-003 | Invalid concurrency_limit | `src/orchestrator/apply_to_each.py::expand_and_run` | Must be a positive integer. Default is 20. |
 | BRT-APE-004 | Depth limit exceeded | `src/orchestrator/apply_to_each.py::expand_and_run` | `current_depth >= max_depth`. Increase `max_depth` or flatten the plan structure. |
 | BRT-APE-005 | No items to process | `src/orchestrator/apply_to_each.py` | Items list is empty. Check the upstream state_op or input reference. |
+| BRT-APE-006 | Ref names no step | `src/orchestrator/apply_to_each.py::_resolve_items` (marked by `src/orchestrator/engine.py::_build_task_from_node`) | An apply_to_each step (plan-written, or a skill such as `extract_fields`) has `inputs_ref` / `items_ref` set to a name that is not the id of any step in this plan or an earlier one, and carries no items of its own. The step fails before any model call; re_plan sees it as an ordinary step failure. Usually the list is in the operator's message: it belongs in the step's `items` (one string per item; for a skill, `items` in `skill_args` or `items_ref` given as a list). A ref naming a step of the same plan is not this failure: the step waits for that step. The lane's reserved `documents` ref is never checked here. |
 
 ## BRT-TOOL — Runtime Tool Dispatcher (BRT-WEB-01)
 

@@ -88,7 +88,7 @@ async def test_skill_apply_to_each_with_an_unknown_items_ref_fails_loudly(env):
             "SELECT status, inbound_payload FROM envelopes WHERE type='apply_to_each'"
         ).fetchone()
     assert row is not None and row[0] == "failed", row
-    assert "BRT-APE-001" in row[1]
+    assert "BRT-APE-006" in row[1]   # planner ruling 1a: a ref naming nothing
 
 
 @pytest.mark.asyncio

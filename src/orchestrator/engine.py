@@ -1136,7 +1136,13 @@ def _node_reads_documents(node: dict) -> bool:
 
 
 def _node_refs(node: dict) -> list[str]:
-    """Every earlier step a node reads: depends_on, inputs_ref, source."""
+    """Every earlier step a node reads: depends_on, inputs_ref, source, and
+    a skill's ``*_ref`` args (``items_ref``, ``failed_items_ref``).
+
+    Used by the ready check (a named step in the same plan is waited for, as
+    if it were in ``depends_on``; planner ruling 1a) and by the lane's taint
+    check. A ref given as a list is inline items, not a step id.
+    """
     refs: list[str] = []
     deps = node.get("depends_on") or []
     if isinstance(deps, list):
@@ -1147,10 +1153,33 @@ def _node_refs(node: dict) -> list[str]:
             refs.append(value)
     skill_args = node.get("skill_args") or {}
     if isinstance(skill_args, dict):
-        ref = skill_args.get("items_ref")
-        if isinstance(ref, str) and ref and ref != _DOCUMENTS_REF:
-            refs.append(ref)
+        for key, ref in skill_args.items():
+            if (
+                str(key).endswith("_ref")
+                and isinstance(ref, str)
+                and ref
+                and ref != _DOCUMENTS_REF
+            ):
+                refs.append(ref)
     return refs
+
+
+def _inline_items(node: dict) -> Optional[list]:
+    """Items a plan node carries itself, or None (planner ruling 1a).
+
+    A list from the operator's message travels in the node: ``items`` on the
+    node, ``items`` in a skill's args, or a skill's ``items_ref`` given as a
+    list instead of a step id.
+    """
+    if isinstance(node.get("items"), list) and node["items"]:
+        return node["items"]
+    skill_args = node.get("skill_args") or {}
+    if isinstance(skill_args, dict):
+        for key in ("items", "items_ref"):
+            value = skill_args.get(key)
+            if isinstance(value, list) and value:
+                return value
+    return None
 
 
 def _node_document_ids(node: dict, lane: LaneContext) -> list[str]:
@@ -1238,7 +1267,10 @@ def _build_task_from_node(
     For apply_to_each nodes: if ``inputs_ref`` is a string and matches a
     prior node id in ``results``, the upstream envelope's output is walked
     for an ``items`` / ``results`` list and stamped into
-    ``dependency_input['items']`` — BRT-APE-01.
+    ``dependency_input['items']`` — BRT-APE-01. Items written in the node
+    (``items``, or a skill's ``items`` / list-valued ``items_ref``) win. A
+    ref naming no finished step, with no items of its own, is marked
+    ``unresolved_ref`` and the expander fails it with BRT-APE-006 (ruling 1a).
 
     Raises:
         ValueError: BRT-ORC-008 on build failure.
@@ -1264,12 +1296,21 @@ def _build_task_from_node(
 
     # If skill node
     if node.get("skill_id"):
+        skill_args = node.get("skill_args", {})
+        inline_items = _inline_items(node)
+        render_args = skill_args
+        if inline_items is not None and isinstance(skill_args, dict) and not isinstance(
+            skill_args.get("items_ref"), str
+        ):
+            # Inline items stand in for items_ref, which the skill template
+            # requires; the template itself is never changed (ruling 1a).
+            render_args = {**skill_args, "items_ref": ""}
         try:
             lib = _get_skill_lib()
             rendered = lib.render(
                 skill_id=node["skill_id"],
                 version=node.get("skill_version", 1),
-                args=node.get("skill_args", {}),
+                args=render_args,
                 run_id=run_id,
                 current_depth=current_depth,
                 max_depth=max_depth,
@@ -1284,6 +1325,8 @@ def _build_task_from_node(
                 "governance_instruction": governing,
                 **lane_fields,
             }
+            if render_args is not skill_args:
+                update["skill_args"] = skill_args
             if rendered.type == "apply_to_each":
                 # R14 — resolve the items from the earlier step the skill's
                 # items_ref names, as a plan-written apply_to_each node does.
@@ -1293,10 +1336,19 @@ def _build_task_from_node(
                     dep["items"] = named_docs or _all_parts()
                     update["dependency_input"] = dep
                     update["documents"] = dep["items"]
+                elif inline_items is not None:
+                    # Ruling 1a — items written in the step itself.
+                    dep["items"] = inline_items
+                    update["dependency_input"] = dep
                 elif not dep.get("items"):
-                    upstream = _upstream_list(dep.get("inputs_ref"), results)
+                    ref = dep.get("inputs_ref")
+                    upstream = _upstream_list(ref, results)
                     if upstream is not None:
                         dep["items"] = upstream
+                        update["dependency_input"] = dep
+                    elif isinstance(ref, str) and ref and ref not in results:
+                        # Names no step: the expander fails it (BRT-APE-006).
+                        dep["unresolved_ref"] = ref
                         update["dependency_input"] = dep
             elif named_docs:
                 update["documents"] = named_docs
@@ -1371,6 +1423,17 @@ def _build_task_from_node(
             "items": resolved_items,
             "concurrency_limit": node.get("concurrency_limit", 20),
         }
+        if (
+            not named_docs
+            and not items_from_node
+            and isinstance(inputs_ref_raw, str)
+            and inputs_ref_raw
+            and inputs_ref_raw not in results
+        ):
+            # Ruling 1a — the ref names no step (the ready check has already
+            # waited for any step of this plan it names). The expander fails
+            # the step with BRT-APE-006 before any model call.
+            dep_input["unresolved_ref"] = inputs_ref_raw
         return WrappedTask(
             envelope_id=uuid4(),
             run_id=run_id,
@@ -1768,10 +1831,14 @@ async def _orchestrate_run(
                     return False
             return True
 
+        # Planner ruling 1a — an inputs_ref, a skill's items_ref or a
+        # state_op source naming a step of this plan is a dependency too.
+        # A step naming itself is not held back (it would wait forever); its
+        # ref resolves to nothing and the step fails loudly (BRT-APE-006).
         ready = [
             n for n in current_nodes
             if n.get("id") not in completed_ids
-            and _deps_ready(n.get("depends_on", []))
+            and _deps_ready([r for r in _node_refs(n) if r != n.get("id")])
         ]
 
         if not ready:
