@@ -160,7 +160,8 @@ class LaneContext:
             "steps that read them run on the operator's own machines. Refer to\n"
             "them by id only:\n"
             '- an apply_to_each step with "inputs_ref": "documents" runs once per\n'
-            "  document (or part of one);\n"
+            "  document (or part of one). \"documents\" is the one reserved name that\n"
+            "  is not a step id; use it, do not copy document ids into \"items\";\n"
             '- an answerer step with "documents": ["doc_001"] reads the named documents.\n'
             "Ask such steps for short structured fields (names, dates, labels), never\n"
             "for copies of the text. Do not answer directly: the answer must come from\n"
