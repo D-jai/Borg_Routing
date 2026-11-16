@@ -60,6 +60,7 @@ After the build, on Deej's word only: make the repo public, deploy the replay de
 6. Deej spends no time testing; every check is done by the build.
 7. Opus 5.5 and Sonnet 5.5, both at medium effort, do the work. Fable plans only.
 8. LM Studio removed (evening of 15-Nov-2026). The local model runs as Ollama in Docker; see `BUILD.md` section 8.
+9. A second small additive edit to the planner prompt, for the list hand-over, work order 1.10 only (16-Nov-2026; Deej's yes given in the planner's session and relayed by the planner): one `items` line in the apply_to_each JSON shape and one "Where the items come from" paragraph in `src/prompts/orchestrator.py`.
 
 Standing permissions: local commits on `showcase`; pushes of `showcase` to the private `origin`; merge of its pull request into `master` when CI is green and the reviewer has no objection.
 
@@ -86,7 +87,7 @@ Standing permissions: local commits on `showcase`; pushes of `showcase` to the p
 
 ## Needs Deej
 
-- **Yes or no on the planner's protected-prompt edit (ruling 1b, 16-Nov-2026).** The planner asked Deej in its own session; the lead waits for the planner to relay the answer. If yes, add to `src/prompts/orchestrator.py`, apply_to_each section only, additions only:
+- **Answered: yes (ruling 9, relayed by the planner, 16-Nov-2026); edit made.** The original item, kept for the record: yes or no on the planner's protected-prompt edit (ruling 1b). If yes, add to `src/prompts/orchestrator.py`, apply_to_each section only, additions only:
   - After the `inputs_ref` line in the JSON shape: `"items": ["only when the list is in the user's message: the items themselves, one string each"],` (check brace doubling: it sits inside a `{{ }}` block).
   - After "You handle the failures in re_plan.": "Where the items come from. If the list is in the user's message, copy the items into `items`, one string per item, and leave `inputs_ref` out. If an earlier step produces the list, set `inputs_ref` to that step's id. `inputs_ref` is always the id of a step; a name you make up resolves to nothing. The same holds for a skill's `items_ref`."
   - Then a prompt test, then Check 1 attempt 3 (smoke prompt unchanged).
