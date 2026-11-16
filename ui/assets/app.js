@@ -88,6 +88,10 @@
   function getToken() { return safeGet('sessionStorage', TOKEN_KEY); }
   function setToken(t) { return safeSet('sessionStorage', TOKEN_KEY, t); }
 
+  function sameOrigin(path) {
+    try { return new URL(path, location.href).origin === location.origin; } catch (_) { return false; }
+  }
+
   function errorWords(status, body) {
     var detail = body && (body.detail || body.error || body.message);
     if (detail && typeof detail !== 'string') {
@@ -107,7 +111,7 @@
     opts = opts || {};
     var init = { method: opts.method || 'GET', headers: {} };
     Object.keys(opts.headers || {}).forEach(function (k) { init.headers[k] = opts.headers[k]; });
-    var token = getToken();
+    var token = sameOrigin(path) ? getToken() : null; // never send the token to another origin
     if (token) init.headers['Authorization'] = 'Bearer ' + token;
     if (opts.json !== undefined) {
       init.headers['Content-Type'] = 'application/json';
@@ -140,23 +144,29 @@
   }
 
   // ---------- formatters ----------
+  // A number, or a non-blank numeric string; anything else (true, [], '', null, NaN) is not one.
+  function toNum(v) {
+    if (typeof v === 'string' && v.trim() !== '') v = Number(v);
+    return typeof v === 'number' && isFinite(v) ? v : null;
+  }
   function money(v) {
-    var n = Number(v);
-    if (v === null || v === undefined || v === '' || !isFinite(n)) return '-';
+    var n = toNum(v);
+    if (n === null) return '-';
     var sign = n < 0 ? '-' : '';
     n = Math.abs(n);
-    if (n === 0) return '$0.000';
+    if (n === 0) return '$0.00';
     if (n >= 1) return sign + '$' + n.toFixed(2);
-    if (n >= 0.001) return sign + '$' + n.toFixed(3);
-    // Small paid amount: keep two significant digits so it never reads as zero.
-    var digits = Math.min(10, Math.max(4, 1 - Math.floor(Math.log10(n)) + 1));
-    return sign + '$' + n.toFixed(digits);
+    // Below $1: three significant figures, so a paid amount never reads as zero.
+    if (n < 1e-9) return sign + '$' + n.toExponential(2);
+    var s = n.toFixed(2 - Math.floor(Math.log10(n)));
+    if (parseFloat(s) >= 1) s = n.toFixed(2); // rounded up to a whole dollar: two decimals
+    return sign + '$' + s;
   }
   function duration(seconds) {
-    var s = Number(seconds);
-    if (seconds === null || seconds === undefined || !isFinite(s) || s < 0) return '-';
+    var s = toNum(seconds);
+    if (s === null || s < 0) return '-';
     if (s < 10) return (Math.round(s * 10) / 10) + ' s';
-    if (s < 60) return Math.round(s) + ' s';
+    if (s < 59.5) return Math.round(s) + ' s';
     var m = Math.floor(s / 60), r = Math.round(s - m * 60);
     if (r === 60) { m += 1; r = 0; }
     if (m < 60) return m + ' min ' + r + ' s';
@@ -164,15 +174,24 @@
     return h + ' h ' + (m - h * 60) + ' min';
   }
   var MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  var DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
+  function isDateOnly(v) { return typeof v === 'string' && DATE_ONLY.test(v.trim()); }
   function parseWhen(v) {
-    if (v === null || v === undefined || v === '') return null;
+    if (v === null || v === undefined || v === '' || v === 0) return null;
     var d;
     if (typeof v === 'number') d = new Date(v < 1e12 ? v * 1000 : v);
+    else if (v instanceof Date) d = v;
+    else if (typeof v !== 'string') return null;
     else {
-      var s = String(v);
-      // Server timestamps without a zone are UTC.
-      if (/^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}/.test(s) && !/(Z|[+-]\d{2}:?\d{2})$/.test(s)) s = s.replace(' ', 'T') + 'Z';
-      d = new Date(s);
+      var s = v.trim();
+      if (DATE_ONLY.test(s)) {
+        // A date with no time: a local calendar date, no time of day invented.
+        d = new Date(Number(s.slice(0, 4)), Number(s.slice(5, 7)) - 1, Number(s.slice(8, 10)));
+      } else {
+        // Server timestamps without a zone (SQLite) are UTC.
+        if (/^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}/.test(s) && !/(Z|[+-]\d{2}:?\d{2})$/i.test(s)) s = s.replace(' ', 'T') + 'Z';
+        d = new Date(s);
+      }
     }
     return isNaN(d.getTime()) ? null : d;
   }
@@ -180,11 +199,12 @@
   function dateTime(v) {
     var d = parseWhen(v);
     if (!d) return '-';
-    return pad2(d.getDate()) + '-' + MONTHS[d.getMonth()] + '-' + d.getFullYear() + ' ' + pad2(d.getHours()) + ':' + pad2(d.getMinutes());
+    var day = pad2(d.getDate()) + '-' + MONTHS[d.getMonth()] + '-' + d.getFullYear();
+    return isDateOnly(v) ? day : day + ' ' + pad2(d.getHours()) + ':' + pad2(d.getMinutes());
   }
   function timeOnly(v) {
     var d = parseWhen(v);
-    return d ? pad2(d.getHours()) + ':' + pad2(d.getMinutes()) : '-';
+    return d && !isDateOnly(v) ? pad2(d.getHours()) + ':' + pad2(d.getMinutes()) : '-';
   }
 
   // ---------- safe markdown: marked, then DOMPurify ----------
@@ -195,7 +215,7 @@
   }
   function markdown(text) {
     var src = text === null || text === undefined ? '' : String(text);
-    if (window.marked && window.DOMPurify) {
+    if (window.marked && window.DOMPurify && window.DOMPurify.isSupported !== false) {
       var parse = window.marked.parse || window.marked;
       return window.DOMPurify.sanitize(parse.call(window.marked, src, { gfm: true, breaks: true }));
     }
@@ -261,7 +281,7 @@
 
   window.Borg = {
     api: api, notify: notify, clearNotices: clearNotices, ready: ready,
-    money: money, duration: duration, dateTime: dateTime, timeOnly: timeOnly,
+    money: money, duration: duration, parseWhen: parseWhen, dateTime: dateTime, timeOnly: timeOnly,
     markdown: markdown, escapeHtml: escapeHtml, el: el,
     getToken: getToken, setToken: setToken,
     storage: { get: safeGet, set: safeSet },
