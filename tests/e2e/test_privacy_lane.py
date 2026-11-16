@@ -263,25 +263,73 @@ async def test_d_off_refuses_documents(lane):
     assert stub.requests == []
 
 
-@pytest.mark.parametrize("bad", [
-    "../outside.txt",
-    "sub/../../outside.txt",
-    "C:x.txt",
-    "\\x.txt",
-    "/x.txt",
-    "\\\\server\\share\\x.txt",
-    "\\\\?\\C:\\x.txt",
-    "\\\\.\\C:\\x.txt",
+def _outside_target(lane, form: str) -> str:
+    """A request string of the given form whose target really exists outside
+    the root, so a refusal can only come from the path check (not from
+    "not found"). Skips a form that cannot be made to exist on this OS."""
+    tmp = lane["tmp"]
+    outside = tmp / "outside.txt"
+    outside.write_text("outside", encoding="utf-8")
+    (lane["docs"] / "sub").mkdir(exist_ok=True)
+    win = sys.platform == "win32"
+    no_drive = str(outside)[len(outside.drive):]       # "\Users\...\outside.txt"
+    if form == "dotdot":
+        return "../outside.txt"
+    if form == "sub_dotdot":
+        return "sub/../../outside.txt"
+    if form == "drive_relative":
+        # "C:outside.txt" means "outside.txt in the current folder of drive C";
+        # run from the temp folder (outside the root) so it names a real file.
+        lane["mp"].chdir(tmp)
+        return f"{outside.drive}outside.txt" if win else "C:outside.txt"
+    if form == "root_relative_backslash":
+        if not win:
+            pytest.skip("'\\x' is an ordinary file name, not root-relative, off Windows")
+        lane["mp"].chdir(tmp)
+        return no_drive
+    if form == "root_relative_slash":
+        if not win:
+            return str(outside)          # "/tmp/.../outside.txt" is root-relative here
+        lane["mp"].chdir(tmp)
+        return no_drive.replace("\\", "/")
+    if form == "unc":
+        if not win:
+            pytest.skip("UNC paths exist only on Windows")
+        unc = "\\\\localhost\\" + outside.drive.rstrip(":") + "$" + no_drive
+        if not os.path.exists(unc):
+            pytest.skip("the administrative share is not reachable on this machine")
+        return unc
+    if form == "device_question":
+        if not win:
+            pytest.skip("device prefixes exist only on Windows")
+        return "\\\\?\\" + str(outside)
+    if form == "device_dot":
+        if not win:
+            pytest.skip("device prefixes exist only on Windows")
+        return "\\\\.\\" + str(outside)
+    raise AssertionError(form)
+
+
+@pytest.mark.parametrize("form", [
+    "dotdot", "sub_dotdot", "drive_relative", "root_relative_backslash",
+    "root_relative_slash", "unc", "device_question", "device_dot",
 ])
-async def test_e_paths_outside_the_root_are_refused(lane, bad):
+async def test_e_paths_outside_the_root_are_refused(lane, form):
     from src.lane.documents import load_documents
     from src.lane.errors import LaneError
 
-    (lane["tmp"] / "outside.txt").write_text("outside", encoding="utf-8")
+    bad = _outside_target(lane, form)
+    if form in ("dotdot", "sub_dotdot"):
+        assert (lane["docs"] / bad).resolve().is_file(), "the target must exist"
+    else:
+        assert os.path.isfile(bad), f"the target of {bad!r} must exist"
     with pytest.raises(LaneError) as info:
         load_documents({"files": [bad]})
     assert info.value.code == "BRT-LANE-001"
-    assert str(lane["tmp"]) not in str(info.value)
+    message = str(info.value)
+    assert "not found" not in message, "refused for the wrong reason"
+    assert "is not a relative path" in message or "resolves outside" in message, message
+    assert str(lane["tmp"]) not in message.replace(bad, "")
 
 
 async def test_e_an_absolute_path_is_refused_even_inside_the_root(lane):
