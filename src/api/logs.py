@@ -3,6 +3,7 @@
 GET  /logs                — list recent log events
 GET  /logs/entities       — list extracted NER entities (optionally filtered by run_id/label)
 GET  /logs/cost-summary   — aggregate cost and token counts per model
+GET  /logs/outlier-runs   — the most expensive or slowest runs (sort=cost|duration)
 GET  /logs/export         — export log events as JSONL
 
 Error codes:
@@ -10,6 +11,7 @@ Error codes:
 - BRT-API-041: entities fetch failed
 - BRT-API-042: cost summary fetch failed
 - BRT-API-043: export failed
+- BRT-API-044: outlier runs fetch failed
 """
 import json
 
@@ -140,6 +142,51 @@ async def cost_summary() -> JSONResponse:
         raise HTTPException(
             status_code=500,
             detail={"error": "BRT-API-042", "message": f"Cost summary failed: {exc}"},
+        )
+
+
+@router.get("/outlier-runs")
+async def outlier_runs(
+    sort: str = Query("cost", pattern="^(cost|duration)$"),
+    limit: int = Query(5, ge=1, le=50),
+) -> JSONResponse:
+    """Runs ranked by what they cost or how long they took (never by prompt length).
+
+    Cost is the logged dollars of the run's own paid calls (the same rows the
+    cost summary counts). Duration is completed_at minus created_at, so a run
+    that has not finished has no duration and is left out of the duration sort.
+    Direct-to-model (bypass) runs are left out.
+    """
+    order = "cost DESC" if sort == "cost" else "duration_s DESC"
+    where = "WHERE duration_s IS NOT NULL" if sort == "duration" else ""
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute(
+                f"""WITH paid AS (
+                      SELECT run_id,
+                             COALESCE(SUM(dollars), 0) AS cost,
+                             COALESCE(SUM(tokens_input), 0) + COALESCE(SUM(tokens_output), 0) AS tokens
+                      FROM logs WHERE {_COST_ROWS} GROUP BY run_id
+                    ), ranked AS (
+                      SELECT r.run_id, r.status, r.user_instruction, r.created_at,
+                             (julianday(r.completed_at) - julianday(r.created_at)) * 86400.0
+                                 AS duration_s,
+                             COALESCE(p.cost, 0) AS cost, COALESCE(p.tokens, 0) AS tokens
+                      FROM runs r LEFT JOIN paid p ON p.run_id = r.run_id
+                      WHERE COALESCE(r.kind, 'orchestrated') != 'bypass'
+                    )
+                    SELECT * FROM ranked {where}
+                    ORDER BY {order}
+                    LIMIT ?""",
+                (limit,),
+            ) as cur:
+                rows = await cur.fetchall()
+        return JSONResponse(content={"sort": sort, "runs": [dict(r) for r in rows]})
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail={"error": "BRT-API-044", "message": f"Outlier runs failed: {exc}"},
         )
 
 

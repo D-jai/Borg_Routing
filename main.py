@@ -48,10 +48,17 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="BORG_ROUTE", version="0.1.0", lifespan=lifespan)
 
-# Serve static UI files if the ui/ directory exists. html=True makes
-# /ui/ resolve to ui/index.html (BUG-005 fix) so operators landing on the
-# root UI path see the directory page instead of a 404.
+# Serve static UI files if the ui/ directory exists. The old directory page
+# (ui/index.html) is retired: /ui/ goes to the Admin overview until 4.2 points
+# the root at the Ask page.
 if os.path.isdir("ui"):
+    from fastapi.responses import RedirectResponse
+
+    @app.get("/ui", include_in_schema=False)
+    @app.get("/ui/", include_in_schema=False)
+    async def ui_root():
+        return RedirectResponse("/ui/admin_overview.html")
+
     app.mount("/ui", StaticFiles(directory="ui", html=True), name="ui")
 
 # Register routers
@@ -62,6 +69,7 @@ from src.mcp.server import router as mcp_router  # noqa: E402
 from src.api.admin import router as admin_router  # noqa: E402
 from src.api.logs import router as logs_router  # noqa: E402
 from src.api.skills import router as skills_router  # noqa: E402
+from src.api.status import router as status_router  # noqa: E402
 
 app.include_router(models_router)
 app.include_router(chat_router)
@@ -70,6 +78,7 @@ app.include_router(mcp_router)
 app.include_router(admin_router)
 app.include_router(logs_router)
 app.include_router(skills_router)
+app.include_router(status_router)
 
 
 @app.get("/health")
