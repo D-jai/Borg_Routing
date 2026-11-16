@@ -66,7 +66,7 @@ entries) and re-run Discover. A good spread has 1-3 frontier, 2-4 mid,
 2-4 cheap / fast, and 1 specialty (e.g. web-search).
 
 ### If something goes wrong
-- **No local models appear** — LM Studio on ports 1234-1237, or Ollama at `http://localhost:11434`, must be running.
+- **No local models appear** — LM Studio on ports 1234-1237, or Ollama at `http://localhost:11434`, must be running. Servers on other addresses are set with `LMSTUDIO_BASE_URLS`, `OLLAMA_BASE_URL` and `LOCAL_OPENAI_BASE_URLS` in `.env` (see the install guide).
 - **OpenRouter section is empty** — Check that `data/curated_models.yaml` exists and lists at least one `id:` (BRT-REG-032).
 - **"Invalid OpenRouter API key"** — Check `OPENROUTER_API_KEY` in `.env`.
 

@@ -55,6 +55,7 @@ The install is done when all of these pass:
 - `pip` (bundled with Python).
 - Optional: **LM Studio** (Windows / macOS / Linux builds — all use ports 1234-1237).
 - Optional: **Ollama** (Linux-native, macOS + Windows builds exist — port 11434).
+- Optional: **Ollama in Docker** (`docker run -d -p 11434:11434 ollama/ollama`, then pull a model) — an easy way to get a local model without a native install; it answers on port 11434, the default address.
 - Optional: **OpenRouter API key** for external models AND for the capability scorer.
 
 ## Quick Start (Local Development)
@@ -139,6 +140,15 @@ are most likely to touch during install and operation are grouped below.
 |---|---|---|
 | `OPENROUTER_API_KEY` | (unset) | Required for OpenRouter discovery, the capability scorer, and the Perplexity web-search fallback. |
 | `TAVILY_API_KEY` | (unset) | Optional. When set, Tavily becomes the primary `web_search` provider (cheaper than Perplexity). Without it, `web_search` silently falls back to Perplexity via OpenRouter and logs `BRT-TOOL-DEGRADED` once per process. |
+
+### Local model servers
+| Variable | Default | Purpose |
+|---|---|---|
+| `LMSTUDIO_BASE_URLS` | `http://localhost:1234`, `1235`, `1236`, `1237` | Comma-separated LM Studio addresses probed by Discover. |
+| `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama address probed by Discover (Ollama in Docker works here). |
+| `LOCAL_OPENAI_BASE_URLS` | (unset) | Comma-separated addresses of any other OpenAI-compatible server, found through `/v1/models`; rows get source `custom_key`. |
+
+Addresses must start with `http://` or `https://`; anything else is ignored with a log warning. An unreachable address is skipped, never an error.
 
 ### Scorer
 | Variable | Default | Purpose |
