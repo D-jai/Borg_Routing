@@ -165,7 +165,7 @@ Resume refusal: code chosen in 2.2. 2.2 may renumber; the error registry is the 
 | F9 | `BRT-LANE-002` caught by the router's generic fallback; cloud `default_model` and degraded orchestrator path in `all_local` | `local_only` from the node before routing; never caught; local filter on both (6.1) |
 | F10 | Bypass in `all_local`; admin Discover and research scoring call out | Bypass refused in `all_local` (6.3); admin actions out of scope and refused in `all_local` (1, 6.4) |
 | F11 | Thread history from an `all_local` run fed to a later cloud planner or compressor | Messages carry their lane; stripped (5.6) |
-| F12 | Resume rebuilds tasks from saved payloads without their scope, under a changed pool | Resume refused (5.7); A12 rewritten |
+| F12 | Resume does not re-run saved tasks: it starts a fresh run with a saved step's instruction as the planner's user message, without the run's documents or saved `data_scope`, under the current lane mode | Resume refused (5.7); A12 rewritten |
 | F13 | `_make_child_task` drops `data_scope`; skill nodes bypass marking | Copied; skill-node tests (5.2, 12) |
 | F14 | Trivial-conversation shortcut and planner `direct_answer` skip the plan and every lane check | Shortcut off with documents; `direct_answer` rejected (5.5) |
 | F15 | Ledger keeps 2000 characters and is written after the call; a failed or timed-out call leaves no row | Full row written and awaited before the POST (9) |
