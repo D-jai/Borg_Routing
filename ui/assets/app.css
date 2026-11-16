@@ -143,3 +143,22 @@ dl.kv dt { color: var(--ink-3); } dl.kv dd { margin: 0; }
 .md code { font-family: var(--mono); font-size: 13px; }
 .md table { margin-bottom: var(--s3); }
 .chip.local { background: var(--brand-soft); color: var(--brand); } .chip.cloud { background: var(--cloud-soft); color: var(--cloud); }
+
+/* ---------- Admin pages (4.3) ---------- */
+.tabs { display: flex; gap: var(--s1); border-bottom: 1px solid var(--line); margin-bottom: var(--s4); }
+.tabs button { border: 0; background: none; padding: var(--s2) var(--s3); cursor: pointer; color: var(--ink-2); border-bottom: 2px solid transparent; }
+.tabs button[aria-selected="true"] { color: var(--brand); border-bottom-color: var(--brand); font-weight: 600; }
+.actions { display: flex; gap: var(--s2); align-items: center; flex-wrap: wrap; }
+.chip.ok { background: var(--ok-soft); color: var(--ok); } .chip.bad { background: var(--bad-soft); color: var(--bad); }
+.chip.warn { background: var(--warn-soft); color: var(--warn); }
+.callout { border-left: 3px solid var(--warn); background: var(--warn-soft); color: var(--ink); padding: var(--s3) var(--s4); border-radius: var(--radius-sm); }
+.setting { display: grid; grid-template-columns: minmax(170px, 1fr) minmax(150px, 260px) auto; gap: var(--s1) var(--s4); align-items: center; padding: var(--s3) 0; border-bottom: 1px solid var(--line); }
+.setting:last-child { border-bottom: 0; }
+.setting .help { grid-column: 1 / -1; margin: 0; }
+.setting input, .setting select, .inline-input { width: 100%; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface); padding: 7px var(--s3); }
+textarea.wide, input.wide { width: 100%; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface); padding: var(--s2) var(--s3); }
+.rule-item { padding: var(--s3) 0; border-bottom: 1px solid var(--line); display: flex; gap: var(--s3); justify-content: space-between; align-items: flex-start; }
+.rule-item.retired { opacity: .55; }
+.clip { max-width: 360px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.score { text-align: right; } .score.dim { color: var(--ink-3); }
+@media (max-width: 860px) { .setting { grid-template-columns: 1fr; } }

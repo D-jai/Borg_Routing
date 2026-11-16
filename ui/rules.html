@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rules - BORG_ROUTE</title>
+<link rel="stylesheet" href="assets/app.css">
+</head>
+<body>
+<main id="page" data-page="rules" class="stack">
+  <div class="row"><h1>Rules</h1><span class="chip">Admin</span></div>
+  <p class="muted">Rules are sent with every model call, so they apply to every step of every run.</p>
+  <div class="card stack">
+    <h2>Global rules</h2>
+    <p class="small muted">Free text, one rule per line, for example "Always answer in English." Replaces the previous text when you save.</p>
+    <textarea id="global-rules" class="wide" rows="5" aria-label="Global rules"></textarea>
+    <div class="actions"><button class="btn primary" id="save-global" type="button">Save global rules</button><span class="small muted" id="global-msg" role="status"></span></div>
+  </div>
+  <div class="card stack">
+    <h2>Rules ledger</h2>
+    <p class="small muted">Rules added over time. A retired rule stops being sent but stays here as a record.</p>
+    <div id="ledger"><p class="muted small">Loading...</p></div>
+    <div class="field">
+      <label for="new-rule">New rule</label>
+      <input id="new-rule" class="wide" type="text" placeholder="Never reveal internal model names.">
+      <div class="actions"><button class="btn primary" id="add-rule" type="button">Add rule</button><span class="small muted" id="rule-msg" role="status"></span></div>
+    </div>
+  </div>
+</main>
+<script src="assets/app.js"></script>
+<script src="assets/admin.js"></script>
+<script>
+Borg.ready(function () {
+  var A = window.BorgAdmin, h = A.h, B = window.Borg;
+  B.api('/config').then(function (cfg) { if (cfg && cfg.global_rules) A.$('global-rules').value = cfg.global_rules; }, function () {});
+  A.$('save-global').addEventListener('click', function () {
+    B.api('/config', { json: { key: 'global_rules', value: A.$('global-rules').value.trim() } }).then(function () {
+      A.$('global-msg').textContent = 'Saved. It applies from the next run.';
+    }, function () {});
+  });
+  function load() {
+    return B.api('/config/rules').then(function (r) {
+      var box = A.clear(A.$('ledger')), rules = r.rules || [];
+      if (!rules.length) { box.appendChild(h('p', { class: 'muted small' }, 'No rules yet.')); return; }
+      rules.forEach(function (rule) {
+        var retired = !!rule.retired_at;
+        var meta = 'Added ' + A.ago(rule.added_at) + (retired ? ', retired ' + A.ago(rule.retired_at) : '');
+        var btn = null;
+        if (!retired) {
+          btn = h('button', { class: 'btn', type: 'button' }, 'Retire');
+          btn.addEventListener('click', function () {
+            B.api('/config/rules/' + encodeURIComponent(rule.id) + '/retire', { method: 'POST' }).then(load, function () {});
+          });
+        }
+        box.appendChild(h('div', { class: 'rule-item' + (retired ? ' retired' : '') }, [
+          h('div', {}, [h('div', {}, rule.text), h('div', { class: 'small muted' }, meta)]), btn
+        ]));
+      });
+    }, function () { A.clear(A.$('ledger')).appendChild(h('p', { class: 'muted' }, 'The rules could not be loaded.')); });
+  }
+  A.$('add-rule').addEventListener('click', function () {
+    var input = A.$('new-rule'), text = input.value.trim(), msg = A.$('rule-msg');
+    if (!text) { msg.textContent = 'Type the rule first.'; return; }
+    B.api('/config/rules', { json: { text: text } }).then(function () {
+      input.value = ''; msg.textContent = 'Rule added.'; return load();
+    }, function () {});
+  });
+  load();
+});
+</script>
+</body>
+</html>
