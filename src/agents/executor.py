@@ -19,6 +19,9 @@ Error codes:
                already at or above the 16000 ceiling — caller must raise
                ANSWERER_MAX_TOKENS / envelope.max_output_tokens or split
                the task.
+- BRT-ANS-010: the model declined or reported failure (shown to the planner
+               in place of the code its own failure_reason text may start
+               with; set where the planner's stage_results are built)
 - BRT-TOOL-001: tool unavailable (caught via ToolInvocationResult, not raised)
 - BRT-TOOL-002: tool runtime failure (BRT-WEB-01)
 - BRT-LANE-003: a call that must stay local was headed off the machine (raised

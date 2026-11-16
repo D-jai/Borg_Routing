@@ -122,4 +122,4 @@ async def test_inputs_ref_unknown_fails_with_006(db):
     env = await expand_and_run(task, db_path=db)
     assert env.status == "failed"
     assert "BRT-APE-006" in env.failure_reason
-    assert "'does_not_exist' is not a step id" in env.failure_reason
+    assert "Not a step id: 'does_not_exist'" in env.failure_reason

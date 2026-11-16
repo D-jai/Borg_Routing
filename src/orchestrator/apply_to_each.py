@@ -29,15 +29,23 @@ from typing import Optional
 from src.envelopes.schema import InboundEnvelope, WrappedTask
 
 
+_NAME_MAX = 40   # a step name shown in a failure text is cut to this many characters
+
+
+def _short(name: object) -> str:
+    return str(name)[:_NAME_MAX]
+
+
 def unresolved_ref_message(name: object) -> str:
-    """BRT-APE-006 failure text for a ref that names no step."""
+    """BRT-APE-006 failure text for a ref that names no step.
+
+    The guidance comes first and the name last, cut to 40 characters, so the
+    whole text fits the 200-character cap on what re_plan is shown.
+    """
     return (
-        f"BRT-APE-006: '{name}' is not a step id in this run: no step of this "
-        f"run has that id (a child run does not see its parent's step ids), so "
-        f"this step has no items and made no model call. A list from the "
-        f"user's message belongs in `items` on the step (one string per item); "
-        f"`inputs_ref` and a skill's `items_ref` name an earlier step's id in "
-        f"this run."
+        "BRT-APE-006: a list from the user's message belongs in `items`; "
+        "`inputs_ref`/`items_ref` must name a step of this run, not a parent's. "
+        f"Not a step id: '{_short(name)}'"
     )
 
 
@@ -60,8 +68,8 @@ def empty_ref_list_message(key: str) -> str:
 def failed_ref_message(name: object) -> str:
     """BRT-APE-005 failure text for a ref naming a step that failed."""
     return (
-        f"BRT-APE-005: step '{name}', which this step takes its items from, "
-        f"failed, so this step has no items and made no model call."
+        "BRT-APE-005: the step this one takes its items from failed, so it has "
+        f"no items and made no model call. Step: '{_short(name)}'"
     )
 
 

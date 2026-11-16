@@ -325,7 +325,7 @@ async def test_raw_apply_to_each_ref_failure_uses_the_lane_code_shape(lane_env):
     replan = stub.of_kind("re_plan")[0]
     assert _replan_block(stub)["n2"] == {"failure": {"code": "BRT-APE-006", "doc": None}}
     body = json.dumps(replan.body)
-    assert "is not a step id" not in body
+    assert "belongs in `items`" not in body
 
 
 def _envelope_for(db_path, fragment):
@@ -384,6 +384,6 @@ async def test_child_run_ref_to_a_parent_step_fails_ape_006_naming_this_run(env)
     assert len(rows) == 1 and rows[0][0] == "failed", rows
     payload = rows[0][1]
     assert "BRT-APE-006" in payload
-    assert "in this run" in payload
+    assert "of this run, not a parent" in payload
     assert "parent" in payload
 

@@ -182,7 +182,7 @@ def _assert_unresolved_failure(stub, db_path, name):
     assert len(rows) == 1 and rows[0][0] == "failed", rows
     payload = rows[0][1]
     assert "BRT-APE-006" in payload
-    assert f"'{name}' is not a step id" in payload
+    assert f"Not a step id: '{name}'" in payload
     assert "items" in payload
     # The failure reaches re_plan as an ordinary step failure.
     replans = stub.of_kind("re_plan")

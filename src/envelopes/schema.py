@@ -159,3 +159,8 @@ class InboundEnvelope(BaseModel):
     # (the envelope was built from its JSON), not by the runtime. Never
     # serialised; the output guard then shows BRT-LANE-004 upward.
     _reason_from_model: bool = PrivateAttr(default=False)
+    # On-premise lane: the data_scope of the task that produced this envelope
+    # ("raw" or "derived"), and its document ids label. Set by the engine;
+    # never serialised. Decides what a prompt shows of a failure.
+    _data_scope: Optional[str] = PrivateAttr(default=None)
+    _doc_label: Optional[str] = PrivateAttr(default=None)

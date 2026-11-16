@@ -79,7 +79,10 @@ from src.db.state import (
     update_run_status,
 )
 from src.envelopes.schema import InboundEnvelope, ToolRequest, WrappedTask
-from src.lane.context import LaneContext, current_lane, failure_of, prompt_json, raw_failure_code
+from src.lane.context import (
+    RAW_FAILURE_DEFAULT, LaneContext, current_lane, doc_label, failure_of, prompt_json,
+    raw_failure_code,
+)
 from src.lane.errors import LaneError
 from src.lane.outbound import call_scope, send_outbound
 from src.logging.writer import write_event
@@ -589,29 +592,48 @@ async def _select_orchestrator_model(
     )
 
 
-_FAILURE_MESSAGE_MAX = 200   # deliberate cap on a failure message sent to re_plan
+_FAILURE_MESSAGE_MAX = 200   # deliberate cap on a failure message sent to plan / re_plan
 _FAILURE_CODE_FALLBACK = "BRT-ORC-004"
+_MODEL_FAILURE_CODE = "BRT-ANS-010"   # the model itself declined or reported failure
 
 
-def _stage_output_for_prompt(env: InboundEnvelope) -> dict:
+def _stage_output_for_prompt(env: InboundEnvelope, mode: str = "re_plan") -> dict:
     """One step's entry in the stage_results block of an orchestrator prompt.
 
     A passing step shows its output unchanged. A failed step also carries
-    ``{"failure": {"code", "message"}}`` (code from the start of its
-    failure_reason, else a fixed fallback; message the first 200 characters),
-    merged over whatever output exists: re_plan reads outputs, not
-    failure_reason. A raw lane step's failure already is
-    ``{"code", "doc"}`` (``lane_guarded`` False) and is shown as is, never
-    with message text.
+    ``{"failure": {"code", "message"}}`` merged over whatever output exists:
+    re_plan reads outputs, not failure_reason. The message is the first 200
+    characters of the reason; in compose mode the failure is the code only.
+
+    The code: a reason the model wrote (the envelope was built from its JSON)
+    is BRT-ANS-010 and is never parsed; otherwise it is the code the
+    runtime's reason starts with, else a fixed fallback.
+
+    A raw step (decided by the ``data_scope`` of the task that produced the
+    envelope, not by ``lane_guarded``) shows only ``{"code", "doc"}``: never
+    its output or any message text.
     """
-    if env.status != "failed" or env.lane_guarded is False:
+    if env.status != "failed":
         return env.output
+    if env._data_scope == "raw":
+        shown = (env.output or {}).get("failure")
+        if env.lane_guarded is False and isinstance(shown, dict) and shown.get("code"):
+            return {"failure": {"code": shown["code"], "doc": shown.get("doc")}}
+        code = (
+            RAW_FAILURE_DEFAULT if env._reason_from_model
+            else raw_failure_code(env.failure_reason)
+        )
+        return {"failure": failure_of(code, [env._doc_label] if env._doc_label else [])}
     reason = str(env.failure_reason or "")
+    code = (
+        _MODEL_FAILURE_CODE if env._reason_from_model
+        else raw_failure_code(reason, _FAILURE_CODE_FALLBACK)
+    )
     entry = dict(env.output or {})
-    entry["failure"] = {
-        "code": raw_failure_code(reason, _FAILURE_CODE_FALLBACK),
-        "message": reason[:_FAILURE_MESSAGE_MAX],
-    }
+    failure = {"code": code}
+    if mode != "compose":
+        failure["message"] = reason[:_FAILURE_MESSAGE_MAX]
+    entry["failure"] = failure
     return entry
 
 
@@ -644,7 +666,7 @@ async def _invoke_orchestrator_model(
         ValueError: BRT-ORC-002 on JSON parse failure.
     """
     stage_results_str = prompt_json(
-        {k: _stage_output_for_prompt(v) for k, v in stage_results.items()}, indent=2
+        {k: _stage_output_for_prompt(v, mode) for k, v in stage_results.items()}, indent=2
     ) if stage_results else "(none)"
 
     # BRT-WEB-02 — surface raw tool_results (web_search citations, etc.)
@@ -1378,6 +1400,8 @@ async def _lane_refuse_node(
         failure_reason=json.dumps(failure),
         lane_guarded=False,
     )
+    results[node_id]._data_scope = "raw"
+    results[node_id]._doc_label = doc_label(part_ids)
     if raw_unstamped is not None:
         raw_unstamped.add(node_id)
     try:
@@ -2343,6 +2367,8 @@ async def _orchestrate_run(
         )
         for nid, env, done_task in dispatched:
             results[nid] = env
+            env._data_scope = done_task.data_scope
+            env._doc_label = doc_label(list(done_task.documents))
             if done_task.data_scope == "raw" and not env.lane_guarded:
                 raw_unstamped.add(nid)
         # Back to the top: the next wave, or re_plan when no step is ready.
