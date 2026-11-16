@@ -580,6 +580,32 @@ async def _select_orchestrator_model(
     )
 
 
+_FAILURE_MESSAGE_MAX = 200   # deliberate cap on a failure message sent to re_plan
+_FAILURE_CODE_FALLBACK = "BRT-ORC-004"
+
+
+def _stage_output_for_prompt(env: InboundEnvelope) -> dict:
+    """One step's entry in the stage_results block of an orchestrator prompt.
+
+    A passing step shows its output unchanged. A failed step also carries
+    ``{"failure": {"code", "message"}}`` (code from the start of its
+    failure_reason, else a fixed fallback; message the first 200 characters),
+    merged over whatever output exists: re_plan reads outputs, not
+    failure_reason. A raw lane step's failure already is
+    ``{"code", "doc"}`` (``lane_guarded`` False) and is shown as is, never
+    with message text.
+    """
+    if env.status != "failed" or env.lane_guarded is False:
+        return env.output
+    reason = str(env.failure_reason or "")
+    entry = dict(env.output or {})
+    entry["failure"] = {
+        "code": raw_failure_code(reason, _FAILURE_CODE_FALLBACK),
+        "message": reason[:_FAILURE_MESSAGE_MAX],
+    }
+    return entry
+
+
 async def _invoke_orchestrator_model(
     mode: str,
     run_id: UUID,
@@ -609,7 +635,7 @@ async def _invoke_orchestrator_model(
         ValueError: BRT-ORC-002 on JSON parse failure.
     """
     stage_results_str = prompt_json(
-        {k: v.output for k, v in stage_results.items()}, indent=2
+        {k: _stage_output_for_prompt(v) for k, v in stage_results.items()}, indent=2
     ) if stage_results else "(none)"
 
     # BRT-WEB-02 — surface raw tool_results (web_search citations, etc.)
