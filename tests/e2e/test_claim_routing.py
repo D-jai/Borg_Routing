@@ -112,7 +112,6 @@ async def test_every_model_call_is_priced_and_the_run_total_is_their_sum(finishe
     assert digest[0] == pytest.approx(sum(d for _m, d in calls))
 
 
-@pytest.mark.xfail(strict=True, reason="work order 1.7: the stream drops line breaks")
 @pytest.mark.asyncio
 async def test_the_streamed_answer_keeps_every_character(finished_run):
     import json

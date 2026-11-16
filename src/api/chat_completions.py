@@ -12,7 +12,8 @@ Model aliases:
 
 Streaming: if stream=true, emit SSE with OpenAI-compat data: lines.
   - Bypass mode: relays actual SSE chunks from the underlying model endpoint.
-  - Orchestration mode: word-level SSE after pipeline completion.
+  - Orchestration mode: word-level SSE after pipeline completion; every
+    character, including newlines, is preserved.
 
 Error codes:
 - BRT-API-010: malformed request body
@@ -23,6 +24,7 @@ Error codes:
 import asyncio
 import json
 import os
+import re
 import time
 import uuid
 from typing import AsyncIterator, Optional
@@ -134,10 +136,10 @@ async def _stream_response(response_text: str, model_alias: str, run_id: str) ->
     chunk_id = f"chatcmpl-{run_id}"
     created = int(time.time())
 
-    # Stream word by word for a natural feel
-    words = response_text.split()
-    for i, word in enumerate(words):
-        delta_content = word + (" " if i < len(words) - 1 else "")
+    # Word-sized chunks, each word keeping the whitespace after it, so the
+    # concatenated stream equals the text exactly (newlines and indents too).
+    pieces = re.findall(r"\S+\s*|\s+", response_text)
+    for delta_content in pieces:
         chunk = {
             "id": chunk_id,
             "object": "chat.completion.chunk",
