@@ -178,6 +178,17 @@ async def record_end(
     await _finish_row(lane.db_path, request_id, status, http_status, error)
 
 
+def client_for(local: bool, timeout: float) -> httpx.AsyncClient:
+    """THE way a lane call builds its HTTP client.
+
+    A local target gets ``trust_env=False``, so ``HTTP_PROXY``/``ALL_PROXY``
+    cannot carry it off the machine (design note section 3). Used by
+    ``send_outbound`` and by the streamed bypass relay."""
+    if local:
+        return httpx.AsyncClient(timeout=timeout, trust_env=False)
+    return httpx.AsyncClient(timeout=timeout)
+
+
 def check_backstop(url: str, body: dict, destination: Optional[str]) -> Optional[str]:
     """The backstop's verdict for a body headed off the machine: None, or the
     refusal message (document id and rule, never the matched text)."""
@@ -248,11 +259,8 @@ async def send_outbound(
         url, body, left_machine=not local, purpose=purpose,
         destination=dest, attempt=attempt,
     )
-    client_kwargs: dict = {"timeout": timeout}
-    if local:
-        client_kwargs["trust_env"] = False
     try:
-        async with httpx.AsyncClient(**client_kwargs) as client:
+        async with client_for(local, timeout) as client:
             resp = await client.post(url, json=body, headers=headers)
     except BaseException as exc:
         await record_end(request_id, "failed", None, f"{type(exc).__name__}: {exc}"[:500])

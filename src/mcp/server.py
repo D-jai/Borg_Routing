@@ -165,6 +165,12 @@ async def _tool_submit_task(args: dict) -> dict:
 
     from src.db.state import create_run
     from src.db.schema import DB_PATH
+    from src.lane.context import prepare_lane
+
+    # On-premise lane: prepared exactly as POST /v1/task does, before a run
+    # row exists, so all_local holds for this run too. A refusal (a bad lane
+    # setting) raises LaneError (a ValueError) and creates nothing.
+    lane = await prepare_lane(None, DB_PATH)
     run_id = await create_run(instruction, db_path=DB_PATH)
 
     # R9: create_run only writes the row; start the run the way POST /v1/task
@@ -173,7 +179,10 @@ async def _tool_submit_task(args: dict) -> dict:
     from src.api.tasks import _run_in_background
 
     task = asyncio.get_running_loop().create_task(
-        _run_in_background(instruction, str(run_id), DB_PATH)
+        _run_in_background(
+            instruction, str(run_id), DB_PATH,
+            **({"lane": lane} if lane is not None else {}),
+        )
     )
     _BACKGROUND_RUNS.add(task)
     task.add_done_callback(_BACKGROUND_RUNS.discard)

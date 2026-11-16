@@ -17,7 +17,8 @@ Error codes:
 - BRT-API-029: stream DB error
 - BRT-LANE-001: a document path was refused (400, no run is created)
 - BRT-LANE-005: documents sent with the lane off, or a bad lane setting (400)
-- BRT-LANE-008: resume refused for a run that read documents (409)
+- BRT-LANE-008: resume refused for a run that read documents, or when that
+  could not be checked (409, fails closed)
 """
 import asyncio
 import json
@@ -57,10 +58,11 @@ class TaskRequest(BaseModel):
 def lane_admin_allowed(request=None) -> bool:
     """THE single hook for the admin token (work order 4.4, not built yet).
 
-    With the lane on, the outbound bodies in run detail (and, per the design
-    note, /logs/entities and /logs/export) belong behind the admin token.
-    Until 4.4 adds the token this returns True; 4.4 replaces its body with
-    the token check, and every caller already goes through it.
+    With the lane on, the outbound bodies in run detail belong behind the
+    admin token; today GET /runs/{id} is the only caller. The design note
+    also puts /logs/entities and /logs/export behind the token: those routes
+    do not call this hook yet (work order 4.4 wires them). Until 4.4 adds the
+    token this returns True; 4.4 replaces its body with the token check.
     """
     return True
 
@@ -507,10 +509,18 @@ async def resume_run_endpoint(
 
     # On-premise lane: a run that read documents is never resumed (design
     # note 5.7); a resume would start a fresh run without its documents.
+    # Fails closed: if the lookup itself fails, the resume is refused.
     try:
         read_documents = await get_run_documents(run_uuid, db_path=DB_PATH)
     except Exception:
-        read_documents = None
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": "BRT-LANE-008",
+                "message": "could not check whether this run read documents, so it "
+                           "is not resumed; try again, or start a new run",
+            },
+        )
     if read_documents:
         raise HTTPException(
             status_code=409,
@@ -519,6 +529,18 @@ async def resume_run_endpoint(
                 "message": "this run read documents, so it cannot be resumed; "
                            "start a new run with the same documents",
             },
+        )
+
+    # The re-run takes the lane exactly as POST /v1/task does (no documents:
+    # a run that read some was refused above), so all_local stays local.
+    from src.lane.context import prepare_lane
+    from src.lane.errors import LaneError
+    try:
+        lane = await prepare_lane(None, DB_PATH)
+    except LaneError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail={"error": exc.code, "message": str(exc)},
         )
 
     try:
@@ -564,6 +586,7 @@ async def resume_run_endpoint(
             root_instruction if root_instruction != run_instruction else None
         ),
         route_options=route_options,
+        **({"lane": lane} if lane is not None else {}),
     )
 
     return JSONResponse(

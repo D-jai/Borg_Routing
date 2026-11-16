@@ -7,14 +7,19 @@ rows "2.2 locality/API review" and "2.2 runtime review" (16-Nov-2026).
 """
 from __future__ import annotations
 
+import asyncio
 import json
+import socket
+import sqlite3
+import threading
 import uuid
 
 import pytest
+from fastapi import BackgroundTasks
 
 from src.lane.backstop import normalise
 from src.orchestrator import engine
-from tests.e2e.stub_model_server import StubModels, lane_matrix
+from tests.e2e.stub_model_server import StubModels, drain_log_writes, lane_matrix
 from tests.e2e.test_privacy_lane import (  # noqa: F401  (fixture)
     PLAN_RAW,
     SUMMARY,
@@ -219,3 +224,212 @@ async def test_r6_web_search_is_refused_at_the_door_in_all_local(lane):
             await WebSearchTool().run({"query": "lease rates"})
     assert info.value.code == "BRT-LANE-003"
     assert stub.requests == []
+
+
+# -- R7: resume and MCP submit_task carry the lane --------------------------------------------
+
+async def _all_local_api(lane):
+    from src.api import tasks as tasks_api
+    from src.db import schema
+
+    lane["mp"].setenv("BORG_LANE_MODE", "all_local")
+    lane["mp"].setattr(tasks_api, "DB_PATH", lane["db"])
+    lane["mp"].setattr(schema, "DB_PATH", lane["db"])
+    lane["mp"].setattr(engine, "_shared_matrix", lane_matrix())
+    plan = [dict(PLAN_RAW[1], tier="light", depends_on=[])]
+    return StubModels(plan_nodes=plan).install(lane["mp"])
+
+
+async def test_r7_a_resumed_run_in_all_local_stays_on_the_machine(lane):
+    from src.api import tasks as tasks_api
+    from src.db.state import create_run, save_envelope
+    from src.envelopes.schema import WrappedTask
+
+    stub = await _all_local_api(lane)
+    run_id = await create_run("Summarise the risks.", db_path=lane["db"])
+    await save_envelope(WrappedTask(
+        envelope_id=uuid.uuid4(), run_id=run_id, subtask_id=uuid.uuid4(), type="answerer",
+        current_depth=1, max_depth=5, level_path="1a",
+        model_endpoint="https://openrouter.ai/api", model_name="openrouter/stub/cheap",
+        instruction="Summarise.", output_schema={"result": "string"},
+    ), db_path=lane["db"])
+    background = BackgroundTasks()
+    resp = await tasks_api.resume_run_endpoint(str(run_id), background)
+    assert resp.status_code == 202
+    await background()
+    await drain_log_writes()
+    assert stub.requests, "the resume never ran"
+    assert [r.url for r in stub.requests if not r.is_local] == []
+
+
+async def test_r7_mcp_submit_task_in_all_local_stays_on_the_machine(lane):
+    from src.db.state import get_run
+    from src.mcp import server as mcp_server
+
+    stub = await _all_local_api(lane)
+    reply = await mcp_server._tool_submit_task({"instruction": "Summarise the risks."})
+    run_id = reply["_meta"]["run_id"]
+    await asyncio.gather(*list(mcp_server._BACKGROUND_RUNS), return_exceptions=True)
+    await drain_log_writes()
+    run = await get_run(uuid.UUID(run_id), db_path=lane["db"])
+    assert run["status"] in ("completed", "failed")
+    assert stub.requests, "the run never ran"
+    assert [r.url for r in stub.requests if not r.is_local] == []
+
+
+# -- R8: the streamed bypass ignores a proxy for a local target ------------------------------
+
+class _FakeProxy:
+    """A real listener standing in for a proxy; records what reaches it."""
+
+    def __init__(self) -> None:
+        self.got: list[bytes] = []
+        self.sock = socket.socket()
+        self.sock.bind(("127.0.0.1", 0))
+        self.sock.listen(5)
+        self.sock.settimeout(0.2)
+        self.port = self.sock.getsockname()[1]
+        self._stop = threading.Event()
+        self.thread = threading.Thread(target=self._serve, daemon=True)
+        self.thread.start()
+
+    def _serve(self) -> None:
+        while not self._stop.is_set():
+            try:
+                conn, _ = self.sock.accept()
+            except (socket.timeout, OSError):
+                continue
+            try:
+                conn.settimeout(1)
+                self.got.append(conn.recv(65536)[:200])
+                conn.sendall(b"HTTP/1.1 502 Bad\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+            except OSError:
+                pass
+            finally:
+                conn.close()
+
+    def close(self) -> None:
+        self._stop.set()
+        self.thread.join(timeout=2)
+        self.sock.close()
+
+
+async def test_r8_a_streamed_bypass_to_a_local_model_ignores_http_proxy(lane, tmp_path):
+    from src.api import chat_completions as cc
+    from src.lane.context import lane_scope, prepare_lane
+    from src.lane.outbound import call_scope
+    from src.registry.capability_matrix import CapabilityMatrix
+    from src.registry.models import ModelInfo
+
+    # A port with nothing listening: the direct call fails, which is fine.
+    probe = socket.socket()
+    probe.bind(("127.0.0.1", 0))
+    dead_port = probe.getsockname()[1]
+    probe.close()
+
+    proxy = _FakeProxy()
+    try:
+        for name in ("HTTP_PROXY", "http_proxy", "ALL_PROXY", "all_proxy"):
+            lane["mp"].setenv(name, f"http://127.0.0.1:{proxy.port}")
+        for name in ("NO_PROXY", "no_proxy"):
+            lane["mp"].delenv(name, raising=False)
+        lane["mp"].setenv("BORG_LANE_MODE", "raw_local")
+        lane["mp"].setattr(cc, "DB_PATH", lane["db"])
+        matrix = CapabilityMatrix(path=str(tmp_path / "m.yaml"))
+        matrix.upsert(ModelInfo(model_id="local-llm", source="lmstudio",
+                                endpoint=f"http://127.0.0.1:{dead_port}", context_length=4096))
+        ctx = await prepare_lane(None, lane["db"])
+        rid = str(uuid.uuid4())
+        with lane_scope(ctx), call_scope(uuid.UUID(rid)):
+            try:
+                async for _chunk in cc._stream_bypass_relay(
+                    matrix, "local-llm", "local-llm",
+                    [cc.ChatMessage(role="user", content="SECRET-PROMPT")], rid,
+                ):
+                    pass
+            except Exception:
+                pass
+        await drain_log_writes()
+    finally:
+        proxy.close()
+    assert proxy.got == [], "a local call went through the proxy"
+    with sqlite3.connect(lane["db"]) as conn:
+        rows = conn.execute("SELECT left_machine FROM outbound_requests").fetchall()
+    assert rows and all(r[0] == 0 for r in rows)
+
+
+# -- R9: tests that pin the parent walk and the body gating ------------------------------------
+
+def _insert_runs(db, parent_docs: bool):
+    parent, child = str(uuid.uuid4()), str(uuid.uuid4())
+    with sqlite3.connect(db) as conn:
+        conn.execute(
+            "INSERT INTO runs(run_id, status, user_instruction, documents) VALUES (?, 'failed', 'p', ?)",
+            (parent, json.dumps([{"id": "doc_001"}]) if parent_docs else None),
+        )
+        conn.execute(
+            "INSERT INTO runs(run_id, parent_run_id, status, user_instruction) "
+            "VALUES (?, ?, 'failed', 'c')", (child, parent),
+        )
+    return parent, child
+
+
+async def test_r9_resuming_a_child_of_a_run_that_read_documents_is_refused(lane):
+    from fastapi import HTTPException
+
+    from src.api import tasks as tasks_api
+
+    lane["mp"].setattr(tasks_api, "DB_PATH", lane["db"])
+    _parent, child = _insert_runs(lane["db"], parent_docs=True)
+    with pytest.raises(HTTPException) as info:
+        await tasks_api.resume_run_endpoint(child, BackgroundTasks())
+    assert info.value.status_code == 409
+    assert info.value.detail["error"] == "BRT-LANE-008"
+
+
+async def test_r9_run_detail_withholds_outbound_bodies_when_admin_is_not_allowed(lane):
+    from src.api import tasks as tasks_api
+
+    lane["mp"].setattr(tasks_api, "DB_PATH", lane["db"])
+    run_id = str(uuid.uuid4())
+    with sqlite3.connect(lane["db"]) as conn:
+        conn.execute("INSERT INTO runs(run_id, status, user_instruction) VALUES (?, 'completed', 'p')",
+                     (run_id,))
+        conn.execute(
+            "INSERT INTO outbound_requests(request_id, run_id, attempt, purpose, url, "
+            "left_machine, body, status) VALUES (?,?,1,'model','https://x.test',1,?,'sent')",
+            (str(uuid.uuid4()), run_id, json.dumps({"model": "m", "secret": "BODY-TEXT"})),
+        )
+    shown = json.loads((await tasks_api.get_run_state(run_id)).body)
+    assert shown["outbound"] and shown["outbound"][0]["body"] is not None
+    lane["mp"].setattr(tasks_api, "lane_admin_allowed", lambda request=None: False)
+    hidden = json.loads((await tasks_api.get_run_state(run_id)).body)
+    assert hidden["outbound"] and all(r["body"] is None for r in hidden["outbound"])
+    assert "BODY-TEXT" not in json.dumps(hidden)
+
+
+# -- R10: resume fails closed ------------------------------------------------------------------
+
+async def test_r10_resume_is_refused_when_the_documents_lookup_fails(lane):
+    from fastapi import HTTPException
+
+    from src.api import tasks as tasks_api
+
+    async def broken(*args, **kwargs):
+        raise RuntimeError("database is locked")
+
+    lane["mp"].setattr(tasks_api, "DB_PATH", lane["db"])
+    lane["mp"].setattr(tasks_api, "get_run_documents", broken)
+    started: list = []
+
+    async def never(*args, **kwargs):
+        started.append(1)
+        return []
+
+    lane["mp"].setattr(tasks_api, "resume_run", never)
+    _parent, child = _insert_runs(lane["db"], parent_docs=False)
+    with pytest.raises(HTTPException) as info:
+        await tasks_api.resume_run_endpoint(child, BackgroundTasks())
+    assert info.value.status_code in (409, 503)
+    assert info.value.detail["error"] == "BRT-LANE-008"
+    assert started == []

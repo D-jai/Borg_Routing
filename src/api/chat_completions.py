@@ -518,13 +518,14 @@ async def _stream_bypass_relay(
     recorded = False
     relay_text: list[str] = []
     from src.lane.context import current_lane  # noqa: PLC0415
-    from src.lane.outbound import record_end, record_start  # noqa: PLC0415
+    from src.lane.outbound import client_for, record_end, record_start  # noqa: PLC0415
 
     # With the lane on, the relay's request is in the ledger before it is sent.
     relay_lane = current_lane()
+    relay_local = relay_lane is not None and relay_lane.is_local(model_info, url)
     ledger_id = await record_start(
         url, payload,
-        left_machine=not (relay_lane is not None and relay_lane.is_local(model_info, url)),
+        left_machine=not relay_local,
         purpose="bypass", destination=model_id,
     )
 
@@ -539,7 +540,9 @@ async def _stream_bypass_relay(
         )
 
     try:
-        async with httpx.AsyncClient(timeout=120) as client:
+        # A local target ignores proxy variables (trust_env=False), the same
+        # client every lane call builds; with the lane off, as in Phase 1.
+        async with client_for(relay_local, 120) as client:
             async with client.stream(
                 "POST", url, json=payload, headers=headers
             ) as resp:
