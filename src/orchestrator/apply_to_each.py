@@ -125,15 +125,19 @@ def _make_child_task(
     )
 
 
-def _failure_reason(child: WrappedTask, reason: object) -> object:
+def _failure_reason(child: WrappedTask, reason: object,
+                    env: Optional[InboundEnvelope] = None) -> object:
     """A raw child's failure as seen upward: code plus document id only."""
     if child.data_scope != "raw":
         return reason
-    from src.lane.context import failure_of, raw_failure_code  # noqa: PLC0415
+    from src.lane.context import failure_of, lane_failure_code, raw_failure_code  # noqa: PLC0415
 
-    # The code comes only from a code-shaped match or a fixed code, never
-    # from parsed model text (a JSON "code" may hold document text).
-    return failure_of(raw_failure_code(reason), list(child.documents))
+    # A raw child's failed envelope comes from the output guard, which built
+    # it with a runtime code (a model-reported failure is BRT-LANE-004 there).
+    # Otherwise the reason is a runtime exception: its leading code or a
+    # fixed one, never parsed model text.
+    code = lane_failure_code(env) if env is not None else None
+    return failure_of(code or raw_failure_code(reason), list(child.documents))
 
 
 async def _dispatch_child(
@@ -237,7 +241,7 @@ async def expand_and_run(
                     failures.append({
                         "index": index,
                         "item": item,
-                        "reason": _failure_reason(child, env.failure_reason or "status=failed"),
+                        "reason": _failure_reason(child, env.failure_reason or "status=failed", env),
                         "model_id": child.model_name,
                     })
             except Exception as exc:

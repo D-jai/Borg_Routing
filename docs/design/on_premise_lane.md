@@ -52,7 +52,7 @@ A model is local only when its URL is local **and**:
 - it is not an Ollama model whose tag ends in `-cloud`, and discovery did not report it as remote (Ollama lists cloud models with a remote host); such rows get `remote: true` and are never local;
 - if `lane_local_allowlist` (env `BORG_LANE_LOCAL_ALLOWLIST`: model ids and/or `host:port` entries) is set, it is on the list. Unset means every local URL counts.
 
-Every local call is built with `httpx.AsyncClient(trust_env=False)`, so a `HTTP_PROXY`/`ALL_PROXY` variable cannot carry it off the machine. The same function produces the ledger's `left_machine` flag (section 9), so routing and record cannot disagree.
+Every local model, tool and bypass call (the calls made through `send_outbound()` while the lane is on, and the streamed bypass relay) is built with `httpx.AsyncClient(trust_env=False)` by `client_for()` in `src/lane/outbound.py`, so a `HTTP_PROXY`/`ALL_PROXY` variable cannot carry it off the machine. Not covered: model discovery, Get Model Info scoring and the status probes build their own clients and honour proxy variables; they carry no document text. The same function produces the ledger's `left_machine` flag (section 9), so routing and record cannot disagree.
 
 ## 4. Documents by reference
 
@@ -84,15 +84,21 @@ Every local call is built with `httpx.AsyncClient(trust_env=False)`, so a `HTTP_
 
 ## 7. Content backstop (the primary check on what leaves)
 
-When `lane_mode` is not `off` and the run has documents, **every request body headed for a non-local URL** is checked against the run's loaded document text before it is sent. One helper, `send_outbound()`, owns every such call: the answerer's `_call_model`, the orchestrator's `_post_and_collect`, the Tavily and Perplexity calls in `web_search`, the bypass relay in `chat_completions`, and the thread compressor. A hit refuses the call with `BRT-LANE-006` and nothing is sent.
+When `lane_mode` is not `off` and the run has documents, **every request body headed for a non-local URL** is checked against the run's loaded document text before it is sent. One helper, `send_outbound()`, owns every such call: the answerer's `_call_model`, the orchestrator's `_post_and_collect`, the Tavily and Perplexity calls in `web_search`, and the bypass relay in `chat_completions`. A hit refuses the call with `BRT-LANE-006` and nothing is sent. The thread compressor (`src/memory/compressor.py`) does not go through `send_outbound()`; it has no caller in the running app, and it is outside the lane's claims until one is added.
 
-- **Serialise.** Walk the whole body and join every key and every string value (numbers as text) with newlines into one string. (Not `json.dumps`: its escapes, such as `\n`, would break matches.) A string that itself holds JSON, such as a prompt block built with `json.dumps`, is decoded as well, a few levels deep, and the engine builds those blocks with `ensure_ascii=False`.
-- **Normalise** body and documents alike: Unicode NFKC, casefold, then every run of characters that are not letters or digits (punctuation, whitespace, line breaks) becomes one space.
+- **Serialise.** Walk the whole body and join every key and every string value (numbers as text) with newlines into one string, plus one more line of the values alone (every string and number in order, no keys), so a copy split one word per value under separate keys reads as the run it was. (Not `json.dumps`: its escapes, such as `\n`, would break matches.) JSON string escapes are decoded to a fixed point (until a pass changes nothing, at most 16 passes), and a string that itself holds JSON, such as a prompt block built with `json.dumps`, is parsed and walked a few levels deep. With the lane on the engine builds those blocks with `ensure_ascii=False` (lone surrogates replaced by U+FFFD so the request can be encoded); with the lane off they are exactly as in Phase 1.
+- **Normalise** body and documents alike: delete Unicode format characters (category `Cf`: zero-width space and joiners, soft hyphen, byte-order mark), then Unicode NFKC, casefold, then every run of characters that are not letters or digits (punctuation, whitespace, line breaks) becomes one space.
 - **Flag** when any of these holds for any document of the run (child runs included):
   - (a) **Verbatim:** the body shares a run of `lane_max_verbatim_chars` (default 120) or more consecutive normalised characters with the document.
   - (b) **Coverage:** the share of the document's distinct word 8-grams that appear in the body exceeds `lane_max_ngram_share` (default 0.10). This catches a document passed on in short pieces.
   - (c) **Short document:** a document shorter than the verbatim limit occurs whole in the body. Documents under 24 normalised characters are skipped (they would match ordinary words) and listed as a limit.
-- **Limits, stated honestly.** Paraphrase, translation, summaries and encodings (base64, spelling out) are not caught. Copied pieces below both limits are not caught. It is a backstop behind sections 5 and 6, not proof. The verbatim scan may be a plain scan or a rolling hash (documents are small).
+- **Limits, stated honestly.** Not caught:
+  - documents shorter than 24 normalised characters (never checked by the copy checks, here or in the output guard);
+  - encodings (base64, hex, spelling out), reversed text or reversed word order, look-alike letters from other alphabets (a Cyrillic "а" for a Latin "a"), a marker word inserted every few words, and a copy placed one word per key name;
+  - paraphrase, translation and summaries;
+  - copied pieces below both limits.
+
+  File names are visible to the planner in the manifest unless `lane_manifest` is `ids`. The backstop is a backstop behind sections 5 and 6, not proof. The verbatim scan may be a plain scan or a rolling hash (documents are small).
 
 ## 8. Bounding what a local step returns (P2)
 

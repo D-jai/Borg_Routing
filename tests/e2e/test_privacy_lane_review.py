@@ -120,18 +120,27 @@ def test_r1_the_backstop_decodes_escaped_and_nested_json():
 
 
 def test_r1_engine_prompt_blocks_keep_accents_unescaped():
+    """With the lane on (round 2: with it off the block is Phase 1's form)."""
     from src.envelopes.schema import InboundEnvelope
+    from src.lane.context import LaneContext, lane_scope
+    from src.lane.settings import LaneSettings
 
     env = InboundEnvelope(envelope_id=uuid.uuid4(), subtask_id=uuid.uuid4(),
                           status="resolved", output={"client": "Zoë Müller"})
-    task = engine._build_task_from_node(
+    ctx = LaneContext(settings=LaneSettings(mode="raw_local"), docs=None, db_path=":memory:")
+    with lane_scope(ctx):
+        task = _build_n2(env)
+    assert "Zoë Müller" in task.context
+
+
+def _build_n2(env):
+    return engine._build_task_from_node(
         {"type": "answerer", "id": "n2", "depends_on": ["n1"], "instruction": "x",
          "output_schema": {"result": "string"}},
         run_id=uuid.uuid4(), current_depth=1, max_depth=5, level_path="1a",
         model_endpoint="http://127.0.0.1:11434", model_name="ollama/stub/local",
         user_instruction="x", results={"n1": env},
     )
-    assert "Zoë Müller" in task.context
 
 
 # -- R2: the guard's short-document rule ------------------------------------------

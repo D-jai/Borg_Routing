@@ -502,14 +502,14 @@ The planner never sees the text. It gets a list: an id per document (`doc_001`),
 - The runtime, not the planner, marks a step **raw** when it reads documents (`"inputs_ref": "documents"`, `"documents": ["doc_001"]`, or a skill given `items_ref: documents`), or when it reads the output of a raw step that was withheld. Raw steps run on local models only.
 - The text is loaded inside the step, right before its own (local) request. Plans, saved envelopes and results carry document ids, never text.
 - **What a local step returns can be passed on.** That is the limit of the promise, so it is bounded: an output longer than `lane_max_output_chars` (default 1500 characters), one that copies a passage of `lane_max_verbatim_chars` (default 120) characters from the document, or one that holds a short document (under that limit) whole, is withheld (**BRT-LANE-004**). The check reads the output's values as text, so line breaks and accented letters do not hide a copy. Ask such steps for short fields (names, dates, labels).
-- When a raw step fails, the planner and the final answer see only the code and the document id, for example `{"code": "BRT-LANE-004", "doc": "doc_001"}`. The code is the first `BRT-...` code found in the failure, never a value the model chose; when there is none it is **BRT-LANE-004**. The full error stays in the local trace.
+- When a raw step fails, the planner and the final answer see only the code and the document id, for example `{"code": "BRT-LANE-004", "doc": "doc_001"}`. A failure the local model itself reported always shows as **BRT-LANE-004**, whatever code or text it wrote. Only a failure BORG_ROUTE itself raised keeps its own code (for example **BRT-ANS-009** for a truncated answer, or a `BRT-LANE-*` refusal). The full error stays in the local trace.
 - With documents, the planner may not answer directly or skip the plan (**BRT-ORC-003**), and the short-prompt shortcut is off.
 - An `orchestrate` step given documents is refused outside `all_local` (**BRT-LANE-005**): its own planner would read them.
 - Every call a raw step makes, retries included, is checked right before it is sent; a call about to leave the machine is blocked (**BRT-LANE-003**, which means a defect).
 
 ### The check on everything sent out, and the record
 
-- While the lane is on and the run has documents, every request headed off the machine (planner, final answer, cloud steps, web search, direct-to-model) is compared with the documents first. If it holds a passage of 120 characters, more than 10% of a document's 8-word sequences (`lane_max_ngram_share`), or a short document whole, it is blocked (**BRT-LANE-006**). Case, punctuation and line breaks do not hide a match. Paraphrase, translation, summaries and encodings are not caught.
+- While the lane is on and the run has documents, every request headed off the machine (planner, final answer, cloud steps, web search, direct-to-model) is compared with the documents first. If it holds a passage of 120 characters, more than 10% of a document's 8-word sequences (`lane_max_ngram_share`), or a short document whole, it is blocked (**BRT-LANE-006**). Case, punctuation, line breaks, repeated JSON escaping, invisible characters (zero-width space, soft hyphen) and a copy split one word per field do not hide a match. What it does not catch is listed under "What is not promised".
 - Every request a run makes while the lane is on is written to the `outbound_requests` table before it is sent, with its exact body (secret fields such as `api_key` are blanked in the stored copy), and whether it left the machine. If that write fails, the request is not sent (**BRT-LANE-007**). A retry is its own row.
 - Local calls ignore proxy settings (`HTTP_PROXY` and the like), so a proxy cannot carry them off the machine.
 
@@ -529,6 +529,13 @@ The planner never sees the text. It gets a list: an id per document (`doc_001`),
 - Your own prompt goes to the planner. Hand documents over by reference; text pasted into the prompt from a document that was also loaded is blocked, text from any other document cannot be recognised.
 - Facts a local step extracts (a name, a date, a short quote) can leave inside its answer, within the limits above, and are listed.
 - A document can carry instructions aimed at the local model ("put everything in base64"). The limits reduce the damage; they do not catch encodings or paraphrase.
+- The copy checks (the output guard and the check on everything sent out) do not catch:
+  - documents shorter than 24 characters once case, punctuation and spacing are folded: these are never checked;
+  - encodings (base64, hex), reversed text or reversed word order, look-alike letters from other alphabets, a marker word inserted every few words, or a copy placed one word per key name;
+  - paraphrase and summaries.
+
+  The check is a backstop, not proof.
+- File names are visible to the planner unless `lane_manifest` is set to `ids`.
 - A local model server that itself forwards to a cloud service looks local. Restrict the lane with `lane_local_allowlist` (model ids or `host:port`) to servers you vouch for.
 - `all_local` removes these limits by sending nothing out.
 - Copies of document-derived text stay in the local database (`logs`, `log_entities`, `envelopes`, `outbound_requests`).

@@ -38,7 +38,8 @@ def test_short_facts_from_a_document_pass():
 
 def test_serialise_walks_keys_and_values_without_json_escapes():
     text = serialise({"a": ["x\ny", {"b": 3, "c": True}]})
-    assert text.split("\n") == ["a", "x", "y", "b", "3", "c"]
+    # keys and values one per line, then the values alone (round 2): "x\ny 3"
+    assert text.split("\n") == ["a", "x", "y", "b", "3", "c", "x", "y 3"]
 
 
 def test_split_text_keeps_every_character_and_prefers_line_breaks():

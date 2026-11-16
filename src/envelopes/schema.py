@@ -14,7 +14,7 @@ Error codes:
 from typing import Literal, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, field_validator, model_validator
+from pydantic import BaseModel, PrivateAttr, field_validator, model_validator
 
 VALID_ENVELOPE_TYPES = {"orchestrate", "answerer", "apply_to_each", "state_op"}
 VALID_SIDE_EFFECT_ACTIONS = {"write", "delete"}
@@ -155,3 +155,7 @@ class InboundEnvelope(BaseModel):
     # guard; a step reading an unguarded raw output is raw itself. None for
     # an envelope the guard never saw (any derived step).
     lane_guarded: Optional[bool] = None
+    # On-premise lane: True when ``failure_reason`` was written by the model
+    # (the envelope was built from its JSON), not by the runtime. Never
+    # serialised; the output guard then shows BRT-LANE-004 upward.
+    _reason_from_model: bool = PrivateAttr(default=False)

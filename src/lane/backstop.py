@@ -7,14 +7,17 @@ Used twice:
 - the **output guard**: what a raw (local) step returns is checked before any
   of it can be placed in another request.
 
-Text on both sides is normalised the same way: Unicode NFKC, casefold, then
-every run of characters that are not letters or digits becomes one space.
+Text on both sides is normalised the same way: Unicode format characters
+(category ``Cf``: zero-width, soft hyphen, BOM) deleted, then NFKC, casefold,
+then every run of characters that are not letters or digits becomes one space.
 A request body is serialised by walking it and joining every key and string
-value (numbers as text) with newlines; ``json.dumps`` is not used, because its
-escapes (``\\n``, ``\\u00eb``) would break matches. The walk works on decoded
-values: a string holding JSON (a prompt block built with ``json.dumps``, or
-JSON of JSON) is decoded too, a few levels deep, before normalising. The
-output guard uses the same walk and the same copy rules (``copied_rule``).
+value (numbers as text) with newlines, plus one line of the values alone;
+``json.dumps`` is not used, because its escapes (``\\n``, ``\\u00eb``) would
+break matches. The walk works on decoded values: JSON string escapes are
+decoded to a fixed point (at most 16 passes), and a string holding JSON (a
+prompt block built with ``json.dumps``, or JSON of JSON) is parsed and walked
+a few levels deep, before normalising. The output guard uses the same walk
+and the same copy rules (``copied_rule``).
 
 A body is flagged for a document when any of these holds:
 
@@ -27,8 +30,11 @@ A body is flagged for a document when any of these holds:
     match ordinary words); that is a stated limit.
 
 Not caught, and said so wherever the lane is described: paraphrase,
-translation, summaries, encodings (base64, spelling out) and copied pieces
-below both limits. This is a backstop behind routing and taint, not proof.
+translation, summaries, encodings (base64, hex, spelling out), reversed text
+or word order, look-alike letters from other alphabets, a marker word
+inserted every few words, one word per key name, documents under 24
+normalised characters, and copied pieces below both limits. This is a
+backstop behind routing and taint, not proof.
 
 The verbatim scan indexes each document's normalised text in aligned windows
 of half the limit; any shared run of the full limit must contain one whole
@@ -48,13 +54,23 @@ MIN_SHORT_DOC_CHARS = 24
 _NGRAM = 8
 
 
+def _drop_format_chars(text: str) -> str:
+    """``text`` without Unicode format characters (category ``Cf``: zero-width
+    space and joiners, soft hyphen, byte-order mark, bidi marks). They are
+    invisible, so a copy with one after every letter reads the same."""
+    if text.isascii():
+        return text
+    return "".join(c for c in text if unicodedata.category(c) != "Cf")
+
+
 def normalise(text: str) -> str:
-    folded = unicodedata.normalize("NFKC", text or "").casefold()
+    folded = unicodedata.normalize("NFKC", _drop_format_chars(text or "")).casefold()
     return _NON_ALNUM.sub(" ", folded).strip()
 
 
 _JSON_ESCAPE = re.compile(r'\\(?:u[0-9a-fA-F]{4}(?:\\u[0-9a-fA-F]{4})?|["\\/bfnrt])')
-_UNESCAPE_LEVELS = 3
+_UNESCAPE_LEVELS = 3        # JSON nested in strings: levels parsed and walked
+_UNESCAPE_MAX_PASSES = 16   # escape decoding: until a pass changes nothing, at most this
 
 
 def _unescape_once(text: str) -> str:
@@ -72,10 +88,11 @@ def _unescape_once(text: str) -> str:
 
 def _decoded_forms(text: str) -> list[str]:
     """``text`` plus each further decoding of its escapes (JSON nested in a
-    string, and JSON of JSON), up to a few levels."""
+    string, and JSON of JSON), to a fixed point: decoding stops when a pass
+    changes nothing, after at most ``_UNESCAPE_MAX_PASSES`` passes."""
     forms = [text]
     current = text
-    for _ in range(_UNESCAPE_LEVELS):
+    for _ in range(_UNESCAPE_MAX_PASSES):
         if "\\" not in current:
             break
         nxt = _unescape_once(current)
@@ -93,19 +110,27 @@ def serialise(body: object) -> str:
     itself JSON is parsed and walked too, and every string is also added
     with its JSON escapes decoded (see ``_decoded_forms``). A ``str`` body is
     parsed as JSON first when it is JSON.
+
+    A last line holds the values only (every string and number in order, no
+    keys, joined by spaces), so a copy split one word per value under
+    separate keys reads as the run it was. A copy placed one word per key
+    name is not rebuilt (a stated limit).
     """
     out: list[str] = []
+    values: list[str] = []
 
-    def walk(value: object, depth: int = 0) -> None:
+    def walk(value: object, depth: int = 0, is_key: bool = False) -> None:
         if isinstance(value, dict):
             for key, item in value.items():
-                walk(str(key), depth)
+                walk(str(key), depth, is_key=True)
                 walk(item, depth)
         elif isinstance(value, (list, tuple)):
             for item in value:
                 walk(item, depth)
         elif isinstance(value, str):
             out.extend(_decoded_forms(value))
+            if not is_key:
+                values.append(value)
             stripped = value.strip()
             if depth < _UNESCAPE_LEVELS and stripped[:1] in ("{", "[", '"'):
                 try:
@@ -116,8 +141,11 @@ def serialise(body: object) -> str:
                     walk(parsed, depth + 1)
         elif isinstance(value, (int, float)) and not isinstance(value, bool):
             out.append(str(value))
+            values.append(str(value))
 
     walk(body)
+    if len(values) > 1:
+        out.append(" ".join(values))
     return "\n".join(out)
 
 

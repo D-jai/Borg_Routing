@@ -233,25 +233,63 @@ def failed_envelope(task: WrappedTask, code: str, base: Optional[InboundEnvelope
     )
 
 
-_RAW_CODE_RE = re.compile(r"BRT-[A-Z]+-\d+")
+_RAW_CODE_RE = re.compile(r"\s*(BRT-[A-Z]+-\d+)\b")
+_RAW_CODE_FULL = re.compile(r"BRT-[A-Z]+-\d+")
 _RAW_CODE_MAX = 16          # registry codes are like BRT-LANE-004 (12 characters)
 RAW_FAILURE_DEFAULT = "BRT-LANE-004"
 
 
 def raw_failure_code(reason: object, default: str = RAW_FAILURE_DEFAULT) -> str:
-    """The code a raw step's failure shows upward.
+    """The code of a failure the runtime itself produced, as shown upward.
 
-    Never parsed from model text: the first match of ``BRT-[A-Z]+-\\d+`` in
-    the reason (as text), when it is code-sized, else the fixed ``default``
-    (``BRT-LANE-004``: the step's output and reason were withheld). A model
-    that writes ``{"code": "<document text>"}`` therefore sends nothing on.
+    Call it only on runtime reasons (our own exceptions and envelopes); a
+    reason the local model wrote never reaches it (``guard_envelope`` turns
+    those into ``BRT-LANE-004`` by source). The code is the
+    ``BRT-[A-Z]+-\\d+`` that the reason starts with, when it is code-sized,
+    else the fixed ``default``; nothing later in the text (which may quote
+    model output) is read.
     """
     if isinstance(reason, LaneError):
         return reason.code
-    m = _RAW_CODE_RE.search(str(reason or ""))
-    if m and len(m.group(0)) <= _RAW_CODE_MAX:
-        return m.group(0)
+    m = _RAW_CODE_RE.match(str(reason or ""))
+    if m and len(m.group(1)) <= _RAW_CODE_MAX:
+        return m.group(1)
     return default
+
+
+def mark_model_reason(env: InboundEnvelope) -> InboundEnvelope:
+    """Mark ``env`` as built from the model's own JSON: its failure_reason
+    was written by the model. Returns ``env``."""
+    env._reason_from_model = True
+    return env
+
+
+def lane_failure_code(env: InboundEnvelope) -> Optional[str]:
+    """The code of a failure ``failed_envelope`` built (its output carries
+    ``{"failure": {"code": ...}}`` and ``lane_guarded`` is False, which an
+    envelope built from model JSON never has), else None."""
+    if env.status != "failed" or env.lane_guarded is not False:
+        return None
+    failure = (env.output or {}).get("failure")
+    code = failure.get("code") if isinstance(failure, dict) else None
+    if isinstance(code, str) and _RAW_CODE_FULL.fullmatch(code) and len(code) <= _RAW_CODE_MAX:
+        return code
+    return None
+
+
+_LONE_SURROGATE = re.compile(r"[\ud800-\udfff]")
+
+
+def prompt_json(value: object, **kwargs) -> str:
+    """``json.dumps`` for a block placed in a prompt.
+
+    Lane off: exactly ``json.dumps(value, **kwargs)`` (Phase 1, ASCII
+    escapes). Lane on: ``ensure_ascii=False``, so the backstop reads the
+    text as written, with any lone surrogate replaced by U+FFFD (a lone
+    surrogate cannot be encoded as UTF-8, and the request would fail)."""
+    if current_lane() is None:
+        return json.dumps(value, **kwargs)
+    return _LONE_SURROGATE.sub("�", json.dumps(value, ensure_ascii=False, **kwargs))
 
 
 def guard_envelope(env: InboundEnvelope, task: WrappedTask, ctx: LaneContext) -> InboundEnvelope:
@@ -266,9 +304,16 @@ def guard_envelope(env: InboundEnvelope, task: WrappedTask, ctx: LaneContext) ->
     output values, keys included, never escaped JSON text. A passed envelope
     is stamped ``lane_guarded``. Anything else, including a failed or partial
     envelope, is replaced by a failure carrying a code and document ids only.
+    The code is decided by source: a failure the model reported (the
+    envelope was built from its JSON, ``mark_model_reason``) is always
+    ``BRT-LANE-004``; only a failure the runtime wrote keeps its own code.
     """
     if env.status != "resolved":
-        return failed_envelope(task, raw_failure_code(env.failure_reason), base=env)
+        code = (
+            RAW_FAILURE_DEFAULT if env._reason_from_model
+            else raw_failure_code(env.failure_reason)
+        )
+        return failed_envelope(task, code, base=env)
     serialised = json.dumps(env.output, ensure_ascii=False)
     if len(serialised) > ctx.settings.max_output_chars:
         return failed_envelope(task, "BRT-LANE-004", base=env)

@@ -45,7 +45,7 @@ from src.db.state import create_run, get_config, sum_run_tree, update_run_status
 from src.envelopes.schema import InboundEnvelope, WrappedTask
 from src.envelopes.validator import validate_inbound
 from src.lane.context import (
-    current_lane, failed_envelope, failure_of, guard_envelope, raw_failure_code,
+    current_lane, failed_envelope, failure_of, guard_envelope, mark_model_reason, raw_failure_code,
 )
 from src.lane.errors import LaneError
 from src.lane.outbound import call_scope, send_outbound
@@ -595,6 +595,8 @@ async def _execute_answerer(task: WrappedTask, db_path: str) -> InboundEnvelope:
         raise ValueError(
             f"BRT-ANS-003: could not build InboundEnvelope from model response: {exc}. Raw: {raw}"
         ) from exc
+    # Its failure_reason (if any) is the model's own text, not a runtime code.
+    mark_model_reason(env)
 
     # Validate contract
     try:
