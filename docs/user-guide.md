@@ -439,16 +439,16 @@ A step's `recommended_model` still comes first. The alias also reaches the child
 
 ## Reading why each step used its model
 
-`GET /runs/{run_id}` returns `run`, `envelopes`, `child_envelopes`, `events` and `digest`. `child_envelopes` holds the envelopes (with their `routing`) of every child run the run started, each tagged with its own `run_id`. Each envelope (one per step) now carries:
+`GET /runs/{run_id}` returns `run`, `envelopes`, `child_envelopes`, `events` and `digest`. `child_envelopes` holds the envelopes (with their `routing`) of every child run the run started, each tagged with its own `run_id`. Do not add these dollars to the parent's: the `dollars` of an `orchestrate` envelope already include everything its child run spent, and a child run's `orchestrate` envelope already includes its own grandchildren. The run total is `digest`. Each envelope (one per step) now carries:
 
 - `routing`: why the step went to its model. It holds `chosen`, `reason` (`routed`, `planner_pick` or `fallback_default`), `task_type`, `tier`, `floor`, `est_input_tokens`, `est_output_tokens`, `candidates` (the models that cleared the floor, cheapest first, at most 8, each with a score, `est_cost` and `est_dollars`), `baseline` (the model the run is compared against: the best-reasoning checked model, or the one set by the `baseline_model_id` config key / `BASELINE_MODEL_ID`) and `baseline_est_cost`. If a configured baseline is not in the matrix, `baseline_note` says which model was used instead.
   - Every figure under `routing` is an estimate, never a measured cost. The token counts are guessed from the step's text length, and `dollars` on the envelope is the only real cost.
   - `est_dollars` is the chosen model's estimated dollars only (0.0 for a local model). `baseline_est_cost` is the same estimate at the baseline model's prices, so the two compare like for like. `est_cost` is what the router ranks by: dollars plus the cost of waiting (`TIME_COST_PER_SEC`), so it is not comparable with `baseline_est_cost`.
   - A step whose routing failed (`fallback_default`) still carries the token estimate and `est_dollars`; if no estimate could be made they are `null`, never 0.0. A `planner_pick` also lists `candidates`, for information; the pick itself is unchanged. When no model cleared the floor, `candidates` is empty and `candidates_reason` says so.
   - For an `apply_to_each` step the estimates cover every item: `items` is the count, `per_item_est_dollars` and `per_item_baseline_est_cost` are one call, and `est_dollars` and `baseline_est_cost` are the totals.
-  - For an `orchestrate` step `served_by` is `child_run`: a child run plans the step and picks its own models, so `chosen` is only the fallback if the step is demoted at max depth (`note` says so), `child_run_id` names the child run, and `est_dollars` and `baseline_est_cost` are `null`.
+  - For an `orchestrate` step `served_by` is `child_run`: a child run plans the step and picks its own models, so `chosen` is only the fallback if the step is demoted at max depth (`note` says so), `child_run_id` names the child run, and `est_dollars` and `baseline_est_cost` are `null`. A step demoted at max depth runs as one single call instead: it has no `served_by` or `child_run_id`, carries `est_dollars` and `baseline_est_cost` like any single call, and its `note` is "demoted at max depth". A skill step is described by the type it runs as (`apply_to_each` or `orchestrate`), not by the type written in the plan.
 - `dollars`: what the step's call actually cost.
-- `latency_ms`: how long the step took, in milliseconds.
+- `latency_ms`: the step's own wall-clock run time in milliseconds: from the start of its call (model calls, tools, a child run) until it returns. It leaves out the pricing and database work done after the step returns. Latency of each individual call is on the log rows.
 
 ---
 

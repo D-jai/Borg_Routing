@@ -642,8 +642,10 @@ async def test_json_retry_row_is_priced_separately(db, monkeypatch):
     ]
     assert await _invoke_plan(db, run_id, queue) == good
     await drain_log_writes()
+    # Each attempt's row is written by its own fire-and-forget task, so the
+    # insert order (log_id) is not guaranteed; order by the attempt's tokens.
     rows = _q(db, "SELECT tokens_input, tokens_output, dollars FROM logs WHERE run_id=? "
-                  "AND event_type='orchestrator_decision' ORDER BY log_id", str(run_id))
+                  "AND event_type='orchestrator_decision' ORDER BY tokens_input", str(run_id))
     assert [r[:2] for r in rows] == [(10, 5), (20, 8)]
     assert rows[0][2] == pytest.approx(10 * PRICE_IN + 5 * PRICE_OUT)
     assert rows[1][2] == pytest.approx(20 * PRICE_IN + 8 * PRICE_OUT)

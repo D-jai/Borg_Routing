@@ -946,6 +946,7 @@ async def _log_route(
     db_path: str,
     node_type: str = "answerer",
     item_count: Optional[int] = None,
+    demoted: bool = False,
 ) -> None:
     """Write why a step went to its model into the run trace.
 
@@ -974,7 +975,11 @@ async def _log_route(
         decision.setdefault("baseline", None)
         decision.setdefault("baseline_est_cost", None)
 
-    if node_type == "orchestrate":
+    if node_type == "orchestrate" and demoted:
+        # At max depth the executor runs this step as one answerer call on
+        # ``chosen``: it is a normal single call, with real estimates.
+        decision["note"] = "demoted at max depth"
+    elif node_type == "orchestrate":
         # The child run picks its own models; the routed model is only the
         # fallback if the step is demoted at max depth, so no estimate of a
         # single call describes this step.
@@ -1572,7 +1577,9 @@ async def orchestrate_run(
                     governance_instruction=governance_instruction,
                 )
                 if route_decision is not None:
-                    node_kind = node.get("type", "answerer")
+                    # The built task's type, not the plan node's: a skill
+                    # step takes its type from the skill's envelope_type.
+                    node_kind = task.type
                     item_count = None
                     if node_kind == "apply_to_each":
                         try:
@@ -1582,6 +1589,7 @@ async def orchestrate_run(
                     await _log_route(
                         run_id, node_id, task.envelope_id, route_decision, db_path,
                         node_type=node_kind, item_count=item_count,
+                        demoted=task.current_depth >= task.max_depth,
                     )
                 # BRT-PR-01a — log any depends_on ids that didn't resolve.
                 missing_deps = (task.dependency_input or {}).pop(
