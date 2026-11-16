@@ -128,8 +128,10 @@ def test_malformed_entries_are_skipped(monkeypatch):
 async def test_unreachable_custom_address_does_not_crash_discover_all(monkeypatch):
     monkeypatch.setenv("LOCAL_OPENAI_BASE_URLS", "http://dead-host:8000")
     cm = CapabilityMatrix()
+    seen = []
 
     async def get(url, **kw):
+        seen.append(url)
         raise httpx.ConnectError("refused")
 
     with patch("httpx.AsyncClient", return_value=_client(get)), patch(
@@ -138,6 +140,7 @@ async def test_unreachable_custom_address_does_not_crash_discover_all(monkeypatc
         mock_or.return_value = []
         count = await discover_all(cm)
 
+    assert "http://dead-host:8000/v1/models" in seen
     assert count == 0
 
 
@@ -160,3 +163,68 @@ async def test_discover_all_includes_local_openai_rows(monkeypatch):
     assert count == 1
     row = next(m for m in cm.all() if m.source == "custom_key")
     assert row.endpoint == "http://vllm-host:8001"
+
+
+# --- reconcile of local custom rows ----------------------------------------
+
+async def _run_discover(cm, get):
+    with patch("httpx.AsyncClient", return_value=_client(get)), patch(
+        "src.registry.discovery.discover_openrouter", new_callable=AsyncMock
+    ) as mock_or:
+        mock_or.return_value = []
+        return await discover_all(cm)
+
+
+@pytest.mark.asyncio
+async def test_stopped_local_openai_server_row_is_reset(monkeypatch):
+    monkeypatch.setenv("LOCAL_OPENAI_BASE_URLS", "http://vllm-host:8001")
+    cm = CapabilityMatrix()
+
+    async def up(url, **kw):
+        if "vllm-host" in url:
+            return _resp(OPENAI_LIST)
+        raise httpx.ConnectError("refused")
+
+    await _run_discover(cm, up)
+    row = next(m for m in cm.all() if m.source == "custom_key")
+    row.checked = True
+    assert row.endpoint == "http://vllm-host:8001"
+
+    async def down(url, **kw):
+        raise httpx.ConnectError("refused")
+
+    await _run_discover(cm, down)
+    assert row.endpoint is None
+    assert row.checked is False
+
+    # variable removed entirely: also reset
+    row.endpoint = "http://vllm-host:8001"
+    row.checked = True
+    monkeypatch.delenv("LOCAL_OPENAI_BASE_URLS")
+    await _run_discover(cm, down)
+    assert row.endpoint is None
+    assert row.checked is False
+
+
+@pytest.mark.asyncio
+async def test_non_local_custom_key_row_is_untouched(monkeypatch):
+    from src.registry.models import ModelInfo
+
+    cm = CapabilityMatrix()
+    cm.upsert(
+        ModelInfo(
+            model_id="custom_acme/gpt-x",
+            source="custom_key",
+            endpoint="https://api.acme.example",
+            context_length=8192,
+            checked=True,
+        )
+    )
+
+    async def down(url, **kw):
+        raise httpx.ConnectError("refused")
+
+    await _run_discover(cm, down)
+    row = cm.get("custom_acme/gpt-x")
+    assert row.endpoint == "https://api.acme.example"
+    assert row.checked is True

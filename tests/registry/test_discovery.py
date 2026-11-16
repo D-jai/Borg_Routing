@@ -23,6 +23,13 @@ from src.registry.discovery import (
 from src.registry.models import ModelInfo
 
 
+@pytest.fixture(autouse=True)
+def _isolate_local_env(monkeypatch):
+    """A developer's .env must not make discover_all probe real servers."""
+    for k in ("LMSTUDIO_BASE_URLS", "OLLAMA_BASE_URL", "LOCAL_OPENAI_BASE_URLS"):
+        monkeypatch.delenv(k, raising=False)
+
+
 # ---------------------------------------------------------------------------
 # Fixture responses
 # ---------------------------------------------------------------------------

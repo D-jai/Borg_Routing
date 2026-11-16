@@ -349,21 +349,26 @@ async def reconcile_local_rows(
     matrix: CapabilityMatrix,
     discovered_ids: set[str],
 ) -> int:
-    """Mark local rows (lmstudio/ollama) unavailable if not seen this pass.
+    """Mark local rows (lmstudio/ollama/local OpenAI servers) unavailable if not seen.
 
     "Unavailable" means ``endpoint`` is cleared and ``checked`` forced to False.
     The row is kept so operator-assigned scores / notes survive; it just can't
     be routed to until discovery sees it again.
 
-    OpenRouter and custom_key rows are never reconciled — their authoritative
-    source is the curated list / operator-provided credentials, not live probing.
+    Local OpenAI-compatible rows are the ``custom_key`` rows whose id starts
+    ``custom_local_`` (see :func:`discover_local_openai`). OpenRouter and other
+    custom_key rows are never reconciled — their authoritative source is the
+    curated list / operator-provided credentials, not live probing.
 
     Returns:
         Number of rows reconciled.
     """
     reconciled = 0
     for m in matrix.all():
-        if m.source not in ("lmstudio", "ollama"):
+        is_local_custom = m.source == "custom_key" and m.model_id.startswith(
+            "custom_local_"
+        )
+        if m.source not in ("lmstudio", "ollama") and not is_local_custom:
             continue
         if m.model_id in discovered_ids:
             continue
