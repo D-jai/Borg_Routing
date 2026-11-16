@@ -14,10 +14,19 @@ Order of decision:
   3. When no model clears the floor: the run's default model (reason
      ``fallback_default``). The caller logs BRT-ORC-019.
 
+On-premise lane (``local_filter`` given, design note section 6.1): a step
+that must stay local is offered only rows the filter accepts. A non-local
+``recommended_model`` is ignored with a note, candidates are filtered before
+the cost sort, and there is no fallback to the default model: when no local
+model clears the floor the call raises ``LaneError`` (BRT-LANE-002), which the
+caller must not turn into a fallback.
+
 The returned ``decision`` dict is written to the run trace, so the operator
 can read why a step went where it went.
 """
-from typing import Any, Optional
+from typing import Any, Callable, Optional
+
+from src.lane.errors import LaneError
 
 from .capability_matrix import CapabilityMatrix
 from .cost import call_dollars, effective_cost
@@ -115,12 +124,25 @@ def _planner_pick(node: dict, matrix: CapabilityMatrix, notes: list[str]) -> Opt
     return row
 
 
-def _estimate_input_tokens(node: dict) -> int:
+def _estimate_input_tokens(node: dict, extra_input_tokens: int = 0) -> int:
     text = f"{node.get('instruction') or ''}{node.get('context') or ''}"
     skill_args = node.get("skill_args")
     if skill_args:  # a skill step's args are its context, so they count
         text += str(skill_args)
-    return max(_MIN_EST_INPUT_TOKENS, len(text) // 4)
+    return max(_MIN_EST_INPUT_TOKENS, len(text) // 4 + int(extra_input_tokens or 0))
+
+
+def local_view(matrix: CapabilityMatrix, keep: Callable[[ModelInfo], bool]) -> CapabilityMatrix:
+    """A throw-away matrix holding only the rows ``keep`` accepts.
+
+    Never saved (its path is never written); used so the router's own query
+    and cost sort see local rows only.
+    """
+    view = CapabilityMatrix(path="__lane_local_view__.yaml")
+    for row in matrix.all():
+        if keep(row):
+            view.upsert(row)
+    return view
 
 
 def select_model_for_node(
@@ -131,6 +153,8 @@ def select_model_for_node(
     time_cost_per_sec: float,
     default_model: ModelInfo,
     run_options: Optional[dict] = None,
+    local_filter: Optional[Callable[[ModelInfo], bool]] = None,
+    extra_input_tokens: int = 0,
 ) -> tuple[ModelInfo, dict]:
     """Return ``(model, decision)`` for one plan node.
 
@@ -146,8 +170,13 @@ def select_model_for_node(
             ``task_type`` (replaces each step's kind of work),
             ``strategy`` (``LOCAL_FIRST`` prefers a local model that clears
             the floor). A step's own ``recommended_model`` still comes first.
+        local_filter: when set, the step must stay on this machine: only rows
+            the filter accepts are offered, and a miss raises BRT-LANE-002.
+        extra_input_tokens: added to the token estimate (the size of the
+            documents a raw step reads, which are not in its text).
 
-    Never raises for a routing miss: the miss is reported in the decision
+    Never raises for a routing miss, except a step that must stay local
+    (``LaneError`` BRT-LANE-002). Any other miss is reported in the decision
     (``reason == "fallback_default"`` with the router's error text).
     """
     notes: list[str] = []
@@ -159,8 +188,11 @@ def select_model_for_node(
             f"run alias '{(run_options or {}).get('alias')}' asked for a local model first"
         )
     floor = float(floors.get(tier, DEFAULT_FLOORS[tier]))
-    est_in = _estimate_input_tokens(node)
+    est_in = _estimate_input_tokens(node, extra_input_tokens)
     est_out = _EST_OUTPUT_TOKENS
+    if local_filter is not None:
+        notes.append("on-premise lane: this step may use local models only")
+        matrix = local_view(matrix, local_filter)
 
     def cost_of(model: ModelInfo) -> float:
         return effective_cost(model, est_in, est_out, time_cost_per_sec)
@@ -196,6 +228,8 @@ def select_model_for_node(
     if run_options:
         decision["alias"] = run_options.get("alias")
         decision["strategy"] = strategy
+    if local_filter is not None:
+        decision["local_only"] = True
 
     picked = _planner_pick(node, matrix, notes)
     if picked is not None:
@@ -223,6 +257,13 @@ def select_model_for_node(
             time_cost_per_sec=time_cost_per_sec,
         )
     except ValueError as exc:
+        if local_filter is not None:
+            # No fallback for a step that must stay local (design note 6.1).
+            raise LaneError(
+                "BRT-LANE-002",
+                f"no local model clears the {tier} floor ({floor:g}) for "
+                f"kind of work '{task_type}'; the step is not sent anywhere",
+            ) from exc
         decision.update(
             reason="fallback_default",
             chosen=default_model.model_id,

@@ -37,6 +37,10 @@ class ModelInfo(BaseModel):
     publisher: Optional[str] = None
     notes: Optional[str] = None
     checked: bool = False
+    # Set by discovery when a local server says the model really runs
+    # elsewhere (Ollama lists cloud models with a remote host). Such a row is
+    # never local for the on-premise lane (src/registry/locality.py).
+    remote: bool = False
 
     @model_validator(mode="before")
     @classmethod

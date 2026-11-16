@@ -178,12 +178,20 @@ async def discover_ollama(
                 continue
             details = item.get("details", {})
             context_length = details.get("context_length") or 4096
+            # Ollama lists cloud-served models with a remote host and a
+            # "-cloud" tag; they are served from localhost but run remotely,
+            # so the on-premise lane must never count them as local.
+            remote = bool(
+                item.get("remote_host") or item.get("remote_model")
+                or name.lower().endswith(("-cloud", ":cloud"))
+            )
             found.append(
                 ModelInfo(
                     model_id=_ollama_model_id(name),
                     source="ollama",
                     endpoint=base_url,
                     context_length=int(context_length),
+                    remote=remote,
                 )
             )
     return found
@@ -417,6 +425,8 @@ async def discover_all(
                         "endpoint": model.endpoint or existing.endpoint,
                         "context_length": model.context_length,
                         "pricing": model.pricing or existing.pricing,
+                        # A remote flag, once reported, sticks (lane safety).
+                        "remote": model.remote or existing.remote,
                     }
                 )
                 matrix.upsert(merged)

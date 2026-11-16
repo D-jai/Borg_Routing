@@ -452,6 +452,22 @@ A step's `recommended_model` still comes first. The alias also reaches the child
 
 ---
 
+## On-premise lane
+
+The lane keeps your documents on your own machines. Its promise, in these words: **raw document text is sent only to models on your own machines. Everything sent to a cloud model is listed, and you can read it.** The full design is `docs/design/on_premise_lane.md`.
+
+### What counts as "local"
+
+A model is local when the address its requests go to is this machine, never because of its label on the Models page:
+
+- `localhost`, `127.x.x.x` and `[::1]` are local. So is any host you list in `BORG_LOCAL_HOSTS` in `.env` (names, IP addresses or ranges such as `10.8.0.0/16`, comma-separated). A private address that is not listed (for example `192.168.1.20`) is not local: it could forward to a cloud service.
+- Addresses written in unusual forms (`127.1`, `2130706433`, `0x7f.1`, `0.0.0.0`, a URL with a user name in it) are not local.
+- An Ollama model whose tag ends in `-cloud`, or that Ollama reports as served from a remote host, is never local: it is served from localhost but runs elsewhere.
+
+When a step must stay local, the router offers it only local models, ignores a cloud model the planner recommended, and never falls back to a cloud model. If no local model clears the step's quality floor, the step fails with **BRT-LANE-002** and nothing is sent. Each such step's `routing` shows `"local_only": true`.
+
+---
+
 ## Multi-turn Conversations (Threads)
 
 BORG_ROUTE tracks conversation history in **threads**. Each thread stores the sequence of user and assistant messages. When a new run is created within a thread, the last N messages are passed to the orchestrator as context, enabling coherent multi-turn conversations.

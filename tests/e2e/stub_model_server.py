@@ -37,6 +37,12 @@ class StubRequest:
     system: str
     user: str
     max_tokens: Optional[int]
+    body: dict = field(default_factory=dict)   # the exact JSON body received
+
+    @property
+    def is_local(self) -> bool:
+        """True when the request went to the stand-in local server."""
+        return self.url.startswith("http://127.0.0.1")
 
     @property
     def governance_instruction(self) -> Optional[str]:
@@ -80,6 +86,9 @@ class StubModels:
     plan_for: Optional[Callable[[StubRequest], list[dict]]] = None
     replan_for: Optional[Callable[[StubRequest], dict]] = None
     completion_tokens: int = 50
+    plan_content_for: Optional[Callable[[StubRequest], dict]] = None
+    error_for: Optional[Callable[[StubRequest], Optional[Exception]]] = None
+    finish_for: Optional[Callable[[StubRequest], str]] = None
     requests: list[StubRequest] = field(default_factory=list)
 
     def install(self, monkeypatch) -> "StubModels":
@@ -97,7 +106,9 @@ class StubModels:
         messages = payload.get("messages") or []
         system = next((m["content"] for m in messages if m.get("role") == "system"), "")
         user = next((m["content"] for m in messages if m.get("role") == "user"), "")
-        if "response_format" in payload:
+        if "tavily" in url:
+            kind = "tool"
+        elif "response_format" in payload:
             m = _MODE_RE.search(system)
             kind = m.group(1) if m else "plan"
         else:
@@ -109,12 +120,24 @@ class StubModels:
             system=system,
             user=user,
             max_tokens=payload.get("max_tokens"),
+            body=json.loads(json.dumps(payload)),
         )
         self.requests.append(req)
 
-        if kind == "plan":
+        if self.error_for is not None:
+            exc = self.error_for(req)
+            if exc is not None:
+                raise exc
+
+        if kind == "tool":
+            return _StubResponse(
+                {"results": [{"title": "stub", "url": "https://example.test", "content": "stub"}]}
+            )
+        if kind == "plan" and self.plan_content_for is not None:
+            content: Any = self.plan_content_for(req)
+        elif kind == "plan":
             nodes = self.plan_for(req) if self.plan_for else self.plan_nodes
-            content: Any = {"plan": {"nodes": nodes}, "rationale": "scripted plan"}
+            content = {"plan": {"nodes": nodes}, "rationale": "scripted plan"}
         elif kind == "re_plan":
             content = (
                 self.replan_for(req) if self.replan_for
@@ -128,10 +151,11 @@ class StubModels:
             )
             content = {"status": "resolved", "confidence": 0.9, "output": output}
 
+        finish = self.finish_for(req) if self.finish_for else "stop"
         return _StubResponse(
             {
                 "choices": [
-                    {"message": {"content": json.dumps(content)}, "finish_reason": "stop"}
+                    {"message": {"content": json.dumps(content)}, "finish_reason": finish}
                 ],
                 "usage": {
                     "prompt_tokens": max(1, len(system) // 4),
@@ -179,6 +203,17 @@ def stub_model(
         task_scores={t: score for t in TASK_TYPES},
         checked=checked,
     )
+
+
+def lane_matrix(local_score: float = 7.0) -> CapabilityMatrix:
+    """One local model (at 127.0.0.1) and three cloud models, all checked.
+
+    The local model's default score (7.0) clears the light floor (6.0) but
+    not the mid floor (7.5), so a derived mid step still goes to the cloud.
+    """
+    matrix = three_tier_matrix()
+    matrix.upsert(stub_model("local", local_score, 0.0, 0.0, source="ollama"))
+    return matrix
 
 
 def three_tier_matrix() -> CapabilityMatrix:

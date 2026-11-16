@@ -236,3 +236,11 @@
 | BRT-MEM-003 | Model call failed during compression | `src/memory/compressor.py::compress_inactive_turns` | The compressor model endpoint is unreachable or returned a non-2xx response. Check that the model server is running at the configured endpoint. Also raised on timeout (120 s). |
 | BRT-MEM-004 | Compression response parse failed | `src/memory/compressor.py::compress_inactive_turns` | The model returned an empty or structurally unexpected response. Check the model and its output. Re-run compression once the model is healthy. |
 | BRT-MEM-005 | Config write failed after compression | `src/memory/compressor.py::compress_inactive_turns` | Could not persist the rolling summary to the config table. Check database file permissions and disk space. |
+
+## BRT-LANE — On-premise lane (work order 2.2)
+
+Design: `docs/design/on_premise_lane.md`. Every lane failure names codes, model ids, URLs, document ids and relative paths only, never document text or an absolute path. Where a step fails, what reaches re_plan, compose or a parent is `{"code": "BRT-LANE-...", "doc": "<document ids>"}`; the full error stays in the local log.
+
+| Code | Description | Origin | Hints |
+|------|-------------|--------|-------|
+| BRT-LANE-002 | No local model clears the floor for a step that must stay local (or, in `all_local`, for the planner) | `src/registry/node_router.py::select_model_for_node`, `src/orchestrator/engine.py::_select_orchestrator_model` | The step is not sent anywhere: there is no fallback to the default or a cloud model. Tick a local model (Ollama, LM Studio, or a server listed in `BORG_LOCAL_HOSTS`) that scores at or above the step tier's floor for its kind of work, run Get Model Info so its scores are real, or lower `LEAF_QUALITY_*`. In `all_local` the planner needs a local model too (the orchestrator bar degrades to 5.1, local models only). A `-cloud` Ollama tag, a row discovery marked `remote`, or a model left out of `lane_local_allowlist` never counts as local. A document larger than every local model's context also ends here. |
