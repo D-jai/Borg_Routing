@@ -91,6 +91,10 @@ Standing permissions: local commits on `showcase`; pushes of `showcase` to the p
   - After "You handle the failures in re_plan.": "Where the items come from. If the list is in the user's message, copy the items into `items`, one string per item, and leave `inputs_ref` out. If an earlier step produces the list, set `inputs_ref` to that step's id. `inputs_ref` is always the id of a step; a name you make up resolves to nothing. The same holds for a skill's `items_ref`."
   - Then a prompt test, then Check 1 attempt 3 (smoke prompt unchanged).
 
+## Questions for Deej after the build (not blocking)
+
+- **Spend control.** Anyone who can reach the app can start paid runs (`/v1/task`, chat, MCP, "Run again"); there is no notion of who owns a run, so anyone can also read every run. The admin lock covers settings and sensitive logs only. Options: leave it (single-operator install), lock all paid entry points behind the token, or a daily spend cap. Raised by the 4.4 reviewer, 16-Nov-2026.
+
 ## Needs planner
 
 - **Answered 16-Nov-2026** (planner rulings 1 and 2 in `BUILD.md` section 8; new work order 2.4). The question was kept below for the record.

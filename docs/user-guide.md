@@ -660,6 +660,12 @@ become worth the cost — nothing else in the pipeline depends on it.
 - When the list is in your message, the planner puts it in the step's `items` (for a skill such as `extract_fields`, `items` in its args, or `items_ref` given as a list), and the step makes one call per item. Lists of more than a few dozen items belong in documents, not in the prompt: your whole message is sent with every step.
 - A step whose `inputs_ref`, `items_ref` or `source` names another step of the same plan waits for that step to finish, just as if it were listed in `depends_on`.
 - If `inputs_ref` or `items_ref` names something that is not a step id, and the step has no items of its own, the step fails with BRT-APE-006 before any model call. The message names the missing id and says the list belongs in `items`.
+- Within one plan, steps run in waves until none is ready; only then does the planner re-plan. A step that waits on another step of the plan (through `inputs_ref`, a skill's `items_ref`, `source` or `depends_on`) runs in the same plan once that step finishes.
+- Steps that wait on each other in a loop (n1 reads n2 and n2 reads n1) can never run: they fail with BRT-ORC-024 before re-planning, the message names the loop, and no model is called.
+- A step that takes its items from a step that failed fails with BRT-APE-005, naming that step, and makes no model call.
+- A list can be given in place of a ref: `inputs_ref`, `items_ref` or `failed_items_ref` written as a list of strings is the step's items. An empty list fails with BRT-APE-005; a number or an object fails with BRT-APE-006.
+- A ref names a step of this run only. A child run (an `orchestrate` step) cannot name its parent's steps.
+- `documents` names the run's documents only while the on-premise lane is on; with the lane off it is an ordinary step id.
 - When a step fails, the planner is told its error code and the first 200 characters of the reason, so it can retry or change course. For steps that read your documents, it is told only the code and the document id, never the message.
 
 ---
