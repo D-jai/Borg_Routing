@@ -26,6 +26,8 @@ Every SQLite write has an owner. Children self-clean before returning; parents v
 - Parent sweeps `WHERE level = {child_level}` after fold-in. Residue → `child_residue` event + trust adjustment + cleanup.
 - Scratch is ephemeral; structured envelope outputs persist.
 
+**Status (16-Nov-2026).** The rule stands. Its machinery (the `scratch` table, cleanup directives, fold-in residue check) exists, but no current step writes scratch: `write_scratch` has no caller in `src/`, and an answerer's `scratch_writes` are recorded, not stored. Law 2 is therefore not exercised by any current run and is outside the showcase's claims.
+
 ---
 
 ## 3. Core Patterns (mental model)
