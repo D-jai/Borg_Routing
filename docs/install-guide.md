@@ -108,7 +108,7 @@ python -m uvicorn main:app --reload
 3. **Click Discover Models.** Expect 7 LM Studio rows (if LM Studio is running) + 12 curated OpenRouter rows.
 4. **Click Get Model Info.** Scorer runs for 30-90 seconds; fills relative 0-10 task scores per row. Requires `OPENROUTER_API_KEY`.
 5. **Tick the checkbox** on any row you want in today's routing pool (typical: 3-6 total).
-6. **Kick a test run** from `http://localhost:8000/ui/index.html` — the orchestrator will route to one of the checked models.
+6. **Kick a test run** from `http://localhost:8000/ui/` (it opens the Admin overview) — the orchestrator will route to one of the checked models.
 
 ## Production Deployment
 
@@ -206,9 +206,11 @@ incremental and idempotent. See BRT-LOG-DB-COMPAT for details.
 ### Where settings come from
 BORG resolves each operator-facing setting in this order: **Admin DB (`config`
 table, written via `POST /config`) → `.env` → hardcoded default**. The Admin UI
-at `/ui/admin.html` displays the effective value for each setting with a tag
-showing which source it came from. **The Admin UI is read-only** for these
-values — to change them, edit `.env` (or `POST /config`) and reload the page.
+at `/ui/settings.html` shows the effective value for each setting with a tag
+showing which source it came from, and saves a changed value through
+`POST /config`; it applies from the next run, with no restart. Two settings are
+read from `.env` only (`ORCHESTRATOR_MAX_TOKENS`, `ANSWERER_MAX_TOKENS`); the
+page shows them read-only.
 
 ### Cold-start defaults — pre-checked OpenRouter models
 On a fresh install the curated capability matrix ships with **two OpenRouter

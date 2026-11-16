@@ -32,16 +32,8 @@ from html.parser import HTMLParser
 from pathlib import Path
 
 LEGACY_ALLOW_LIST = {
-    "_header.html": "4a86a2279b3d4371960e16257eeee4c337a9cd6ad85dfaec0ca91ca7d3cd173d",
-    "admin.html": "8171d20d57d0f4f97bfc3f1cd34e7b92cabaac974c67f7496e1d9b32df3ac0f5",
     "chat.html": "f067a475b937d5521eea81b746cced27b436bc84cc1899b66dcf6ed65a37f4b0",
-    "dashboard.html": "558b7095b378600ee95863ba14762303d206f1e3912c4cb709791125cd2fdcb5",
-    "index.html": "ed754ab116fd98ffc0fce47c55a51eb561d64fe6d49d3d2fd0d077f9868ec908",
-    "keys.html": "77790c2e83d9c455bdcdb7436cc3afa90d93b1bd5f65b34909bdf2802d4fcd14",
-    "logs.html": "7a182afc321317f29594c5835806610beecca9ca8e75d85980f15cea05cf10f9",
-    "models.html": "9f54cc47d73d14e31d5a0012b19deb7c69f12bdc8bf8f3045298eaeb3b0057e9",
     "run.html": "48fe2b2ab782e76b89f39cb7ccd956cb04db28f078b6069a9c8a31da405e9557",
-    "skills.html": "68ec89148ab9d3d42e658356938d894b98ceb7f0b04f575a7babe86e3d1a135c",
 }
 MAX_STYLE_LINES = 15
 URL_ATTRS = ("src", "href", "srcset", "poster", "data", "action", "formaction")

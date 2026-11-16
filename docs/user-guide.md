@@ -372,40 +372,33 @@ BORG_ROUTE can orchestrate sub-problems by spawning **child runs**. Each child r
 ### What happens at the depth cap
 When an orchestrate node is dispatched at the maximum depth, BORG_ROUTE **demotes it to an answerer** — the model responds directly rather than trying to recurse further. This is logged as a `BRT-ORC-020` event in the run trace.
 
-### How to adjust the depth limit
-1. Open `http://localhost:8000/ui/admin.html`.
-2. In the **Settings** section, adjust **Max Recursion Depth** (1–10).
-3. Click **Save Settings**.
+### The depth limit
+The limit is fixed at 5 in the engine (`MAX_DEPTH` in `src/orchestrator/engine.py`). It cannot be changed from the Admin pages.
 
 ---
 
-## Admin Panel
+## Admin Pages
 
-The Admin panel at `http://localhost:8000/ui/admin.html` lets you configure BORG_ROUTE's behaviour without restarting the server.
+The Admin pages sit in the left menu under **Admin**, starting at `http://localhost:8000/ui/admin_overview.html`. Changes apply from the next run; nothing needs a restart.
 
-### Global Rules
-Text entered here is injected verbatim into every model call's governance layer. Use it to add blanket constraints — for example, "Always respond in English" or "Never reveal pricing information."
-
-### Admin Rules Ledger
-Additive rules that accumulate over time. New rules are appended; old rules can be retired (they are excluded from future model calls but kept in the ledger for audit purposes).
-
-### Settings
-- **Max Recursion Depth** — Maximum levels of nested orchestration (1–10, default: 5).
-- **Default Strategy** — `SYSTEM_CHOOSE` lets BORG_ROUTE pick the best available model; `LOCAL_FIRST` prefers local models and only falls back to external if no local model qualifies.
-- **Context Window Size** — How many recent conversation turns to include in the orchestrator's context (default: 10).
-- **Time Cost Per Second** — Dollar value assigned to one second of local-model compute time, used in cost estimation (default: $0.0083 ≈ $30/hr).
+- **Overview** — a first-run checklist (cloud key saved, models in the pool, local server reachable, admin token, lane mode), what has been spent, and the last runs. A failed or running run has a **Run again** button.
+- **Models** — tick the models the router may use. **Discover** finds local models and adds the curated cloud list; **Get Model Info** researches each model and updates its scores. Each row is marked as running on this machine or in the cloud.
+- **Keys** — says whether the OpenRouter key is saved. It never shows a key. Paste a new key to replace the saved one.
+- **Rules** — global rules (free text) and the rules ledger. Both are sent with every model call. A retired rule stops being sent but stays in the ledger.
+- **Settings** — every setting the engine reads: the quality floors for light, mid and heavy steps, the orchestrator quality requirement, time cost per second, the baseline model for cost comparison, a pinned planner, the run time limit, Rule Zero, and the on-premise lane keys. A bad value is refused with `BRT-ADM-006`. The two max-token settings are read from `.env` only and are shown read-only.
+- **Skills** — the skill library with each skill's usage.
+- **Logs** — events, the cost summary, and Stats: run outcomes, tokens by model, feedback and the outlier runs. Outlier runs are ranked by what they cost or how long they took, never by prompt length.
 
 ---
 
-## Resuming a Failed Run
+## Running a Failed Run Again
 
-If a run fails partway through (network error, model timeout, etc.), you can resume it without re-running the work that already completed.
+If a run fails partway through (network error, model timeout, etc.), you can run it again from the Admin Overview.
 
-### How to resume
-1. Open `http://localhost:8000/ui/dashboard.html`.
-2. Find the failed run in the run history table.
-3. Click **Resume** — only failed or in-progress runs show this button.
-4. The system re-dispatches only the failed/in-flight envelopes. Completed work is not repeated.
+### How to run it again
+1. Open `http://localhost:8000/ui/admin_overview.html`.
+2. Find the failed run under **Last runs**.
+3. Click **Run again**. It plans the run from the start, with the words you first sent. It does not continue where the run stopped, and it refuses runs that read documents.
 
 ### Via API
 ```
@@ -643,12 +636,9 @@ You can also manage skills via the API:
 
 ---
 
-## Dashboard Stats Tab
+## Stats
 
-The Dashboard at `http://localhost:8000/ui/dashboard.html` now has two tabs:
-
-- **Runs** — full run history table with trace and resume buttons
-- **Stats** — run outcome counts, cost breakdown by model, feedback summary (thumbs up/down), and top outlier runs
+The Stats tab of the Logs page (`http://localhost:8000/ui/logs.html`) shows run outcome counts, token use by model, feedback (thumbs up/down) and the outlier runs.
 
 ---
 
@@ -677,15 +667,13 @@ summary = await compress_inactive_turns(
 
 ---
 
-## Dashboard
+## Logs and Stats
 
-The Dashboard at `http://localhost:8000/ui/dashboard.html` shows all runs with their status, parent link, and creation time. Click **Trace** to open the full run trace for any run.
-
-The **Stats** tab now shows:
-- **Cost Cards** — total cost, total tokens, number of models used, and total calls at a glance.
-- **Token Leaderboard** — horizontal bar chart showing token consumption per model (top 8).
-- **Depth Tree** — visual tree of runs and their child runs, so you can see recursive orchestration at a glance.
-- **Outlier Runs** — the five most complex runs by instruction length.
+The Logs page at `http://localhost:8000/ui/logs.html` has three tabs: **Events**, **Cost summary** and **Stats**. Stats shows:
+- **Totals** — runs by outcome, and thumbs up and down.
+- **Tokens by model** — a bar per model (top 8).
+- **Runs and the runs they started** — which runs spawned child runs.
+- **Outlier runs** — the five runs that cost the most, or took the longest (your choice); `GET /logs/outlier-runs?sort=cost|duration`.
 
 ---
 
