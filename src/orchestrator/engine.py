@@ -30,9 +30,6 @@ Error codes:
 - BRT-ORC-019: no checked model cleared the quality floor for a step's tier
                and kind of work; the step ran on the run's default model
                (warning; run continues)
-- BRT-ORC-024: an apply_to_each step's inputs_ref names no finished step and
-               the step has no inline items; it ran as one answerer call over
-               the operator's input (warning; run continues)
 
 Optimisation hooks (no error code):
 - BRT-ZERO-01: for unambiguously conversational short prompts, skip
@@ -1085,9 +1082,7 @@ def _build_task_from_node(
     For apply_to_each nodes: if ``inputs_ref`` is a string and matches a
     prior node id in ``results``, the upstream envelope's output is walked
     for an ``items`` / ``results`` list and stamped into
-    ``dependency_input['items']`` — BRT-APE-01. If ``inputs_ref`` names no
-    finished step and the node has no ``items``, the step is built as one
-    answerer task over the operator's input instead (BRT-ORC-024).
+    ``dependency_input['items']`` — BRT-APE-01.
 
     Raises:
         ValueError: BRT-ORC-008 on build failure.
@@ -1185,42 +1180,6 @@ def _build_task_from_node(
             upstream = _upstream_list(inputs_ref_raw, results)
             if upstream is not None:
                 resolved_items = upstream
-
-        if (
-            isinstance(inputs_ref_raw, str)
-            and inputs_ref_raw
-            and inputs_ref_raw not in results
-            and not items_from_node
-        ):
-            # BRT-ORC-024 — the ref names no finished step (usually data in
-            # the operator's own prompt). Run the step once over the
-            # operator's input instead of fanning out over nothing: one
-            # answerer call, same task type and tier. The dispatch loop pops
-            # the marker, notes the route decision and logs the warning.
-            node_context = node.get("context", "")
-            context = governing + (f"\n\n{node_context}" if node_context else "")
-            return WrappedTask(
-                envelope_id=uuid4(),
-                run_id=run_id,
-                subtask_id=uuid4(),
-                type="answerer",
-                current_depth=current_depth,
-                max_depth=max_depth,
-                level_path=level_path,
-                model_endpoint=model_endpoint,
-                model_name=model_name,
-                instruction=(
-                    "Apply the following to each item in the operator's input, "
-                    "and return one result per item as a JSON list under the "
-                    "key \"results\": " + node.get("instruction", "")
-                ),
-                governance_instruction=governing,
-                context=context,
-                output_schema={"results": [node.get("output_schema", {})]},
-                side_effects=node.get("side_effects", []),
-                dependency_input={"_unresolved_inputs_ref": inputs_ref_raw},
-                trigger_reason=node.get("trigger_reason", "initial_plan"),
-            )
 
         dep_input = {
             "inputs_ref": inputs_ref_raw,
@@ -1639,38 +1598,6 @@ async def _orchestrate_run(
                     results=results,
                     governance_instruction=governance_instruction,
                 )
-                # BRT-ORC-024 — an apply_to_each whose inputs_ref named no
-                # step was built as one answerer call; record why.
-                unresolved_ref = (task.dependency_input or {}).pop(
-                    "_unresolved_inputs_ref", None
-                )
-                if unresolved_ref is not None and route_decision is not None:
-                    route_decision = dict(route_decision)
-                    route_decision["note"] = (
-                        f"apply_to_each: inputs_ref '{unresolved_ref}' names no "
-                        "step; ran once over the operator's input"
-                    )
-                if unresolved_ref is not None:
-                    try:
-                        await write_event(
-                            "error",
-                            run_id=run_id,
-                            envelope_id=task.envelope_id,
-                            decision={
-                                "code": "BRT-ORC-024",
-                                "severity": "warning",
-                                "msg": (
-                                    "apply_to_each inputs_ref names no finished "
-                                    "step and the step has no items; it ran as "
-                                    "one call over the operator's input"
-                                ),
-                                "node_id": node_id,
-                                "inputs_ref": unresolved_ref,
-                            },
-                            db_path=db_path,
-                        )
-                    except Exception:
-                        pass
                 if route_decision is not None:
                     # The built task's type, not the plan node's: a skill
                     # step takes its type from the skill's envelope_type.
