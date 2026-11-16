@@ -30,6 +30,9 @@ Error codes:
 - BRT-ORC-019: no checked model cleared the quality floor for a step's tier
                and kind of work; the step ran on the run's default model
                (warning; run continues)
+- BRT-ORC-024: a step waits, through its refs or depends_on, on a cycle of
+               steps of the same plan, so it can never run; it fails before
+               re_plan with no model call and the message names the cycle
 
 On-premise lane (docs/design/on_premise_lane.md; on only when the run has a
 lane context, see src/lane/context.py):
@@ -40,8 +43,9 @@ lane context, see src/lane/context.py):
                rejected when the run has documents
 Raw marking: a step is raw when its node names documents (``documents``,
 ``"inputs_ref": "documents"``, a skill's ``items_ref: documents``) or reads,
-through ``depends_on``, ``inputs_ref`` or ``source``, a raw step whose output
-did not pass the output guard. Raw steps are routed to local models only.
+through ``depends_on``, ``inputs_ref``, ``source`` or any of a skill's
+``*_ref`` args (``items_ref``, ``failed_items_ref``, ``evidence_ref``), a raw
+step whose output did not pass the output guard. Raw steps are routed to local models only.
 
 Optimisation hooks (no error code):
 - BRT-ZERO-01: for unambiguously conversational short prompts, skip
@@ -79,7 +83,12 @@ from src.lane.context import LaneContext, current_lane, failure_of, prompt_json,
 from src.lane.errors import LaneError
 from src.lane.outbound import call_scope, send_outbound
 from src.logging.writer import write_event
-from src.orchestrator.apply_to_each import _resolve_items
+from src.orchestrator.apply_to_each import (
+    _resolve_items,
+    bad_ref_type_message,
+    empty_ref_list_message,
+    failed_ref_message,
+)
 from src.orchestrator.fold_in import fold_in
 from src.prompts.base import build_system_prompt, load_governance
 from src.prompts.orchestrator import ORCHESTRATOR_SYSTEM_PROMPT
@@ -1161,31 +1170,37 @@ def _node_reads_documents(node: dict) -> bool:
     )
 
 
-def _node_refs(node: dict) -> list[str]:
+def _node_refs(node: dict, documents_reserved: bool = True) -> list[str]:
     """Every earlier step a node reads: depends_on, inputs_ref, source, and
-    a skill's ``*_ref`` args (``items_ref``, ``failed_items_ref``).
+    a skill's ``*_ref`` args (``items_ref``, ``failed_items_ref``,
+    ``evidence_ref``).
 
     Used by the ready check (a named step in the same plan is waited for, as
     if it were in ``depends_on``; planner ruling 1a) and by the lane's taint
     check. A ref given as a list is inline items, not a step id.
+    ``"documents"`` names the run's documents, not a step, only while the
+    lane is on (``documents_reserved``); with the lane off it is an ordinary
+    step id.
     """
+    def _is_step_ref(value: object) -> bool:
+        return (
+            isinstance(value, str)
+            and bool(value)
+            and not (documents_reserved and value == _DOCUMENTS_REF)
+        )
+
     refs: list[str] = []
     deps = node.get("depends_on") or []
     if isinstance(deps, list):
         refs.extend(str(d) for d in deps)
     for key in ("inputs_ref", "source", "source_ref"):
         value = node.get(key)
-        if isinstance(value, str) and value and value != _DOCUMENTS_REF:
+        if _is_step_ref(value):
             refs.append(value)
     skill_args = node.get("skill_args") or {}
     if isinstance(skill_args, dict):
         for key, ref in skill_args.items():
-            if (
-                str(key).endswith("_ref")
-                and isinstance(ref, str)
-                and ref
-                and ref != _DOCUMENTS_REF
-            ):
+            if str(key).endswith("_ref") and _is_step_ref(ref):
                 refs.append(ref)
     return refs
 
@@ -1194,17 +1209,133 @@ def _inline_items(node: dict) -> Optional[list]:
     """Items a plan node carries itself, or None (planner ruling 1a).
 
     A list from the operator's message travels in the node: ``items`` on the
-    node, ``items`` in a skill's args, or a skill's ``items_ref`` given as a
-    list instead of a step id.
+    node, ``items`` in a skill's args, or any of a skill's ``*_ref`` args
+    (``items_ref``, ``failed_items_ref``) given as a list instead of a step
+    id. A ``*_ref`` given as an empty list is returned as ``[]``, so the step
+    fails with BRT-APE-005 instead of looking up a step named ``[]``.
     """
     if isinstance(node.get("items"), list) and node["items"]:
         return node["items"]
     skill_args = node.get("skill_args") or {}
     if isinstance(skill_args, dict):
-        for key in ("items", "items_ref"):
-            value = skill_args.get(key)
-            if isinstance(value, list) and value:
+        value = skill_args.get("items")
+        if isinstance(value, list) and value:
+            return value
+        for key, value in skill_args.items():
+            if str(key).endswith("_ref") and isinstance(value, list):
                 return value
+    return None
+
+
+def _bad_ref_arg(skill_args: object) -> Optional[tuple[str, object]]:
+    """The first ``*_ref`` skill arg that is neither a string nor a list."""
+    if not isinstance(skill_args, dict):
+        return None
+    for key, value in skill_args.items():
+        if str(key).endswith("_ref") and value is not None and not isinstance(value, (str, list)):
+            return str(key), value
+    return None
+
+
+def _failed_step(ref: object, results: dict) -> bool:
+    """True when ``ref`` names a finished step of this run that failed."""
+    return (
+        isinstance(ref, str)
+        and ref in results
+        and getattr(results[ref], "status", None) == "failed"
+    )
+
+
+def _with_ids(nodes: list) -> list:
+    """The plan's nodes, each with an ``id`` (``n<index>`` when it has none),
+    so a step that ran is never taken for one still waiting."""
+    out = []
+    for i, n in enumerate(nodes or []):
+        if isinstance(n, dict) and not n.get("id"):
+            n = {**n, "id": f"n{i}"}
+        out.append(n)
+    return out
+
+
+def ref_cycle_message(node_id: str, cycle: Optional[list[str]]) -> str:
+    """BRT-ORC-024 failure text for a step on a ref / depends_on cycle."""
+    path = " -> ".join(cycle) if cycle else "steps that wait on each other"
+    return (
+        f"BRT-ORC-024: step '{node_id}' waits on a cycle of steps ({path}) "
+        f"through inputs_ref, a skill's *_ref args, source or depends_on, so it "
+        f"can never run; no model call was made. A step can only read steps "
+        f"that do not read it back."
+    )
+
+
+async def _fail_ref_cycles(
+    waiting: list[dict],
+    edges: dict[str, list[str]],
+    results: dict,
+    raw_unstamped: set,
+    run_id: UUID,
+    lane: Optional[LaneContext],
+    db_path: str,
+) -> None:
+    """Fail every waiting step that lies on a cycle (BRT-ORC-024).
+
+    Called when steps are left but none is ready. A raw step's failure is a
+    code plus document ids (the lane's shape); otherwise the message names
+    the cycle. If no cycle is found (which the ready check rules out), every
+    waiting step is failed so the loop always moves on.
+    """
+    cycles = {nid: _ref_cycle(nid, edges) for nid in edges}
+    on_cycle = [n for n in waiting if cycles.get(n["id"])]
+    for node in on_cycle or waiting:
+        node_id = node["id"]
+        message = ref_cycle_message(node_id, cycles.get(node_id))
+        raw = lane is not None and (
+            _node_reads_documents(node)
+            or any(r in raw_unstamped for r in _node_refs(node))
+        )
+        if raw:
+            part_ids: list[str] = []
+            if lane.has_documents and _node_reads_documents(node):
+                try:
+                    part_ids = _node_document_ids(node, lane)
+                except ValueError:
+                    part_ids = []
+            await _lane_refuse_node(
+                results, raw_unstamped, run_id, node_id, "BRT-ORC-024", message,
+                part_ids, db_path,
+            )
+            continue
+        results[node_id] = InboundEnvelope(
+            envelope_id=uuid4(),
+            subtask_id=uuid4(),
+            status="failed",
+            output={},
+            failure_reason=message,
+        )
+        try:
+            await write_event(
+                "error",
+                run_id=run_id,
+                decision={"code": "BRT-ORC-024", "msg": message, "node_id": node_id,
+                          "cycle": cycles.get(node_id)},
+                db_path=db_path,
+            )
+        except Exception:
+            pass
+
+
+def _ref_cycle(start: str, edges: dict[str, list[str]]) -> Optional[list[str]]:
+    """A path ``start -> ... -> start`` through ``edges``, or None."""
+    stack = [(start, [start])]
+    seen: set[str] = set()
+    while stack:
+        cur, path = stack.pop()
+        for nxt in edges.get(cur, []):
+            if nxt == start:
+                return path + [start]
+            if nxt not in seen:
+                seen.add(nxt)
+                stack.append((nxt, path + [nxt]))
     return None
 
 
@@ -1280,8 +1411,9 @@ def _build_task_from_node(
     and a node that names documents gets their part ids, never their text:
     ``"inputs_ref": "documents"`` (or a skill's ``items_ref: documents``) on
     an apply_to_each makes one item per document part; ``documents`` on any
-    node names the ids it reads. ``"documents"`` is never looked up as a
-    step id; with no documents loaded it fails the node (BRT-ORC-008).
+    node names the ids it reads. While the lane is on, ``"documents"`` is
+    never looked up as a step id; with no documents loaded it fails the node
+    (BRT-ORC-008). With the lane off it is an ordinary step id.
 
     ``user_instruction`` is this run's instruction (the fallback task text
     for a node with none). ``governance_instruction`` is the operator's
@@ -1325,14 +1457,29 @@ def _build_task_from_node(
         skill_args = node.get("skill_args", {})
         inline_items = _inline_items(node)
         render_args = skill_args
-        if inline_items is not None and isinstance(skill_args, dict) and not isinstance(
-            skill_args.get("items_ref"), str
-        ):
-            # Inline items stand in for items_ref, which the skill template
-            # requires; the template itself is never changed (ruling 1a).
-            render_args = {**skill_args, "items_ref": ""}
         try:
             lib = _get_skill_lib()
+            skill_def = lib.get(node["skill_id"], node.get("skill_version", 1))
+            if (
+                skill_def.get("envelope_type") == "apply_to_each"
+                and isinstance(skill_args, dict)
+            ):
+                # Ruling 1a — inline items stand in for the skill's ref arg.
+                # A *_ref arg given as a list renders as "" (the items travel
+                # in dependency_input); a required *_ref arg left out is
+                # filled with "" when the step carries items. Only for an
+                # apply_to_each skill: any other skill still needs its ref and
+                # fails loudly (BRT-SKL-005). The template is never changed.
+                fill = {
+                    k: "" for k, v in skill_args.items()
+                    if str(k).endswith("_ref") and isinstance(v, list)
+                }
+                if inline_items is not None:
+                    for arg in skill_def.get("required_args", {}) or {}:
+                        if str(arg).endswith("_ref") and arg not in skill_args:
+                            fill[arg] = ""
+                if fill:
+                    render_args = {**skill_args, **fill}
             rendered = lib.render(
                 skill_id=node["skill_id"],
                 version=node.get("skill_version", 1),
@@ -1363,13 +1510,28 @@ def _build_task_from_node(
                     update["dependency_input"] = dep
                     update["documents"] = dep["items"]
                 elif inline_items is not None:
-                    # Ruling 1a — items written in the step itself.
+                    # Ruling 1a — items written in the step itself; an empty
+                    # list fails with BRT-APE-005 in the expander.
                     dep["items"] = inline_items
+                    if not inline_items:
+                        empty_key = next(
+                            (str(k) for k, v in skill_args.items()
+                             if str(k).endswith("_ref") and v == []),
+                            "items_ref",
+                        ) if isinstance(skill_args, dict) else "items_ref"
+                        dep["ref_failure"] = empty_ref_list_message(empty_key)
+                    update["dependency_input"] = dep
+                elif _bad_ref_arg(skill_args) is not None:
+                    key, value = _bad_ref_arg(skill_args)
+                    dep["ref_failure"] = bad_ref_type_message(key, value)
                     update["dependency_input"] = dep
                 elif not dep.get("items"):
                     ref = dep.get("inputs_ref")
-                    upstream = _upstream_list(ref, results)
-                    if upstream is not None:
+                    if _failed_step(ref, results):
+                        # The step it reads failed: no items (BRT-APE-005).
+                        dep["ref_failure"] = failed_ref_message(ref)
+                        update["dependency_input"] = dep
+                    elif (upstream := _upstream_list(ref, results)) is not None:
                         dep["items"] = upstream
                         update["dependency_input"] = dep
                     elif isinstance(ref, str) and ref and ref not in results:
@@ -1429,37 +1591,45 @@ def _build_task_from_node(
         inputs_ref_raw = node.get("inputs_ref", "")
         items_from_node = node.get("items", [])
         resolved_items = items_from_node
+        ref_failure: Optional[str] = None
+        unresolved: Optional[str] = None
         if lane is not None and (named_docs or inputs_ref_raw == _DOCUMENTS_REF):
             # On-premise lane: one item per document part, by id. Handled
-            # here explicitly: "documents" is never a step id.
+            # here explicitly: "documents" is never a step id while the lane
+            # is on.
             resolved_items = named_docs or _all_parts()
             named_docs = resolved_items
-        elif (
-            isinstance(inputs_ref_raw, str)
-            and inputs_ref_raw
-            and inputs_ref_raw in results
-            and not items_from_node
-        ):
-            upstream = _upstream_list(inputs_ref_raw, results)
-            if upstream is not None:
-                resolved_items = upstream
+        elif items_from_node:
+            pass
+        elif isinstance(inputs_ref_raw, list):
+            # Ruling 1a review — inputs_ref given as a list is the items.
+            resolved_items = inputs_ref_raw
+            if not inputs_ref_raw:
+                ref_failure = empty_ref_list_message("inputs_ref")
+        elif isinstance(inputs_ref_raw, str) and inputs_ref_raw:
+            if _failed_step(inputs_ref_raw, results):
+                ref_failure = failed_ref_message(inputs_ref_raw)
+            elif inputs_ref_raw in results:
+                upstream = _upstream_list(inputs_ref_raw, results)
+                if upstream is not None:
+                    resolved_items = upstream
+            else:
+                # Ruling 1a — the ref names no step of this run (the ready
+                # check has already waited for any step of this plan it
+                # names). The expander fails it with BRT-APE-006.
+                unresolved = inputs_ref_raw
+        elif inputs_ref_raw not in (None, ""):
+            ref_failure = bad_ref_type_message("inputs_ref", inputs_ref_raw)
 
         dep_input = {
             "inputs_ref": inputs_ref_raw,
             "items": resolved_items,
             "concurrency_limit": node.get("concurrency_limit", 20),
         }
-        if (
-            not named_docs
-            and not items_from_node
-            and isinstance(inputs_ref_raw, str)
-            and inputs_ref_raw
-            and inputs_ref_raw not in results
-        ):
-            # Ruling 1a — the ref names no step (the ready check has already
-            # waited for any step of this plan it names). The expander fails
-            # the step with BRT-APE-006 before any model call.
-            dep_input["unresolved_ref"] = inputs_ref_raw
+        if ref_failure:
+            dep_input["ref_failure"] = ref_failure
+        if unresolved:
+            dep_input["unresolved_ref"] = unresolved
         return WrappedTask(
             envelope_id=uuid4(),
             run_id=run_id,
@@ -1840,35 +2010,83 @@ async def _orchestrate_run(
     # one of them is raw too (taint follows the data, design note 5.2).
     raw_unstamped: set[str] = set()
 
+    current_nodes = _with_ids(current_nodes)
+    # "documents" names the run's documents only while the lane is on; with
+    # the lane off it is an ordinary step id and is waited for like any other.
+    documents_reserved = lane is not None
+    # True once a wave ran (or a step was failed) since the last re_plan.
+    ran_since_replan = False
+
     while loop_count < MAX_LOOPS:
-        loop_count += 1
-
-        # Find ready nodes. BRT-PR-01a — depends_on ids that reference nodes
-        # not present in the plan at all (e.g. orchestrator hallucinated an
-        # upstream id) are IGNORED by the ready-check — they would otherwise
-        # block the node forever. The mismatch is logged as BRT-ORC-017 when
-        # the task is built below.
+        # Within one plan, waves run until no step is ready; only then is
+        # re_plan called (review of 158c424, finding 1): a step held back by
+        # a ref or depends_on is never dropped. BRT-PR-01a — a ref naming no
+        # step of the plan is IGNORED by the ready check (it would block the
+        # step forever); a depends_on mismatch is logged as BRT-ORC-017 when
+        # the task is built, an unresolved item ref fails with BRT-APE-006.
         completed_ids = set(results.keys())
-        known_ids = {n.get("id") for n in current_nodes if n.get("id")}
+        waiting = [n for n in current_nodes if n.get("id") not in completed_ids]
+        waiting_ids = {n.get("id") for n in waiting}
 
-        def _deps_ready(node_deps: list) -> bool:
-            for d in node_deps or []:
-                if d in known_ids and d not in completed_ids:
-                    return False
-            return True
+        def _waits_on(n: dict) -> list[str]:
+            # Planner ruling 1a — an inputs_ref, a skill's *_ref arg or a
+            # state_op source naming a step of this plan is a dependency too.
+            # A step naming itself is not held back (it would wait forever);
+            # its ref resolves to nothing and the step fails (BRT-APE-006).
+            return [
+                r for r in _node_refs(n, documents_reserved)
+                if r != n.get("id") and r in waiting_ids
+            ]
 
-        # Planner ruling 1a — an inputs_ref, a skill's items_ref or a
-        # state_op source naming a step of this plan is a dependency too.
-        # A step naming itself is not held back (it would wait forever); its
-        # ref resolves to nothing and the step fails loudly (BRT-APE-006).
-        ready = [
-            n for n in current_nodes
-            if n.get("id") not in completed_ids
-            and _deps_ready([r for r in _node_refs(n) if r != n.get("id")])
-        ]
+        ready = [n for n in waiting if not _waits_on(n)]
+
+        if waiting and not ready:
+            # Every step left waits on another step left: a cycle. Its
+            # members can never run, so they fail loudly now (BRT-ORC-024);
+            # a step waiting on a member then runs against a failed step.
+            await _fail_ref_cycles(
+                waiting, {n["id"]: _waits_on(n) for n in waiting},
+                results, raw_unstamped, run_id, lane, db_path,
+            )
+            ran_since_replan = True
+            continue
 
         if not ready:
-            break
+            if not ran_since_replan:
+                # re_plan sent nothing new to run (e.g. only steps that
+                # already ran): compose.
+                break
+            ran_since_replan = False
+            loop_count += 1
+
+            # --- RE_PLAN MODE ---
+            replan_result = await _invoke_orchestrator_model(
+                mode="re_plan",
+                stage_results=results,
+                child_scratch_digest=child_digests,
+                **base_kwargs,
+            )
+
+            action = replan_result.get("action", "compose")
+
+            if action == "compose":
+                break
+            elif action in ("continue", "cascade"):
+                next_nodes = replan_result.get("next_nodes", [])
+                if not next_nodes:
+                    break
+                # Nothing is held at this point (every step either ran or
+                # failed), so the next wave is re_plan's steps.
+                current_nodes = _with_ids(next_nodes)
+                continue
+            elif action == "fail":
+                rationale = replan_result.get("rationale", "No rationale provided.")
+                raise ValueError(f"BRT-ORC-006: orchestrator failed the run: {rationale}")
+            else:
+                # Unknown action — compose anyway
+                break
+
+        ran_since_replan = True
 
         # Dispatch ready nodes in parallel
         tasks_to_dispatch = []
@@ -2127,36 +2345,7 @@ async def _orchestrate_run(
             results[nid] = env
             if done_task.data_scope == "raw" and not env.lane_guarded:
                 raw_unstamped.add(nid)
-
-        # Check if all nodes dispatched
-        all_node_ids = {n.get("id", f"n{i}") for i, n in enumerate(current_nodes)}
-        if all_node_ids.issubset(set(results.keys())):
-            # All nodes done — move to re_plan
-            pass
-
-        # --- RE_PLAN MODE ---
-        replan_result = await _invoke_orchestrator_model(
-            mode="re_plan",
-            stage_results=results,
-            child_scratch_digest=child_digests,
-            **base_kwargs,
-        )
-
-        action = replan_result.get("action", "compose")
-
-        if action == "compose":
-            break
-        elif action in ("continue", "cascade"):
-            next_nodes = replan_result.get("next_nodes", [])
-            if not next_nodes:
-                break
-            current_nodes = next_nodes
-        elif action == "fail":
-            rationale = replan_result.get("rationale", "No rationale provided.")
-            raise ValueError(f"BRT-ORC-006: orchestrator failed the run: {rationale}")
-        else:
-            # Unknown action — compose anyway
-            break
+        # Back to the top: the next wave, or re_plan when no step is ready.
 
     if loop_count >= MAX_LOOPS:
         await write_event(

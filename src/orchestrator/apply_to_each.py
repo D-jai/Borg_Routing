@@ -15,10 +15,12 @@ Error codes:
 - BRT-APE-002: child envelope dispatch failed (individual failures go to failures[])
 - BRT-APE-003: concurrency_limit invalid
 - BRT-APE-004: max_depth would be exceeded by child envelopes
-- BRT-APE-005: no items to process (empty list)
-- BRT-APE-006: the step's inputs_ref / items_ref names no step (not a step
-               id of this plan or an earlier one) and it has no inline items;
-               failed before any model call (planner ruling 1a)
+- BRT-APE-005: no items to process (empty list, a ref given as an empty
+               list, or a ref naming a step that failed)
+- BRT-APE-006: the step's inputs_ref / items_ref names no step of this run
+               (or is neither a step id nor a list) and it has no inline
+               items; failed before any model call (planner ruling 1a).
+               On a raw (lane) step both are shown upward as code+doc only.
 """
 import asyncio
 import uuid
@@ -30,11 +32,36 @@ from src.envelopes.schema import InboundEnvelope, WrappedTask
 def unresolved_ref_message(name: object) -> str:
     """BRT-APE-006 failure text for a ref that names no step."""
     return (
-        f"BRT-APE-006: '{name}' is not a step id: no step in this plan or an "
-        f"earlier one has that id, so this step has no items and made no model "
-        f"call. A list from the user's message belongs in `items` on the step "
-        f"(one string per item); `inputs_ref` and a skill's `items_ref` name "
-        f"an earlier step's id."
+        f"BRT-APE-006: '{name}' is not a step id in this run: no step of this "
+        f"run has that id (a child run does not see its parent's step ids), so "
+        f"this step has no items and made no model call. A list from the "
+        f"user's message belongs in `items` on the step (one string per item); "
+        f"`inputs_ref` and a skill's `items_ref` name an earlier step's id in "
+        f"this run."
+    )
+
+
+def bad_ref_type_message(key: str, value: object) -> str:
+    """BRT-APE-006 failure text for a ref that is neither a string nor a list."""
+    return (
+        f"BRT-APE-006: `{key}` must be a step id or a list of items, got "
+        f"{type(value).__name__}; this step has no items and made no model call."
+    )
+
+
+def empty_ref_list_message(key: str) -> str:
+    """BRT-APE-005 failure text for a ref given as an empty list."""
+    return (
+        f"BRT-APE-005: `{key}` is an empty list, so this step has no items and "
+        f"made no model call."
+    )
+
+
+def failed_ref_message(name: object) -> str:
+    """BRT-APE-005 failure text for a ref naming a step that failed."""
+    return (
+        f"BRT-APE-005: step '{name}', which this step takes its items from, "
+        f"failed, so this step has no items and made no model call."
     )
 
 
@@ -51,6 +78,9 @@ def _resolve_items(task: WrappedTask) -> list:
         ValueError: BRT-APE-006 if the step's ref names no step and it has
             no items of its own.
     """
+    ref_failure = task.dependency_input.get("ref_failure")
+    if ref_failure and not task.dependency_input.get("items"):
+        raise ValueError(str(ref_failure))
     unresolved = task.dependency_input.get("unresolved_ref")
     if unresolved and not task.dependency_input.get("items"):
         raise ValueError(unresolved_ref_message(unresolved))
@@ -74,6 +104,8 @@ def _resolve_items(task: WrappedTask) -> list:
                     f"points at an upstream node with a non-empty items/"
                     f"results list, or populate node['items'] directly."
                 )
+            # inputs_ref given as a list is the items (ruling 1a review).
+            return inputs_ref_inline
         return items
 
     # inputs_ref as a list of strings (simple inline items)
@@ -169,6 +201,25 @@ async def _dispatch_child(
     return await execute(task, db_path=db_path)
 
 
+async def _raw_ref_failure(task: WrappedTask, exc: Exception, db_path: str) -> InboundEnvelope:
+    """A raw step's BRT-APE-005/006: the lane's code+doc failure shape."""
+    from src.lane.context import failed_envelope, raw_failure_code  # noqa: PLC0415
+    from src.logging.writer import write_event  # noqa: PLC0415
+
+    code = raw_failure_code(exc, "BRT-APE-005")
+    try:
+        await write_event(
+            "error",
+            run_id=task.run_id,
+            envelope_id=task.envelope_id,
+            decision={"code": code, "msg": "raw step has no items", "error": str(exc)[:2000]},
+            db_path=db_path,
+        )
+    except Exception:
+        pass
+    return failed_envelope(task, code)
+
+
 async def expand_and_run(
     task: WrappedTask,
     db_path: str = "data/borg_route.db",
@@ -204,6 +255,11 @@ async def expand_and_run(
         items = _resolve_items(task)
     except ValueError as exc:
         if "BRT-APE-005" in str(exc) or "BRT-APE-006" in str(exc):
+            if task.data_scope == "raw":
+                # On-premise lane: a raw step's failure is seen upward as a
+                # code plus document ids only (design note 5.4); the message
+                # stays in the local trace.
+                return await _raw_ref_failure(task, exc, db_path)
             return InboundEnvelope(
                 envelope_id=task.envelope_id,
                 subtask_id=task.subtask_id,
