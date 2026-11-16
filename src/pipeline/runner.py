@@ -67,6 +67,7 @@ async def run_pipeline(
     parent_run_id: Optional[UUID] = None,
     current_depth: int = 0,
     thread_id: Optional[str] = None,
+    run_id: Optional[UUID] = None,
 ) -> dict:
     """Create a run, orchestrate it, return a summary.
 
@@ -109,6 +110,7 @@ async def run_pipeline(
             parent_run_id=parent_run_id,
             thread_id=thread_id,
             db_path=db_path,
+            run_id=run_id,
         )
     except Exception as exc:
         return {

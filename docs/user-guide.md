@@ -333,7 +333,7 @@ Turn it off when you want to compare costs / latency before and after, or when d
 
 `POST /v1/chat/completions` with `stream: true` and `model: borg_route*` now emits SSE keepalive comments (`: heartbeat <ts>`) every `BORG_STREAM_HEARTBEAT_SEC` seconds while the pipeline runs. Previously the stream went silent until `orchestrate_run` finished, which on multi-node plans took long enough that browsers timed the fetch out before any bytes arrived.
 
-Keepalive lines are ignored by SSE consumers but reset their idle timers. The real response is word-streamed after the pipeline resolves, and the chunks add back up to the exact answer: line breaks, indents and code blocks arrive intact.
+Keepalive lines are ignored by SSE consumers but reset their idle timers. The real response is word-streamed after the pipeline resolves, and the chunks add back up to the exact answer: line breaks, indents and code blocks arrive intact. Stage updates shown while a chat streams belong to that chat's own run only; other runs going on at the same time no longer leak in.
 
 ### Tuning
 `BORG_STREAM_HEARTBEAT_SEC` (default `5`). Set to `0` to disable heartbeats entirely. Non-streaming (`stream: false`) requests are unaffected.

@@ -172,12 +172,14 @@ async def _poll_stage_events(
     started_at: float,
     last_seen_log_id: int,
     db_path: str,
+    run_id: Optional[str] = None,
 ) -> tuple[list[dict], int]:
     """BUG-018 — pull recent orchestrator_decision rows from the logs
     table so the SSE layer can surface them as stage transitions.
 
     Returns a list of {stage, detail, ts} dicts and the highest log_id
-    seen so the next poll only fetches new rows.
+    seen so the next poll only fetches new rows. ``run_id`` limits the rows
+    to one run (R3); without it every run's rows come back.
     """
     import aiosqlite
     events: list[dict] = []
@@ -185,15 +187,20 @@ async def _poll_stage_events(
     try:
         async with aiosqlite.connect(db_path) as db:
             db.row_factory = aiosqlite.Row
+            run_filter = "AND run_id = ?" if run_id else ""
+            params: tuple = (last_seen_log_id, str(int(started_at)))
+            if run_id:
+                params += (str(run_id),)
             async with db.execute(
-                """SELECT log_id, model_id, decision_json, created_at
+                f"""SELECT log_id, model_id, decision_json, created_at
                    FROM logs
                    WHERE event_type = 'orchestrator_decision'
                      AND log_id > ?
                      AND strftime('%s', created_at) >= ?
+                     {run_filter}
                    ORDER BY log_id ASC
                    LIMIT 20""",
-                (last_seen_log_id, str(int(started_at))),
+                params,
             ) as cur:
                 rows = await cur.fetchall()
         for row in rows:
@@ -235,15 +242,16 @@ async def _stream_orchestration_with_heartbeats(
     indicator in place, so multi-stage runs show real progress instead
     of an opaque spinner.
     """
-    from src.db.schema import DB_PATH  # noqa: PLC0415
-
     heartbeat_every = float(os.getenv("BORG_STREAM_HEARTBEAT_SEC", "5"))
     started_at = time.time()
     last_log_id = 0
+    # Issue the run id here so stage polling can be limited to this run.
+    own_run_id = uuid.uuid4()
     pipeline_task = asyncio.create_task(
         run_pipeline(
             user_instruction=user_instruction,
             thread_window=thread_window,
+            run_id=own_run_id,
         )
     )
 
@@ -261,6 +269,7 @@ async def _stream_orchestration_with_heartbeats(
                 started_at=started_at,
                 last_seen_log_id=last_log_id,
                 db_path=DB_PATH,
+                run_id=str(own_run_id),
             )
             if events:
                 for ev in events:
