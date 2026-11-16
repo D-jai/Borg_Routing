@@ -27,6 +27,9 @@ from fastapi.responses import JSONResponse
 
 router = APIRouter()
 
+# Strong references so started runs are not garbage-collected mid-flight.
+_BACKGROUND_RUNS: set = set()
+
 SERVER_INFO = {
     "name": "borg_route",
     "version": "0.1.0",
@@ -164,10 +167,21 @@ async def _tool_submit_task(args: dict) -> dict:
     from src.db.schema import DB_PATH
     run_id = await create_run(instruction, db_path=DB_PATH)
 
+    # R9: create_run only writes the row; start the run the way POST /v1/task
+    # does (same background driver: wall-clock cap, failure reason, digest).
+    import asyncio
+    from src.api.tasks import _run_in_background
+
+    task = asyncio.get_running_loop().create_task(
+        _run_in_background(instruction, str(run_id), DB_PATH)
+    )
+    _BACKGROUND_RUNS.add(task)
+    task.add_done_callback(_BACKGROUND_RUNS.discard)
+
     return {
         "content": [{"type": "text", "text": f"Task submitted. run_id: {run_id}"}],
         "isError": False,
-        "_meta": {"run_id": str(run_id), "status": "pending"},
+        "_meta": {"run_id": str(run_id), "status": "running"},
     }
 
 
