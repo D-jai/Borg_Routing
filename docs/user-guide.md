@@ -424,6 +424,19 @@ sub-task and is governed by the top-level run's instruction.
 
 ---
 
+## Chat model aliases
+
+The `model` field of `POST /v1/chat/completions` (and the Chat page's dropdown) steers how the router picks a model for each step:
+
+- `borg_route`: the planner's own tier for each step.
+- `borg_route:light`, `:mid`, `:heavy`: every step is routed at that tier's quality floor, replacing the tier the planner chose. `:light` is the cheap run, `:heavy` the careful one. Planning and the final answer still use the orchestrator model.
+- `borg_route:coding`, `:creative`, `:reasoning`, `:extraction`: the kind of work for any step that names none (a step that states its own kind of work keeps it; `creative` is read as writing).
+- `borg_route:local`: a local model (LM Studio, Ollama) that clears the step's floor is preferred over a cheaper cloud one; if none clears it, the cheapest cloud model is used as usual.
+
+A step's `recommended_model` still comes first. The alias also reaches the child runs of the request. Each step's `routing` (see below) lists the alias and a note saying what it changed.
+
+---
+
 ## Reading why each step used its model
 
 `GET /runs/{run_id}` returns `run`, `envelopes`, `child_envelopes`, `events` and `digest`. `child_envelopes` holds the envelopes (with their `routing`) of every child run the run started, each tagged with its own `run_id`. Each envelope (one per step) now carries:

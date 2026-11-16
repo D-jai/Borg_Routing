@@ -38,6 +38,7 @@ Optimisation hooks (no error code):
                or the rule_zero_shortcut config key.
 """
 import asyncio
+import contextvars
 import json
 import logging
 import math
@@ -86,6 +87,13 @@ _MATRIX_PATH = "data/capability_matrix.yaml"
 _SKILLS_PATH = "data/skills.yaml"
 
 _shared_matrix: Optional[CapabilityMatrix] = None
+
+# What the chat alias asked of this run (tier, default kind of work, local
+# first), read when each step is routed. A context variable so child runs
+# started from a step inherit it without threading it through every call.
+_route_options: contextvars.ContextVar[Optional[dict]] = contextvars.ContextVar(
+    "borg_route_options", default=None
+)
 _shared_skill_lib: Optional[SkillLibrary] = None
 
 
@@ -1274,8 +1282,12 @@ async def orchestrate_run(
     db_path: str = "data/borg_route.db",
     current_depth: int = 0,
     root_instruction: Optional[str] = None,
+    route_options: Optional[dict] = None,
 ) -> str:
     """Main orchestration loop. Returns the final response text.
+
+    ``route_options`` carries a chat alias (``borg_route:light`` and so on)
+    into step routing for this run and the child runs it starts.
 
     ``root_instruction`` is the operator's verbatim instruction for the
     whole job. A child run is given it so every call it makes stays governed
@@ -1285,6 +1297,8 @@ async def orchestrate_run(
     Raises:
         ValueError: BRT-ORC-001..009 on fatal failures.
     """
+    if route_options is not None:
+        _route_options.set(route_options)
     if thread_window is None:
         thread_window = []
 
@@ -1531,6 +1545,7 @@ async def orchestrate_run(
                         floors=leaf_floors,
                         time_cost_per_sec=time_cost,
                         default_model=default_model,
+                        run_options=_route_options.get(),
                     )
                 except Exception as exc:
                     step_model = default_model
@@ -1540,6 +1555,7 @@ async def orchestrate_run(
                         floors=leaf_floors,
                         default_model=default_model,
                         error=f"routing failed: {exc}",
+                        run_options=_route_options.get(),
                     )
 
             try:

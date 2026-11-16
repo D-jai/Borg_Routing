@@ -52,8 +52,14 @@ def _word(value: Any) -> str:
     return str(value).strip().lower() if value is not None else ""
 
 
-def _resolve_task_type(node: dict, skill: Optional[dict], notes: list[str]) -> str:
+def _resolve_task_type(
+    node: dict, skill: Optional[dict], notes: list[str], run_options: Optional[dict] = None
+) -> str:
     raw = _word(node.get("task_type")) or _word((skill or {}).get("recommended_specialty"))
+    if (not raw or raw in ("null", "none")) and (run_options or {}).get("task_type"):
+        # The chat alias names the job's kind of work; it only fills a gap.
+        raw = _word(run_options["task_type"])
+        notes.append(f"run alias '{run_options.get('alias')}' gave the default kind of work: {raw}")
     if not raw or raw in ("null", "none"):
         return DEFAULT_TASK_TYPE
     if raw in _TASK_TYPE_ALIASES:
@@ -66,7 +72,19 @@ def _resolve_task_type(node: dict, skill: Optional[dict], notes: list[str]) -> s
     return raw
 
 
-def _resolve_tier(node: dict, skill: Optional[dict], notes: list[str]) -> str:
+def _resolve_tier(
+    node: dict, skill: Optional[dict], notes: list[str], run_options: Optional[dict] = None
+) -> str:
+    chosen = _word((run_options or {}).get("tier"))
+    if chosen in TIERS:
+        # The operator picked the tier for the whole run; it beats the
+        # planner's per-step guess.
+        asked = _word(node.get("tier")) or _word((skill or {}).get("recommended_tier"))
+        note = f"run alias '{run_options.get('alias')}' set the tier to {chosen}"
+        if asked and asked != chosen:
+            note += f" (the step asked for {asked})"
+        notes.append(note)
+        return chosen
     raw = _word(node.get("tier")) or _word((skill or {}).get("recommended_tier"))
     if not raw or raw in ("null", "none"):
         return DEFAULT_TIER
@@ -107,6 +125,7 @@ def select_model_for_node(
     floors: dict[str, float],
     time_cost_per_sec: float,
     default_model: ModelInfo,
+    run_options: Optional[dict] = None,
 ) -> tuple[ModelInfo, dict]:
     """Return ``(model, decision)`` for one plan node.
 
@@ -117,13 +136,23 @@ def select_model_for_node(
         floors: minimum score per tier, keys ``light``, ``mid``, ``heavy``.
         time_cost_per_sec: passed through to the cost formula.
         default_model: used when no model clears the floor.
+        run_options: what the chat alias asked of the whole run, or None:
+            ``alias`` (for the trace), ``tier`` (replaces each step's tier),
+            ``task_type`` (the default kind of work for a step with none),
+            ``strategy`` (``LOCAL_FIRST`` prefers a local model that clears
+            the floor). A step's own ``recommended_model`` still comes first.
 
     Never raises for a routing miss: the miss is reported in the decision
     (``reason == "fallback_default"`` with the router's error text).
     """
     notes: list[str] = []
-    task_type = _resolve_task_type(node, skill, notes)
-    tier = _resolve_tier(node, skill, notes)
+    task_type = _resolve_task_type(node, skill, notes, run_options)
+    tier = _resolve_tier(node, skill, notes, run_options)
+    strategy = (run_options or {}).get("strategy") or "SYSTEM_CHOOSE"
+    if strategy == "LOCAL_FIRST":
+        notes.append(
+            f"run alias '{(run_options or {}).get('alias')}' asked for a local model first"
+        )
     floor = float(floors.get(tier, DEFAULT_FLOORS[tier]))
     est_in = _estimate_input_tokens(node)
     est_out = _EST_OUTPUT_TOKENS
@@ -159,6 +188,9 @@ def select_model_for_node(
         "candidates": [],
         "notes": notes,
     }
+    if run_options:
+        decision["alias"] = run_options.get("alias")
+        decision["strategy"] = strategy
 
     picked = _planner_pick(node, matrix, notes)
     if picked is not None:
@@ -182,6 +214,7 @@ def select_model_for_node(
             estimated_input_tokens=est_in,
             estimated_output_tokens=est_out,
             quality_requirement=floor,
+            strategy=strategy,
             time_cost_per_sec=time_cost_per_sec,
         )
     except ValueError as exc:
@@ -211,6 +244,7 @@ def fallback_decision(
     floors: dict[str, float],
     default_model: ModelInfo,
     error: str,
+    run_options: Optional[dict] = None,
 ) -> dict:
     """The decision for a step whose routing raised unexpectedly.
 
@@ -221,11 +255,11 @@ def fallback_decision(
     """
     notes: list[str] = []
     try:
-        task_type = _resolve_task_type(node, skill, notes)
+        task_type = _resolve_task_type(node, skill, notes, run_options)
     except Exception:
         task_type = DEFAULT_TASK_TYPE
     try:
-        tier = _resolve_tier(node, skill, notes)
+        tier = _resolve_tier(node, skill, notes, run_options)
     except Exception:
         tier = DEFAULT_TIER
     try:

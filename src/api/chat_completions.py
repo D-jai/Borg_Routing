@@ -3,11 +3,12 @@
 POST /v1/chat/completions — accepts standard OpenAI request bodies.
 Model aliases:
   borg_route               → full orchestration, SYSTEM_CHOOSE
-  borg_route:light         → quality_requirement=5
-  borg_route:mid           → quality_requirement=7
-  borg_route:heavy         → quality_requirement=9
-  borg_route:coding|creative|reasoning|extraction → specialty hint
-  borg_route:local         → LOCAL_FIRST strategy
+  borg_route:light|mid|heavy → every step is routed at that tier's floor
+  borg_route:coding|creative|reasoning|extraction → default kind of work for
+                              steps that name none
+  borg_route:local         → LOCAL_FIRST strategy (a local model that clears
+                              the floor wins over a cheaper cloud one)
+  (see _route_options_for_alias; the run trace notes the alias per step)
   {exact model_id}         → bypass orchestration, direct to that model
 
 Streaming: if stream=true, emit SSE with OpenAI-compat data: lines.
@@ -91,6 +92,33 @@ def _parse_model_alias(model: str) -> tuple[str, float, Optional[str], str]:
         return ("borg_route", 7.0, hint, "SYSTEM_CHOOSE")
     else:
         return ("borg_route", 7.0, None, "SYSTEM_CHOOSE")
+
+
+def _route_options_for_alias(model: str) -> Optional[dict]:
+    """What a ``borg_route:<hint>`` alias asks of the router, or None.
+
+    A tier (light, mid, heavy) replaces every step's tier; a specialty
+    (coding, creative, reasoning, extraction) is the default kind of work for
+    a step that names none; ``local`` prefers a local model that clears the
+    floor. Plain ``borg_route`` and an unknown hint ask for nothing.
+    """
+    parts = model.split(":", 1)
+    if parts[0] != "borg_route" or len(parts) == 1:
+        return None
+    hint = parts[1]
+    if hint in ("light", "mid", "heavy"):
+        return {"alias": model, "tier": hint}
+    if hint == "local":
+        return {"alias": model, "strategy": "LOCAL_FIRST"}
+    if hint in ("coding", "creative", "reasoning", "extraction"):
+        return {"alias": model, "task_type": hint}
+    return None
+
+
+def _route_kwargs(model: str) -> dict:
+    """``route_options`` for run_pipeline, or nothing when the alias asks for none."""
+    options = _route_options_for_alias(model)
+    return {"route_options": options} if options else {}
 
 
 def _build_openai_response(
@@ -252,6 +280,7 @@ async def _stream_orchestration_with_heartbeats(
             user_instruction=user_instruction,
             thread_window=thread_window,
             run_id=own_run_id,
+            **_route_kwargs(model_alias),
         )
     )
 
@@ -609,6 +638,7 @@ async def chat_completions(request: Request):
         result = await run_pipeline(
             user_instruction=user_instruction,
             thread_window=thread_window,
+            **_route_kwargs(model_alias),
         )
     except Exception as exc:
         raise HTTPException(

@@ -68,6 +68,7 @@ async def run_pipeline(
     current_depth: int = 0,
     thread_id: Optional[str] = None,
     run_id: Optional[UUID] = None,
+    route_options: Optional[dict] = None,
 ) -> dict:
     """Create a run, orchestrate it, return a summary.
 
@@ -145,6 +146,7 @@ async def run_pipeline(
                 rolling_summary=rolling_summary,
                 db_path=db_path,
                 current_depth=current_depth,
+                **({"route_options": route_options} if route_options else {}),
             ),
             timeout=max_run_seconds,
         )
