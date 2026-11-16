@@ -288,6 +288,17 @@ Previously, three silent-fallback sites in `orchestrate_run` could make a broken
 - **BRT-ORC-015** (warning) — the default answerer selection failed and the orchestrator model is being reused. The run still completes; you'll see the event in the trace.
 - **BRT-ORC-016** (error) — envelope save/update failed. Logged and the run continues; check DB health (`data/borg_route.db`).
 
+### When a reply is cut off by the token cap (BRT-ORC-018, BRT-ANS-009)
+
+Every call to a model carries a cap on how many tokens it may write: `ORCHESTRATOR_MAX_TOKENS` for planning and composing, `ANSWERER_MAX_TOKENS` for steps (both default to 2000 when unset). A reasoning-family model gets four times the cap, at least 8000, to leave room for its hidden thinking. A step may ask for a larger cap of its own (`max_output_tokens`, default 4000); the larger of the two is used.
+
+If the model stops because it reached the cap, BORG_ROUTE repeats the call **once** at double the cap, never above 16000. There is no second retry. If the first cap is already 16000 or more (for example a reasoning model with `ANSWERER_MAX_TOKENS=6000`, which gives 24000), no retry is made.
+
+What you see:
+
+- **Planner or compose call retried:** the run carries on. The trace's `orchestrator_decision` event for that call shows `"length_retry": true` and `"code": "BRT-ORC-018"`, and its token counts are the two attempts added together.
+- **A step still cut off:** the step fails with **BRT-ANS-009**. The message says either "even after one retry at double the cap (A -> B)" or "no retry", so you know which happened. Raise `ANSWERER_MAX_TOKENS` in `.env` or split the request into smaller pieces.
+
 ---
 
 <!-- Added: 2026-04-18 — Slice 3: Recursion + Admin + Resume + Threads -->

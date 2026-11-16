@@ -11,6 +11,8 @@ TC-ANS-008 — HTTP error from model → BRT-ANS-002
 TC-ANS-009 — finish_reason=length on first attempt → retry at doubled cap succeeds
 TC-ANS-010 — finish_reason=length even after retry → BRT-ANS-009 failed envelope
 TC-ANS-011 — envelope max_output_tokens acts as a floor over ANSWERER_MAX_TOKENS
+TC-ANS-012 — the answerer retry is capped at 16000
+TC-ANS-013 — cut off at or above the 16000 ceiling: no retry, message says so
 """
 import asyncio
 import json
@@ -232,6 +234,7 @@ async def test_truncation_retry_succeeds(db):
     }
 
     call_count = {"n": 0}
+    caps: list[int] = []
 
     class _MockClient:
         def __init__(self, *a, **kw):
@@ -242,6 +245,7 @@ async def test_truncation_retry_succeeds(db):
             return False
         async def post(self, url, json=None, headers=None):
             call_count["n"] += 1
+            caps.append(json["max_tokens"])
             body = truncated_payload if call_count["n"] == 1 else full_payload
             req = httpx.Request("POST", url)
             return httpx.Response(200, json=body, request=req)
@@ -250,6 +254,7 @@ async def test_truncation_retry_succeeds(db):
         env = await execute(task, db_path=db)
 
     assert call_count["n"] == 2, "executor must retry once on finish_reason=length"
+    assert caps[1] == 2 * caps[0], "the retry must ask for double the first cap"
     assert env.status == "resolved"
     assert env.output["bucket"] == "bug"
     # Tokens accumulate across both calls
@@ -276,6 +281,7 @@ async def test_truncation_retry_exhausted_returns_brt_ans_009(db):
         env = await execute(task, db_path=db)
     assert env.status == "failed"
     assert "BRT-ANS-009" in env.failure_reason
+    assert "even after one retry at double the cap" in env.failure_reason
     # Tokens-used still recorded so cost accounting works.
     assert env.tokens_used == {"input": 200, "output": 8000}
 
@@ -323,3 +329,62 @@ async def test_envelope_max_output_tokens_acts_as_floor(db, monkeypatch):
     assert captured["payload"]["max_tokens"] == 9000, (
         "envelope max_output_tokens (9000) must beat ANSWERER_MAX_TOKENS (2000)"
     )
+
+
+def _cut_off_client(caps: list[int]):
+    """A fake httpx client whose every reply is cut off by the cap."""
+    import httpx
+
+    class _MockClient:
+        def __init__(self, *a, **kw):
+            pass
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, *a):
+            return False
+        async def post(self, url, json=None, headers=None):
+            caps.append(json["max_tokens"])
+            req = httpx.Request("POST", url)
+            return httpx.Response(200, json={
+                "choices": [{
+                    "message": {"content": '{"status": "resolved", "output": {"bu'},
+                    "finish_reason": "length",
+                }],
+                "usage": {"prompt_tokens": 10, "completion_tokens": 5},
+            }, request=req)
+
+    return _MockClient
+
+
+@pytest.mark.asyncio
+async def test_answerer_retry_is_capped_at_16000(db, monkeypatch):
+    """TC-ANS-012 — a 12000 cap retries at 16000, not 24000."""
+    monkeypatch.setenv("ANSWERER_MAX_TOKENS", "2000")
+    task = _task(uuid.uuid4()).model_copy(update={"max_output_tokens": 12000})
+    caps: list[int] = []
+
+    with patch("src.agents.executor.httpx.AsyncClient", _cut_off_client(caps)):
+        env = await execute(task, db_path=db)
+
+    assert caps == [12000, 16000]
+    assert env.status == "failed"
+    assert "even after one retry at double the cap (12000 -> 16000)" in env.failure_reason
+
+
+@pytest.mark.asyncio
+async def test_cut_off_at_the_ceiling_does_not_retry_and_says_so(db, monkeypatch):
+    """TC-ANS-013 — a node cap of 20000 is above the ceiling: one call, and
+    the failure message must not claim a retry happened."""
+    monkeypatch.setenv("ANSWERER_MAX_TOKENS", "2000")
+    task = _task(uuid.uuid4()).model_copy(update={"max_output_tokens": 20000})
+    caps: list[int] = []
+
+    with patch("src.agents.executor.httpx.AsyncClient", _cut_off_client(caps)):
+        env = await execute(task, db_path=db)
+
+    assert caps == [20000]
+    assert env.status == "failed"
+    assert "BRT-ANS-009" in env.failure_reason
+    assert "no retry" in env.failure_reason
+    assert "after one retry" not in env.failure_reason
+    assert env.tokens_used == {"input": 10, "output": 5}

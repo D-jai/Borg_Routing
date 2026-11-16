@@ -100,8 +100,29 @@ summary_human: |
       kwarg and return a 4-tuple.
     - tests/envelopes/test_schema.py: assertion bumped 1000 -> 4000
       with a comment pointing back at BRT-ANS-009.
+    - tests/orchestrator/test_engine_truncation_retry.py (new, 15-Nov-2026,
+      work order 0.1): four tests — the orchestrator retries once at
+      double the cap; no retry at the 16000 ceiling; a plan node's own
+      max_output_tokens is stamped on the task; an unusable node cap
+      falls back to the schema default.
 
-  Suite: 388 -> 391 passed. Zero regressions.
+  Review fixes (16-Nov-2026):
+    - BRT-ORC-018 is now recorded on the orchestrator_decision event
+      ("length_retry": true, "code": "BRT-ORC-018", "retry_max_tokens"),
+      with the tokens of both attempts summed. Two tests added to
+      tests/orchestrator/test_engine_truncation_retry.py.
+    - The BRT-ANS-009 message says whether a retry happened ("even after
+      one retry at double the cap (A -> B)" or "no retry" when the first
+      cap is already at or above 16000). TC-ANS-009 now checks the retry
+      doubles the cap; two tests added (TC-ANS-012 retry capped at 16000,
+      TC-ANS-013 no retry at or above the ceiling).
+    - Registry entries state exactly when each retry can and cannot
+      happen; user guide gains a section; .env.example explains the 6000
+      values (reasoning models get 24000, above the retry ceiling).
+
+  Counts: settled 15-Nov-2026 with `pytest tests/agents tests/envelopes
+  tests/orchestrator/test_engine_truncation_retry.py` at 50 passed; the
+  work order 0.2 full baseline was 391 passed.
 
   ## Why this matters
 
@@ -137,6 +158,10 @@ outputs:
     - tests/agents/test_executor_openrouter.py # 4-tuple unpack
     - tests/agents/test_executor_tool_requests.py  # fake signature
     - tests/envelopes/test_schema.py           # default 1000 -> 4000
+    - tests/orchestrator/test_engine_truncation_retry.py  # 6 tests (4 + 2 review fixes)
+  docs:
+    - docs/errors/error-registry.md
+    - docs/user-guide.md
   ledger:
     - .dev/ledger/2026-04-26_token-truncation-retry.yaml
 
@@ -149,16 +174,23 @@ files_touched:
   - tests/agents/test_executor_openrouter.py
   - tests/agents/test_executor_tool_requests.py
   - tests/envelopes/test_schema.py
+  - tests/orchestrator/test_engine_truncation_retry.py
+  - docs/errors/error-registry.md
+  - docs/user-guide.md
 
 error_codes_added:
-  - { code: BRT-ANS-009, meaning: "answerer output truncated (finish_reason=length) even after the auto-retry at doubled cap; raise ANSWERER_MAX_TOKENS / envelope.max_output_tokens or split the task" }
-  - { code: BRT-ORC-018, meaning: "orchestrator response truncated by max_tokens; auto-retried once at doubled cap (info, not fatal — surfaced via the orchestrator_decision event)" }
+  - { code: BRT-ANS-009, meaning: "answerer output truncated (finish_reason=length), after one retry at double the cap, or with no retry when the first cap is already >= 16000; raise ANSWERER_MAX_TOKENS or split the task" }
+  - { code: BRT-ORC-018, meaning: "orchestrator response truncated by max_tokens; retried once at double the cap when the first cap is below 16000 (info, not fatal; recorded as length_retry/code on the orchestrator_decision event)" }
 
 env_vars_added: []
 
 dependencies_added: []
 
-tests_added: { count: 3, files: ["tests/agents/test_executor.py"] }
+tests_added:
+  count: 11
+  files:
+    tests/agents/test_executor.py: 5          # TC-ANS-009..011, plus TC-ANS-012..013 (review fixes)
+    tests/orchestrator/test_engine_truncation_retry.py: 6   # 4 + 2 (review fixes)
 
 audience: [operator, developer]
 demo_value: medium
@@ -167,7 +199,8 @@ keywords: [tokens, truncation, finish_reason, retry, BRT-ANS-009, BRT-ORC-018, B
 
 breaking_change: false
 
-user_guide: {}
+user_guide:
+  section: "Loud Failures (BRT-ORC-02) > When a reply is cut off by the token cap (BRT-ORC-018, BRT-ANS-009)"
 
 install_guide:
   prerequisites_added: []

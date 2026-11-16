@@ -42,7 +42,9 @@ def _plain_model() -> ModelInfo:
     )
 
 
-async def _invoke(db: str, responses: list[MagicMock]) -> tuple[dict, list[int]]:
+async def _invoke(
+    db: str, responses: list[MagicMock], run_id: uuid.UUID | None = None
+) -> tuple[dict, list[int]]:
     """Run one plan-mode call; return (parsed, max_tokens seen on each POST)."""
     caps: list[int] = []
     queue = list(responses)
@@ -60,7 +62,7 @@ async def _invoke(db: str, responses: list[MagicMock]) -> tuple[dict, list[int]]
 
         parsed = await _invoke_orchestrator_model(
             mode="plan",
-            run_id=uuid.uuid4(),
+            run_id=run_id or uuid.uuid4(),
             user_instruction="Hi",
             current_depth=0,
             max_depth=5,
@@ -102,6 +104,61 @@ async def test_orchestrator_does_not_retry_at_the_ceiling(monkeypatch, db):
 
     assert parsed == full
     assert caps == [16000]
+
+
+async def _decision_rows(db: str, run_id: uuid.UUID) -> list[tuple[int, int, dict]]:
+    import aiosqlite
+    from tests.e2e.stub_model_server import drain_log_writes
+    await drain_log_writes()
+    async with aiosqlite.connect(db) as conn:
+        cur = await conn.execute(
+            "SELECT tokens_input, tokens_output, decision_json FROM logs "
+            "WHERE run_id = ? AND event_type = 'orchestrator_decision'",
+            (str(run_id),),
+        )
+        rows = await cur.fetchall()
+    return [(r[0], r[1], json.loads(r[2])) for r in rows]
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_retry_is_recorded_on_the_decision_event(monkeypatch, db):
+    """BRT-ORC-018 — the retry shows up on the orchestrator_decision row,
+    with the tokens of both attempts summed."""
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test-xyz")
+    monkeypatch.setenv("ORCHESTRATOR_MAX_TOKENS", "1000")
+    full = {"direct_answer": "hello", "plan": None, "rationale": "simple"}
+    run_id = uuid.uuid4()
+
+    await _invoke(
+        db,
+        [_resp('{"direct_answer": "hel', "length"), _resp(json.dumps(full), "stop")],
+        run_id=run_id,
+    )
+
+    rows = await _decision_rows(db, run_id)
+    assert len(rows) == 1
+    tokens_in, tokens_out, decision = rows[0]
+    assert decision["length_retry"] is True
+    assert decision["code"] == "BRT-ORC-018"
+    assert decision["retry_max_tokens"] == 2000
+    assert (tokens_in, tokens_out) == (20, 10)  # 10+10 in, 5+5 out
+
+
+@pytest.mark.asyncio
+async def test_no_retry_flag_when_the_reply_was_not_cut_off(monkeypatch, db):
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test-xyz")
+    monkeypatch.setenv("ORCHESTRATOR_MAX_TOKENS", "1000")
+    full = {"direct_answer": "hello", "plan": None, "rationale": "simple"}
+    run_id = uuid.uuid4()
+
+    await _invoke(db, [_resp(json.dumps(full), "stop")], run_id=run_id)
+
+    rows = await _decision_rows(db, run_id)
+    assert len(rows) == 1
+    tokens_in, tokens_out, decision = rows[0]
+    assert "length_retry" not in decision
+    assert "code" not in decision
+    assert (tokens_in, tokens_out) == (10, 5)
 
 
 def _answerer_node(**extra) -> dict:

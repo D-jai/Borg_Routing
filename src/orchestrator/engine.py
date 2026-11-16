@@ -21,8 +21,10 @@ Error codes:
 - BRT-ORC-017: depends_on id not found in results (warning; node dispatches
                with whatever upstream outputs could be resolved)
 - BRT-ORC-018: orchestrator response truncated by max_tokens; auto-retried
-               once at doubled cap (info; logged via the existing
-               orchestrator_decision write_event path)
+               once at doubled cap, ceiling 16000, only when the first cap
+               is below 16000 (info; recorded as "length_retry": true and
+               "code": "BRT-ORC-018" on that call's orchestrator_decision
+               event, whose tokens are the sum of both attempts)
 - BRT-ORC-019: no checked model cleared the quality floor for a step's tier
                and kind of work; the step ran on the run's default model
                (warning; run continues)
@@ -672,9 +674,11 @@ async def _invoke_orchestrator_model(
     # through to the parse-failure retry path. Without this, a "length"
     # cut produces partial JSON that may or may not parse — and even if
     # it does, the plan it encodes is broken.
+    length_retried = False
     if finish_reason == "length" and max_tokens < 16000:
         retry_max = min(max_tokens * 2, 16000)
         if retry_max > max_tokens:
+            length_retried = True
             payload["max_tokens"] = retry_max
             content_t, usage_t, latency_t, finish_reason = await _post_and_collect()
             tokens_in += usage_t.get("prompt_tokens", 0)
@@ -707,6 +711,19 @@ async def _invoke_orchestrator_model(
                 "parsed": parsed,
                 "rationale": (parsed or {}).get("rationale", ""),
                 "parse_error": str(parse_error) if parse_error else None,
+                # BRT-ORC-018 — recorded on this same event (no new
+                # event_type: logs.event_type has a CHECK constraint).
+                # tokens_input/tokens_output above are the sum of both
+                # attempts when this flag is set.
+                **(
+                    {
+                        "length_retry": True,
+                        "code": "BRT-ORC-018",
+                        "retry_max_tokens": max_tokens,
+                    }
+                    if length_retried
+                    else {}
+                ),
             },
             payload_in=system_prompt[:2000],
             payload_out=content[:2000],

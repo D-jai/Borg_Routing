@@ -14,8 +14,9 @@ Error codes:
 - BRT-ANS-006: model call timed out
 - BRT-ANS-007: governance load failed
 - BRT-ANS-008: unexpected executor error
-- BRT-ANS-009: model output truncated (finish_reason=length) even after the
-               automatic doubled-cap retry — caller must raise
+- BRT-ANS-009: model output truncated (finish_reason=length), after the
+               doubled-cap retry or with no retry when the first cap is
+               already at or above the 16000 ceiling — caller must raise
                ANSWERER_MAX_TOKENS / envelope.max_output_tokens or split
                the task.
 - BRT-TOOL-001: tool unavailable (caught via ToolInvocationResult, not raised)
@@ -154,6 +155,28 @@ async def _post_chat_completion(
     return content, tokens_in, tokens_out, finish_reason
 
 
+def _answerer_caps(
+    model: ModelInfo, requested_max_tokens: Optional[int] = None
+) -> tuple[int, Optional[int]]:
+    """Return (first_cap, retry_cap) for an answerer call.
+
+    ``first_cap`` is the env cap (4x, at least 8000, for reasoning-family
+    models) with the envelope's ``max_output_tokens`` as a floor.
+    ``retry_cap`` is the doubled cap (ceiling ``_TRUNCATION_RETRY_CEILING``)
+    used once on ``finish_reason == "length"``, or None when the first cap
+    is already at or above the ceiling, so no retry can happen.
+    """
+    from src.orchestrator.engine import _resolve_max_tokens_for_model  # noqa: PLC0415
+
+    base_max = _resolve_max_tokens_for_model(
+        model, "ANSWERER_MAX_TOKENS", default=2000
+    )
+    effective_max = max(base_max, int(requested_max_tokens or 0))
+    if effective_max >= _TRUNCATION_RETRY_CEILING:
+        return effective_max, None
+    return effective_max, min(effective_max * 2, _TRUNCATION_RETRY_CEILING)
+
+
 async def _call_model(
     model: ModelInfo,
     system_prompt: str,
@@ -185,15 +208,9 @@ async def _call_model(
     # o1/o3/o4, thinking-prefixed snapshots) burn thousands of hidden
     # chain-of-thought tokens before emitting visible output; a 2000-token
     # cap truncates them mid-thought. _resolve_max_tokens_for_model bumps
-    # the cap to >= 8000 for detected reasoning models.
-    from src.orchestrator.engine import _resolve_max_tokens_for_model  # noqa: PLC0415
-
-    base_max = _resolve_max_tokens_for_model(
-        model, "ANSWERER_MAX_TOKENS", default=2000
-    )
-    # Envelope-requested cap acts as a floor (orchestrator may have asked
-    # for more on this specific node).
-    effective_max = max(base_max, int(requested_max_tokens or 0))
+    # the cap to >= 8000 for detected reasoning models. The envelope's
+    # requested cap acts as a floor (the planner may ask for more on a node).
+    effective_max, retry_cap = _answerer_caps(model, requested_max_tokens)
 
     payload = {
         "model": body_model,
@@ -214,19 +231,17 @@ async def _call_model(
     # always a partial JSON object and BRT-ANS-004 then fires on the
     # unparseable tail. Retry ONCE with the cap doubled so the natural
     # fix happens automatically instead of failing the run.
-    if finish_reason == "length" and effective_max < _TRUNCATION_RETRY_CEILING:
-        retry_cap = min(effective_max * 2, _TRUNCATION_RETRY_CEILING)
-        if retry_cap > effective_max:
-            retry_payload = {**payload, "max_tokens": retry_cap}
-            (
-                content_retry,
-                retry_in,
-                retry_out,
-                finish_reason,
-            ) = await _post_chat_completion(url, headers, retry_payload)
-            content = content_retry
-            tokens_in += retry_in
-            tokens_out += retry_out
+    if finish_reason == "length" and retry_cap is not None:
+        retry_payload = {**payload, "max_tokens": retry_cap}
+        (
+            content_retry,
+            retry_in,
+            retry_out,
+            finish_reason,
+        ) = await _post_chat_completion(url, headers, retry_payload)
+        content = content_retry
+        tokens_in += retry_in
+        tokens_out += retry_out
 
     return content, tokens_in, tokens_out, finish_reason
 
@@ -368,15 +383,27 @@ async def _execute_answerer(task: WrappedTask, db_path: str) -> InboundEnvelope:
     # downstream BRT-ANS-004 (unparseable JSON, which is the symptom not
     # the cause).
     if finish_reason == "length":
+        first_cap, retry_cap = _answerer_caps(model_for_call, task.max_output_tokens)
+        if retry_cap is not None:
+            cut_detail = (
+                f"even after one retry at double the cap ({first_cap} -> {retry_cap})"
+            )
+            msg = "max_tokens cap exhausted after retry"
+        else:
+            cut_detail = (
+                f"at a cap of {first_cap}; no retry, the cap is already at or "
+                f"above the {_TRUNCATION_RETRY_CEILING} retry ceiling"
+            )
+            msg = "max_tokens cap exhausted; no retry (cap at or above ceiling)"
         env = InboundEnvelope(
             envelope_id=task.envelope_id,
             subtask_id=task.subtask_id,
             status="failed",
             output={},
             failure_reason=(
-                "BRT-ANS-009: model output truncated (finish_reason=length) "
-                "even after auto-retry at doubled cap. Raise "
-                "ANSWERER_MAX_TOKENS or split the task into smaller nodes."
+                f"BRT-ANS-009: model output truncated (finish_reason=length) "
+                f"{cut_detail}. Raise ANSWERER_MAX_TOKENS or split the task "
+                "into smaller nodes."
             ),
             tokens_used={"input": tokens_in, "output": tokens_out},
         )
@@ -391,7 +418,10 @@ async def _execute_answerer(task: WrappedTask, db_path: str) -> InboundEnvelope:
             payload_out=content[:2000],
             decision={
                 "code": "BRT-ANS-009",
-                "msg": "max_tokens cap exhausted after retry",
+                "msg": msg,
+                "retried": retry_cap is not None,
+                "first_max_tokens": first_cap,
+                "retry_max_tokens": retry_cap,
                 "envelope_max_output_tokens": task.max_output_tokens,
             },
             db_path=db_path,
