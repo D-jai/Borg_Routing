@@ -209,6 +209,7 @@ Use this instead of emitting N identical answerers.
   "id": "n1",
   "instruction": "Do this to ONE item: ...",
   "inputs_ref": "input_list",  // the runtime resolves this from run state
+  "items": ["only when the list is in the user's message: the items themselves, one string each"],
   "output_schema": {{ ... per-item shape ... }},
   "concurrency_limit": 20,
   "side_effects": ["deferrals"],
@@ -220,6 +221,8 @@ Use this instead of emitting N identical answerers.
 The runtime expands this into N envelopes. Failures are returned as a
 structured list alongside successes (best-effort). You handle the failures
 in re_plan.
+
+Where the items come from. If the list is in the user's message, copy the items into `items`, one string per item, and leave `inputs_ref` out. If an earlier step produces the list, set `inputs_ref` to that step's id. `inputs_ref` is always the id of a step; a name you make up resolves to nothing. The same holds for a skill's `items_ref`.
 
 ### 3. `state_op` — Deterministic, no model, free
 ```json
