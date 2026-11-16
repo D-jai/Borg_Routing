@@ -156,6 +156,45 @@ async def test_answerer_first_attempt_is_logged_when_the_retry_fails(db, env, mo
     assert digest["cost_dollars"] == pytest.approx(1000 * PRICE_IN + 2000 * PRICE_OUT)
 
 
+def _length_then_error_body(first_usage):
+    """First response is cut by the cap; the retry is HTTP 200 with an error body."""
+    calls = []
+
+    async def fake_post(client, url, json=None, headers=None, **kwargs):  # noqa: A002
+        calls.append(json)
+        resp = MagicMock()
+        if len(calls) == 1:
+            resp.json.return_value = {
+                "choices": [{"message": {"content": '{"cut'}, "finish_reason": "length"}],
+                "usage": first_usage,
+            }
+        else:
+            resp.json.return_value = {"error": {"message": "x"}}
+        resp.raise_for_status = MagicMock()
+        return resp
+
+    return fake_post
+
+
+@pytest.mark.asyncio
+async def test_answerer_first_attempt_is_logged_when_the_retry_is_a_200_error_body(
+    db, env, monkeypatch
+):
+    monkeypatch.setattr(
+        httpx.AsyncClient, "post",
+        _length_then_error_body({"prompt_tokens": 1000, "completion_tokens": 2000}),
+    )
+    run_id = await create_run("x", db_path=db)
+    with pytest.raises(ValueError, match="BRT-ANS-002"):
+        await execute(_answerer_task(run_id), db_path=db)
+    await drain_log_writes()
+
+    rows = _q(db, "SELECT event_type, tokens_input, tokens_output, dollars FROM logs "
+                  "WHERE run_id=?", str(run_id))
+    assert [r[:3] for r in rows] == [("model_call", 1000, 2000)]
+    assert rows[0][3] == pytest.approx(1000 * PRICE_IN + 2000 * PRICE_OUT)
+
+
 def _orc_model():
     return ModelInfo(
         model_id="openrouter/acme/plain-model", source="openrouter",
@@ -216,6 +255,30 @@ async def test_orchestrator_first_attempt_is_logged_when_the_length_retry_fails(
     assert rows[0][3] == pytest.approx(1000 * PRICE_IN + 2000 * PRICE_OUT)
     digest = await compute_and_save_digest(run_id, db_path=db)
     assert digest["cost_dollars"] == pytest.approx(1000 * PRICE_IN + 2000 * PRICE_OUT)
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_first_attempt_is_logged_when_the_retry_is_a_200_error_body(
+    db, monkeypatch
+):
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test-x")
+    monkeypatch.setenv("ORCHESTRATOR_MAX_TOKENS", "1000")
+    run_id = await create_run("x", db_path=db)
+    err = MagicMock()
+    err.json.return_value = {"error": {"message": "x"}}
+    err.raise_for_status = MagicMock()
+    queue = [
+        _orc_resp('{"cut', "length", {"prompt_tokens": 1000, "completion_tokens": 2000}),
+        err,
+    ]
+    with pytest.raises(ValueError, match="BRT-ORC-001"):
+        await _invoke_plan(db, run_id, queue)
+    await drain_log_writes()
+
+    rows = _q(db, "SELECT event_type, tokens_input, tokens_output, dollars FROM logs "
+                  "WHERE run_id=?", str(run_id))
+    assert [r[:3] for r in rows] == [("orchestrator_decision", 1000, 2000)]
+    assert rows[0][3] == pytest.approx(1000 * PRICE_IN + 2000 * PRICE_OUT)
 
 
 # --- 3. flush_pending ------------------------------------------------------
@@ -447,6 +510,102 @@ async def test_streaming_bypass_without_usage_logs_no_tokens(db, monkeypatch):
     run_id, _out = await _relay(cc, ['data: {"choices":[{"delta":{"content":"hi"}}]}', "data: [DONE]"])
     rows = _q(db, "SELECT tokens_input, tokens_output, dollars FROM logs WHERE run_id=?", run_id)
     assert rows == [(None, None, None)]     # absent, not zero
+
+
+class _FakeBrokenStreamResponse(_FakeStreamResponse):
+    async def aiter_lines(self):
+        yield 'data: {"choices":[{"delta":{"content":"par"}}]}'
+        raise httpx.ReadError("connection dropped")
+
+
+@pytest.mark.asyncio
+async def test_streaming_bypass_logs_a_row_when_the_provider_errors_mid_stream(db, monkeypatch):
+    from src.api import chat_completions as cc
+
+    _bypass_matrix(monkeypatch)
+    monkeypatch.setattr(cc, "DB_PATH", db)
+    monkeypatch.setattr(cc.httpx, "AsyncClient", _FakeStreamClient)
+    monkeypatch.setattr(
+        _FakeStreamClient, "stream",
+        lambda self, method, url, json=None, headers=None: _BrokenCtx(), raising=False,
+    )
+    run_id, out = await _relay(cc, [])
+    assert any("Streaming relay failed" in c for c in out)
+    rows = _q(db, "SELECT event_type, tokens_input, tokens_output, dollars FROM logs "
+                  "WHERE run_id=?", run_id)
+    assert rows == [("model_call", None, None, None)]
+
+
+class _BrokenCtx:
+    async def __aenter__(self):
+        return _FakeBrokenStreamResponse([])
+
+    async def __aexit__(self, *exc):
+        return None
+
+
+@pytest.mark.asyncio
+async def test_streaming_bypass_logs_a_row_when_the_client_disconnects(db, monkeypatch):
+    from main import matrix
+    from src.api import chat_completions as cc
+    from src.api.chat_completions import ChatMessage
+
+    _bypass_matrix(monkeypatch)
+    monkeypatch.setattr(cc, "DB_PATH", db)
+    monkeypatch.setattr(cc.httpx, "AsyncClient", _FakeStreamClient)
+    _FakeStreamClient.lines = [
+        'data: {"choices":[{"delta":{"content":"a"}}]}',
+        'data: {"choices":[{"delta":{"content":"b"}}]}',
+        "data: [DONE]",
+    ]
+    run_id = str(uuid.uuid4())
+    gen = cc._stream_bypass_relay(
+        matrix, "openrouter/bypass/cheap", "openrouter/bypass/cheap",
+        [ChatMessage(role="user", content="hi there")], run_id)
+    await gen.__anext__()
+    await gen.aclose()          # client went away: GeneratorExit inside the relay
+    await drain_log_writes()
+    rows = _q(db, "SELECT tokens_input, tokens_output FROM logs WHERE run_id=?", run_id)
+    assert rows == [(None, None)]
+
+
+@pytest.mark.asyncio
+async def test_bypass_runs_are_tagged_and_left_out_of_the_run_list(db, monkeypatch):
+    from src.api import chat_completions as cc
+    from src.api import tasks as tasks_api
+
+    _bypass_matrix(monkeypatch)
+    monkeypatch.setattr(cc, "DB_PATH", db)
+    monkeypatch.setattr(cc, "_db_initialised", True)
+    monkeypatch.setattr(tasks_api, "DB_PATH", db)
+    monkeypatch.setattr(httpx.AsyncClient, "post", _post_returning({"prompt_tokens": 1, "completion_tokens": 1}))
+    body = json.loads((await cc.chat_completions(_FakeRequest("openrouter/bypass/cheap"))).body)
+    bypass_id = body["id"].removeprefix("chatcmpl-")
+    normal_id = str(await create_run("a normal run", db_path=db))
+
+    assert _q(db, "SELECT kind FROM runs WHERE run_id=?", bypass_id) == [("bypass",)]
+    assert _q(db, "SELECT kind FROM runs WHERE run_id=?", normal_id) == [("orchestrated",)]
+
+    default = json.loads((await tasks_api.list_runs()).body)["runs"]
+    assert [r["run_id"] for r in default] == [normal_id]
+    everything = json.loads((await tasks_api.list_runs(include_bypass=True)).body)["runs"]
+    assert {r["run_id"] for r in everything} == {normal_id, bypass_id}
+
+
+@pytest.mark.asyncio
+async def test_a_bypass_run_is_still_returned_by_id(db, monkeypatch):
+    from src.api import chat_completions as cc
+    from src.api import tasks as tasks_api
+
+    _bypass_matrix(monkeypatch)
+    monkeypatch.setattr(cc, "DB_PATH", db)
+    monkeypatch.setattr(cc, "_db_initialised", True)
+    monkeypatch.setattr(tasks_api, "DB_PATH", db)
+    monkeypatch.setattr(httpx.AsyncClient, "post", _post_returning({"prompt_tokens": 1, "completion_tokens": 1}))
+    body = json.loads((await cc.chat_completions(_FakeRequest("openrouter/bypass/cheap"))).body)
+    bypass_id = body["id"].removeprefix("chatcmpl-")
+    got = json.loads((await tasks_api.get_run_state(bypass_id)).body)
+    assert got["run"]["run_id"] == bypass_id and got["run"]["kind"] == "bypass"
 
 
 # --- 7. POST /tasks background run -----------------------------------------

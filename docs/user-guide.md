@@ -116,7 +116,9 @@ calls) is logged with its token counts and its **dollars**:
 
 The prices come from the capability-matrix row of the model that served the call.
 A model with no pricing (a local model) costs `0.0`, and so does a model the
-matrix does not know; the call is never left blank. A call that was retried
+matrix does not know; the call is never left blank, with one exception: a
+direct-to-model (bypass) call whose provider sends no usage is logged with its
+tokens and dollars left blank (unknown), not zero. A call that was retried
 after being cut off counts the tokens of both attempts. The tools do not carry
 a price today, so tool calls log `0.0`.
 
@@ -134,7 +136,13 @@ a price today, so tool calls log `0.0`.
   A direct-to-model request (an exact model id) reports the provider's own
   usage and logs one priced `model_call` under its run id; if the provider
   sends no usage the block is left out. Streamed replies do not report usage
-  yet.
+  yet, but a streamed direct call is still logged once, even if the provider
+  fails mid-stream or the client disconnects (tokens blank if unknown). A
+  direct-to-model run is tagged `kind = 'bypass'` (all other runs are
+  `orchestrated`), so `GET /runs` leaves bypass runs out by default; add
+  `?include_bypass=true` to list them too. `GET /runs/{id}` still returns a
+  bypass run by its id. A digest saved before the token and baseline columns
+  existed reads those fields as unknown (null), not 0.
 - **Baseline (an estimate):** each call also stores `baseline_dollars`, the same
   tokens priced as if the baseline model had done the work; the run digest
   stores the run's total. Both are stored now; the interface receipt that will

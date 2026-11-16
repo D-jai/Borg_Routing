@@ -207,4 +207,19 @@ async def test_migration_adds_cost_columns_to_an_old_schema_database(tmp_path):
                 have = {r[1] for r in await cur.fetchall()}
             assert cols <= have, f"{table} is missing {cols - have}"
         async with db.execute("SELECT summary, cost_dollars, tokens_input FROM run_digests") as cur:
-            assert await cur.fetchall() == [("old", 0.5, 0)]
+            assert await cur.fetchall() == [("old", 0.5, None)]   # unknown, not 0
+
+
+@pytest.mark.asyncio
+async def test_new_digest_cost_columns_default_to_null_and_runs_have_a_kind(tmp_path):
+    path = str(tmp_path / "fresh.db")
+    await create_all(path)
+    async with aiosqlite.connect(path) as db:
+        await db.execute("INSERT INTO runs(run_id, status, user_instruction) VALUES ('r1','completed','x')")
+        await db.execute("INSERT INTO run_digests(run_id, summary) VALUES ('r1','s')")
+        async with db.execute(
+            "SELECT baseline_dollars, tokens_input, tokens_output FROM run_digests"
+        ) as cur:
+            assert await cur.fetchall() == [(None, None, None)]
+        async with db.execute("SELECT kind FROM runs") as cur:
+            assert await cur.fetchall() == [("orchestrated",)]

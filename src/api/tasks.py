@@ -512,10 +512,15 @@ async def rate_run(run_id: str, req: RatingRequest) -> JSONResponse:
 
 
 @router.get("/runs")
-async def list_runs(limit: int = 50) -> JSONResponse:
-    """Return recent runs ordered by created_at descending."""
+async def list_runs(limit: int = 50, include_bypass: bool = False) -> JSONResponse:
+    """Return recent runs ordered by created_at descending.
+
+    Direct-to-model (bypass) runs are left out unless ``include_bypass=true``.
+    """
     try:
-        runs = await get_runs_list(limit=limit, db_path=DB_PATH)
+        runs = await get_runs_list(
+            limit=limit, db_path=DB_PATH, include_bypass=include_bypass
+        )
         return JSONResponse(content={"runs": runs})
     except Exception as exc:
         raise HTTPException(

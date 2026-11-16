@@ -40,9 +40,12 @@ _MIGRATIONS = [
     "ALTER TABLE logs ADD COLUMN baseline_dollars NUMERIC",
     "ALTER TABLE envelopes ADD COLUMN baseline_dollars NUMERIC",
     # Run digest: baseline price of the run and the input/output token split.
-    "ALTER TABLE run_digests ADD COLUMN baseline_dollars REAL DEFAULT 0",
-    "ALTER TABLE run_digests ADD COLUMN tokens_input INTEGER DEFAULT 0",
-    "ALTER TABLE run_digests ADD COLUMN tokens_output INTEGER DEFAULT 0",
+    # NULL means unknown (a digest saved before these columns existed).
+    "ALTER TABLE run_digests ADD COLUMN baseline_dollars REAL",
+    "ALTER TABLE run_digests ADD COLUMN tokens_input INTEGER",
+    "ALTER TABLE run_digests ADD COLUMN tokens_output INTEGER",
+    # Direct-to-model (bypass) runs are tagged so run lists can leave them out.
+    "ALTER TABLE runs ADD COLUMN kind TEXT DEFAULT 'orchestrated'",
 ]
 
 _SCHEMA_SQL = """
@@ -58,7 +61,8 @@ CREATE TABLE IF NOT EXISTS runs (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     completed_at TIMESTAMP,
     user_rating INTEGER,
-    failure_reason TEXT
+    failure_reason TEXT,
+    kind TEXT DEFAULT 'orchestrated'
 );
 
 CREATE TABLE IF NOT EXISTS subtasks (
@@ -172,9 +176,9 @@ CREATE TABLE IF NOT EXISTS run_digests (
     summary TEXT NOT NULL,
     cost_dollars REAL DEFAULT 0,
     token_count INTEGER DEFAULT 0,
-    baseline_dollars REAL DEFAULT 0,
-    tokens_input INTEGER DEFAULT 0,
-    tokens_output INTEGER DEFAULT 0,
+    baseline_dollars REAL,
+    tokens_input INTEGER,
+    tokens_output INTEGER,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 

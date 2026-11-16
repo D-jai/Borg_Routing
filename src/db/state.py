@@ -23,6 +23,7 @@ async def create_run(
     thread_id: Optional[str] = None,
     db_path: str = DB_PATH,
     run_id: Optional[UUID] = None,
+    kind: str = "orchestrated",
 ) -> UUID:
     """Insert a new run record with status=pending. Returns the new run_id.
 
@@ -40,14 +41,15 @@ async def create_run(
     async with aiosqlite.connect(db_path) as db:
         await db.execute(
             """INSERT INTO runs(
-                run_id, parent_run_id, thread_id, status, user_instruction, instance_id
-            ) VALUES (?, ?, ?, 'pending', ?, ?)""",
+                run_id, parent_run_id, thread_id, status, user_instruction, instance_id, kind
+            ) VALUES (?, ?, ?, 'pending', ?, ?, ?)""",
             (
                 str(run_id),
                 str(parent_run_id) if parent_run_id else None,
                 thread_id,
                 user_instruction,
                 resolve_instance_id(),
+                kind,
             ),
         )
         await db.commit()
@@ -173,12 +175,18 @@ async def get_run(run_id: UUID, db_path: str = DB_PATH) -> dict:
     return dict(row)
 
 
-async def get_runs_list(limit: int = 50, db_path: str = DB_PATH) -> list[dict]:
-    """Return the most recent runs ordered by created_at descending."""
+async def get_runs_list(
+    limit: int = 50, db_path: str = DB_PATH, include_bypass: bool = False
+) -> list[dict]:
+    """Return the most recent runs ordered by created_at descending.
+
+    Direct-to-model (bypass) runs are left out unless ``include_bypass``.
+    """
+    where = "" if include_bypass else "WHERE COALESCE(kind, 'orchestrated') != 'bypass' "
     async with aiosqlite.connect(db_path) as db:
         db.row_factory = aiosqlite.Row
         async with db.execute(
-            "SELECT * FROM runs ORDER BY created_at DESC LIMIT ?",
+            f"SELECT * FROM runs {where}ORDER BY created_at DESC LIMIT ?",
             (limit,),
         ) as cur:
             rows = await cur.fetchall()

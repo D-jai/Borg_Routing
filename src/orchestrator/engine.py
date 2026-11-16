@@ -687,11 +687,17 @@ async def _invoke_orchestrator_model(
         except httpx.RequestError as exc:
             raise ValueError(f"BRT-ORC-001: request error calling orchestrator: {exc}") from exc
         latency = int((time.monotonic() - t_start) * 1000)
-        body_resp = resp.json()
-        choice_resp = body_resp["choices"][0]
-        content_resp = choice_resp["message"]["content"]
-        finish_resp = (choice_resp.get("finish_reason") or "").strip()
-        usage_resp = body_resp.get("usage", {})
+        try:
+            body_resp = resp.json()
+            choice_resp = body_resp["choices"][0]
+            content_resp = choice_resp["message"]["content"]
+            finish_resp = (choice_resp.get("finish_reason") or "").strip()
+            usage_resp = body_resp.get("usage", {})
+        except (KeyError, IndexError, TypeError, AttributeError) as exc:
+            # An HTTP 200 whose body is an error object or has no choices.
+            raise ValueError(
+                f"BRT-ORC-001: malformed response from orchestrator (no usable choices): {exc!r}"
+            ) from exc
         return content_resp, usage_resp, latency, finish_resp
 
     content, usage, latency_ms, finish_reason = await _post_and_collect()

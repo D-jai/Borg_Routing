@@ -328,7 +328,9 @@ async def _record_bypass_call(
         await create_all(db_path)
         run_uuid = uuid.UUID(run_id)
         last_user = next((m.content for m in reversed(messages) if m.role == "user"), "")
-        await create_run(last_user or "(bypass)", db_path=db_path, run_id=run_uuid)
+        await create_run(
+            last_user or "(bypass)", db_path=db_path, run_id=run_uuid, kind="bypass"
+        )
         await update_run_status(run_uuid, "completed", db_path=db_path)
 
         tokens = _usage_tokens(usage)
@@ -467,6 +469,7 @@ async def _stream_bypass_relay(
                     # Fallback to non-stream
                     t_fb = time.monotonic()
                     text, fb_usage = await _bypass_to_model(matrix, model_id, messages)
+                    recorded = True   # the fallback row below is this run's one record
                     await _record_bypass_call(
                         matrix, model_id, run_id, messages, text, fb_usage,
                         int((time.monotonic() - t_fb) * 1000),
@@ -498,7 +501,6 @@ async def _stream_bypass_relay(
                             yield f"data: {json.dumps(chunk)}\n\n"
                         except json.JSONDecodeError:
                             yield f"data: {payload_str}\n\n"
-        await _record_relay()
     except Exception as exc:
         err_chunk = {
             "id": f"chatcmpl-{run_id}", "object": "chat.completion.chunk",
@@ -506,6 +508,10 @@ async def _stream_bypass_relay(
             "choices": [{"index": 0, "delta": {"content": f"[BRT-API-013] Streaming relay failed: {exc}"}, "finish_reason": "stop"}],
         }
         yield f"data: {json.dumps(err_chunk)}\n\ndata: [DONE]\n\n"
+    finally:
+        # Normal end, provider error mid-stream and client disconnect
+        # (GeneratorExit) all record the call once, with whatever usage is known.
+        await _record_relay()
 
 
 @router.post("/v1/chat/completions")

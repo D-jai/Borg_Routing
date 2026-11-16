@@ -146,11 +146,17 @@ async def _post_chat_completion(
     except httpx.RequestError as exc:
         raise ValueError(f"BRT-ANS-002: request error calling {url}: {exc}") from exc
 
-    body = resp.json()
-    choice = body["choices"][0]
-    content = choice["message"]["content"]
-    finish_reason = (choice.get("finish_reason") or "").strip()
-    usage = body.get("usage", {})
+    try:
+        body = resp.json()
+        choice = body["choices"][0]
+        content = choice["message"]["content"]
+        finish_reason = (choice.get("finish_reason") or "").strip()
+        usage = body.get("usage", {})
+    except (KeyError, IndexError, TypeError, AttributeError) as exc:
+        # An HTTP 200 whose body is an error object or otherwise has no choices.
+        raise ValueError(
+            f"BRT-ANS-002: malformed response from {url} (no usable choices): {exc!r}"
+        ) from exc
     tokens_in = usage.get("prompt_tokens", 0)
     tokens_out = usage.get("completion_tokens", 0)
     return content, tokens_in, tokens_out, finish_reason
