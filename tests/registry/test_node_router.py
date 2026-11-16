@@ -3,7 +3,12 @@ import pytest
 
 from src.registry.capability_matrix import CapabilityMatrix
 from src.registry.models import ModelInfo, Pricing
-from src.registry.node_router import DEFAULT_FLOORS, select_model_for_node
+from src.registry.node_router import (
+    _TASK_TYPE_ALIASES,
+    DEFAULT_FLOORS,
+    fallback_decision,
+    select_model_for_node,
+)
 
 TASK_TYPES = ("reasoning", "coding", "summarize", "writing", "roleplay", "agentic", "extraction")
 
@@ -123,6 +128,35 @@ def test_unlabelled_step_is_reasoning_at_mid():
 def test_creative_means_writing():
     _model_, decision = _route(_node(task_type="creative", tier="light"))
     assert decision["task_type"] == "writing"
+    assert any("creative" in n and "writing" in n for n in decision["notes"])
+
+
+@pytest.mark.parametrize("word, mapped", sorted(_TASK_TYPE_ALIASES.items()))
+def test_every_alias_mapping_is_written_into_the_notes(word, mapped):
+    _model_, decision = _route(_node(task_type=word, tier="light"))
+    assert decision["task_type"] == mapped
+    assert any(f"'{word}'" in n and mapped in n for n in decision["notes"]), decision["notes"]
+
+
+def test_a_task_type_word_needs_no_note():
+    _model_, decision = _route(_node(task_type="coding", tier="light"))
+    assert decision["notes"] == []
+
+
+def test_the_fallback_decision_carries_every_field():
+    d = fallback_decision(
+        node=_node(task_type="extraction", tier="light"),
+        skill=None,
+        floors=DEFAULT_FLOORS,
+        default_model=TOP,
+        error="routing failed: boom",
+    )
+    assert d["reason"] == "fallback_default"
+    assert (d["task_type"], d["tier"], d["floor"]) == ("extraction", "light", 6.0)
+    assert d["chosen"] == TOP.model_id
+    assert d["est_cost"] is None
+    assert d["candidates"] == []
+    assert d["error"] == "routing failed: boom"
 
 
 def test_unknown_kind_of_work_becomes_reasoning_and_is_noted():

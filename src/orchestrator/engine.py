@@ -25,6 +25,8 @@ Error codes:
                is below 16000 (info; recorded as "length_retry": true and
                "code": "BRT-ORC-018" on that call's orchestrator_decision
                event, whose tokens are the sum of both attempts)
+- BRT-ORC-023: skill lookup failed while routing a step (warning; the step
+               is routed without the skill's tier and specialty)
 - BRT-ORC-019: no checked model cleared the quality floor for a step's tier
                and kind of work; the step ran on the run's default model
                (warning; run continues)
@@ -66,7 +68,11 @@ from src.prompts.orchestrator import ORCHESTRATOR_SYSTEM_PROMPT
 from src.registry.capability_matrix import CapabilityMatrix
 from src.registry.model_call import resolve_model_call
 from src.registry.models import ModelInfo
-from src.registry.node_router import DEFAULT_FLOORS, select_model_for_node
+from src.registry.node_router import (
+    DEFAULT_FLOORS,
+    fallback_decision,
+    select_model_for_node,
+)
 from src.registry.router import select_model
 from src.skills.library import SkillLibrary
 
@@ -807,14 +813,40 @@ async def _load_leaf_floors(db_path: str) -> dict[str, float]:
     return floors
 
 
-def _skill_for_node(node: dict) -> Optional[dict]:
-    """The skill record a plan node invokes, or None."""
+async def _skill_for_node(
+    node: dict, run_id: UUID, node_id: str, db_path: str
+) -> Optional[dict]:
+    """The skill record a plan node invokes, or None.
+
+    A failed lookup is not swallowed silently: it logs BRT-ORC-023 (warning)
+    and the step is routed without the skill's tier and specialty.
+    """
     skill_id = node.get("skill_id")
     if not skill_id:
         return None
     try:
         return _get_skill_lib().get(skill_id, node.get("skill_version", 1))
-    except Exception:
+    except Exception as exc:
+        try:
+            await write_event(
+                "error",
+                run_id=run_id,
+                decision={
+                    "code": "BRT-ORC-023",
+                    "severity": "warning",
+                    "msg": (
+                        "skill lookup failed while routing a step; it is "
+                        "routed without the skill's tier and specialty"
+                    ),
+                    "node_id": node_id,
+                    "skill_id": skill_id,
+                    "skill_version": node.get("skill_version", 1),
+                    "err": str(exc),
+                },
+                db_path=db_path,
+            )
+        except Exception:
+            pass
         return None
 
 
@@ -1332,10 +1364,11 @@ async def orchestrate_run(
             step_model = default_model
             route_decision: Optional[dict] = None
             if node.get("type", "answerer") != "state_op":
+                node_skill = await _skill_for_node(node, run_id, node_id, db_path)
                 try:
                     step_model, route_decision = select_model_for_node(
                         node=node,
-                        skill=_skill_for_node(node),
+                        skill=node_skill,
                         matrix=matrix,
                         floors=leaf_floors,
                         time_cost_per_sec=time_cost,
@@ -1343,11 +1376,13 @@ async def orchestrate_run(
                     )
                 except Exception as exc:
                     step_model = default_model
-                    route_decision = {
-                        "reason": "fallback_default",
-                        "chosen": default_model.model_id,
-                        "error": f"routing failed: {exc}",
-                    }
+                    route_decision = fallback_decision(
+                        node=node,
+                        skill=node_skill,
+                        floors=leaf_floors,
+                        default_model=default_model,
+                        error=f"routing failed: {exc}",
+                    )
 
             try:
                 task = _build_task_from_node(

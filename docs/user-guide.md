@@ -120,8 +120,17 @@ bar above). Every other step in a plan is routed on its own:
    whose score for that kind of work is at or above the tier's floor. A
    step that invokes a skill takes the skill's own tier and specialty when
    the planner gave none. A step with no labels is `reasoning`, `mid`.
+   Near-synonyms are accepted (`creative` is read as writing, `code` as
+   coding, `extract` as extraction, `summary` or `summarise` as
+   summarize), and each such reading is written into the step's route
+   notes; any other unknown word is treated as `reasoning`, also noted.
+   If the skill a step names cannot be found, the trace shows a
+   `BRT-ORC-023` warning and the step is routed without the skill's hints.
+   An `apply_to_each` step's items all run on the step's own model.
 3. If no ticked model clears the floor, the step runs on the run's default
-   model and the trace shows a `BRT-ORC-019` warning.
+   model and the trace shows a `BRT-ORC-019` warning. If routing fails for
+   any other reason, the step also runs on the default model and its route
+   entry carries the error.
 
 | Tier | Floor (default) | Setting |
 |---|---|---|

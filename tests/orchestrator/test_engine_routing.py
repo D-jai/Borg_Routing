@@ -174,3 +174,113 @@ async def test_floors_come_from_config_then_env_then_defaults(db, env):
 
     await set_config("leaf_quality_light", 7.0, db_path=db)
     assert (await _load_leaf_floors(db))["light"] == 7.0
+
+
+def _routes(db_path: str, run_id: str) -> dict[str, tuple]:
+    return {
+        d["node_id"]: (envelope_id, model_id, d)
+        for envelope_id, model_id, d in _decisions(db_path, run_id, "orchestrator_decision")
+        if d.get("mode") == "route"
+    }
+
+
+@pytest.mark.asyncio
+async def test_a_skill_step_is_routed_by_the_skills_tier_and_specialty(db, env):
+    """extract_fields is light/extraction in skills.yaml. The planner gives
+    no task_type or tier, so without the skill's hints the step would be
+    reasoning/mid (stub/mid); with them it is extraction/light (stub/cheap)."""
+    env.setattr(engine, "_shared_matrix", three_tier_matrix())
+    plan = [
+        {"type": "apply_to_each", "id": "n1", "skill_id": "extract_fields",
+         "skill_version": 1,
+         "skill_args": {"items_ref": "notes", "fields": [{"name": "name", "type": "string"}],
+                        "concurrency_limit": 2}},
+    ]
+    StubModels(plan_nodes=plan).install(env)
+
+    result = await run_pipeline(INSTRUCTION, db_path=db)
+    await drain_log_writes()
+
+    routes = _routes(db, result["run_id"])
+    assert set(routes) == {"n1"}
+    envelope_id, model_id, d = routes["n1"]
+    assert (d["reason"], d["task_type"], d["tier"]) == ("routed", "extraction", "light")
+    assert model_id == d["chosen"] == "openrouter/stub/cheap"
+
+    with sqlite3.connect(db) as conn:
+        served_by = dict(
+            conn.execute(
+                "SELECT envelope_id, model_id FROM envelopes WHERE run_id=?",
+                (result["run_id"],),
+            ).fetchall()
+        )
+    assert served_by[envelope_id] == "openrouter/stub/cheap"
+
+
+@pytest.mark.asyncio
+async def test_a_failed_skill_lookup_is_logged_not_swallowed(db):
+    run_id = uuid.uuid4()
+    skill = await engine._skill_for_node(
+        {"type": "answerer", "skill_id": "no_such_skill"}, run_id, "n7", db
+    )
+    await drain_log_writes()
+
+    assert skill is None
+    warnings = [d for _e, _m, d in _decisions(db, str(run_id), "error")]
+    assert len(warnings) == 1
+    w = warnings[0]
+    assert (w["code"], w["severity"], w["node_id"], w["skill_id"]) == (
+        "BRT-ORC-023", "warning", "n7", "no_such_skill",
+    )
+    assert "BRT-SKL-003" in w["err"]
+
+
+@pytest.mark.asyncio
+async def test_apply_to_each_items_are_served_by_the_steps_routed_model(db, env):
+    """The run default is stub/top (quality bar 9.0); the step is routed to
+    stub/cheap, and every item must go to stub/cheap too."""
+    env.setattr(engine, "_shared_matrix", three_tier_matrix())
+    plan = [
+        {"type": "apply_to_each", "id": "n1", "instruction": "Pull the name from the note.",
+         "task_type": "extraction", "tier": "light",
+         "items": ["note alpha", "note beta", "note gamma"],
+         "output_schema": {"result": "string"}},
+    ]
+    stub = StubModels(plan_nodes=plan).install(env)
+
+    result = await run_pipeline(INSTRUCTION, db_path=db)
+    await drain_log_writes()
+    assert result["status"] == "completed", result.get("error")
+
+    item_calls = [r for r in stub.of_kind("answerer") if "Pull the name" in r.system]
+    assert len(item_calls) == 3
+    assert {r.model for r in item_calls} == {"stub/cheap"}
+
+
+@pytest.mark.asyncio
+async def test_an_unexpected_routing_error_still_fills_every_decision_field(db, env):
+    env.setattr(engine, "_shared_matrix", three_tier_matrix())
+
+    def broken_router(**_kwargs):
+        raise RuntimeError("router exploded")
+
+    env.setattr(engine, "select_model_for_node", broken_router)
+    plan = [
+        {"type": "answerer", "id": "n1", "instruction": "Extract the names.",
+         "task_type": "extraction", "tier": "light", "output_schema": {"result": "string"}},
+    ]
+    stub = StubModels(plan_nodes=plan).install(env)
+
+    result = await run_pipeline(INSTRUCTION, db_path=db)
+    await drain_log_writes()
+    assert result["status"] == "completed", result.get("error")
+
+    _envelope_id, model_id, d = _routes(db, result["run_id"])["n1"]
+    for key in ("reason", "task_type", "tier", "floor", "chosen", "est_cost", "candidates", "error"):
+        assert key in d, f"decision is missing {key}: {d}"
+    assert d["reason"] == "fallback_default"
+    assert (d["task_type"], d["tier"], d["floor"]) == ("extraction", "light", 6.0)
+    assert d["candidates"] == []
+    assert "router exploded" in d["error"]
+    assert model_id == d["chosen"] == "openrouter/stub/top"
+    assert stub.step_request("Extract the names.").model == "stub/top"

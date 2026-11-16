@@ -56,7 +56,10 @@ def _resolve_task_type(node: dict, skill: Optional[dict], notes: list[str]) -> s
     raw = _word(node.get("task_type")) or _word((skill or {}).get("recommended_specialty"))
     if not raw or raw in ("null", "none"):
         return DEFAULT_TASK_TYPE
-    raw = _TASK_TYPE_ALIASES.get(raw, raw)
+    if raw in _TASK_TYPE_ALIASES:
+        mapped = _TASK_TYPE_ALIASES[raw]
+        notes.append(f"kind of work '{raw}' read as {mapped}")
+        raw = mapped
     if raw not in TASK_TYPES:
         notes.append(f"unknown kind of work '{raw}'; treated as {DEFAULT_TASK_TYPE}")
         return DEFAULT_TASK_TYPE
@@ -92,7 +95,7 @@ def _planner_pick(node: dict, matrix: CapabilityMatrix, notes: list[str]) -> Opt
 def _estimate_input_tokens(node: dict) -> int:
     text = f"{node.get('instruction') or ''}{node.get('context') or ''}"
     skill_args = node.get("skill_args")
-    if skill_args:
+    if skill_args:  # a skill step's args are its context, so they count
         text += str(skill_args)
     return max(_MIN_EST_INPUT_TOKENS, len(text) // 4)
 
@@ -175,3 +178,43 @@ def select_model_for_node(
     ]
     decision.update(reason="routed", chosen=chosen.model_id, est_cost=cost_of(chosen))
     return chosen, decision
+
+
+def fallback_decision(
+    node: dict,
+    skill: Optional[dict],
+    floors: dict[str, float],
+    default_model: ModelInfo,
+    error: str,
+) -> dict:
+    """The decision for a step whose routing raised unexpectedly.
+
+    Carries every field a routed decision has (reason, task_type, tier,
+    floor, chosen, est_cost, candidates) plus ``error``, so the trace reads
+    the same whatever went wrong. Never raises: a field that cannot be
+    worked out is left at its default.
+    """
+    notes: list[str] = []
+    try:
+        task_type = _resolve_task_type(node, skill, notes)
+    except Exception:
+        task_type = DEFAULT_TASK_TYPE
+    try:
+        tier = _resolve_tier(node, skill, notes)
+    except Exception:
+        tier = DEFAULT_TIER
+    try:
+        floor: Optional[float] = float(floors.get(tier, DEFAULT_FLOORS[tier]))
+    except Exception:
+        floor = DEFAULT_FLOORS.get(tier)
+    return {
+        "reason": "fallback_default",
+        "task_type": task_type,
+        "tier": tier,
+        "floor": floor,
+        "chosen": default_model.model_id,
+        "est_cost": None,
+        "candidates": [],
+        "notes": notes,
+        "error": error,
+    }
