@@ -22,6 +22,7 @@
   publisher: anthropic
   notes: Current frontier from Anthropic. Use as the 'oracle' for final synthesis.
   checked: false
+  remote: false
 - model_id: openrouter/openai/gpt-5.4-pro
   source: openrouter
   endpoint: https://openrouter.ai/api
@@ -47,6 +48,7 @@
   notes: Top pure-reasoning model. Very expensive — use only when reasoning bar is
     extreme.
   checked: false
+  remote: false
 - model_id: openrouter/x-ai/grok-4.20
   source: openrouter
   endpoint: https://openrouter.ai/api
@@ -71,6 +73,7 @@
   publisher: x-ai
   notes: 2M-context frontier. Best option when input corpus is huge.
   checked: false
+  remote: false
 - model_id: openrouter/anthropic/claude-sonnet-4.6
   source: openrouter
   endpoint: https://openrouter.ai/api
@@ -98,6 +101,7 @@
     pre-checked default — chosen for rock-solid strict-JSON / instruction-following
     discipline so the orchestrator's complex system prompt is honoured reliably.
   checked: true
+  remote: false
 - model_id: openrouter/google/gemini-3.1-pro-preview
   source: openrouter
   endpoint: https://openrouter.ai/api
@@ -122,6 +126,7 @@
   publisher: google
   notes: Google mid flagship. Strong long-doc summarization and extraction.
   checked: false
+  remote: false
 - model_id: openrouter/moonshotai/kimi-k2-thinking
   source: openrouter
   endpoint: https://openrouter.ai/api
@@ -149,6 +154,7 @@
     score (9.2). The cost optimiser will prefer this for most prompts; Sonnet stays
     as the strict-JSON safety net.
   checked: true
+  remote: false
 - model_id: openrouter/openai/gpt-5.3-codex
   source: openrouter
   endpoint: https://openrouter.ai/api
@@ -171,6 +177,7 @@
   publisher: openai
   notes: Dedicated coding variant. Beats generalists on code-heavy work.
   checked: false
+  remote: false
 - model_id: openrouter/deepseek/deepseek-v3.2
   source: openrouter
   endpoint: https://openrouter.ai/api
@@ -193,7 +200,8 @@
   params_b: null
   publisher: deepseek
   notes: Exceptional price/performance. Strong default for mid work.
-  checked: true
+  checked: false
+  remote: false
 - model_id: openrouter/x-ai/grok-4.1-fast
   source: openrouter
   endpoint: https://openrouter.ai/api
@@ -217,6 +225,7 @@
   publisher: x-ai
   notes: Huge context at bargain prices. Best for bulk long-doc processing.
   checked: false
+  remote: false
 - model_id: openrouter/openai/gpt-5.4-nano
   source: openrouter
   endpoint: https://openrouter.ai/api
@@ -239,7 +248,8 @@
   params_b: null
   publisher: openai
   notes: Ultra-cheap OpenAI. Bulk classification / extraction.
-  checked: true
+  checked: false
+  remote: false
 - model_id: openrouter/google/gemini-3.1-flash-lite-preview
   source: openrouter
   endpoint: https://openrouter.ai/api
@@ -263,6 +273,7 @@
   publisher: google
   notes: Ultra-cheap flash with 1M context. Bulk summarization at scale.
   checked: false
+  remote: false
 - model_id: openrouter/perplexity/sonar-pro-search
   source: openrouter
   endpoint: https://openrouter.ai/api
@@ -287,3 +298,4 @@
   publisher: perplexity
   notes: Web-search enabled. Default SCORING_MODEL for the Get Info feature.
   checked: false
+  remote: false
