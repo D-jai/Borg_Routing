@@ -32,7 +32,7 @@ from uuid import UUID
 import httpx
 
 from src.db.scratch import apply_cleanup_directives
-from src.db.state import create_run, get_config, update_run_status
+from src.db.state import create_run, get_config, sum_run_tree, update_run_status
 from src.envelopes.schema import InboundEnvelope, WrappedTask
 from src.envelopes.validator import validate_inbound
 from src.logging.writer import write_event
@@ -234,12 +234,18 @@ async def _call_model(
     # fix happens automatically instead of failing the run.
     if finish_reason == "length" and retry_cap is not None:
         retry_payload = {**payload, "max_tokens": retry_cap}
-        (
-            content_retry,
-            retry_in,
-            retry_out,
-            finish_reason,
-        ) = await _post_chat_completion(url, headers, retry_payload)
+        try:
+            (
+                content_retry,
+                retry_in,
+                retry_out,
+                finish_reason,
+            ) = await _post_chat_completion(url, headers, retry_payload)
+        except ValueError as exc:
+            # The first attempt was billed even though the retry failed.
+            # Hand its tokens to the caller so the paid call is still logged.
+            exc.paid_tokens = (tokens_in, tokens_out)  # type: ignore[attr-defined]
+            raise
         content = content_retry
         tokens_in += retry_in
         tokens_out += retry_out
@@ -374,7 +380,32 @@ async def _execute_answerer(task: WrappedTask, db_path: str) -> InboundEnvelope:
         content, tokens_in, tokens_out, finish_reason = await _call_model(
             model_for_call, system_prompt, "begin", task.max_output_tokens
         )
-    except ValueError:
+    except ValueError as exc:
+        paid = getattr(exc, "paid_tokens", None)
+        if paid:
+            # Paid-then-failed: the first attempt was billed. Log it (existing
+            # event type) before re-raising so the digest counts it.
+            paid_dollars, paid_baseline = await price_with_baseline(
+                model_for_call, paid[0], paid[1], db_path
+            )
+            await write_event(
+                "model_call",
+                run_id=task.run_id,
+                envelope_id=task.envelope_id,
+                model_id=task.model_name,
+                tokens_input=paid[0],
+                tokens_output=paid[1],
+                dollars=paid_dollars,
+                baseline_dollars=paid_baseline,
+                latency_ms=int((time.monotonic() - t0) * 1000),
+                decision={
+                    "code": "BRT-ANS-009",
+                    "msg": "first attempt billed (finish_reason=length); retry failed",
+                    "retry_failed": True,
+                    "error": str(exc)[:300],
+                },
+                db_path=db_path,
+            )
         raise
     except Exception as exc:
         raise ValueError(f"BRT-ANS-008: unexpected error calling model: {exc}") from exc
@@ -417,6 +448,8 @@ async def _execute_answerer(task: WrappedTask, db_path: str) -> InboundEnvelope:
                 "into smaller nodes."
             ),
             tokens_used={"input": tokens_in, "output": tokens_out},
+            dollars=dollars,
+            baseline_dollars=baseline_dollars,
         )
         await write_event(
             "model_call",
@@ -453,6 +486,8 @@ async def _execute_answerer(task: WrappedTask, db_path: str) -> InboundEnvelope:
             output={},
             failure_reason=f"BRT-ANS-004: could not parse model response as JSON. Raw: {content[:200]}",
             tokens_used={"input": tokens_in, "output": tokens_out},
+            dollars=dollars,
+            baseline_dollars=baseline_dollars,
         )
         await write_event(
             "model_call",
@@ -509,6 +544,9 @@ async def _execute_answerer(task: WrappedTask, db_path: str) -> InboundEnvelope:
     # Apply cleanup directives (Law 2 — child self-cleans)
     if env.scratch_cleanup:
         await apply_cleanup_directives(task.run_id, env.scratch_cleanup, db_path=db_path)
+
+    env.dollars = dollars
+    env.baseline_dollars = baseline_dollars
 
     # Log model_call event (fire-and-forget)
     await write_event(
@@ -593,11 +631,23 @@ async def execute(task: WrappedTask, db_path: str = "data/borg_route.db") -> Inb
                 pass
             raise ValueError(f"BRT-ORC-022: child orchestration failed: {exc}") from exc
 
+        # The child run's calls are logged under its own run id. Give this
+        # node the child tree's total so the parent envelope shows its cost.
+        from src.logging.writer import flush_pending  # noqa: PLC0415
+
+        await flush_pending()
+        child_total = await sum_run_tree(child_run_id, db_path=db_path)
         return InboundEnvelope(
             envelope_id=task.envelope_id,
             subtask_id=task.subtask_id,
             status="resolved",
             output={"response": result_text, "child_run_id": str(child_run_id)},
+            tokens_used={
+                "input": child_total["tokens_input"],
+                "output": child_total["tokens_output"],
+            },
+            dollars=child_total["dollars"],
+            baseline_dollars=child_total["baseline_dollars"],
         )
     else:
         raise ValueError(f"BRT-ANS-008: unknown task type '{task.type}'")

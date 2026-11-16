@@ -22,8 +22,12 @@ async def create_run(
     parent_run_id: Optional[UUID] = None,
     thread_id: Optional[str] = None,
     db_path: str = DB_PATH,
+    run_id: Optional[UUID] = None,
 ) -> UUID:
     """Insert a new run record with status=pending. Returns the new run_id.
+
+    ``run_id`` is for a caller that already issued the id (a bypass request);
+    omit it to get a fresh one.
 
     BRT-LOG-DB-COMPAT — also stamps instance_id so The_Borg_DB can tell
     apart runs from different devices when aggregated via hive-collective.
@@ -32,7 +36,7 @@ async def create_run(
     # monkey-patch the provenance singletons.
     from src.logging.provenance import resolve_instance_id  # noqa: PLC0415
 
-    run_id = uuid4()
+    run_id = run_id or uuid4()
     async with aiosqlite.connect(db_path) as db:
         await db.execute(
             """INSERT INTO runs(
@@ -228,6 +232,54 @@ async def resume_run(run_id: UUID, db_path: str = DB_PATH) -> list:
     return tasks
 
 
+async def _sum_run_tree(db, run_id: UUID):
+    """Sum logged model_call / orchestrator_decision rows for a run and every
+    descendant run (child runs spawned by orchestrate nodes, via parent_run_id)."""
+    async with db.execute(
+        """WITH RECURSIVE tree(run_id) AS (
+               SELECT ?
+               UNION
+               SELECT r.run_id FROM runs r JOIN tree t ON r.parent_run_id = t.run_id
+           )
+           SELECT COALESCE(SUM(tokens_input), 0) AS tin,
+                  COALESCE(SUM(tokens_output), 0) AS tout,
+                  COALESCE(SUM(dollars), 0) AS total_cost,
+                  COALESCE(SUM(baseline_dollars), 0) AS total_baseline
+           FROM logs
+           WHERE run_id IN (SELECT run_id FROM tree)
+             AND event_type IN ('model_call','orchestrator_decision')""",
+        (str(run_id),),
+    ) as cur:
+        return await cur.fetchone()
+
+
+async def sum_run_tree(run_id: UUID, db_path: str = DB_PATH) -> dict:
+    """Logged tokens and dollars for a run plus all its descendant runs."""
+    async with aiosqlite.connect(db_path) as db:
+        db.row_factory = aiosqlite.Row
+        row = await _sum_run_tree(db, run_id)
+    return {
+        "tokens_input": int(row["tin"]),
+        "tokens_output": int(row["tout"]),
+        "dollars": float(row["total_cost"]),
+        "baseline_dollars": float(row["total_baseline"]),
+    }
+
+
+async def get_run_digest(run_id: UUID, db_path: str = DB_PATH) -> Optional[dict]:
+    """The stored digest row for a run, or None if no digest was saved."""
+    async with aiosqlite.connect(db_path) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            """SELECT summary, cost_dollars, baseline_dollars, tokens_input,
+                      tokens_output, token_count
+               FROM run_digests WHERE run_id=?""",
+            (str(run_id),),
+        ) as cur:
+            row = await cur.fetchone()
+    return dict(row) if row else None
+
+
 async def compute_and_save_digest(run_id: UUID, db_path: str = DB_PATH) -> dict:
     """Aggregate cost/tokens for a run from its logged calls and persist to run_digests.
 
@@ -246,16 +298,7 @@ async def compute_and_save_digest(run_id: UUID, db_path: str = DB_PATH) -> dict:
             (str(run_id),),
         ) as cur:
             env_row = await cur.fetchone()
-        async with db.execute(
-            """SELECT COALESCE(SUM(tokens_input), 0) AS tin,
-                      COALESCE(SUM(tokens_output), 0) AS tout,
-                      COALESCE(SUM(dollars), 0) AS total_cost,
-                      COALESCE(SUM(baseline_dollars), 0) AS total_baseline
-               FROM logs
-               WHERE run_id=? AND event_type IN ('model_call','orchestrator_decision')""",
-            (str(run_id),),
-        ) as cur:
-            row = await cur.fetchone()
+        row = await _sum_run_tree(db, run_id)
 
     envelope_count = env_row["cnt"] if env_row else 0
     tokens_in_total = int(row["tin"]) if row else 0
@@ -272,13 +315,18 @@ async def compute_and_save_digest(run_id: UUID, db_path: str = DB_PATH) -> dict:
 
     async with aiosqlite.connect(db_path) as db:
         await db.execute(
-            """INSERT INTO run_digests(run_id, summary, cost_dollars, token_count)
-               VALUES (?, ?, ?, ?)
+            """INSERT INTO run_digests(run_id, summary, cost_dollars, token_count,
+                                       baseline_dollars, tokens_input, tokens_output)
+               VALUES (?, ?, ?, ?, ?, ?, ?)
                ON CONFLICT(run_id) DO UPDATE SET
                  summary=excluded.summary,
                  cost_dollars=excluded.cost_dollars,
-                 token_count=excluded.token_count""",
-            (str(run_id), summary, cost_dollars, token_count),
+                 token_count=excluded.token_count,
+                 baseline_dollars=excluded.baseline_dollars,
+                 tokens_input=excluded.tokens_input,
+                 tokens_output=excluded.tokens_output""",
+            (str(run_id), summary, cost_dollars, token_count,
+             baseline_total, tokens_in_total, tokens_out_total),
         )
         await db.commit()
 

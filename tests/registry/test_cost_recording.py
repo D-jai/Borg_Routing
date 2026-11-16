@@ -99,3 +99,12 @@ async def test_price_with_baseline_survives_an_empty_matrix_and_unknown_model(tm
     await create_all(db)
     dollars, baseline = await price_with_baseline(None, 10, 10, db, matrix=CapabilityMatrix())
     assert dollars == 0.0 and baseline is None
+
+
+def test_baseline_tie_goes_to_the_smaller_id_even_when_it_is_a_prefix():
+    # 'a/x' is a prefix of 'a/xy'; equal scores must pick 'a/x', in either insert order.
+    for order in (("x", "xy"), ("xy", "x")):
+        matrix = CapabilityMatrix()
+        for name in order:
+            matrix.upsert(stub_model(name, 8.0, 1e-6, 3e-6))
+        assert select_baseline_model(matrix).model_id == "openrouter/stub/x"

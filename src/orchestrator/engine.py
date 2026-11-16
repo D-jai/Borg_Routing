@@ -708,7 +708,38 @@ async def _invoke_orchestrator_model(
         if retry_max > max_tokens:
             length_retried = True
             payload["max_tokens"] = retry_max
-            content_t, usage_t, latency_t, finish_reason = await _post_and_collect()
+            try:
+                content_t, usage_t, latency_t, finish_reason = await _post_and_collect()
+            except ValueError as exc:
+                # The first attempt was billed even though the retry failed:
+                # log it (existing event type) before re-raising.
+                try:
+                    paid_dollars, paid_baseline = await price_with_baseline(
+                        orchestrator_model, tokens_in, tokens_out, db_path
+                    )
+                    await write_event(
+                        "orchestrator_decision",
+                        run_id=run_id,
+                        model_id=orchestrator_model.model_id,
+                        tokens_input=tokens_in,
+                        tokens_output=tokens_out,
+                        dollars=paid_dollars,
+                        baseline_dollars=paid_baseline,
+                        latency_ms=latency_ms,
+                        decision={
+                            "mode": mode,
+                            "parsed": None,
+                            "length_retry_failed": True,
+                            "code": "BRT-ORC-018",
+                            "error": str(exc)[:300],
+                        },
+                        payload_in=system_prompt[:2000],
+                        payload_out=content[:2000],
+                        db_path=db_path,
+                    )
+                except Exception:
+                    pass
+                raise
             tokens_in += usage_t.get("prompt_tokens", 0)
             tokens_out += usage_t.get("completion_tokens", 0)
             latency_ms += latency_t
@@ -1524,7 +1555,12 @@ async def orchestrate_run(
                 tok_in = env.tokens_used.get("input") if env.tokens_used else None
                 tok_out = env.tokens_used.get("output") if env.tokens_used else None
                 env_dollars = env_baseline = None
-                if tok_in is not None or tok_out is not None:
+                if env.dollars is not None:
+                    # Set by the node itself: the serving model's price for an
+                    # answerer, the sum over everything spawned for an
+                    # orchestrate or apply_to_each node.
+                    env_dollars, env_baseline = env.dollars, env.baseline_dollars
+                elif tok_in is not None or tok_out is not None:
                     env_dollars, env_baseline = await price_with_baseline(
                         _get_matrix().get(task.model_name or ""),
                         tok_in, tok_out, db_path,

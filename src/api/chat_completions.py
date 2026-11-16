@@ -97,9 +97,14 @@ def _build_openai_response(
     response_text: str,
     prompt_tokens: int = 0,
     completion_tokens: int = 0,
+    include_usage: bool = True,
 ) -> dict:
-    """Build an OpenAI-shaped chat completion response."""
-    return {
+    """Build an OpenAI-shaped chat completion response.
+
+    ``include_usage=False`` leaves the ``usage`` block out (a provider that
+    reported none), rather than claiming zero tokens.
+    """
+    body = {
         "id": f"chatcmpl-{run_id}",
         "object": "chat.completion",
         "created": int(time.time()),
@@ -114,12 +119,14 @@ def _build_openai_response(
                 "finish_reason": "stop",
             }
         ],
-        "usage": {
+    }
+    if include_usage:
+        body["usage"] = {
             "prompt_tokens": prompt_tokens,
             "completion_tokens": completion_tokens,
             "total_tokens": prompt_tokens + completion_tokens,
-        },
-    }
+        }
+    return body
 
 
 async def _stream_response(response_text: str, model_alias: str, run_id: str) -> AsyncIterator[str]:
@@ -285,12 +292,81 @@ async def _stream_orchestration_with_heartbeats(
         yield chunk
 
 
+def _usage_tokens(usage: Optional[dict]) -> Optional[tuple[int, int]]:
+    """(prompt, completion) tokens from a provider usage block, or None."""
+    if not isinstance(usage, dict):
+        return None
+    tin = usage.get("prompt_tokens")
+    tout = usage.get("completion_tokens")
+    if tin is None and tout is None:
+        return None
+    return int(tin or 0), int(tout or 0)
+
+
+async def _record_bypass_call(
+    matrix: CapabilityMatrix,
+    model_id: str,
+    run_id: str,
+    messages: list[ChatMessage],
+    text: str,
+    usage: Optional[dict],
+    latency_ms: int,
+) -> None:
+    """Log a direct-to-model call as a ``model_call`` row under its run id,
+    priced like any other call, and save the run's digest. Never raises: the
+    caller already has its answer."""
+    try:
+        from src.db.state import (  # noqa: PLC0415
+            compute_and_save_digest,
+            create_run,
+            update_run_status,
+        )
+        from src.logging.writer import flush_pending, write_event  # noqa: PLC0415
+        from src.registry.cost import price_with_baseline  # noqa: PLC0415
+
+        db_path = DB_PATH
+        await create_all(db_path)
+        run_uuid = uuid.UUID(run_id)
+        last_user = next((m.content for m in reversed(messages) if m.role == "user"), "")
+        await create_run(last_user or "(bypass)", db_path=db_path, run_id=run_uuid)
+        await update_run_status(run_uuid, "completed", db_path=db_path)
+
+        tokens = _usage_tokens(usage)
+        model_info = matrix.get(model_id)
+        dollars = baseline = None
+        if tokens is not None:
+            dollars, baseline = await price_with_baseline(
+                model_info, tokens[0], tokens[1], db_path, matrix=matrix
+            )
+        await write_event(
+            "model_call",
+            run_id=run_uuid,
+            model_id=model_id,
+            tokens_input=tokens[0] if tokens else None,
+            tokens_output=tokens[1] if tokens else None,
+            dollars=dollars,
+            baseline_dollars=baseline,
+            latency_ms=latency_ms,
+            decision={"mode": "bypass"},
+            payload_in=json.dumps([{"role": m.role, "content": m.content} for m in messages])[:2000],
+            payload_out=text[:2000],
+            db_path=db_path,
+        )
+        await flush_pending()
+        await compute_and_save_digest(run_uuid, db_path=db_path)
+    except Exception:
+        pass
+
+
 async def _bypass_to_model(
     matrix: CapabilityMatrix,
     model_id: str,
     messages: list[ChatMessage],
-) -> str:
-    """Send the request directly to a specific model, bypassing orchestration."""
+) -> tuple[str, Optional[dict]]:
+    """Send the request directly to a specific model, bypassing orchestration.
+
+    Returns (reply text, the provider's ``usage`` block or None if it sent none).
+    """
     model_info = matrix.get(model_id)
     if not model_info:
         raise HTTPException(
@@ -315,7 +391,7 @@ async def _bypass_to_model(
         resp = await client.post(url, json=payload, headers=headers)
     resp.raise_for_status()
     body = resp.json()
-    return body["choices"][0]["message"]["content"]
+    return body["choices"][0]["message"]["content"], body.get("usage")
 
 
 async def _stream_bypass_relay(
@@ -334,7 +410,7 @@ async def _stream_bypass_relay(
     if not model_info:
         # Fallback: non-streaming fetch then simulate
         try:
-            text = await _bypass_to_model(matrix, model_id, messages)
+            text, _usage = await _bypass_to_model(matrix, model_id, messages)
         except Exception as exc:
             err = {"id": f"chatcmpl-{run_id}", "object": "chat.completion.chunk",
                    "created": int(time.time()), "model": model_alias,
@@ -349,7 +425,7 @@ async def _stream_bypass_relay(
         url, headers, body_model = resolve_model_call(model_info)
     except ValueError:
         try:
-            text = await _bypass_to_model(matrix, model_id, messages)
+            text, _usage = await _bypass_to_model(matrix, model_id, messages)
         except Exception as exc:
             err = {"id": f"chatcmpl-{run_id}", "object": "chat.completion.chunk",
                    "created": int(time.time()), "model": model_alias,
@@ -367,6 +443,21 @@ async def _stream_bypass_relay(
         "stream": True,
         "max_tokens": max_tokens,
     }
+    t_stream = time.monotonic()
+    relay_usage: Optional[dict] = None
+    recorded = False
+    relay_text: list[str] = []
+
+    async def _record_relay() -> None:
+        nonlocal recorded
+        if recorded:
+            return
+        recorded = True
+        await _record_bypass_call(
+            matrix, model_id, run_id, messages, "".join(relay_text), relay_usage,
+            int((time.monotonic() - t_stream) * 1000),
+        )
+
     try:
         async with httpx.AsyncClient(timeout=120) as client:
             async with client.stream(
@@ -374,7 +465,12 @@ async def _stream_bypass_relay(
             ) as resp:
                 if resp.status_code != 200:
                     # Fallback to non-stream
-                    text = await _bypass_to_model(matrix, model_id, messages)
+                    t_fb = time.monotonic()
+                    text, fb_usage = await _bypass_to_model(matrix, model_id, messages)
+                    await _record_bypass_call(
+                        matrix, model_id, run_id, messages, text, fb_usage,
+                        int((time.monotonic() - t_fb) * 1000),
+                    )
                     async for chunk in _stream_response(text, model_alias, run_id):
                         yield chunk
                     return
@@ -384,15 +480,25 @@ async def _stream_bypass_relay(
                     if line.startswith("data:"):
                         payload_str = line[5:].strip()
                         if payload_str == "[DONE]":
+                            await _record_relay()
                             yield "data: [DONE]\n\n"
                             return
                         # Re-emit with our model alias substituted
                         try:
                             chunk = json.loads(payload_str)
+                            # Providers that report usage send it on the last
+                            # chunk; if none does, usage stays absent.
+                            if isinstance(chunk.get("usage"), dict):
+                                relay_usage = chunk["usage"]
+                            for choice in chunk.get("choices") or []:
+                                piece = (choice.get("delta") or {}).get("content")
+                                if piece:
+                                    relay_text.append(piece)
                             chunk["model"] = model_alias
                             yield f"data: {json.dumps(chunk)}\n\n"
                         except json.JSONDecodeError:
                             yield f"data: {payload_str}\n\n"
+        await _record_relay()
     except Exception as exc:
         err_chunk = {
             "id": f"chatcmpl-{run_id}", "object": "chat.completion.chunk",
@@ -444,8 +550,11 @@ async def chat_completions(request: Request):
                 _stream_bypass_relay(app_matrix, base_model, model_alias, chat_req.messages, run_id),
                 media_type="text/event-stream",
             )
+        t_bypass = time.monotonic()
         try:
-            response_text = await _bypass_to_model(app_matrix, base_model, chat_req.messages)
+            response_text, bypass_usage = await _bypass_to_model(
+                app_matrix, base_model, chat_req.messages
+            )
         except HTTPException:
             raise
         except Exception as exc:
@@ -453,7 +562,17 @@ async def chat_completions(request: Request):
                 status_code=502,
                 detail={"error": "BRT-API-012", "message": f"Bypass model failed: {exc}"},
             )
-        return JSONResponse(content=_build_openai_response(run_id, model_alias, response_text))
+        await _record_bypass_call(
+            app_matrix, base_model, run_id, chat_req.messages, response_text,
+            bypass_usage, int((time.monotonic() - t_bypass) * 1000),
+        )
+        tokens = _usage_tokens(bypass_usage)
+        if tokens is None:
+            return JSONResponse(content=_build_openai_response(
+                run_id, model_alias, response_text, include_usage=False))
+        return JSONResponse(content=_build_openai_response(
+            run_id, model_alias, response_text,
+            prompt_tokens=tokens[0], completion_tokens=tokens[1]))
 
     # Full orchestration via pipeline runner.
     # BRT-STR-01 — streaming path uses heartbeats to keep the browser SSE

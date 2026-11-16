@@ -175,3 +175,36 @@ async def test_create_all_valid_run_insert(db_path):
         async with db.execute("SELECT run_id FROM runs WHERE run_id='valid-run-1'") as cur:
             row = await cur.fetchone()
     assert row is not None
+
+
+@pytest.mark.asyncio
+async def test_migration_adds_cost_columns_to_an_old_schema_database(tmp_path):
+    """An existing database from before the cost columns gains them on create_all."""
+    path = str(tmp_path / "old.db")
+    await create_all(path)
+    async with aiosqlite.connect(path) as db:
+        await db.execute("INSERT INTO runs(run_id, status, user_instruction) VALUES ('r1','completed','x')")
+        await db.execute("INSERT INTO run_digests(run_id, summary, cost_dollars, token_count) VALUES ('r1','old',0.5,10)")
+        for table, col in (
+            ("run_digests", "baseline_dollars"), ("run_digests", "tokens_input"),
+            ("run_digests", "tokens_output"), ("logs", "baseline_dollars"),
+            ("envelopes", "baseline_dollars"),
+        ):
+            await db.execute(f"ALTER TABLE {table} DROP COLUMN {col}")
+        await db.commit()
+        async with db.execute("PRAGMA table_info(run_digests)") as cur:
+            assert "tokens_input" not in {r[1] for r in await cur.fetchall()}
+
+    await create_all(path)   # the migration list runs on the old database
+
+    async with aiosqlite.connect(path) as db:
+        for table, cols in (
+            ("run_digests", {"baseline_dollars", "tokens_input", "tokens_output"}),
+            ("logs", {"baseline_dollars"}),
+            ("envelopes", {"baseline_dollars"}),
+        ):
+            async with db.execute(f"PRAGMA table_info({table})") as cur:
+                have = {r[1] for r in await cur.fetchall()}
+            assert cols <= have, f"{table} is missing {cols - have}"
+        async with db.execute("SELECT summary, cost_dollars, tokens_input FROM run_digests") as cur:
+            assert await cur.fetchall() == [("old", 0.5, 0)]

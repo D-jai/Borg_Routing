@@ -51,9 +51,9 @@ def select_baseline_model(matrix, configured_id: Optional[str] = None) -> Option
     checked = [m for m in matrix.all() if m.checked]
     if not checked:
         return None
-    return max(
+    return min(
         checked,
-        key=lambda m: (m.task_scores.get("reasoning", 0.0), [-ord(c) for c in m.model_id]),
+        key=lambda m: (-m.task_scores.get("reasoning", 0.0), m.model_id),
     )
 
 

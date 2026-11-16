@@ -88,21 +88,34 @@ async def list_entities(
         )
 
 
+# Rows that carry a paid call: every model_call, plus each orchestrator_decision
+# that recorded tokens or dollars (route decisions carry neither, so they are
+# left out and nothing is counted twice).
+_COST_ROWS = (
+    "(event_type='model_call' OR (event_type='orchestrator_decision' "
+    "AND (dollars IS NOT NULL OR tokens_input IS NOT NULL)))"
+)
+
+
 @router.get("/cost-summary")
 async def cost_summary() -> JSONResponse:
-    """Return aggregate cost and token counts grouped by model_id."""
+    """Return aggregate cost and token counts grouped by model_id.
+
+    Sums ``model_call`` rows plus ``orchestrator_decision`` rows that carry
+    tokens or dollars (plan, re_plan and compose calls).
+    """
     try:
         async with aiosqlite.connect(DB_PATH) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
-                """SELECT
+                f"""SELECT
                      model_id,
                      COUNT(*) AS call_count,
                      COALESCE(SUM(tokens_input), 0)  AS total_tokens_in,
                      COALESCE(SUM(tokens_output), 0) AS total_tokens_out,
                      COALESCE(SUM(dollars), 0)        AS total_cost
                    FROM logs
-                   WHERE event_type='model_call'
+                   WHERE {_COST_ROWS}
                    GROUP BY model_id
                    ORDER BY total_cost DESC"""
             ) as cur:
@@ -110,12 +123,12 @@ async def cost_summary() -> JSONResponse:
 
             # Overall totals
             async with db.execute(
-                """SELECT
+                f"""SELECT
                      COUNT(*) AS total_calls,
                      COALESCE(SUM(tokens_input), 0)  AS total_tokens_in,
                      COALESCE(SUM(tokens_output), 0) AS total_tokens_out,
                      COALESCE(SUM(dollars), 0)        AS total_cost
-                   FROM logs WHERE event_type='model_call'"""
+                   FROM logs WHERE {_COST_ROWS}"""
             ) as cur:
                 totals = await cur.fetchone()
 

@@ -26,7 +26,15 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
 from src.db.schema import DB_PATH
-from src.db.state import get_envelopes, get_run, get_runs_list, resume_run, set_run_rating
+from src.db.state import (
+    compute_and_save_digest,
+    get_envelopes,
+    get_run,
+    get_run_digest,
+    get_runs_list,
+    resume_run,
+    set_run_rating,
+)
 from src.pipeline.runner import run_pipeline
 
 router = APIRouter()
@@ -127,6 +135,16 @@ async def _run_in_background(
             )
         except Exception:
             pass
+    finally:
+        # Digest for every background run, same as the pipeline does: wait for
+        # the fire-and-forget log writes, then total the logged rows.
+        try:
+            from src.logging.writer import flush_pending  # noqa: PLC0415
+
+            await flush_pending()
+            await compute_and_save_digest(run_id, db_path=db_path)
+        except Exception:
+            pass
 
 
 @router.post("/v1/task", status_code=202)
@@ -177,6 +195,8 @@ async def get_run_state(run_id: str) -> JSONResponse:
         "run": { ...run record... },
         "envelopes": [ ...envelope records... ],
         "events": [ ...log events... ],
+        "digest": {cost_dollars, baseline_dollars, tokens_input, tokens_output,
+                   token_count, summary} or null if no digest was saved yet,
     }
     """
     import uuid as _uuid
@@ -235,10 +255,16 @@ async def get_run_state(run_id: str) -> JSONResponse:
     for env in envelopes:
         env["routing"] = routes.get(env.get("envelope_id"))
 
+    try:
+        digest = await get_run_digest(run_uuid, db_path=DB_PATH)
+    except Exception:
+        digest = None
+
     return JSONResponse(content={
         "run": run,
         "envelopes": envelopes,
         "events": events,
+        "digest": digest,
     })
 
 

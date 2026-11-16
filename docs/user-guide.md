@@ -120,17 +120,29 @@ matrix does not know; the call is never left blank. A call that was retried
 after being cut off counts the tokens of both attempts. The tools do not carry
 a price today, so tool calls log `0.0`.
 
-- **Run total:** the run digest (`run_digests`, shown in the run's cost summary)
-  is the sum of the logged calls' dollars and tokens, so it always matches the log.
+- **Run total:** the run digest (`run_digests`) is the sum of the logged calls'
+  dollars and tokens for the run and every child run it spawned, so it always
+  matches the log. It stores `cost_dollars`, `baseline_dollars`, `tokens_input`
+  and `tokens_output`, and `GET /runs/{id}` returns it as `digest`. An
+  `orchestrate` or `apply_to_each` step's envelope shows the total of the calls
+  it spawned. The Logs page's Cost Summary tab sums `model_call` rows plus the
+  `orchestrator_decision` rows that carry tokens or dollars (route decisions
+  carry neither). A call that was billed but then failed (a retry after a
+  cut-off that errors) is still logged with what was billed.
 - **Reply:** the `usage` block of the chat reply (`prompt_tokens`,
   `completion_tokens`, `total_tokens`) is the run's total across every call.
-  Streamed replies and direct-to-model requests do not report usage yet.
+  A direct-to-model request (an exact model id) reports the provider's own
+  usage and logs one priced `model_call` under its run id; if the provider
+  sends no usage the block is left out. Streamed replies do not report usage
+  yet.
 - **Baseline (an estimate):** each call also stores `baseline_dollars`, the same
-  tokens priced as if the baseline model had done the work. This is what the
-  savings comparison uses. It is an estimate: the baseline model might have
-  needed more or fewer tokens, so treat the gap as indicative. The baseline is
-  the checked model with the highest `reasoning` score; set `baseline_model_id`
-  (Admin config) or `BASELINE_MODEL_ID` in `.env` to pick another.
+  tokens priced as if the baseline model had done the work; the run digest
+  stores the run's total. Both are stored now; the interface receipt that will
+  show the comparison is not built yet. It is an estimate: the baseline model
+  might have needed more or fewer tokens, so treat the gap as indicative. The
+  baseline is the checked model with the highest `reasoning` score (ties go to
+  the smaller model id); set `baseline_model_id` (Admin config) or
+  `BASELINE_MODEL_ID` in `.env` to pick another.
 
 ### How each step gets its model
 The planner and the final answer use the orchestrator model (the quality
@@ -436,7 +448,7 @@ You can also rate a run via the API: `POST /runs/{run_id}/rating` with body `{"r
 The Logs page at `http://localhost:8000/ui/logs.html` provides three tabs:
 
 - **Events** — all model_call, orchestrator_decision, child_residue, and error events with filtering by run ID and event type
-- **Cost Summary** — aggregate token counts and dollar cost grouped by model
+- **Cost Summary** — aggregate token counts and dollar cost grouped by model (`model_call` plus priced `orchestrator_decision` rows)
 - **NER Entities** — named entities extracted from log payloads by the background NER worker
 
 Click **Export JSONL** to download a full log snapshot for offline analysis.

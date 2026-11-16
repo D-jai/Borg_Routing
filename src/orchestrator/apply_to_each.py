@@ -183,6 +183,8 @@ async def expand_and_run(
     semaphore = asyncio.Semaphore(concurrency_limit)
     results = []
     failures = []
+    # Tokens and dollars of every item call, summed onto this envelope.
+    totals = {"input": 0, "output": 0, "dollars": 0.0, "baseline": 0.0}
 
     async def _run_one(index: int, item: object) -> None:
         suffix = _level_suffix(index)
@@ -190,6 +192,10 @@ async def expand_and_run(
         async with semaphore:
             try:
                 env = await _dispatch_child(child, db_path)
+                totals["input"] += (env.tokens_used or {}).get("input") or 0
+                totals["output"] += (env.tokens_used or {}).get("output") or 0
+                totals["dollars"] += env.dollars or 0.0
+                totals["baseline"] += env.baseline_dollars or 0.0
                 if env.status == "resolved":
                     results.append({
                         "index": index,
@@ -229,6 +235,9 @@ async def expand_and_run(
             "success_count": len(results),
             "failure_count": len(failures),
         },
+        tokens_used={"input": totals["input"], "output": totals["output"]},
+        dollars=totals["dollars"],
+        baseline_dollars=totals["baseline"],
     )
 
 

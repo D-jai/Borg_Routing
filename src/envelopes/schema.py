@@ -128,6 +128,11 @@ class InboundEnvelope(BaseModel):
     output: dict
     failure_reason: Optional[str] = None
     tokens_used: dict = {}
+    # Dollars for the calls behind this envelope (and, for an orchestrate or
+    # apply_to_each node, behind everything it spawned). None = not set; the
+    # engine then prices ``tokens_used`` against the node's model.
+    dollars: Optional[float] = None
+    baseline_dollars: Optional[float] = None
     scratch_writes: list[SideEffectAction] = []
     scratch_cleanup: list[SideEffectAction] = []
     # BRT-WEB-02 — raw tool invocation results (e.g. web_search citations)
