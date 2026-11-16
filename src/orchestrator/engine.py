@@ -1028,6 +1028,23 @@ async def _log_route(
         pass
 
 
+def _upstream_list(ref: object, results: dict) -> Optional[list]:
+    """The list an earlier step produced, or None.
+
+    ``ref`` is the id of a finished step (``inputs_ref`` of an apply_to_each
+    step, ``source`` of a state_op). The step's output is read for an
+    ``items``, ``results``, ``list`` or ``result`` key holding a list.
+    """
+    if not isinstance(ref, str) or not ref or ref not in results:
+        return None
+    out = getattr(results[ref], "output", {}) or {}
+    for key in ("items", "results", "list", "result"):
+        candidate = out.get(key)
+        if isinstance(candidate, list):
+            return candidate
+    return None
+
+
 def _build_task_from_node(
     node: dict,
     run_id: UUID,
@@ -1092,11 +1109,20 @@ def _build_task_from_node(
         dep_input = {
             "op": node.get("op", "count"),
             "params": node.get("params", {}),
-            "items": node.get("items", []),
         }
-        source = node.get("source")
+        source = node.get("source") or node.get("source_ref")
         if source:
             dep_input["source_ref"] = source
+        # R4 — a step named as the source supplies its list; items written in
+        # the node win. A source that resolves to nothing leaves no items, so
+        # the operator fails loudly (BRT-SOP-003) instead of counting nothing.
+        items = node.get("items")
+        if not items and source:
+            items = _upstream_list(source, results)
+        if items is not None and (items or not source):
+            dep_input["items"] = items
+        elif not source:
+            dep_input["items"] = []
 
         return WrappedTask(
             envelope_id=uuid4(),
@@ -1129,13 +1155,9 @@ def _build_task_from_node(
             and inputs_ref_raw in results
             and not items_from_node
         ):
-            upstream_env = results[inputs_ref_raw]
-            upstream_out = getattr(upstream_env, "output", {}) or {}
-            for key in ("items", "results", "list"):
-                candidate = upstream_out.get(key)
-                if isinstance(candidate, list):
-                    resolved_items = candidate
-                    break
+            upstream = _upstream_list(inputs_ref_raw, results)
+            if upstream is not None:
+                resolved_items = upstream
 
         dep_input = {
             "inputs_ref": inputs_ref_raw,
