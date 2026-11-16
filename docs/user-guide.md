@@ -391,11 +391,13 @@ The Admin pages sit in the left menu under **Admin**, starting at `http://localh
 
 ### The admin lock
 
-Pages that change things (keys, settings, rules, models, skills) and the entity and export logs are locked by `BORG_ADMIN_TOKEN` in `.env`.
+Pages that change things (keys, settings, rules, models, skills) and the logs (`GET /logs`, entities and export) are locked by `BORG_ADMIN_TOKEN` in `.env`.
 
 - **Token set:** the first time you save something, the page shows a box asking for the token. Type it once and press **Save token**; the call is retried and the token is kept until you close the tab. A wrong token is forgotten and asked for again. Overview shows "Admin token set".
 - **Token not set:** only the computer the server runs on can use these pages. From any other computer the page says that remote admin is off and what to set (`BRT-API-046`). Overview shows "Admin token not set".
-- Asking questions and reading a run stay open to everyone. In a run's details, the exact text sent to cloud models is shown only to an admin (the same rule).
+- Asking questions and reading a run stay open to everyone. In a run's details, the exact text sent to cloud models is shown only to an admin (the same rule), and while the lane is on the event text (error messages and other decision notes) is hidden from anyone else; type, model, tokens, cost, times and routing stay.
+- The token must be ASCII (letters, digits, punctuation; no spaces or accents). Anything else is reported as misconfigured (`BRT-API-047`, `admin_token_valid: false` in `GET /keys/status`) and the locked routes refuse everyone until it is fixed.
+- **Logs, Export JSONL** is a button: it downloads through the same token prompt and saves a file.
 - API clients send `Authorization: Bearer <token>`; a missing or wrong token gets 401 (`BRT-API-045`).
 
 ---
@@ -405,7 +407,7 @@ Pages that change things (keys, settings, rules, models, skills) and the entity 
 These two read-only routes feed the Overview checklist and the Keys page. Neither returns, logs or echoes a key.
 
 ### `GET /keys/status`
-Returns `{"providers": [{"id", "label", "env_var", "saved", "env_file_only"}], "admin_token_set": bool}` for OpenRouter and Tavily. `admin_token_set` says whether `BORG_ADMIN_TOKEN` is set (never the token); Overview uses it. `saved` is true only when the running server has the key (set from `.env` at start-up, or by saving it on the Keys page). `env_file_only` is true when the key is a line in `.env` but the running server does not have it yet: restart the server.
+Returns `{"providers": [{"id", "label", "env_var", "saved", "env_file_only"}], "admin_token_set": bool, "admin_token_valid": bool}` for OpenRouter and Tavily. `admin_token_set` says whether `BORG_ADMIN_TOKEN` is set and `admin_token_valid` whether it is ASCII-only (never the token); Overview uses them. `saved` is true only when the running server has the key (set from `.env` at start-up, or by saving it on the Keys page). `env_file_only` is true when the key is a line in `.env` but the running server does not have it yet: restart the server.
 
 ### `GET /status/local`
 Probes the configured local model servers (Ollama, LM Studio, other local OpenAI-compatible addresses) with a short request and returns `{"reachable": bool, "servers": [{"name", "url", "reachable"}]}`. `reachable` is true when any server answers. No model is loaded by the probe.

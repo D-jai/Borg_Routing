@@ -12,6 +12,7 @@ on bytes. The token is never logged, echoed or returned.
 Error codes:
 - BRT-API-045: admin token missing or wrong
 - BRT-API-046: remote admin refused, no BORG_ADMIN_TOKEN configured
+- BRT-API-047: BORG_ADMIN_TOKEN holds characters other than printable ASCII
 """
 from __future__ import annotations
 
@@ -30,6 +31,16 @@ def configured_token() -> str:
 
 def admin_token_set() -> bool:
     return bool(configured_token())
+
+
+def admin_token_valid() -> bool:
+    """True when the token is unset, or is printable ASCII only (no spaces).
+
+    HTTP headers carry ASCII, so a token with other characters could never match
+    what a client sends. It is reported as misconfigured instead.
+    """
+    token = configured_token()
+    return all(0x21 <= ord(ch) <= 0x7E for ch in token)
 
 
 def _is_loopback(host: Optional[str]) -> bool:
@@ -70,7 +81,7 @@ def is_admin(request: Optional[Request]) -> bool:
         return False
     token = configured_token()
     if token:
-        return _token_matches(request, token)
+        return admin_token_valid() and _token_matches(request, token)
     return _is_loopback(_client_host(request))
 
 
@@ -78,6 +89,14 @@ async def require_admin(request: Request) -> None:
     """FastAPI dependency: raise 401 or 403 unless the request is an admin."""
     token = configured_token()
     if token:
+        if not admin_token_valid():
+            raise HTTPException(
+                status_code=500,
+                detail={
+                    "error": "BRT-API-047",
+                    "message": "BORG_ADMIN_TOKEN is misconfigured: use printable ASCII characters only (no spaces or accents), then restart the server.",
+                },
+            )
         if not _token_matches(request, token):
             raise HTTPException(
                 status_code=401,

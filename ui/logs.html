@@ -23,7 +23,7 @@
         <option>child_residue</option><option>escalation</option><option>error</option>
       </select>
       <button class="btn" id="f-go" type="button">Filter</button>
-      <a class="btn" id="f-export" href="/logs/export?limit=1000">Export JSONL</a>
+      <button class="btn" id="f-export" type="button">Export JSONL</button>
     </div>
     <div class="card" id="events"><p class="muted small">Loading...</p></div>
   </section>
@@ -64,7 +64,6 @@ Borg.ready(function () {
     var run = A.$('f-run').value.trim(), type = A.$('f-type').value, q = '/logs?limit=200';
     if (run) q += '&run_id=' + encodeURIComponent(run);
     if (type) q += '&event_type=' + encodeURIComponent(type);
-    A.$('f-export').setAttribute('href', '/logs/export?limit=1000' + (run ? '&run_id=' + encodeURIComponent(run) : ''));
     B.api(q).then(function (r) {
       var box = A.clear(A.$('events')), rows = r.logs || [];
       if (!rows.length) { box.appendChild(h('p', { class: 'muted' }, 'No events match.')); return; }
@@ -78,6 +77,11 @@ Borg.ready(function () {
     }, function () { fail('events', 'The events could not be loaded.'); });
   }
   A.$('f-go').addEventListener('click', loadEvents);
+  A.$('f-export').addEventListener('click', function () {
+    var run = A.$('f-run').value.trim();
+    B.download('/logs/export?limit=1000' + (run ? '&run_id=' + encodeURIComponent(run) : ''), 'borg_route_logs.jsonl', 'application/x-ndjson')
+      .catch(function () { /* the notice is already shown */ });
+  });
 
   /* ---- Cost summary ---- */
   function loadCost() {

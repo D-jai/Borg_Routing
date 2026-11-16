@@ -49,7 +49,7 @@ function load(opts) {
     setItem() { throw new Error('storage blocked'); },
   });
   const sandbox = {
-    console, URL, JSON, Math, Date, Promise, Object, Array, String, Number, RegExp, Error, isFinite, isNaN,
+    console, URL, Blob, setTimeout, JSON, Math, Date, Promise, Object, Array, String, Number, RegExp, Error, isFinite, isNaN,
     document: doc,
     location: { href: origin + '/ui/ask.html', origin: origin, pathname: '/ui/ask.html' },
     localStorage: opts.throwingStorage ? thrower() : store(),

@@ -163,7 +163,7 @@
 
     return fetch(path, init).then(function (res) {
       var ctype = res.headers.get('content-type') || '';
-      var read = ctype.indexOf('json') >= 0 ? res.json() : res.text();
+      var read = ctype.indexOf('json') >= 0 && ctype.indexOf('ndjson') < 0 ? res.json() : res.text(); // JSON Lines is text
       return read.catch(function () { return null; }).then(function (body) {
         if (res.status === 401 && token) setToken(''); // a wrong token is not kept
         if (res.status === 401 && !opts.retried && sameOrigin(path)) {
@@ -317,8 +317,23 @@
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
   else init();
 
+  /* download(path, filename, mime): fetches `path` through api() (so a missing token
+   * prompts and retries), then saves the text as a file via a Blob and an object URL.
+   * Resolves once the save was triggered; rejects (notice already shown) on failure. */
+  function download(path, filename, mime) {
+    return api(path).then(function (data) {
+      var text = typeof data === 'string' ? data : JSON.stringify(data);
+      var url = URL.createObjectURL(new Blob([text], { type: mime || 'text/plain' }));
+      var a = el('a', { href: url, download: filename });
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+    });
+  }
+
   window.Borg = {
-    api: api, notify: notify, clearNotices: clearNotices, ready: ready,
+    api: api, download: download, notify: notify, clearNotices: clearNotices, ready: ready,
     money: money, duration: duration, parseWhen: parseWhen, dateTime: dateTime, timeOnly: timeOnly,
     markdown: markdown, escapeHtml: escapeHtml, el: el,
     getToken: getToken, setToken: setToken,

@@ -325,3 +325,38 @@ def test_403_without_a_server_token_explains_remote_admin(tmp_path):
         """,
     )
     assert "BORG_ADMIN_TOKEN" in out["msg"] and out["shown"] == out["msg"] and out["alerts"] == 0
+
+
+def test_download_goes_through_api_with_token_retry_and_saves_a_blob(tmp_path):
+    out = run_js(
+        tmp_path,
+        _form_js() + """
+        const calls = [];
+        const fetch = async (url, init) => {
+          const a = init.headers['Authorization'] || null;
+          calls.push([url, a]);
+          const ok = a === 'Bearer good';
+          return {ok, status: ok ? 200 : 401, headers: {get: () => (ok ? 'application/x-ndjson' : 'application/json')},
+                  json: async () => ({detail: {error: 'BRT-API-045'}}), text: async () => '{"a":1}'};
+        };
+        const h = H.load({fetch});
+        let alerts = 0; h.window.alert = () => { alerts++; };
+        const made = [], saved = [];
+        h.window.URL.createObjectURL = (b) => { made.push(b); return 'blob:x'; };
+        h.window.URL.revokeObjectURL = () => {};
+        const realCreate = h.doc.createElement;
+        h.doc.createElement = (t) => { const e = realCreate(t); if (t === 'a') saved.push(e); return e; };
+        const p = h.Borg.download('/logs/export?limit=1000', 'borg_route_logs.jsonl', 'application/x-ndjson');
+        await tick(); await tick();
+        const box = slotOf(h).children[0];
+        box.children[1].value = 'good';
+        box.children[2].click();
+        await p;
+        return {calls, alerts, anchors: saved.map((e) => [e.attrs.href, e.attrs.download]),
+                size: made.length ? made[0].size : null, type: made.length ? made[0].type : null};
+        """,
+    )
+    assert out["alerts"] == 0
+    assert out["calls"] == [["/logs/export?limit=1000", None], ["/logs/export?limit=1000", "Bearer good"]]
+    assert out["anchors"] == [["blob:x", "borg_route_logs.jsonl"]]
+    assert out["size"] == 7 and out["type"] == "application/x-ndjson"

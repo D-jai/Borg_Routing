@@ -30,6 +30,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
 from src.api.auth import is_admin
+from src.lane.settings import load_lane_settings
 from src.db.schema import DB_PATH
 from src.db.state import (
     compute_and_save_digest,
@@ -236,6 +237,35 @@ async def submit_task(
     )
 
 
+def _redact_events(events: list[dict]) -> list[dict]:
+    """Drop the free text of log events for a non-admin while the lane is on.
+
+    The decision text of an error or other event can quote document content, so
+    it is removed. Type, model, tokens, dollars, latency and timestamps stay,
+    and so does a route decision (its routing data is also shown as ``routing``).
+    """
+    kept = []
+    for ev in events:
+        if ev.get("event_type") == "orchestrator_decision":
+            try:
+                decision = json.loads(ev.get("decision_json") or "null")
+            except (TypeError, ValueError):
+                decision = None
+            if isinstance(decision, dict) and decision.get("mode") == "route":
+                kept.append(ev)
+                continue
+        kept.append(dict(ev, decision_json=None))
+    return kept
+
+
+async def _lane_is_on() -> bool:
+    """True when the lane is on, or its setting cannot be read (fail closed)."""
+    try:
+        return (await load_lane_settings(DB_PATH)).on
+    except Exception:
+        return True
+
+
 def _attach_routing(envelopes: list[dict], events: list[dict]) -> None:
     """Set ``routing`` on each envelope from its route event (else null).
 
@@ -328,6 +358,8 @@ async def get_run_state(run_id: str, request: Request = None) -> JSONResponse:
     # Work order 1.5 - each envelope carries why its model was chosen.
     # Only a routed step has a route event; any other envelope gets null.
     _attach_routing(envelopes, events)
+    if not lane_admin_allowed(request) and await _lane_is_on():
+        events = _redact_events(events)
 
     # Child runs (orchestrate nodes) choose their own models; show their steps
     # too, each envelope tagged with its own run_id.

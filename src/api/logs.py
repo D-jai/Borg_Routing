@@ -25,7 +25,7 @@ from src.db.schema import DB_PATH
 router = APIRouter(prefix="/logs", tags=["logs"])
 
 
-@router.get("")
+@router.get("", dependencies=[Depends(require_admin)])
 async def list_logs(
     limit: int = Query(100, ge=1, le=1000),
     run_id: str = Query(None),

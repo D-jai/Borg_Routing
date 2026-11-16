@@ -144,11 +144,11 @@ are most likely to touch during install and operation are grouped below.
 ### Admin token
 | Variable | Default | Purpose |
 |---|---|---|
-| `BORG_ADMIN_TOKEN` | (unset) | Locks every route that changes settings, keys, rules, models or skills, plus `GET /logs/entities`, `GET /logs/export` and the request bodies in `GET /runs/{id}`. Clients send `Authorization: Bearer <token>`. |
+| `BORG_ADMIN_TOKEN` | (unset) | Locks every route that changes settings, keys, rules, models or skills, plus `GET /logs`, `GET /logs/entities`, `GET /logs/export` and, for the request bodies and event text in `GET /runs/{id}`, anyone without it. Clients send `Authorization: Bearer <token>`. ASCII only: letters, digits and punctuation, no spaces or accents (anything else is reported as misconfigured, `BRT-API-047`). |
 
 How to set it: put a long random value in `.env` (`BORG_ADMIN_TOKEN=...`) and restart the server. The Admin pages ask for it the first time a call is refused and keep it for that browser tab only.
 
-The loopback rule: with the variable unset or empty, admin routes answer only to requests from this computer (`127.0.0.0/8` and `::1`). Any other address gets 403 (`BRT-API-046`). Set the token before you let anyone else reach the server, and always when it runs behind a reverse proxy or in Docker, because the server then sees the proxy's address rather than the visitor's. Asking questions (`/v1/chat/completions`, `/v1/task`, the MCP tools) and reading a run stay open. A wrong or missing token gets 401 (`BRT-API-045`).
+The loopback rule: with the variable unset or empty, admin routes answer only to requests from this computer (`127.0.0.0/8` and `::1`). Any other address gets 403 (`BRT-API-046`). The server (uvicorn) trusts `X-Forwarded-For` from `127.0.0.1` by default (`proxy_headers` is on), so a reverse proxy on the same machine that sets that header to the visitor's address is handled: the visitor counts as remote and gets 403. The real hole is a proxy that sends no `X-Forwarded-For`, or passes the client's own header through unchanged, and a container whose proxy is not on `127.0.0.1`: then every visitor looks local, or a visitor can claim to be. **Set `BORG_ADMIN_TOKEN` whenever the app is reachable from another machine** (a proxy, Docker port mapping, a LAN, a VPS); do not rely on the loopback rule there. Asking questions (`/v1/chat/completions`, `/v1/task`, the MCP tools) and reading a run stay open. A wrong or missing token gets 401 (`BRT-API-045`).
 
 ### Local model servers
 | Variable | Default | Purpose |
