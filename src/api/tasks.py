@@ -55,6 +55,7 @@ async def _run_in_background(
     run_id_str: str,
     db_path: str,
     root_instruction: Optional[str] = None,
+    route_options: Optional[dict] = None,
 ) -> None:
     """Background task: drive the pipeline for a submitted run.
 
@@ -87,6 +88,7 @@ async def _run_in_background(
                 user_instruction=instruction,
                 db_path=db_path,
                 root_instruction=root_instruction,
+                **({"route_options": route_options} if route_options else {}),
             ),
             timeout=max_run_seconds,
         )
@@ -409,6 +411,28 @@ async def _run_instructions(run_uuid, db_path: str) -> tuple[str, str]:
     return own, root
 
 
+async def _stored_route_options(run_uuid, db_path: str) -> Optional[dict]:
+    """The chat alias the run (or, for a child run, its nearest ancestor that
+    has one) started with, or None."""
+    current = run_uuid
+    for _ in range(_MAX_PARENT_HOPS + 1):
+        try:
+            row = await get_run(current, db_path=db_path)
+        except ValueError:
+            return None
+        raw = row.get("route_options")
+        if raw:
+            try:
+                value = json.loads(raw)
+            except (TypeError, ValueError):
+                return None
+            return value if isinstance(value, dict) else None
+        current = row.get("parent_run_id")
+        if not current:
+            return None
+    return None
+
+
 @router.post("/runs/{run_id}/resume", status_code=202)
 async def resume_run_endpoint(
     run_id: str,
@@ -454,6 +478,7 @@ async def resume_run_endpoint(
         run_instruction, root_instruction = await _run_instructions(
             run_uuid, db_path=DB_PATH
         )
+        route_options = await _stored_route_options(run_uuid, db_path=DB_PATH)
     except Exception as exc:
         raise HTTPException(
             status_code=500,
@@ -468,6 +493,7 @@ async def resume_run_endpoint(
         root_instruction=(
             root_instruction if root_instruction != run_instruction else None
         ),
+        route_options=route_options,
     )
 
     return JSONResponse(

@@ -56,10 +56,15 @@ def _resolve_task_type(
     node: dict, skill: Optional[dict], notes: list[str], run_options: Optional[dict] = None
 ) -> str:
     raw = _word(node.get("task_type")) or _word((skill or {}).get("recommended_specialty"))
-    if (not raw or raw in ("null", "none")) and (run_options or {}).get("task_type"):
-        # The chat alias names the job's kind of work; it only fills a gap.
-        raw = _word(run_options["task_type"])
-        notes.append(f"run alias '{run_options.get('alias')}' gave the default kind of work: {raw}")
+    chosen = _word((run_options or {}).get("task_type"))
+    if chosen:
+        # The operator picked the kind of work for the whole run (a specialty
+        # alias); like a tier alias, it beats the planner's per-step guess.
+        note = f"run alias '{run_options.get('alias')}' set the kind of work to {chosen}"
+        if raw and raw not in ("null", "none") and raw != chosen:
+            note += f" (the step asked for {raw})"
+        notes.append(note)
+        raw = chosen
     if not raw or raw in ("null", "none"):
         return DEFAULT_TASK_TYPE
     if raw in _TASK_TYPE_ALIASES:
@@ -138,7 +143,7 @@ def select_model_for_node(
         default_model: used when no model clears the floor.
         run_options: what the chat alias asked of the whole run, or None:
             ``alias`` (for the trace), ``tier`` (replaces each step's tier),
-            ``task_type`` (the default kind of work for a step with none),
+            ``task_type`` (replaces each step's kind of work),
             ``strategy`` (``LOCAL_FIRST`` prefers a local model that clears
             the floor). A step's own ``recommended_model`` still comes first.
 

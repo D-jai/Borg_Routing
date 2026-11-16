@@ -4,8 +4,8 @@ POST /v1/chat/completions — accepts standard OpenAI request bodies.
 Model aliases:
   borg_route               → full orchestration, SYSTEM_CHOOSE
   borg_route:light|mid|heavy → every step is routed at that tier's floor
-  borg_route:coding|creative|reasoning|extraction → default kind of work for
-                              steps that name none
+  borg_route:coding|creative|reasoning|extraction → kind of work for every step
+                              (replaces the planner's choice)
   borg_route:local         → LOCAL_FIRST strategy (a local model that clears
                               the floor wins over a cheaper cloud one)
   (see _route_options_for_alias; the run trace notes the alias per step)
@@ -98,8 +98,8 @@ def _route_options_for_alias(model: str) -> Optional[dict]:
     """What a ``borg_route:<hint>`` alias asks of the router, or None.
 
     A tier (light, mid, heavy) replaces every step's tier; a specialty
-    (coding, creative, reasoning, extraction) is the default kind of work for
-    a step that names none; ``local`` prefers a local model that clears the
+    (coding, creative, reasoning, extraction) replaces each step's kind of
+    work, as a tier replaces the tier; ``local`` prefers a local model that clears the
     floor. Plain ``borg_route`` and an unknown hint ask for nothing.
     """
     parts = model.split(":", 1)
@@ -207,7 +207,7 @@ async def _poll_stage_events(
 
     Returns a list of {stage, detail, ts} dicts and the highest log_id
     seen so the next poll only fetches new rows. ``run_id`` limits the rows
-    to one run (R3); without it every run's rows come back.
+    to that run and its descendant runs (R3); without it every run's rows come back.
     """
     import aiosqlite
     events: list[dict] = []
@@ -215,10 +215,20 @@ async def _poll_stage_events(
     try:
         async with aiosqlite.connect(db_path) as db:
             db.row_factory = aiosqlite.Row
-            run_filter = "AND run_id = ?" if run_id else ""
+            run_filter = ""
             params: tuple = (last_seen_log_id, str(int(started_at)))
             if run_id:
-                params += (str(run_id),)
+                # The chat's own run plus every child run it started, so the
+                # stages of nested work show; other chats' runs stay out.
+                from src.db.state import get_descendant_run_ids  # noqa: PLC0415
+                try:
+                    wanted = [str(run_id)] + await get_descendant_run_ids(
+                        uuid.UUID(str(run_id)), db_path=db_path
+                    )
+                except Exception:
+                    wanted = [str(run_id)]
+                run_filter = f"AND run_id IN ({','.join('?' * len(wanted))})"
+                params += tuple(wanted)
             async with db.execute(
                 f"""SELECT log_id, model_id, decision_json, created_at
                    FROM logs

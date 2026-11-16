@@ -123,3 +123,36 @@ async def test_state_op_with_an_unresolved_source_fails_instead_of_counting_noth
         ).fetchone()
     assert row is not None and row[0] == "failed", row
     assert "BRT-SOP-003" in row[1]
+
+
+@pytest.mark.asyncio
+async def test_filter_matching_nothing_then_count_gives_zero(env):
+    """A resolved empty list is valid input: the count is 0, not BRT-SOP-003."""
+    db_path, mp = env
+    waves = [
+        {"type": "state_op", "id": "n2", "op": "filter", "source": "n1",
+         "params": {"key": "product", "value": "nothing-matches"}},
+        {"type": "state_op", "id": "n3", "op": "count", "source": "n2", "params": {}},
+    ]
+
+    def replan(_req):
+        if waves:
+            return {"action": "continue", "next_nodes": [waves.pop(0)], "rationale": "next"}
+        return {"action": "compose", "rationale": "done"}
+
+    def lister(req):
+        if "List the reviews." in req.system:
+            return {"items": [{"product": "kettle"}, {"product": "toaster"}]}
+        return {"result": "ok"}
+
+    StubModels(plan_nodes=[LIST_STEP], answer_for=lister, replan_for=replan).install(mp)
+    result = await run_pipeline("Filter then count.", db_path=db_path)
+    await drain_log_writes()
+    assert result["status"] == "completed", result.get("error")
+    with sqlite3.connect(db_path) as conn:
+        rows = conn.execute(
+            "SELECT status, inbound_payload FROM envelopes WHERE type='state_op' ORDER BY rowid"
+        ).fetchall()
+    assert len(rows) == 2, rows
+    assert all(r[0] == "resolved" for r in rows), rows
+    assert '"count":0' in rows[1][1].replace(" ", ""), rows[1][1]

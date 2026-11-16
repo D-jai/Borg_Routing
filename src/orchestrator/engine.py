@@ -1135,12 +1135,13 @@ def _build_task_from_node(
         if source:
             dep_input["source_ref"] = source
         # R4 — a step named as the source supplies its list; items written in
-        # the node win. A source that resolves to nothing leaves no items, so
-        # the operator fails loudly (BRT-SOP-003) instead of counting nothing.
+        # the node win. A source that does not resolve to a list leaves no
+        # items, so the operator fails loudly (BRT-SOP-003); a resolved empty
+        # list is valid (a filter that matched nothing, then count -> 0).
         items = node.get("items")
         if not items and source:
             items = _upstream_list(source, results)
-        if items is not None and (items or not source):
+        if items is not None:
             dep_input["items"] = items
         elif not source:
             dep_input["items"] = []
@@ -1302,8 +1303,29 @@ async def orchestrate_run(
     Raises:
         ValueError: BRT-ORC-001..009 on fatal failures.
     """
-    if route_options is not None:
-        _route_options.set(route_options)
+    # Set for this run only and reset on the way out, so the next run in the
+    # same task never sees this run's alias. A child run (route_options=None)
+    # inherits its parent's value untouched.
+    token = _route_options.set(route_options) if route_options is not None else None
+    try:
+        return await _orchestrate_run(
+            run_id, user_instruction, thread_window, rolling_summary, db_path,
+            current_depth, root_instruction,
+        )
+    finally:
+        if token is not None:
+            _route_options.reset(token)
+
+
+async def _orchestrate_run(
+    run_id: UUID,
+    user_instruction: str,
+    thread_window: Optional[list[dict]],
+    rolling_summary: str,
+    db_path: str,
+    current_depth: int,
+    root_instruction: Optional[str],
+) -> str:
     if thread_window is None:
         thread_window = []
 

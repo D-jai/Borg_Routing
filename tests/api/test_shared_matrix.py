@@ -78,3 +78,13 @@ def test_checkbox_change_is_seen_by_the_engine(api):
     r = client.patch("/models/a/old/checked", json={"checked": False})
     assert r.status_code == 200
     assert engine._get_matrix().get("a/old").checked is False
+
+
+def test_engine_matrix_has_the_yaml_rows_right_after_import():
+    code = (
+        "import main\n"
+        "from src.orchestrator import engine\n"
+        "assert len(engine._get_matrix().all()) > 0, 'matrix empty after import'\n"
+    )
+    r = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr

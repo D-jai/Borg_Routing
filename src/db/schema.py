@@ -27,6 +27,8 @@ _MIGRATIONS = [
     # ingestible by The_Borg_DB without breaking any existing call sites.
     # Every column has a safe default; old code paths keep working.
     "ALTER TABLE runs ADD COLUMN instance_id TEXT",
+    # The chat alias a run started with (JSON), so a resume routes the same way.
+    "ALTER TABLE runs ADD COLUMN route_options TEXT",
     "ALTER TABLE logs ADD COLUMN instance_id TEXT",
     "ALTER TABLE logs ADD COLUMN source_version TEXT",
     "ALTER TABLE logs ADD COLUMN domain_profile TEXT DEFAULT 'general'",
@@ -62,7 +64,8 @@ CREATE TABLE IF NOT EXISTS runs (
     completed_at TIMESTAMP,
     user_rating INTEGER,
     failure_reason TEXT,
-    kind TEXT DEFAULT 'orchestrated'
+    kind TEXT DEFAULT 'orchestrated',
+    route_options TEXT
 );
 
 CREATE TABLE IF NOT EXISTS subtasks (

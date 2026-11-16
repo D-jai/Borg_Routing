@@ -16,6 +16,12 @@ load_dotenv()
 
 # Shared capability matrix — loaded at startup, reused by all API handlers.
 matrix = CapabilityMatrix()
+try:
+    # Loaded at import so the engine, which shares this object, sees the YAML's
+    # rows even before the lifespan runs (the lifespan reload is idempotent).
+    matrix.load()
+except Exception:
+    pass  # Missing or bad YAML is non-fatal; the lifespan tries again.
 
 # The engine routes on this same object, so Discover, Get Model Info and the
 # checkbox take effect on the next run without a restart (R2).

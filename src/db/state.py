@@ -24,6 +24,7 @@ async def create_run(
     db_path: str = DB_PATH,
     run_id: Optional[UUID] = None,
     kind: str = "orchestrated",
+    route_options: Optional[dict] = None,
 ) -> UUID:
     """Insert a new run record with status=pending. Returns the new run_id.
 
@@ -41,8 +42,9 @@ async def create_run(
     async with aiosqlite.connect(db_path) as db:
         await db.execute(
             """INSERT INTO runs(
-                run_id, parent_run_id, thread_id, status, user_instruction, instance_id, kind
-            ) VALUES (?, ?, ?, 'pending', ?, ?, ?)""",
+                run_id, parent_run_id, thread_id, status, user_instruction, instance_id, kind,
+                route_options
+            ) VALUES (?, ?, ?, 'pending', ?, ?, ?, ?)""",
             (
                 str(run_id),
                 str(parent_run_id) if parent_run_id else None,
@@ -50,6 +52,7 @@ async def create_run(
                 user_instruction,
                 resolve_instance_id(),
                 kind,
+                json.dumps(route_options) if route_options else None,
             ),
         )
         await db.commit()

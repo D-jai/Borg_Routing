@@ -235,7 +235,7 @@ Every piece of work BORG_ROUTE sends to a model is wrapped in a **WrappedTask** 
 - **governance_instruction** — what the operator originally asked, word for word. Every step, every item of an `apply_to_each` and every call inside a child run shows this in its governance block, so no model is ever told that a step's own text is "the user's instruction" (Law 1). A child run also gets a short "Your Assignment In This Run" block naming its sub-task.
 - **output_schema** — the exact shape the model must return (this is the compression contract)
 - **type** — one of: `orchestrate`, `answerer`, `apply_to_each`, `state_op`
-- **state_op `source`** — a `state_op` step can name an earlier step (`"source": "n1"`); it then works on the list that step produced (its `items`, `results`, `list` or `result`). If the named step has produced no list, the step fails with BRT-SOP-003 instead of working on an empty list.
+- **state_op `source`** — a `state_op` step can name an earlier step (`"source": "n1"`); it then works on the list that step produced (its `items`, `results`, `list` or `result`). If the named step has produced no list at all (or does not exist), the step fails with BRT-SOP-003; a list that is empty (for example a filter that matched nothing) is valid, so a following count gives 0.
 - **skill `items_ref`** — a skill that works on a list (such as `extract_fields`) takes `items_ref` naming the earlier step whose list it should walk (`"items_ref": "n1"`). The items are read from that step's output the same way a plain `apply_to_each` step does. If no such step has produced a list, the step fails with BRT-APE-001.
 - **level_path** — where this task sits in the run tree (e.g. `"1a"`, `"2b"`)
 - **trigger_reason** — why this envelope was created (e.g. `initial_plan`, `escalation_from:env-id`)
@@ -430,7 +430,7 @@ The `model` field of `POST /v1/chat/completions` (and the Chat page's dropdown) 
 
 - `borg_route`: the planner's own tier for each step.
 - `borg_route:light`, `:mid`, `:heavy`: every step is routed at that tier's quality floor, replacing the tier the planner chose. `:light` is the cheap run, `:heavy` the careful one. Planning and the final answer still use the orchestrator model.
-- `borg_route:coding`, `:creative`, `:reasoning`, `:extraction`: the kind of work for any step that names none (a step that states its own kind of work keeps it; `creative` is read as writing).
+- `borg_route:coding`, `:creative`, `:reasoning`, `:extraction`: every step is routed for that kind of work, replacing the kind the planner chose, the same way a tier alias replaces the tier (`creative` is read as writing). Each step's routing notes say what the alias replaced.
 - `borg_route:local`: a local model (LM Studio, Ollama) that clears the step's floor is preferred over a cheaper cloud one; if none clears it, the cheapest cloud model is used as usual.
 
 A step's `recommended_model` still comes first. The alias also reaches the child runs of the request. Each step's `routing` (see below) lists the alias and a note saying what it changed.

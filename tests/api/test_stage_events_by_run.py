@@ -70,3 +70,22 @@ async def test_stream_passes_its_run_id_and_ignores_other_runs(tmp_path, monkeyp
     assert isinstance(seen["run_id"], uuid.UUID)
     assert "OWN" in out
     assert "FOREIGN" not in out
+
+
+@pytest.mark.asyncio
+async def test_poll_includes_the_chats_child_runs_but_not_unrelated_runs(tmp_path):
+    db = str(tmp_path / "r3d.db")
+    await create_all(db)
+    started = time.time() - 5
+    root = await create_run("chat", db_path=db)
+    child = await create_run("child", parent_run_id=root, db_path=db)
+    grandchild = await create_run("grandchild", parent_run_id=child, db_path=db)
+    stranger = await create_run("another chat", db_path=db)
+    for run, msg in ((root, "root plan"), (child, "child plan"),
+                     (grandchild, "grandchild plan"), (stranger, "stranger plan")):
+        await write_event("orchestrator_decision", run_id=run,
+                          decision={"mode": "plan", "msg": msg}, db_path=db)
+    await flush_pending()
+    await asyncio.sleep(0.15)
+    events, _ = await _poll_stage_events(started, 0, db, run_id=str(root))
+    assert sorted(e["detail"] for e in events) == ["child plan", "grandchild plan", "root plan"]

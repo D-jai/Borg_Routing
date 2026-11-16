@@ -48,6 +48,26 @@ def _preserve_matrix_yaml():
             _MATRIX_PATH.write_text(original, encoding="utf-8")
 
 
+@pytest.fixture(autouse=True)
+def _restore_shared_matrix():
+    """The engine routes on ``main.matrix`` (R2), so a test that ticks rows or
+    inserts a test row there must not leak into later tests: snapshot the
+    rows before each test and put them back afterwards."""
+    import sys
+    import copy
+
+    main_mod = sys.modules.get("main")
+    shared = getattr(main_mod, "matrix", None)
+    snapshot = copy.deepcopy(shared._models) if shared is not None else None
+    try:
+        yield
+    finally:
+        # ``main`` may have been imported during the test itself.
+        shared = getattr(sys.modules.get("main"), "matrix", None)
+        if snapshot is not None and shared is not None:
+            shared._models = snapshot
+
+
 @pytest.fixture(scope="session", autouse=True)
 def _cleanup_db_residue():
     """BUG-006 — wipe well-known test-only runs from the repo DB on teardown.

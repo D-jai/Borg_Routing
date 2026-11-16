@@ -112,6 +112,7 @@ async def run_pipeline(
             thread_id=thread_id,
             db_path=db_path,
             run_id=run_id,
+            route_options=route_options,
         )
     except Exception as exc:
         return {
