@@ -40,6 +40,7 @@ Optimisation hooks (no error code):
 import asyncio
 import json
 import logging
+import math
 import os
 import re
 import time
@@ -364,7 +365,21 @@ def _undouble_braces(template: str) -> str:
 # The prompt as the model should read it; computed once, the template is constant.
 _ORCHESTRATOR_TEMPLATE = _undouble_braces(ORCHESTRATOR_SYSTEM_PROMPT)
 
-_MODELS_BRIEF_LIMIT = 12
+def _per_million(per_token: float) -> str:
+    """A per-token price as dollars per million tokens, readable at any size.
+
+    $1 and above: two decimals ("$5.00"). Below $1: three significant
+    figures ("$0.15", "$0.001"), so a cheap paid model never reads "$0.00".
+    Exactly zero reads "$0".
+    """
+    value = float(per_token) * 1e6
+    if value <= 0:
+        return "$0"
+    if value >= 1:
+        return f"${value:.2f}"
+    decimals = -math.floor(math.log10(value)) + 2
+    text = f"{value:.{decimals}f}".rstrip("0").rstrip(".")
+    return f"${text}"
 
 
 def _available_models_brief(matrix: CapabilityMatrix) -> str:
@@ -380,15 +395,21 @@ def _available_models_brief(matrix: CapabilityMatrix) -> str:
     rows.sort(key=lambda m: m.task_scores.get("reasoning", 0.0), reverse=True)
 
     lines = []
-    for m in rows[:_MODELS_BRIEF_LIMIT]:
+    # Every checked row is listed: the work order says "the checked rows",
+    # so there is no cap (ruling 16-Nov-2026).
+    for m in rows:
         strongest = sorted(m.task_scores.items(), key=lambda kv: kv[1], reverse=True)[:3]
         strengths = ", ".join(f"{kind} {score:g}" for kind, score in strongest) or "not yet scored"
         tags = f" [{', '.join(m.specialty_tags)}]" if m.specialty_tags else ""
-        if m.pricing is not None:
+        if m.pricing is not None and not (
+            m.pricing.input_per_token == 0 and m.pricing.output_per_token == 0
+        ):
             price = (
-                f"${m.pricing.input_per_token * 1e6:.2f} in / "
-                f"${m.pricing.output_per_token * 1e6:.2f} out per million tokens"
+                f"{_per_million(m.pricing.input_per_token)} in / "
+                f"{_per_million(m.pricing.output_per_token)} out per million tokens"
             )
+        elif m.pricing is not None:
+            price = "free, no token price"
         else:
             price = "runs on this machine, no token price"
         lines.append(f"- {m.model_id}{tags}: best at {strengths}; {price}")

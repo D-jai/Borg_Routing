@@ -91,6 +91,16 @@ async def test_the_planner_reads_single_braced_json_examples(planner_prompt):
 
 
 @pytest.mark.asyncio
+async def test_the_rendered_planner_prompt_asks_for_both_labels(planner_prompt):
+    """What the model reads, not just the template: both label lines, in
+    both routable shapes."""
+    for node_type in ("answerer", "apply_to_each"):
+        shape = _shape(planner_prompt, node_type)
+        assert TASK_TYPE_LINE in shape, f"task_type line missing from rendered {node_type}"
+        assert TIER_LINE in shape, f"tier line missing from rendered {node_type}"
+
+
+@pytest.mark.asyncio
 async def test_the_planner_is_shown_only_models_in_the_pool_best_first(planner_prompt):
     assert "openrouter/stub/ghost" not in planner_prompt       # unchecked
     positions = [
@@ -116,6 +126,47 @@ def test_model_brief_says_what_each_model_is_good_at_and_costs():
     assert "$5.00 in / $25.00 out per million tokens" in top_line
     assert local_line.startswith("- ollama/stub/local")
     assert "runs on this machine, no token price" in local_line
+
+
+def test_model_brief_lists_every_checked_model_with_no_cap():
+    matrix = CapabilityMatrix()
+    for i in range(20):
+        matrix.upsert(stub_model(f"m{i:02d}", 6.0 + i * 0.1, 1e-6, 2e-6))
+    matrix.upsert(stub_model("ghost", 9.9, 1e-6, 2e-6, checked=False))
+
+    lines = _available_models_brief(matrix).splitlines()
+
+    assert len(lines) == 20
+    assert lines[0].startswith("- openrouter/stub/m19")      # best reasoning first
+    assert not any("ghost" in line for line in lines)
+
+
+@pytest.mark.parametrize(
+    "per_token, shown",
+    [
+        (1e-9, "$0.001"),          # a paid model priced at $0.001 per million
+        (1e-7, "$0.1"),
+        (1.5e-7, "$0.15"),
+        (1.234e-8, "$0.0123"),     # three significant figures
+        (5e-6, "$5.00"),
+        (2.5e-5, "$25.00"),
+    ],
+)
+def test_a_paid_model_never_reads_as_zero(per_token, shown):
+    assert engine._per_million(per_token) == shown
+
+
+def test_model_brief_shows_tiny_prices_and_free_models():
+    matrix = CapabilityMatrix()
+    matrix.upsert(stub_model("tiny", 9.0, 1e-9, 1e-9))
+    matrix.upsert(stub_model("gratis", 8.0, 0.0, 0.0))
+
+    tiny_line, free_line = _available_models_brief(matrix).splitlines()
+
+    assert "$0.00 " not in tiny_line
+    assert "$0.001 in / $0.001 out per million tokens" in tiny_line
+    assert free_line.startswith("- openrouter/stub/gratis")
+    assert "free" in free_line
 
 
 def test_model_brief_with_nothing_checked_says_so():

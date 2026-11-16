@@ -110,7 +110,14 @@ value with no restart.
 
 ### How each step gets its model
 The planner and the final answer use the orchestrator model (the quality
-bar above). Every other step in a plan is routed on its own:
+bar above). The planner is shown only the models that are ticked in the
+pool and have an endpoint, all of them, best reasoning score first. Each
+line gives the model's three strongest kinds of work with their scores and
+its price per million tokens (input and output; a cheap model shows its
+real price, such as `$0.001`, never `$0.00`; a model on your own machine
+shows no token price). The planner labels each step with its kind of work
+(`task_type`) and size (`tier`). Every other step in a plan is routed on
+its own:
 
 1. If the planner names a model for the step (`recommended_model`) and
    that model is ticked in the pool, the step uses it.
