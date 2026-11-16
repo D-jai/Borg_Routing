@@ -28,6 +28,7 @@ from pydantic import BaseModel
 from src.db.schema import DB_PATH
 from src.db.state import (
     compute_and_save_digest,
+    get_descendant_run_ids,
     get_envelopes,
     get_run,
     get_run_digest,
@@ -186,6 +187,34 @@ async def submit_task(
     )
 
 
+def _attach_routing(envelopes: list[dict], events: list[dict]) -> None:
+    """Set ``routing`` on each envelope from its route event (else null).
+
+    An orchestrate step also gets ``child_run_id`` in its routing, read from
+    the envelope's recorded output once the step has finished.
+    """
+    routes: dict[str, dict] = {}
+    for ev in events:
+        if ev.get("event_type") != "orchestrator_decision" or not ev.get("envelope_id"):
+            continue
+        try:
+            decision = json.loads(ev.get("decision_json") or "null")
+        except (TypeError, ValueError):
+            continue
+        if isinstance(decision, dict) and decision.get("mode") == "route":
+            routes[ev["envelope_id"]] = decision
+    for env in envelopes:
+        routing = routes.get(env.get("envelope_id"))
+        if routing is not None and routing.get("served_by") == "child_run":
+            try:
+                inbound = json.loads(env.get("inbound_payload") or "null") or {}
+                child_id = (inbound.get("output") or {}).get("child_run_id")
+            except (TypeError, ValueError, AttributeError):
+                child_id = None
+            routing = dict(routing, child_run_id=child_id)
+        env["routing"] = routing
+
+
 @router.get("/runs/{run_id}")
 async def get_run_state(run_id: str) -> JSONResponse:
     """Return the full run state including envelopes and log events.
@@ -193,7 +222,10 @@ async def get_run_state(run_id: str) -> JSONResponse:
     Response shape:
     {
         "run": { ...run record... },
-        "envelopes": [ ...envelope records... ],
+        "envelopes": [ ...envelope records, each with "routing" (why its model
+                        was chosen, or null)... ],
+        "child_envelopes": [ ...envelopes of descendant (child) runs, same
+                        shape, each carrying its own run_id... ],
         "events": [ ...log events... ],
         "digest": {cost_dollars, baseline_dollars, tokens_input, tokens_output,
                    token_count, summary} or null if no digest was saved yet,
@@ -242,18 +274,27 @@ async def get_run_state(run_id: str) -> JSONResponse:
 
     # Work order 1.5 - each envelope carries why its model was chosen.
     # Only a routed step has a route event; any other envelope gets null.
-    routes: dict[str, dict] = {}
-    for ev in events:
-        if ev.get("event_type") != "orchestrator_decision" or not ev.get("envelope_id"):
-            continue
-        try:
-            decision = json.loads(ev.get("decision_json") or "null")
-        except (TypeError, ValueError):
-            continue
-        if isinstance(decision, dict) and decision.get("mode") == "route":
-            routes[ev["envelope_id"]] = decision
-    for env in envelopes:
-        env["routing"] = routes.get(env.get("envelope_id"))
+    _attach_routing(envelopes, events)
+
+    # Child runs (orchestrate nodes) choose their own models; show their steps
+    # too, each envelope tagged with its own run_id.
+    child_envelopes: list[dict] = []
+    try:
+        child_ids = await get_descendant_run_ids(run_uuid, db_path=DB_PATH)
+        for child_id in child_ids:
+            child_envs = await get_envelopes(_uuid.UUID(child_id), db_path=DB_PATH)
+            child_events: list[dict] = []
+            async with aiosqlite.connect(DB_PATH) as db:
+                db.row_factory = aiosqlite.Row
+                async with db.execute(
+                    "SELECT * FROM logs WHERE run_id=? ORDER BY created_at",
+                    (child_id,),
+                ) as cur:
+                    child_events = [dict(r) for r in await cur.fetchall()]
+            _attach_routing(child_envs, child_events)
+            child_envelopes.extend(child_envs)
+    except Exception:
+        pass
 
     try:
         digest = await get_run_digest(run_uuid, db_path=DB_PATH)
@@ -263,6 +304,7 @@ async def get_run_state(run_id: str) -> JSONResponse:
     return JSONResponse(content={
         "run": run,
         "envelopes": envelopes,
+        "child_envelopes": child_envelopes,
         "events": events,
         "digest": digest,
     })

@@ -20,7 +20,7 @@ can read why a step went where it went.
 from typing import Any, Optional
 
 from .capability_matrix import CapabilityMatrix
-from .cost import effective_cost
+from .cost import call_dollars, effective_cost
 from .models import ModelInfo
 from .router import select_model
 
@@ -131,6 +131,25 @@ def select_model_for_node(
     def cost_of(model: ModelInfo) -> float:
         return effective_cost(model, est_in, est_out, time_cost_per_sec)
 
+    def dollars_of(model: ModelInfo) -> float:
+        return call_dollars(model, est_in, est_out)
+
+    def candidates_for() -> list[dict]:
+        # Who else was in the running: every checked row that clears the
+        # floor and fits the input, cheapest first. est_cost is what the
+        # router ranks by (dollars plus time); est_dollars is dollars only.
+        offered = matrix.query_by_task(task_type, min_score=floor, min_context_length=est_in)
+        offered.sort(key=cost_of)
+        return [
+            {
+                "model_id": m.model_id,
+                "score": m.task_scores.get(task_type),
+                "est_cost": cost_of(m),
+                "est_dollars": dollars_of(m),
+            }
+            for m in offered[:_MAX_CANDIDATES_RECORDED]
+        ]
+
     decision: dict = {
         "task_type": task_type,
         "tier": tier,
@@ -143,7 +162,17 @@ def select_model_for_node(
 
     picked = _planner_pick(node, matrix, notes)
     if picked is not None:
-        decision.update(reason="planner_pick", chosen=picked.model_id, est_cost=cost_of(picked))
+        try:
+            decision["candidates"] = candidates_for()  # for information only
+        except Exception:
+            decision["candidates"] = []
+            decision["candidates_reason"] = "candidate list could not be built"
+        decision.update(
+            reason="planner_pick",
+            chosen=picked.model_id,
+            est_cost=cost_of(picked),
+            est_dollars=dollars_of(picked),
+        )
         return picked, decision
 
     try:
@@ -160,23 +189,19 @@ def select_model_for_node(
             reason="fallback_default",
             chosen=default_model.model_id,
             est_cost=None,
+            est_dollars=dollars_of(default_model),
+            candidates_reason="no model cleared the floor, so there is no candidate list",
             error=str(exc),
         )
         return default_model, decision
 
-    # The record of who else was in the running: every checked row that
-    # clears the floor and fits the input, cheapest first.
-    offered = matrix.query_by_task(task_type, min_score=floor, min_context_length=est_in)
-    offered.sort(key=cost_of)
-    decision["candidates"] = [
-        {
-            "model_id": m.model_id,
-            "score": m.task_scores.get(task_type),
-            "est_cost": cost_of(m),
-        }
-        for m in offered[:_MAX_CANDIDATES_RECORDED]
-    ]
-    decision.update(reason="routed", chosen=chosen.model_id, est_cost=cost_of(chosen))
+    decision["candidates"] = candidates_for()
+    decision.update(
+        reason="routed",
+        chosen=chosen.model_id,
+        est_cost=cost_of(chosen),
+        est_dollars=dollars_of(chosen),
+    )
     return chosen, decision
 
 
@@ -207,14 +232,28 @@ def fallback_decision(
         floor: Optional[float] = float(floors.get(tier, DEFAULT_FLOORS[tier]))
     except Exception:
         floor = DEFAULT_FLOORS.get(tier)
+    # Same token estimate as a routed decision. If it cannot be made, the
+    # estimates stay null (never a fake 0.0).
+    est_in: Optional[int] = None
+    est_dollars: Optional[float] = None
+    try:
+        est_in = _estimate_input_tokens(node)
+        est_dollars = call_dollars(default_model, est_in, _EST_OUTPUT_TOKENS)
+    except Exception:
+        est_in = None
+        est_dollars = None
     return {
         "reason": "fallback_default",
         "task_type": task_type,
         "tier": tier,
         "floor": floor,
+        "est_input_tokens": est_in,
+        "est_output_tokens": _EST_OUTPUT_TOKENS if est_in is not None else None,
         "chosen": default_model.model_id,
         "est_cost": None,
+        "est_dollars": est_dollars,
         "candidates": [],
+        "candidates_reason": "routing failed, so there is no candidate list",
         "notes": notes,
         "error": error,
     }

@@ -415,9 +415,14 @@ sub-task and is governed by the top-level run's instruction.
 
 ## Reading why each step used its model
 
-`GET /runs/{run_id}` returns `run`, `envelopes` and `events`. Each envelope (one per step) now carries:
+`GET /runs/{run_id}` returns `run`, `envelopes`, `child_envelopes`, `events` and `digest`. `child_envelopes` holds the envelopes (with their `routing`) of every child run the run started, each tagged with its own `run_id`. Each envelope (one per step) now carries:
 
-- `routing`: why the step went to its model. It holds `chosen`, `reason` (`routed`, `planner_pick` or `fallback_default`), `task_type`, `tier`, `floor`, `candidates` (the models that cleared the floor, cheapest first, each with a score and `est_cost`), `baseline` (the model the run is compared against: the best-reasoning checked model, or the one set by the `baseline_model_id` config key / `BASELINE_MODEL_ID`) and `baseline_est_cost`. `baseline_est_cost` is an estimate: the step's estimated input and output tokens priced at the baseline model's prices, not what a real call cost. It is `null` for an envelope that was not routed (or whose route record is missing).
+- `routing`: why the step went to its model. It holds `chosen`, `reason` (`routed`, `planner_pick` or `fallback_default`), `task_type`, `tier`, `floor`, `est_input_tokens`, `est_output_tokens`, `candidates` (the models that cleared the floor, cheapest first, at most 8, each with a score, `est_cost` and `est_dollars`), `baseline` (the model the run is compared against: the best-reasoning checked model, or the one set by the `baseline_model_id` config key / `BASELINE_MODEL_ID`) and `baseline_est_cost`. If a configured baseline is not in the matrix, `baseline_note` says which model was used instead.
+  - Every figure under `routing` is an estimate, never a measured cost. The token counts are guessed from the step's text length, and `dollars` on the envelope is the only real cost.
+  - `est_dollars` is the chosen model's estimated dollars only (0.0 for a local model). `baseline_est_cost` is the same estimate at the baseline model's prices, so the two compare like for like. `est_cost` is what the router ranks by: dollars plus the cost of waiting (`TIME_COST_PER_SEC`), so it is not comparable with `baseline_est_cost`.
+  - A step whose routing failed (`fallback_default`) still carries the token estimate and `est_dollars`; if no estimate could be made they are `null`, never 0.0. A `planner_pick` also lists `candidates`, for information; the pick itself is unchanged. When no model cleared the floor, `candidates` is empty and `candidates_reason` says so.
+  - For an `apply_to_each` step the estimates cover every item: `items` is the count, `per_item_est_dollars` and `per_item_baseline_est_cost` are one call, and `est_dollars` and `baseline_est_cost` are the totals.
+  - For an `orchestrate` step `served_by` is `child_run`: a child run plans the step and picks its own models, so `chosen` is only the fallback if the step is demoted at max depth (`note` says so), `child_run_id` names the child run, and `est_dollars` and `baseline_est_cost` are `null`.
 - `dollars`: what the step's call actually cost.
 - `latency_ms`: how long the step took, in milliseconds.
 

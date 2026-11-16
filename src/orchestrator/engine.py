@@ -63,11 +63,12 @@ from src.db.state import (
 )
 from src.envelopes.schema import InboundEnvelope, ToolRequest, WrappedTask
 from src.logging.writer import write_event
+from src.orchestrator.apply_to_each import _resolve_items
 from src.orchestrator.fold_in import fold_in
 from src.prompts.base import build_system_prompt, load_governance
 from src.prompts.orchestrator import ORCHESTRATOR_SYSTEM_PROMPT
 from src.registry.capability_matrix import CapabilityMatrix
-from src.registry.cost import call_dollars, price_with_baseline, resolve_baseline_model
+from src.registry.cost import call_dollars, price_with_baseline, resolve_baseline_with_note
 from src.registry.model_call import resolve_model_call
 from src.registry.models import ModelInfo
 from src.registry.node_router import (
@@ -923,27 +924,58 @@ async def _log_route(
     envelope_id: UUID,
     decision: dict,
     db_path: str,
+    node_type: str = "answerer",
+    item_count: Optional[int] = None,
 ) -> None:
-    """Write why a step went to its model into the run trace."""
+    """Write why a step went to its model into the run trace.
+
+    Every figure here is an estimate (token counts are guessed from text
+    length). ``est_dollars`` and ``baseline_est_cost`` are dollars only and
+    use the same token estimate, so they compare like for like; ``est_cost``
+    adds the time cost and is what the router ranks by.
+    """
     chosen = decision.get("chosen")
     reason = decision.get("reason")
+    decision = dict(decision)
     try:
         # Work order 1.5 - what the same step would cost on the baseline model.
-        decision = dict(decision)
-        baseline = await resolve_baseline_model(_get_matrix(), db_path)
+        baseline, baseline_note = await resolve_baseline_with_note(_get_matrix(), db_path)
         decision["baseline"] = baseline.model_id if baseline else None
+        if baseline_note:
+            decision["baseline_note"] = baseline_note
+        est_in = decision.get("est_input_tokens")
+        est_out = decision.get("est_output_tokens")
         decision["baseline_est_cost"] = (
-            call_dollars(
-                baseline,
-                decision.get("est_input_tokens"),
-                decision.get("est_output_tokens"),
-            )
-            if baseline
+            call_dollars(baseline, est_in, est_out)
+            if baseline is not None and est_in is not None and est_out is not None
             else None
         )
     except Exception:
         decision.setdefault("baseline", None)
         decision.setdefault("baseline_est_cost", None)
+
+    if node_type == "orchestrate":
+        # The child run picks its own models; the routed model is only the
+        # fallback if the step is demoted at max depth, so no estimate of a
+        # single call describes this step.
+        decision["served_by"] = "child_run"
+        decision["note"] = (
+            "a child run plans this step and picks its own models; 'chosen' is "
+            "only the fallback model if the step is demoted at max depth"
+        )
+        decision["est_dollars"] = None
+        decision["baseline_est_cost"] = None
+    elif node_type == "apply_to_each" and item_count:
+        # The figures above cover one call; the step makes one per item.
+        decision["items"] = item_count
+        per_est = decision.get("est_dollars")
+        per_base = decision.get("baseline_est_cost")
+        decision["per_item_est_dollars"] = per_est
+        decision["per_item_baseline_est_cost"] = per_base
+        decision["est_dollars"] = None if per_est is None else per_est * item_count
+        decision["baseline_est_cost"] = None if per_base is None else per_base * item_count
+        if decision.get("est_cost") is not None:
+            decision["est_cost_total"] = decision["est_cost"] * item_count
     try:
         await write_event(
             "orchestrator_decision",
@@ -1482,8 +1514,16 @@ async def orchestrate_run(
                     governance_instruction=governance_instruction,
                 )
                 if route_decision is not None:
+                    node_kind = node.get("type", "answerer")
+                    item_count = None
+                    if node_kind == "apply_to_each":
+                        try:
+                            item_count = len(_resolve_items(task))
+                        except Exception:
+                            item_count = None
                     await _log_route(
-                        run_id, node_id, task.envelope_id, route_decision, db_path
+                        run_id, node_id, task.envelope_id, route_decision, db_path,
+                        node_type=node_kind, item_count=item_count,
                     )
                 # BRT-PR-01a — log any depends_on ids that didn't resolve.
                 missing_deps = (task.dependency_input or {}).pop(
@@ -1550,6 +1590,9 @@ async def orchestrate_run(
                     output={},
                     failure_reason=f"BRT-ORC-004: {exc}",
                 )
+            # Latency is the step's own run time: stop the clock before any
+            # pricing or database work.
+            elapsed_ms = int((time.monotonic() - t_start) * 1000)
             try:
                 # Work order 1.6 — token counts and dollars on the envelope row.
                 tok_in = env.tokens_used.get("input") if env.tokens_used else None
@@ -1571,7 +1614,7 @@ async def orchestrate_run(
                     tokens_input=tok_in,
                     tokens_output=tok_out,
                     dollars=env_dollars,
-                    latency_ms=int((time.monotonic() - t_start) * 1000),
+                    latency_ms=elapsed_ms,
                     baseline_dollars=env_baseline,
                     db_path=db_path,
                 )

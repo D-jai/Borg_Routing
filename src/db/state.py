@@ -253,6 +253,25 @@ async def _sum_run_tree(db, run_id: UUID):
         return await cur.fetchone()
 
 
+async def get_descendant_run_ids(run_id: UUID, db_path: str = DB_PATH) -> list[str]:
+    """Run ids of every descendant of a run (child runs spawned by orchestrate
+    nodes, via parent_run_id), oldest first. The run itself is not included."""
+    async with aiosqlite.connect(db_path) as db:
+        async with db.execute(
+            """WITH RECURSIVE tree(run_id) AS (
+                   SELECT ?
+                   UNION
+                   SELECT r.run_id FROM runs r JOIN tree t ON r.parent_run_id = t.run_id
+               )
+               SELECT run_id FROM runs
+               WHERE run_id IN (SELECT run_id FROM tree) AND run_id != ?
+               ORDER BY created_at""",
+            (str(run_id), str(run_id)),
+        ) as cur:
+            rows = await cur.fetchall()
+    return [r[0] for r in rows]
+
+
 async def sum_run_tree(run_id: UUID, db_path: str = DB_PATH) -> dict:
     """Logged tokens and dollars for a run plus all its descendant runs."""
     async with aiosqlite.connect(db_path) as db:

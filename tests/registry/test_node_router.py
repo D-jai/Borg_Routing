@@ -210,3 +210,91 @@ def test_custom_floors_are_honoured():
     model, decision = _route(_node(tier="light"), floors=floors)
     assert model.model_id == MID.model_id       # cheap (6.5) no longer clears light
     assert decision["floor"] == 7.0
+
+
+# --- work order 1.5 review fixes ---------------------------------------------
+
+def _local(name, score, tps=50.0):
+    return ModelInfo(
+        model_id=f"ollama/{name}",
+        source="ollama",
+        endpoint="http://127.0.0.1:11434",
+        context_length=32_000,
+        pricing=None,
+        throughput_tps=tps,
+        task_scores={t: score for t in TASK_TYPES},
+        checked=True,
+    )
+
+
+def test_est_dollars_is_dollars_only_and_est_cost_adds_time():
+    model, d = _route(_node(task_type="coding", tier="mid"))
+    expected = d["est_input_tokens"] * 1e-6 + d["est_output_tokens"] * 3e-6
+    assert d["est_dollars"] == pytest.approx(expected)
+    assert d["est_cost"] >= d["est_dollars"]
+    for cand in d["candidates"]:
+        assert "est_dollars" in cand
+
+
+def test_a_local_chosen_model_has_zero_est_dollars_but_baseline_stays_positive():
+    from src.registry.cost import call_dollars
+
+    local = _local("llama", 9.8)
+    matrix = _matrix(TOP, local)
+    model, d = _route(_node(task_type="coding", tier="heavy"), matrix=matrix)
+    assert model.model_id == local.model_id
+    assert d["est_dollars"] == 0.0
+    assert d["est_cost"] > 0.0  # time cost is in est_cost, not est_dollars
+    baseline = call_dollars(TOP, d["est_input_tokens"], d["est_output_tokens"])
+    assert baseline > 0
+
+
+def test_candidate_est_dollars_matches_the_baseline_estimate_when_it_is_a_candidate():
+    from src.registry.cost import call_dollars
+
+    _model_, d = _route(_node(task_type="coding", tier="light"))
+    top = next(c for c in d["candidates"] if c["model_id"] == TOP.model_id)
+    assert top["est_dollars"] == pytest.approx(
+        call_dollars(TOP, d["est_input_tokens"], d["est_output_tokens"])
+    )
+
+
+def test_fallback_decision_carries_the_token_estimate_and_est_dollars():
+    d = fallback_decision(
+        node=_node(task_type="extraction", tier="light", instruction="x" * 4000),
+        skill=None, floors=DEFAULT_FLOORS, default_model=TOP, error="boom",
+    )
+    assert d["est_input_tokens"] == 1000
+    assert d["est_output_tokens"] == 500
+    assert d["est_dollars"] == pytest.approx(1000 * 5e-6 + 500 * 2.5e-5)
+    assert d["candidates_reason"]
+
+
+def test_fallback_decision_est_is_null_when_no_estimate_can_be_made():
+    class Bad(dict):
+        def get(self, *a, **k):
+            raise RuntimeError("cannot read node")
+
+    d = fallback_decision(
+        node=Bad(), skill=None, floors=DEFAULT_FLOORS, default_model=TOP, error="boom",
+    )
+    assert d["est_input_tokens"] is None
+    assert d["est_dollars"] is None  # null, never 0.0
+
+
+def test_planner_pick_lists_candidates_for_information_and_keeps_the_pick():
+    model, d = _route(_node(task_type="coding", tier="light", recommended_model=TOP.model_id))
+    assert d["reason"] == "planner_pick"
+    assert model.model_id == TOP.model_id
+    assert len(d["candidates"]) >= 2
+    costs = [c["est_cost"] for c in d["candidates"]]
+    assert costs == sorted(costs)
+    assert d["est_dollars"] > 0
+
+
+def test_router_miss_fallback_says_why_there_are_no_candidates():
+    model, d = _route(_node(task_type="coding", tier="heavy"), matrix=_matrix(CHEAP))
+    assert d["reason"] == "fallback_default"
+    assert d["candidates"] == []
+    assert "floor" in d["candidates_reason"]
+    assert d["est_dollars"] is not None

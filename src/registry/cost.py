@@ -57,11 +57,11 @@ def select_baseline_model(matrix, configured_id: Optional[str] = None) -> Option
     )
 
 
-async def resolve_baseline_model(matrix, db_path: str) -> Optional[ModelInfo]:
-    """Baseline model using config key ``baseline_model_id``, then env
-    ``BASELINE_MODEL_ID``, then the highest-reasoning checked model.
-
-    Shared by cost recording (1.6) and the routing record (1.5).
+async def resolve_baseline_with_note(matrix, db_path: str) -> tuple[Optional[ModelInfo], Optional[str]]:
+    """``(baseline, note)``: the baseline model and, when a configured id is
+    not in the matrix, a note saying the highest-reasoning model was used
+    instead. Config key ``baseline_model_id`` wins over env
+    ``BASELINE_MODEL_ID``, which wins over the default.
     """
     from src.db.state import get_config  # noqa: PLC0415 - avoid import cycle
 
@@ -72,7 +72,25 @@ async def resolve_baseline_model(matrix, db_path: str) -> Optional[ModelInfo]:
         configured = None
     if not configured:
         configured = os.getenv("BASELINE_MODEL_ID") or None
-    return select_baseline_model(matrix, str(configured) if configured else None)
+    configured = str(configured) if configured else None
+    baseline = select_baseline_model(matrix, configured)
+    note = None
+    if configured and (baseline is None or baseline.model_id != configured):
+        note = (
+            f"configured baseline '{configured}' is not in the matrix; "
+            f"used {baseline.model_id if baseline else 'no model'} instead"
+        )
+    return baseline, note
+
+
+async def resolve_baseline_model(matrix, db_path: str) -> Optional[ModelInfo]:
+    """Baseline model using config key ``baseline_model_id``, then env
+    ``BASELINE_MODEL_ID``, then the highest-reasoning checked model.
+
+    Shared by cost recording (1.6) and the routing record (1.5).
+    """
+    baseline, _note = await resolve_baseline_with_note(matrix, db_path)
+    return baseline
 
 
 def price_call(
