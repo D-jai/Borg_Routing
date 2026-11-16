@@ -75,3 +75,56 @@ async def test_completed_run_stays_refused(db):
     with pytest.raises(HTTPException) as exc:
         await tasks_api.resume_run_endpoint(str(run_id), BackgroundTasks())
     assert exc.value.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_run_reads_running_while_the_re_run_is_in_progress_and_a_second_resume_is_refused(db, monkeypatch):
+    """4.3 round 2: the status is set to running when the background run starts."""
+    import asyncio
+    from src.db.state import get_run
+
+    run_id = await create_run(OPERATOR, db_path=db)
+    await update_run_status(run_id, "failed", failure_reason="BRT-ORC-007", db_path=db)
+
+    inside = asyncio.Event()
+    release = asyncio.Event()
+
+    async def blocked_orchestrate_run(run_id, user_instruction, db_path, **kw):
+        inside.set()
+        await release.wait()
+
+    monkeypatch.setattr(engine, "orchestrate_run", blocked_orchestrate_run)
+
+    background = BackgroundTasks()
+    first = await tasks_api.resume_run_endpoint(str(run_id), background)
+    assert first.status_code == 202
+    running = asyncio.create_task(background())
+    await asyncio.wait_for(inside.wait(), timeout=5)
+
+    assert (await get_run(run_id, db_path=db))["status"] == "running"
+    with pytest.raises(HTTPException) as exc:
+        await tasks_api.resume_run_endpoint(str(run_id), BackgroundTasks())
+    assert exc.value.status_code == 409
+    assert exc.value.detail["error"] == "BRT-API-024"
+
+    release.set()
+    await running
+    assert (await get_run(run_id, db_path=db))["status"] == "completed"
+
+
+@pytest.mark.asyncio
+async def test_resume_refuses_a_pending_run_with_in_flight_envelopes(db):
+    run_id = await create_run(OPERATOR, db_path=db)  # pending
+    import sqlite3
+    con = sqlite3.connect(db)
+    con.execute(
+        "INSERT INTO envelopes(envelope_id, run_id, subtask_id, type, level_path, trigger_reason, status, outbound_payload)"
+        " VALUES (?,?,?,?,?,?,?,?)",
+        (str(uuid.uuid4()), str(run_id), str(uuid.uuid4()), "answerer", "0", "t", "in_flight", "{}"),
+    )
+    con.commit()
+    con.close()
+    with pytest.raises(HTTPException) as exc:
+        await tasks_api.resume_run_endpoint(str(run_id), BackgroundTasks())
+    assert exc.value.status_code == 409
+    assert exc.value.detail["error"] == "BRT-API-024"

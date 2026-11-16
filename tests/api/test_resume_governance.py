@@ -10,7 +10,7 @@ import pytest
 from fastapi import BackgroundTasks
 
 from src.api import tasks as tasks_api
-from src.db.state import create_run, save_envelope
+from src.db.state import create_run, save_envelope, update_run_status
 from src.envelopes.schema import WrappedTask
 from src.orchestrator import engine
 from tests.e2e.stub_model_server import StubModels, drain_log_writes, three_tier_matrix
@@ -55,6 +55,9 @@ async def _save_pre_fix_step(run_id: uuid.UUID, db: str) -> None:
         ),
         db_path=db,
     )
+    # A run that stopped mid-step is failed; a pending run with work in flight
+    # is a live one and is refused (4.3 round 2).
+    await update_run_status(run_id, "failed", failure_reason="stopped mid-step", db_path=db)
 
 
 async def _resume(run_id: uuid.UUID) -> dict:

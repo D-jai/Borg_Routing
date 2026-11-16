@@ -107,6 +107,9 @@ async def _run_in_background(
 
     run_id = _uuid.UUID(run_id_str)
     max_run_seconds = await resolve_max_run_seconds(db_path=db_path)
+    # Visible as running from the moment the work starts, so a second resume
+    # of the same run is refused instead of racing this one.
+    await update_run_status(run_id, "running", db_path=db_path)
     try:
         await _asyncio.wait_for(
             orchestrate_run(
@@ -526,6 +529,22 @@ async def resume_run_endpoint(
                            "wait for it to finish or fail",
             },
         )
+    # A pending run with work in flight was submitted a moment ago and has
+    # not been marked running yet: it is just as busy.
+    if current is not None and current["status"] == "pending":
+        in_flight = [
+            e for e in await get_envelopes(run_uuid, db_path=DB_PATH)
+            if e.get("status") == "in_flight"
+        ]
+        if in_flight:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "error": "BRT-API-024",
+                    "message": "this run has work in flight, so it cannot be run "
+                               "again; wait for it to finish or fail",
+                },
+            )
 
     # On-premise lane: a run that read documents is never resumed (design
     # note 5.7); a resume would start a fresh run without its documents.

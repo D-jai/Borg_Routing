@@ -277,6 +277,8 @@ def _ledger_problem(value: str) -> Optional[str]:
         return "admin_rules_ledger must be a JSON list of rule objects"
     if not isinstance(parsed, list) or not all(isinstance(r, dict) for r in parsed):
         return "admin_rules_ledger must be a list of rule objects"
+    if not all(isinstance(r.get("text", ""), str) for r in parsed):
+        return "admin_rules_ledger: each rule's text must be a string"
     return None
 
 

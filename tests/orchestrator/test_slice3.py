@@ -45,8 +45,22 @@ async def db(tmp_path):
 
 
 @pytest.fixture
-def client():
-    return TestClient(app, raise_server_exceptions=False)
+def client(tmp_path, monkeypatch):
+    """The endpoint tests write config, rules and runs: keep them in a temp DB.
+
+    They used to write the operator's real data/borg_route.db, so what an
+    earlier test or session left there could change these tests' results.
+    """
+    import src.api.admin as admin_mod
+    import src.api.tasks as tasks_mod
+
+    path = str(tmp_path / "slice3_api.db")
+    asyncio.run(create_all(path))
+    for mod in (admin_mod, tasks_mod):
+        monkeypatch.setattr(mod, "DB_PATH", path)
+    test_client = TestClient(app, raise_server_exceptions=False)
+    test_client.db_path = path
+    return test_client
 
 
 def _make_task(run_id, current_depth=0, max_depth=5, task_type="orchestrate"):
@@ -401,7 +415,7 @@ def test_resume_run_endpoint_completed_returns_400(client):
 
     # Mark it completed via API or direct state
     import asyncio
-    asyncio.run(update_run_status(uuid.UUID(run_id), "completed"))
+    asyncio.run(update_run_status(uuid.UUID(run_id), "completed", db_path=client.db_path))
 
     resume_resp = client.post(f"/runs/{run_id}/resume")
     assert resume_resp.status_code == 400

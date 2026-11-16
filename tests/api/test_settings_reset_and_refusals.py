@@ -86,10 +86,12 @@ def test_url_planner_endpoint_is_saved(good, client, db):
     assert client.post("/config", json={"key": "orchestrator_endpoint", "value": good}).status_code == 200
 
 
-@pytest.mark.parametrize("bad", ["not json", "{}", "[1, 2]", '["a"]', "\"text\"", "[{\"id\":\"1\"}, 3]"])
+@pytest.mark.parametrize("bad", ["not json", "{}", "[1, 2]", '["a"]', "\"text\"", "[{\"id\":\"1\"}, 3]",
+                                 "[{\"text\": null}]", "[{\"text\": 5}]"])
 def test_rules_ledger_that_is_not_a_list_of_objects_is_refused(bad, client, db):
     res = client.post("/config", json={"key": "admin_rules_ledger", "value": bad})
     assert res.status_code == 400
+    assert res.json()["detail"]["error"] == "BRT-ADM-006"
     assert "admin_rules_ledger" not in client.get("/config").json()
 
 
