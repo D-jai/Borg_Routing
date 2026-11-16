@@ -32,6 +32,9 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 WALL_CLOCK_LIMIT_S = 600
 MAX_SPEND_DOLLARS = 0.50
 MIN_PRICED_MODELS = 3
+# Cheap OpenRouter models checked for this run only (both confirmed live on
+# OpenRouter, 16-Nov-2026).
+EXTRA_CHECKED = ("openrouter/deepseek/deepseek-v3.2", "openrouter/openai/gpt-5.4-nano")
 
 PROMPT = (
     "From the 12 short product reviews below, extract product and sentiment for "
@@ -288,6 +291,17 @@ def main() -> int:
 
     matrix = CapabilityMatrix()
     matrix.load()
+    # The shipped matrix keeps only the two cold-start defaults checked
+    # (tests/registry/test_cold_start_defaults.py). Check the cheap models in
+    # this in-memory copy only and hand it to the engine; the file is never
+    # written.
+    for model_id in EXTRA_CHECKED:
+        row = matrix.get(model_id)
+        if row is not None:
+            row.checked = True
+    from src.orchestrator import engine
+
+    engine._shared_matrix = matrix
     ok, msg = preflight(matrix.all())
     print(msg)
     if not ok:
