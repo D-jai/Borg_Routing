@@ -42,7 +42,7 @@ if str(REPO_ROOT) not in sys.path:
 
 import yaml  # noqa: E402
 
-from bench import budget, checks, judge, llm  # noqa: E402
+from bench import budget, checks, facts, judge, llm  # noqa: E402
 
 BENCH_DIR = REPO_ROOT / "bench"
 
@@ -513,15 +513,8 @@ def score_classification(answer: str, key: dict, fields: list[str], key_field: s
 
 
 def score_facts(answer: str, key: dict) -> dict:
-    low = (answer or "").lower()
-    facts = [f["answer"] for f in key["facts"]]
-    found = [a for a in facts if a.lower() in low]
-    contr = [c["topic"] for c in key["contradictions"]
-             if c["value_a"].lower() in low and c["value_b"].lower() in low]
-    return {
-        "facts_found": len(found), "facts_total": len(facts),
-        "contradictions_found": len(contr), "contradictions_total": len(key["contradictions"]),
-    }
+    """Job C's machine fact score (bench/facts.py). Informational only: never quoted."""
+    return facts.score_facts(answer, key)
 
 
 def score_answer(job: dict, answer: str, cfg: Config, runner=None) -> dict:
@@ -534,7 +527,7 @@ def score_answer(job: dict, answer: str, cfg: Config, runner=None) -> dict:
         kw = {"runner": runner} if runner is not None else {}
         return checks.run_checks(answer, with_docker=cfg.use_docker, **kw)
     if kind == "pairwise_judge":
-        return score_facts(answer, key)
+        return facts.informational(answer, key)
     return {}
 
 

@@ -322,10 +322,14 @@ def test_scoring_helpers():
     assert s["accuracy"] == 0.5 and s["per_field_accuracy"] == {"category": 0.5, "urgency": 1.0}
     assert run_bench.score_classification("no list", key, ["category"])["accuracy"] == 0.0
     ck = make_data.make_job_c.__module__  # noqa: F841 (module exists)
-    facts = {"facts": [{"answer": "14 March 2027"}, {"answer": "412 loading bays"}],
-             "contradictions": [{"topic": "t", "value_a": "2011", "value_b": "2014"}]}
+    facts = {"facts": [{"question": "q1", "answer": "14 March 2027"}, {"question": "q2", "answer": "412 loading bays"}],
+             "contradictions": [{"topic": "depot opening year", "value_a": "2011", "value_b": "2014"}]}
     f = run_bench.score_facts("It ends 14 March 2027. Opened 2011 in one, 2014 in another.", facts)
-    assert f == {"facts_found": 1, "facts_total": 2, "contradictions_found": 1, "contradictions_total": 1}
+    # a bare "2011 ... 2014" with no topic word nearby is not a contradiction (bench/facts.py)
+    counts = ("facts_found", "facts_total", "contradictions_found", "contradictions_total")
+    assert [f[k] for k in counts] == [1, 2, 0, 1]
+    f = run_bench.score_facts("The depot opened in 2011 in one, 2014 in another.", facts)
+    assert f["contradictions_found"] == 1
 
 
 def test_judge_model_is_in_neither_arm():
