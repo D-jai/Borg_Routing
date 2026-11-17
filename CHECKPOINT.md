@@ -96,6 +96,8 @@ Standing permissions: local commits on `showcase`; pushes of `showcase` to the p
 
 ## Questions for Deej after the build (not blocking)
 
+- **GitHub Actions is blocked by billing (17-Nov-2026).** The first CI run (work order 5.6, `.github/workflows/ci.yml`) did not start: "The job was not started because recent account payments have failed or your spending limit needs to be increased" (Billing & plans in the D-jai account). Until that is fixed, 5.6 cannot go green and full test runs stay local. The run: https://github.com/D-jai/Borg_Routing/actions/runs/44192378709
+
 - **Cold-start defaults after the 17-Nov rescore.** The research route now scores Kimi K2 Thinking at 8.7 reasoning, below the 9.0 floor the shipped defaults must meet (`tests/registry/test_cold_start_defaults.py`). The shipped matrix keeps the April scores for now; the rescored pool lives in `bench/pool_matrix.yaml`. Options: keep as is, or pick a new second default (e.g. Gemini 3.1 Pro 9.7 or Grok 4.20 9.4 by the new scores) and update the test.
 
 - **Local model on this machine (17-Nov-2026): resolved by planner ruling 13, attempt 3.** `llama3.2:3b` serves from Ollama in Docker (`borg_ollama`, kept loaded, 16k context); the local arms run. It is a small CPU-only model (reasoning 4.6), so mid-tier raw steps fail by design. A stronger local model needs better hardware (native Ollama, or the DGX Spark). The container stays running; `docker rm -f borg_ollama` removes it (the `borg_ollama` volume keeps the models).
