@@ -18,8 +18,8 @@ of their committed content (CRLF normalised to LF). A page is exempt ("allowed l
 <name>") only while its content still hashes to that value; any edit removes the
 exemption and the page is checked fully. The list must be empty by 5.6.
 
-CI (work order 5.6) runs `--strict`, which ignores the allow-list. Strict currently fails
-until 4.3/5.3 archive the old pages.
+CI (work order 5.6) runs `--strict`, which ignores the allow-list. With the list empty
+(since 4.2), strict and default give the same result.
 
 Usage: python scripts/check_ui_static.py [--strict] [ui_dir]
 """
@@ -31,10 +31,8 @@ import sys
 from html.parser import HTMLParser
 from pathlib import Path
 
-LEGACY_ALLOW_LIST = {
-    "chat.html": "f067a475b937d5521eea81b746cced27b436bc84cc1899b66dcf6ed65a37f4b0",
-    "run.html": "48fe2b2ab782e76b89f39cb7ccd956cb04db28f078b6069a9c8a31da405e9557",
-}
+# Empty since 4.2: chat.html was archived (replaced by ask.html) and run.html rewritten.
+LEGACY_ALLOW_LIST: dict[str, str] = {}
 MAX_STYLE_LINES = 15
 URL_ATTRS = ("src", "href", "srcset", "poster", "data", "action", "formaction")
 

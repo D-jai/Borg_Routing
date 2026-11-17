@@ -282,7 +282,8 @@ def test_real_tree_passes():
     assert check.main(["x"]) == 0
 
 
-def test_strict_mode_fails_while_legacy_pages_remain():
-    # Documents the current state: CI (5.6) runs --strict, which ignores the
-    # allow-list, so it fails until 4.3/5.3 archive the old pages.
-    assert check.main(["x", "--strict"]) == 1
+def test_allow_list_is_empty_and_strict_passes():
+    # Since 4.2 (chat.html archived, run.html rewritten) no old page is exempt, so
+    # CI's --strict run (5.6) gives the same result as the default run.
+    assert check.LEGACY_ALLOW_LIST == {}
+    assert check.main(["x", "--strict"]) == 0

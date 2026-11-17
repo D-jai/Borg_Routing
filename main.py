@@ -48,16 +48,27 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="BORG_ROUTE", version="0.1.0", lifespan=lifespan)
 
-# Serve static UI files if the ui/ directory exists. The old directory page
-# (ui/index.html) is retired: /ui/ goes to the Admin overview until 4.2 points
-# the root at the Ask page.
+# Serve static UI files if the ui/ directory exists. The Ask page is the front
+# door (work order 4.2): `/`, `/ui`, `/ui/` and the retired chat page
+# (`/ui/chat.html`, archived) all redirect to it. These routes are registered
+# before the static mount so they win over it.
+from fastapi.responses import RedirectResponse  # noqa: E402
+
+ASK_PAGE = "/ui/ask.html"
+
+
+@app.get("/", include_in_schema=False)
+async def site_root():
+    return RedirectResponse(ASK_PAGE)
+
+
 if os.path.isdir("ui"):
-    from fastapi.responses import RedirectResponse
 
     @app.get("/ui", include_in_schema=False)
     @app.get("/ui/", include_in_schema=False)
+    @app.get("/ui/chat.html", include_in_schema=False)
     async def ui_root():
-        return RedirectResponse("/ui/admin_overview.html")
+        return RedirectResponse(ASK_PAGE)
 
     app.mount("/ui", StaticFiles(directory="ui", html=True), name="ui")
 

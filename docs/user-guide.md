@@ -758,18 +758,27 @@ The Logs page at `http://localhost:8000/ui/logs.html` has three tabs: **Events**
 
 ---
 
-<!-- Added: 2026-04-18 — S6-01..S6-04: Live streaming -->
-## Live Run Trace
+## Workspace: Ask, Run and Runs
 
-When you open a run trace (`/ui/run.html?id=<run_id>`) while a run is still in progress, the page automatically connects to the live event stream. You will see:
+Open `http://localhost:8000/` (or `/ui/`); it goes to the Ask page. The old chat page address, `/ui/chat.html`, goes there too.
 
-- A **green pulsing dot** labelled "Live" in the top bar while the stream is active.
-- Envelope rows appearing and updating in real time as the orchestrator dispatches tasks.
-- An **apply_to_each counter** showing how many parallel subtasks have been launched.
-- The dot changes to "Completed" or "Failed" when the run finishes and the stream closes.
+### Ask (`/ui/ask.html`)
 
-No page refresh is needed — everything updates automatically.
+- Type the job and press Enter (Shift+Enter makes a new line). While it runs, a progress line says what is happening (planning, choosing a model for a step, writing the answer) with a clock.
+- The answer arrives word by word. Under it is a **receipt**: number of steps, models used (each marked "this machine" with a filled dot or "cloud" with a ring, with its number of calls), time and cost. Cost is the whole run's total from its digest, steps' own runs included. The receipt does **not** show an "estimate on the top model" figure: by planner ruling 18 that figure (BORG's own tokens priced at the flagship) is not what one top model would have cost, and it stays off the page until its replacement exists.
+- **See how it was done** opens the run. The thumbs record a rating (`POST /runs/{id}/rating`).
+- **Add documents (folder)** sends a folder, relative to `BORG_DOCS_ROOT`, by reference (`"documents": {"folder": "..."}`). A line beside it says which lane mode is on. With the lane off, documents cannot be added.
+- **Routing** picks a chat alias (see "Chat model aliases").
+- The conversation is kept in this browser (`localStorage`); **Clear chat** empties it. Each turn remembers the lane mode it ran under. The server stores no chat history: the page resends earlier turns with each question, **except turns asked under `all_local`, which are resent only while the mode is still `all_local`**. Under any other mode they stay on screen and are never sent again. If the page cannot read the lane mode, it treats the turn as `all_local`. Other clients of `POST /v1/chat/completions` send their own history and must apply this rule themselves.
 
-## Streaming Chat
+### Run (`/ui/run.html?id=<run_id>`)
 
-The Chat page (`/ui/chat.html`) now streams tokens progressively as the model generates them. Text appears word by word instead of waiting for the full response. The **View run trace** link still appears after each reply, and the rating buttons (👍/👎) work as before.
+- **Header:** what was asked, status, and four totals: cost (the run's digest; before it exists, "cost so far" from this run's logged calls), time, steps (and model calls), and calls that left this machine (from the lane's record when there is one, otherwise the calls to cloud models in this run). A failed run shows its `failure_reason` in plain words with its code.
+- **Plan:** a diagram drawn from the run's steps: Plan, then the steps in columns by what they depend on (`depends_on`, `inputs_ref`, `source`, a skill's `*_ref`), then Compose. An `apply_to_each` step is one node with its item count. A step that ran as its own run links to that run; its cost is already inside this run's total. While the run is going, the page follows `/runs/{id}/stream` and redraws as steps finish.
+- **Select a step** to see its model (this machine or cloud), kind of work and tier, the score it needed, cost, time and tokens, whether its input left this machine, why it failed (plain words), and **Why this model**: the candidates that cleared the bar, cheapest first, with their estimated cost (estimates made before the step ran). The raw record is behind **Details**.
+- **What happened:** the run's events as sentences, with the time since the start.
+- **What left this machine** (when the lane is on or the run has a record of requests): every request sent off this machine, where it went and what it was. The exact text of each request is shown to the admin only.
+
+### Runs (`/ui/runs.html`)
+
+The history of runs, newest first, with status and rating. Direct-to-model questions (bypass runs) are left out unless **Include direct-to-model questions** is ticked.

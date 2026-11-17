@@ -1,8 +1,9 @@
 """Round-3 Slice 2 — UX fixes.
 
-BUG-021 — chat.html includes marked + DOMPurify and a safe renderMd helper
+BUG-021 — the Ask page (ui/ask.html, which replaced chat.html in 4.2) renders
+          answers through Borg.markdown (marked + DOMPurify)
 BUG-018 — _poll_stage_events surfaces orchestrator_decision rows as stage events
-BUG-019 — chat.html persists the thread to localStorage and reloads on page load
+BUG-019 — the Ask page persists the thread to localStorage and reloads on page load
 
 The HTML-side BUG-021 / BUG-019 changes are exercised via a shape-check
 on the file (the JS doesn't have a test runner here — but we can grep
@@ -25,59 +26,46 @@ from src.logging.writer import write_event
 
 
 # ============================================================
-# BUG-021 — chat.html shape contract
+# BUG-021 / BUG-019 / BUG-018 — the Ask page contract
+# (ui/chat.html was archived by work order 4.2; ui/ask.html replaces it)
 # ============================================================
 
-def test_chat_html_contains_markdown_renderer():
-    """TC-BUG-021 — marked + DOMPurify CDN + renderMd helper present."""
-    chat = Path("ui/chat.html").read_text(encoding="utf-8")
-    assert "marked.min.js" in chat, "marked CDN script missing"
-    assert "purify.min.js" in chat, "DOMPurify CDN script missing"
-    assert "function renderMd(" in chat, "renderMd helper missing"
-    assert "DOMPurify.sanitize" in chat, "renderMd doesn't sanitize"
-    # User bubbles must stay literal — operator's pasted markdown shouldn't
-    # become headings before they hit Send.
-    assert "div.textContent = content" in chat, (
-        "user-bubble path must stay textContent (BUG-021 verified_fix)"
-    )
+ASK = Path("ui/ask.html")
 
 
-def test_chat_html_renders_assistant_with_innerhtml():
-    """TC-BUG-021-B — assistant bubble path uses renderMd→innerHTML."""
-    chat = Path("ui/chat.html").read_text(encoding="utf-8")
-    # The streaming update site and the final assignment both use renderMd.
-    assert "thinkingDiv.innerHTML = renderMd(fullText)" in chat
+def test_ask_html_renders_markdown_only_through_the_sanitiser():
+    """TC-BUG-021 — vendored marked + DOMPurify, answers through Borg.markdown,
+    user bubbles stay literal text."""
+    page = ASK.read_text(encoding="utf-8")
+    assert 'src="assets/vendor/marked.min.js"' in page
+    assert 'src="assets/vendor/purify.min.js"' in page
+    assert "B.markdown(" in page
+    # Every innerHTML assignment takes Borg.markdown output, nothing else.
+    for line in page.splitlines():
+        if ".innerHTML" in line:
+            assert "= B.markdown(" in line, line
+    # User bubbles: built with text, never markdown.
+    assert "h('div', { class: 'bubble' }, text)" in page
+    app = Path("ui/assets/app.js").read_text(encoding="utf-8")
+    assert "DOMPurify.sanitize" in app
 
 
-# ============================================================
-# BUG-019 — localStorage persistence contract
-# ============================================================
-
-def test_chat_html_persists_thread():
-    """TC-BUG-019 — chat.html persists `thread` and `renderedTurns` to
-    localStorage, restores on load, and exposes a Clear button."""
-    chat = Path("ui/chat.html").read_text(encoding="utf-8")
-    assert "localStorage.setItem(THREAD_KEY" in chat
-    assert "localStorage.getItem(THREAD_KEY" in chat
-    assert "function persistThread" in chat
-    assert "function loadPersistedThread" in chat
-    assert "loadPersistedThread()" in chat, "load helper must run on page load"
-    assert "id=\"clear-btn\"" in chat, "Clear button must be present"
+def test_ask_html_persists_history_in_local_storage_with_the_lane_tag():
+    """TC-BUG-019 — the thread survives a reload; each turn carries its lane mode."""
+    page = ASK.read_text(encoding="utf-8")
+    assert "B.storage.get('localStorage', KEY)" in page
+    assert "B.storage.set('localStorage', KEY" in page
+    assert "lane: tag" in page
+    assert "W.historyForMode(turns, laneMode)" in page
+    assert 'id="clear"' in page, "Clear button must be present"
 
 
-# ============================================================
-# BUG-018 — stage indicator + poll helper
-# ============================================================
-
-def test_chat_html_has_stage_indicator():
-    """TC-BUG-018-A — chat.html attaches a stage indicator with a
-    wall-clock counter and recognizes `chunk.event === 'stage'` payloads."""
-    chat = Path("ui/chat.html").read_text(encoding="utf-8")
-    assert "function attachStageIndicator" in chat
-    assert "chunk.event === 'stage'" in chat
-    # Wall-clock counter must tick (setInterval driving a clock element).
-    assert "setInterval" in chat
-    assert "clock" in chat
+def test_ask_html_has_stage_indicator():
+    """TC-BUG-018-A — stage events update a progress line with a ticking clock."""
+    page = ASK.read_text(encoding="utf-8")
+    assert "chunk.event === 'stage'" in page
+    assert "function stageLine" in page
+    assert "setInterval" in page
 
 
 @pytest.mark.asyncio
