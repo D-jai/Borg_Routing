@@ -1,0 +1,8 @@
+Dear support,
+
+Uploads above 20 MB fail with a timeout message.
+I already searched your help pages first.
+We cannot work properly until this is fixed, please act today.
+
+Thank you,
+Mei

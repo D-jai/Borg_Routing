@@ -1,0 +1,7 @@
+Hello support team,
+
+Your API returns error 500 on the items endpoint (request 70886).
+URGENT: our whole business is stopped, I need help right now.
+
+Kind regards,
+Aiko

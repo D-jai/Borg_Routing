@@ -1,0 +1,7 @@
+Dear support,
+
+Uploads above 20 MB fail with a timeout message.
+No rush at all, whenever you get a chance.
+
+Thanks,
+Hana

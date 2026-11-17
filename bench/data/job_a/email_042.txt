@@ -1,0 +1,7 @@
+Dear support,
+
+Uploads above 20 MB fail with a timeout message.
+Nothing time critical, reply when convenient.
+
+Regards,
+Leila

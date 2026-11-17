@@ -1,0 +1,7 @@
+Good morning,
+
+Your API returns error 500 on the items endpoint (request 63151).
+A reply within the week would be fine.
+
+Kind regards,
+Callum

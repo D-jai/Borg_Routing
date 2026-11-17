@@ -1,0 +1,7 @@
+Good morning,
+
+Uploads above 20 MB fail with a timeout message.
+URGENT: we are losing money every hour until this is fixed.
+
+Thank you,
+Callum

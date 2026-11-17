@@ -1,0 +1,7 @@
+Dear support,
+
+Uploads above 20 MB fail with a timeout message.
+This is blocking my team today, please prioritise it.
+
+Best,
+Tomas

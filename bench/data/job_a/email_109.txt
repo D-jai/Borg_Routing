@@ -1,0 +1,7 @@
+Dear support,
+
+Your API returns error 500 on the items endpoint (request 48800).
+This is blocking my team today, please prioritise it.
+
+Thank you,
+Aiko

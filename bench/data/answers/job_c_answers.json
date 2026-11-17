@@ -1,0 +1,74 @@
+{
+ "job": "C",
+ "questions": [
+  "On what date does the Tamarack pilot end?",
+  "How many loading bays does the Kessler Falls depot have?",
+  "Who is the group compliance contact for regulatory filings?",
+  "What is the approved budget for Project Osprey?",
+  "For how many days must audit logs be kept?",
+  "Which vendor will supply the refrigeration units for the new cold store?",
+  "What is the code word for an emergency shutdown?",
+  "How often is the Pell Harbour crane inspected?",
+  "Do the documents contradict each other anywhere? If so, name each topic and quote the two conflicting values."
+ ],
+ "facts": [
+  {
+   "question": "On what date does the Tamarack pilot end?",
+   "answer": "14 March 2027",
+   "doc": "doc_03_safety_and_compliance_handbook.md"
+  },
+  {
+   "question": "How many loading bays does the Kessler Falls depot have?",
+   "answer": "412 loading bays",
+   "doc": "doc_05_warehouse_network_overview.md"
+  },
+  {
+   "question": "Who is the group compliance contact for regulatory filings?",
+   "answer": "Ingrid Vassallo",
+   "doc": "doc_06_supplier_relations_memo.md"
+  },
+  {
+   "question": "What is the approved budget for Project Osprey?",
+   "answer": "US$3.85 million",
+   "doc": "doc_07_project_osprey_charter.md"
+  },
+  {
+   "question": "For how many days must audit logs be kept?",
+   "answer": "2,317 days",
+   "doc": "doc_09_training_and_staffing_plan.md"
+  },
+  {
+   "question": "Which vendor will supply the refrigeration units for the new cold store?",
+   "answer": "Brannock Cryogenics",
+   "doc": "doc_10_quality_audit_summary.md"
+  },
+  {
+   "question": "What is the code word for an emergency shutdown?",
+   "answer": "juniper-lantern",
+   "doc": "doc_12_customer_service_review.md"
+  },
+  {
+   "question": "How often is the Pell Harbour crane inspected?",
+   "answer": "every 19 days",
+   "doc": "doc_14_risk_register_narrative.md"
+  }
+ ],
+ "contradictions": [
+  {
+   "topic": "Kessler Falls depot opening year",
+   "doc_a": "doc_02_quarterly_operations_report_q2.md",
+   "value_a": "2011",
+   "doc_b": "doc_11_facilities_maintenance_log.md",
+   "value_b": "2014"
+  },
+  {
+   "topic": "Project Osprey steering committee size",
+   "doc_a": "doc_07_project_osprey_charter.md",
+   "value_a": "seven members",
+   "doc_b": "doc_13_expansion_planning_paper.md",
+   "value_b": "nine members"
+  }
+ ],
+ "chars": 595227,
+ "approx_tokens": 148806
+}
