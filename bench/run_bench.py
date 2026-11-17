@@ -1035,8 +1035,8 @@ async def _one_attempt(spec: RunSpec, job: dict, conf: dict, cfg: Config, matrix
         rec["failure_kind"] = "transport" if llm.is_transport_exception(exc) else "other"
     rec.setdefault("routing_config", routing_config(
         cfg, matrix, baseline, rec.get("lane_mode") or conf.get("lane_mode", "n/a (direct call)")))
-    rec["db_path"] = str(db_path) if db_path else None
-    rec["calls_log"] = str(calls_log) if calls_log else None
+    rec["db_path"] = budget.repo_relative(db_path)
+    rec["calls_log"] = budget.repo_relative(calls_log)
     rec["attempt"] = attempt
     logged = budget.logged_dollars(db_path) + budget.calls_log_dollars(calls_log)
     rec["ledger_dollars"] = max(float(rec.get("cost_dollars") or 0.0), logged)
@@ -1418,8 +1418,8 @@ async def run_judge(jobs: dict, cfg: Config, matrix, baseline, chat=llm.chat, lo
                         "cost_dollars": prior_cost + spent["dollars"], "this_call_dollars": spent["dollars"],
                         "reused_pairs": reused, "incomplete_repeats": incomplete})
         results["calls_logs"] = list((stored or {}).get("calls_logs") or
-                                     ([stored["calls_log"]] if stored and stored.get("calls_log") else [])) + [str(calls_log)]
-        results["calls_log"] = str(calls_log)
+                                     ([stored["calls_log"]] if stored and stored.get("calls_log") else [])) + [budget.repo_relative(calls_log)]
+        results["calls_log"] = budget.repo_relative(calls_log)
         cfg.ledger.finish(entry, spent["dollars"])
         cfg.day_dir.mkdir(parents=True, exist_ok=True)
         (cfg.day_dir / f"judge_{name}.json").write_text(json.dumps(results, indent=1) + "\n", encoding="utf-8")

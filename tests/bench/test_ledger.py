@@ -159,3 +159,30 @@ def test_a_second_run_with_the_same_key_gets_a_new_database(cfg):
 def test_run_databases_are_git_ignored():
     lines = (REPO / ".gitignore").read_text(encoding="utf-8").splitlines()
     assert "bench/results/*/dbs/" in lines
+
+
+async def test_paths_written_into_results_and_the_ledger_are_relative_to_the_repo_root(tmp_path, monkeypatch):
+    """Ruling 5.3 review: a result file and a ledger entry hold repo-relative paths; crash recovery resolves them."""
+    monkeypatch.setattr(budget, "REPO_ROOT", tmp_path)
+    root = tmp_path / "bench"
+    (root / "data" / "job_t").mkdir(parents=True)
+    (root / "data" / "answers").mkdir(parents=True)
+    (root / "data" / "job_t" / "a.txt").write_text("Client A.", encoding="utf-8")
+    (root / "data" / "answers" / "t.json").write_text(json.dumps({"answers": {"a.txt": {"risk": "high"}}}),
+                                                      encoding="utf-8")
+    cfg = Config(bench_dir=root, results_root=root / "results", date="2026_01_01", use_docker=False)
+
+    async def fake_borg(job, spec, cfg_, matrix, db_path, baseline=None):
+        fake_logged_db(Path(db_path), 0.4)
+        return {"status": "completed", "cost_dollars": 0.4, "answer": "[]", "models": [], "models_per_step": []}
+
+    monkeypatch.setattr(run_bench, "run_borg", fake_borg)
+    m = three_tier_matrix()
+    rec = await run_bench.execute_run(RunSpec("T", "borg_cloud", 1), {"T": JOB}, cfg, m, run_bench.baseline_model(m))
+    expected = "bench/results/2026_01_01/dbs/T_borg_cloud_1.db"
+    assert json.loads(Path(rec["path"]).read_text(encoding="utf-8"))["db_path"] == expected
+    assert entries(cfg)[0]["db_path"] == expected
+    # the relative path resolves against the repo root, so recovery and stage 2 still find the database
+    assert budget.logged_dollars(expected) == pytest.approx(0.4)
+    # an absolute path (the committed round-1 files) is still read as it is
+    assert budget.logged_dollars(str(tmp_path / expected)) == pytest.approx(0.4)

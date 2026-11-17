@@ -17,6 +17,26 @@ from pathlib import Path
 from typing import Optional
 
 PHASE_CAP_DOLLARS = 20.0
+REPO_ROOT = Path(__file__).resolve().parent.parent
+
+
+def repo_relative(path):
+    """A path as the bench writes it into result files and the ledger: relative to the repo root (forward
+    slashes) when it lies inside the repo, else unchanged. ``None`` stays ``None``."""
+    if not path:
+        return None
+    p = Path(path)
+    try:
+        return p.resolve().relative_to(REPO_ROOT.resolve()).as_posix() if p.is_absolute() else p.as_posix()
+    except ValueError:
+        return str(path)
+
+
+def resolve_path(path) -> Path:
+    """The reverse: a repo-relative path resolved against the repo root (an absolute path, such as those in
+    the round-1 files, is returned as it is)."""
+    p = Path(path)
+    return p if p.is_absolute() else REPO_ROOT / p
 
 
 LOGGED_EVENTS = ("model_call", "orchestrator_decision")  # the rows that carry dollars (as run_bench.read_run_tree)
@@ -28,10 +48,10 @@ def _now() -> str:
 
 def logged_dollars(db_path) -> float:
     """Every dollar logged in a run's database (0.0 if it does not exist or has no log table)."""
-    if not db_path or not Path(db_path).exists():
+    if not db_path or not resolve_path(db_path).exists():
         return 0.0
     try:
-        with sqlite3.connect(str(db_path)) as conn:
+        with sqlite3.connect(str(resolve_path(db_path))) as conn:
             marks = ",".join("?" for _ in LOGGED_EVENTS)
             row = conn.execute(f"SELECT COALESCE(SUM(dollars),0) FROM logs WHERE event_type IN ({marks})",
                                LOGGED_EVENTS).fetchone()
@@ -42,17 +62,17 @@ def logged_dollars(db_path) -> float:
 
 def append_call(calls_log, dollars: float, **info) -> None:
     """One line per paid call outside BORG_ROUTE's database (direct arm, judge)."""
-    path = Path(calls_log)
+    path = resolve_path(calls_log)
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8", newline="\n") as fh:
         fh.write(json.dumps({"dollars": float(dollars), **info}) + "\n")
 
 
 def calls_log_dollars(calls_log) -> float:
-    if not calls_log or not Path(calls_log).exists():
+    if not calls_log or not resolve_path(calls_log).exists():
         return 0.0
     total = 0.0
-    for line in Path(calls_log).read_text(encoding="utf-8").splitlines():
+    for line in resolve_path(calls_log).read_text(encoding="utf-8").splitlines():
         try:
             total += float(json.loads(line).get("dollars") or 0.0)
         except (ValueError, AttributeError):
@@ -105,8 +125,8 @@ class Ledger:
         d = self._read()
         eid = uuid.uuid4().hex[:12]
         d["entries"].append({"id": eid, "key": key, "kind": kind, "date": date,
-                             "db_path": str(db_path) if db_path else None,
-                             "calls_log": str(calls_log) if calls_log else None,
+                             "db_path": repo_relative(db_path),
+                             "calls_log": repo_relative(calls_log),
                              "status": "started", "started_at": _now(), "dollars": 0.0})
         self._write(d)
         return eid
