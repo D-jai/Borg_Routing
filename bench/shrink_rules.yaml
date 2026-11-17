@@ -1,0 +1,11 @@
+# What to shrink when the dry-run estimate for the full matrix is over the limit.
+# Data, not code: the lead can edit it. Steps apply in order; "--shrink-steps N"
+# applies the first N. Job C comes first (its documents are the costly part),
+# then repeats go from three to two.
+estimate_limit_dollars: 14.0
+phase_cap_dollars: 20.0
+steps:
+  - name: "job C: one repeat instead of three"
+    job_repeats: {C: 1}
+  - name: "all jobs: two repeats instead of three (job C stays at one)"
+    repeats: 2

@@ -1,0 +1,21 @@
+# Job A: triage 200 support emails (category and urgency).
+job: A
+title: Triage 200 support emails
+data_folder: job_a                      # under bench/data (BORG_DOCS_ROOT for the run)
+answers_file: answers/job_a_answers.json
+instruction: |
+  Each file in the folder is one customer support email. For every email, assign a category
+  (one of: billing, technical, account_access, shipping, feedback) and an urgency from 1
+  (lowest) to 5 (highest). Return one JSON list with an object {"file": <file name>,
+  "category": <category>, "urgency": <1-5>} for every email, covering all 200 emails, and no other text.
+arms:
+  direct: {}
+  borg_cloud: {lane_mode: by_reference}
+  borg_local_workers: {lane_mode: raw_local, local: true}
+repeats: 3
+est_output_tokens: 9000                 # 200 items of about 40 tokens
+quality:
+  kind: classification
+  key_field: file
+  fields: [category, urgency]
+  win_margin_points: 2                  # accuracy within 2 percentage points
