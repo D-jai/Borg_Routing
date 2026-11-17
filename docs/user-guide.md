@@ -362,6 +362,8 @@ What you see:
 - **Planner or compose call retried:** the run carries on. The trace's `orchestrator_decision` event for that call shows `"length_retry": true` and `"code": "BRT-ORC-018"`, and its token counts are the two attempts added together.
 - **A step still cut off:** the step fails with **BRT-ANS-009**. The message says either "even after one retry at double the cap (A -> B)" or "no retry", so you know which happened. Raise `ANSWERER_MAX_TOKENS` in `.env` or split the request into smaller pieces.
 
+**Per-call timeouts.** One step call may take `BORG_ANSWERER_CALL_TIMEOUT` seconds (default 120, else **BRT-ANS-006**) and one planner or compose call `BORG_ORCHESTRATOR_CALL_TIMEOUT` seconds (default 180, else **BRT-ORC-001**); both are read at each call, and a value that is not a positive number is ignored with a warning in the log.
+
 ---
 
 <!-- Added: 2026-04-18 — Slice 3: Recursion + Admin + Resume + Threads -->

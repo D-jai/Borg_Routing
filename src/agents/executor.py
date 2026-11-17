@@ -61,7 +61,7 @@ from src.registry.cost import price_with_baseline
 from src.registry.model_call import resolve_model_call
 from src.registry.models import ModelInfo
 
-_MODEL_CALL_TIMEOUT_SEC = 120
+_MODEL_CALL_TIMEOUT_SEC = 120   # default; BORG_ANSWERER_CALL_TIMEOUT overrides it per call
 # A "{slot}" in the answerer stage prompt (JSON examples there never match).
 _STAGE_SLOT = re.compile(r"\{(\w+)\}")
 
@@ -161,10 +161,12 @@ async def _post_chat_completion(
         ValueError: BRT-ANS-006 on timeout, BRT-ANS-002 on HTTP/transport error.
         LaneError: BRT-LANE-003 when a call that must stay local is not local.
     """
+    from src.orchestrator.engine import call_timeout_from_env  # noqa: PLC0415  (engine imports this module)
+
     try:
         resp = await send_outbound(
             url, payload, headers,
-            timeout=_MODEL_CALL_TIMEOUT_SEC,
+            timeout=call_timeout_from_env("BORG_ANSWERER_CALL_TIMEOUT", _MODEL_CALL_TIMEOUT_SEC),
             model=model,
             must_stay_local=must_stay_local,
             purpose="answerer",

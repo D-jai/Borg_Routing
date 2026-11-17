@@ -115,7 +115,7 @@ from src.skills.library import SkillLibrary
 
 MAX_LOOPS = 10
 MAX_DEPTH = 5
-_MODEL_CALL_TIMEOUT = 180
+_MODEL_CALL_TIMEOUT = 180   # default; BORG_ORCHESTRATOR_CALL_TIMEOUT overrides it per call
 _MATRIX_PATH = "data/capability_matrix.yaml"
 _SKILLS_PATH = "data/skills.yaml"
 
@@ -286,6 +286,26 @@ def _is_reasoning_model(model: ModelInfo) -> bool:
         return True
     mid = model.model_id or ""
     return any(pat.search(mid) for pat in _REASONING_MODEL_PATTERNS)
+
+
+def call_timeout_from_env(env_var: str, default: float) -> float:
+    """Seconds one model call may take: ``env_var`` when it is a positive finite number, else ``default``.
+
+    Read at call time, so a changed environment applies to the next call. An invalid value (not a number,
+    zero, negative, nan or inf) is never guessed at: the default is used and a warning is logged.
+    Used for ``BORG_ORCHESTRATOR_CALL_TIMEOUT`` (default 180) and ``BORG_ANSWERER_CALL_TIMEOUT`` (default 120).
+    """
+    raw = os.getenv(env_var)
+    if raw is None or raw.strip() == "":
+        return default
+    try:
+        value = float(raw)
+    except ValueError:
+        value = float("nan")
+    if not math.isfinite(value) or value <= 0:
+        logger.warning("%s=%r is not a positive number of seconds; using the default %s s", env_var, raw, default)
+        return default
+    return value
 
 
 def _resolve_max_tokens_for_model(
@@ -813,7 +833,7 @@ async def _invoke_orchestrator_model(
             with call_scope(run_id):
                 resp = await send_outbound(
                     url, payload, headers,
-                    timeout=_MODEL_CALL_TIMEOUT,
+                    timeout=call_timeout_from_env("BORG_ORCHESTRATOR_CALL_TIMEOUT", _MODEL_CALL_TIMEOUT),
                     model=orchestrator_model,
                     must_stay_local=lane is not None and lane.all_local,
                     purpose=f"orchestrator:{mode}",
