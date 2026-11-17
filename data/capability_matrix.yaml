@@ -8,12 +8,12 @@
   throughput_tps: 45.0
   task_scores:
     reasoning: 9.8
-    coding: 9.7
+    coding: 9.8
     summarize: 9.5
-    writing: 9.5
-    roleplay: 9.0
-    agentic: 9.7
-    extraction: 9.5
+    writing: 9.6
+    roleplay: 9.4
+    agentic: 9.8
+    extraction: 9.4
   specialty_tags:
   - frontier
   - heavy_composer
@@ -58,13 +58,13 @@
     output_per_token: 2.5e-06
   throughput_tps: 50.0
   task_scores:
-    reasoning: 9.5
-    coding: 9.2
-    summarize: 9.0
+    reasoning: 9.4
+    coding: 9.0
+    summarize: 8.8
     writing: 9.0
-    roleplay: 9.2
-    agentic: 9.5
-    extraction: 9.0
+    roleplay: 9.5
+    agentic: 9.1
+    extraction: 8.8
   specialty_tags:
   - frontier
   - ultra_long_context
@@ -83,13 +83,13 @@
     output_per_token: 1.5e-05
   throughput_tps: 70.0
   task_scores:
-    reasoning: 9.0
-    coding: 9.3
-    summarize: 9.0
-    writing: 9.0
-    roleplay: 8.5
+    reasoning: 9.1
+    coding: 9.2
+    summarize: 9.3
+    writing: 9.5
+    roleplay: 9.0
     agentic: 9.0
-    extraction: 9.0
+    extraction: 9.2
   specialty_tags:
   - mid_flagship
   - long_context
@@ -111,13 +111,13 @@
     output_per_token: 1.2e-05
   throughput_tps: 80.0
   task_scores:
-    reasoning: 9.0
-    coding: 8.8
-    summarize: 9.0
-    writing: 8.8
-    roleplay: 8.0
-    agentic: 8.8
-    extraction: 9.0
+    reasoning: 9.7
+    coding: 9.3
+    summarize: 9.4
+    writing: 9.1
+    roleplay: 8.6
+    agentic: 9.4
+    extraction: 9.7
   specialty_tags:
   - mid_flagship
   - long_context
@@ -136,13 +136,13 @@
     output_per_token: 2.5e-06
   throughput_tps: 55.0
   task_scores:
-    reasoning: 9.2
-    coding: 9.0
-    summarize: 8.5
-    writing: 8.0
-    roleplay: 7.5
-    agentic: 9.0
-    extraction: 8.5
+    reasoning: 8.7
+    coding: 8.3
+    summarize: 8.2
+    writing: 7.9
+    roleplay: 7.6
+    agentic: 8.8
+    extraction: 8.1
   specialty_tags:
   - reasoning_trace
   - mid_heavy
@@ -164,13 +164,13 @@
     output_per_token: 1.4e-05
   throughput_tps: 60.0
   task_scores:
-    reasoning: 8.5
-    coding: 9.4
-    summarize: 8.0
-    writing: 7.5
-    roleplay: 6.5
-    agentic: 9.0
-    extraction: 8.5
+    reasoning: 9.6
+    coding: 10.0
+    summarize: 9.1
+    writing: 8.8
+    roleplay: 8.4
+    agentic: 10.0
+    extraction: 9.0
   specialty_tags:
   - coding_specialist
   params_b: null
@@ -187,13 +187,13 @@
     output_per_token: 3.8e-07
   throughput_tps: 70.0
   task_scores:
-    reasoning: 8.3
+    reasoning: 8.8
     coding: 8.7
-    summarize: 8.0
-    writing: 7.8
-    roleplay: 7.0
-    agentic: 8.0
-    extraction: 8.0
+    summarize: 8.3
+    writing: 8.1
+    roleplay: 7.9
+    agentic: 8.6
+    extraction: 8.2
   specialty_tags:
   - cheap_strong
   - coding_strong
@@ -235,13 +235,13 @@
     output_per_token: 1.25e-06
   throughput_tps: 180.0
   task_scores:
-    reasoning: 7.0
-    coding: 7.5
-    summarize: 7.8
-    writing: 7.0
-    roleplay: 6.0
-    agentic: 7.0
-    extraction: 7.5
+    reasoning: 8.2
+    coding: 8.8
+    summarize: 8.0
+    writing: 7.8
+    roleplay: 7.4
+    agentic: 8.9
+    extraction: 8.0
   specialty_tags:
   - ultra_cheap
   - fast
@@ -259,13 +259,13 @@
     output_per_token: 1.5e-06
   throughput_tps: 200.0
   task_scores:
-    reasoning: 7.0
-    coding: 7.0
-    summarize: 7.8
-    writing: 7.0
-    roleplay: 6.5
-    agentic: 7.0
-    extraction: 7.5
+    reasoning: 8.4
+    coding: 7.8
+    summarize: 8.5
+    writing: 8.0
+    roleplay: 7.8
+    agentic: 7.5
+    extraction: 8.8
   specialty_tags:
   - ultra_cheap
   - long_context
