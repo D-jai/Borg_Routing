@@ -540,12 +540,28 @@ async def run_borg(job: dict, spec: RunSpec, cfg: Config, matrix) -> dict:
     return record
 
 
+class _DirectCut(Exception):
+    """A direct-arm answer that is empty or still cut off after the retry: the run is "failed"."""
+
+
+def direct_caps(model, est_output_tokens: int) -> tuple[int, Optional[int]]:
+    """The direct arm's ``(first_cap, retry_cap)``: BORG answerers' policy, with the job's expected
+    output as the floor (the role a step's ``max_output_tokens`` plays inside BORG_ROUTE)."""
+    return llm.answerer_caps(model, est_output_tokens)
+
+
 async def run_direct(job: dict, spec: RunSpec, cfg: Config, baseline, chat=llm.chat) -> dict:
-    """The direct arm: the same text, one call to the baseline model, or the fewest calls that fit."""
+    """The direct arm: the same text, one call to the baseline model, or the fewest calls that fit.
+
+    Every call follows BORG answerers' cap policy (``direct_caps``): one retry at the
+    retry cap on ``finish_reason == "length"``. An answer that is empty or still cut
+    off makes the run "failed"; its dollars are kept.
+    """
     instr = instruction_of(job, cfg)
     units = data_units(job, cfg)
     out = int(job.get("est_output_tokens", 4000))
-    max_tokens = min(max(out * 3, 4000), 32000)
+    first_cap, retry_cap = direct_caps(baseline, out)
+    max_tokens = retry_cap or first_cap  # room is kept for the larger of the two attempts
     room = max(1, int(baseline.context_length * DIRECT_CONTEXT_SHARE) - max_tokens - tokens_of(instr))
     chunks: list[list[tuple[str, str]]] = []
     cur: list[tuple[str, str]] = []
@@ -565,13 +581,28 @@ async def run_direct(job: dict, spec: RunSpec, cfg: Config, baseline, chat=llm.c
     answers: list[str] = []
     status, error = "completed", None
     t0 = time.monotonic()
+
+    async def call(step: str, text: str) -> str:
+        nonlocal tin, tout, dollars
+        try:
+            r = await llm.chat_capped(baseline, system, text, out, send=chat)
+        except llm.ChatError as exc:
+            dollars += exc.dollars
+            raise
+        tin += r["tokens_in"]; tout += r["tokens_out"]; dollars += r["dollars"]
+        steps.append({"step": step, "chosen": baseline.model_id, "dollars": r["dollars"],
+                      "finish_reason": r["finish_reason"], "attempts": r["attempts"]})
+        if r["finish_reason"] == "length":
+            raise _DirectCut(f"{step}: answer still cut off at max_tokens={r['attempts'][-1]['max_tokens']} "
+                             "(finish_reason=length) after the retry")
+        if not r["content"].strip():
+            raise _DirectCut(f"{step}: empty answer (finish_reason={r['finish_reason'] or 'none'})")
+        return r["content"]
+
     try:
         for i, chunk in enumerate(chunks, 1):
             body = instr + ("\n\n" + "\n".join(unit_text(*u) for u in chunk) if chunk else "")
-            r = await chat(baseline, system, body, max_tokens)
-            answers.append(r["content"])
-            tin += r["tokens_in"]; tout += r["tokens_out"]; dollars += r["dollars"]
-            steps.append({"step": f"direct_call_{i}", "chosen": baseline.model_id, "dollars": r["dollars"]})
+            answers.append(await call(f"direct_call_{i}", body))
         if len(answers) == 1:
             final = answers[0]
         elif (job.get("quality") or {}).get("kind") == "classification":
@@ -585,11 +616,8 @@ async def run_direct(job: dict, spec: RunSpec, cfg: Config, baseline, chat=llm.c
                 "These are the partial answers, one per part. Combine them into one final answer to the instruction.\n\n"
                 + "\n\n".join(f"--- PART {i} ---\n{a}" for i, a in enumerate(answers, 1))
             )
-            r = await chat(baseline, system, merge_prompt, max_tokens)
-            final = r["content"]
-            tin += r["tokens_in"]; tout += r["tokens_out"]; dollars += r["dollars"]
-            steps.append({"step": "direct_merge", "chosen": baseline.model_id, "dollars": r["dollars"]})
-    except llm.ChatError as exc:
+            final = await call("direct_merge", merge_prompt)
+    except (llm.ChatError, _DirectCut) as exc:
         status, error, final = "failed", str(exc), "\n".join(answers)
     return {
         "status": status,

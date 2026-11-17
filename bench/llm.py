@@ -58,3 +58,55 @@ async def chat(model, system: str, user: str, max_tokens: int, timeout: float = 
         "finish_reason": (choice.get("finish_reason") or "").strip(),
         "model": model.model_id,
     }
+
+
+def answerer_caps(model, requested_max_tokens=None) -> tuple[int, "int | None"]:
+    """``(first_cap, retry_cap)``: BORG_ROUTE's own answerer cap policy, reused, not copied.
+
+    ``src.agents.executor._answerer_caps``: ``ANSWERER_MAX_TOKENS`` (4x, at least
+    8000, for reasoning-family models) with ``requested_max_tokens`` as a floor;
+    the retry cap is double that, at most 16000, or None when the first cap is
+    already at the ceiling.
+    """
+    from src.agents.executor import _answerer_caps  # noqa: PLC0415  (pure function, no side effects)
+
+    return _answerer_caps(model, requested_max_tokens)
+
+
+async def chat_capped(model, system: str, user: str, requested_max_tokens=None, send=None) -> dict:
+    """One call under the answerer cap policy: one retry at the retry cap on ``finish_reason == "length"``.
+
+    Returns ``chat``'s fields summed over the attempts, the final ``finish_reason``
+    and ``attempts`` (``max_tokens``, tokens, dollars and ``finish_reason`` of each).
+    A ChatError on the retry carries the first attempt's dollars too.
+    """
+    send = send or chat
+    first_cap, retry_cap = answerer_caps(model, requested_max_tokens)
+    attempts = []
+    r = await send(model, system, user, first_cap)
+    attempts.append(_attempt(first_cap, r))
+    if (r.get("finish_reason") or "") == "length" and retry_cap is not None:
+        try:
+            r = await send(model, system, user, retry_cap)
+        except ChatError as exc:
+            raise ChatError(str(exc), dollars=attempts[0]["dollars"] + exc.dollars) from exc
+        attempts.append(_attempt(retry_cap, r))
+    return {
+        "content": r.get("content") or "",
+        "tokens_in": sum(a["tokens_in"] for a in attempts),
+        "tokens_out": sum(a["tokens_out"] for a in attempts),
+        "dollars": sum(a["dollars"] for a in attempts),
+        "finish_reason": (r.get("finish_reason") or "").strip(),
+        "attempts": attempts,
+        "model": model.model_id,
+    }
+
+
+def _attempt(cap: int, r: dict) -> dict:
+    return {
+        "max_tokens": cap,
+        "tokens_in": int(r.get("tokens_in") or 0),
+        "tokens_out": int(r.get("tokens_out") or 0),
+        "dollars": float(r.get("dollars") or 0.0),
+        "finish_reason": (r.get("finish_reason") or "").strip(),
+    }
