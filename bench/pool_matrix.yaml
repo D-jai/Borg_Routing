@@ -299,3 +299,61 @@
   notes: Web-search enabled. Default SCORING_MODEL for the Get Info feature.
   checked: false
   remote: false
+- model_id: openrouter/anthropic/claude-opus-5.5
+  source: openrouter
+  endpoint: https://openrouter.ai/api
+  context_length: 1000000
+  pricing:
+    input_per_token: 4.0e-06
+    output_per_token: 2.0e-05
+  throughput_tps: null
+  task_scores: {}
+  specialty_tags:
+  - frontier
+  - bench_baseline
+  params_b: null
+  publisher: anthropic
+  notes: Bench baseline (direct arm) only, ruling 12. Price and context from the live
+    OpenRouter models list, checked 17-Nov-2026. Not scored, not checked, not in the
+    BORG pool.
+  checked: false
+  remote: false
+- model_id: openrouter/qwen/qwen4-max
+  source: openrouter
+  endpoint: https://openrouter.ai/api
+  context_length: 1000000
+  pricing:
+    input_per_token: 1.425e-06
+    output_per_token: 4.275e-06
+  throughput_tps: null
+  task_scores: {}
+  specialty_tags:
+  - bench_judge
+  params_b: null
+  publisher: qwen
+  notes: Bench judge for job C only, ruling 11 (its vendor has no model in the pool
+    and is not the baseline's). Price and context from the live OpenRouter models
+    list, checked 17-Nov-2026. Not scored, not checked, not in the BORG pool.
+  checked: false
+  remote: false
+- model_id: ollama/llama3.2:3b
+  source: ollama
+  endpoint: http://localhost:11434
+  context_length: 16384
+  pricing: null
+  throughput_tps: null
+  task_scores:
+    reasoning: 4.6
+    coding: 4.2
+    summarize: 7.1
+    writing: 6.1
+    roleplay: 5.4
+    agentic: 4.8
+    extraction: 6.8
+  specialty_tags: []
+  params_b: null
+  publisher: null
+  notes: 'Bench row: context_length set to the server''s OLLAMA_CONTEXT_LENGTH=16384
+    (17-Nov-2026).'
+  checked: false
+  remote: false

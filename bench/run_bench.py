@@ -14,9 +14,10 @@ Each run writes ``bench/results/<YYYY_MM_DD>/<job>_<arm>_<n>.json``. Spend is
 kept in ``bench/results/spend.json`` from the logged dollars of each run, and a
 run is refused if that sum plus the run's estimate would pass US$20.
 
-Local arms (``borg_local_workers``, and job D's raw_local arm) are fully
-supported, but ``--skip-local`` is on by default in this build: they write a
-result file with status "not run" and the reason, never a number.
+Local arms (``borg_local_workers``: job A, and job D's raw_local arm) run when a
+local model is checked (``--check-model ollama/llama3.2:3b``, ruling 13). With
+``--skip-local``, or with no checked local model, they write a result file with
+status "not run" and the reason, never a number.
 
 Exit codes: 0 ok, 1 dry-run estimate over the limit, 2 setup problem, 3 a run
 was refused by the budget guard, 4 a run failed.
@@ -45,12 +46,9 @@ import yaml  # noqa: E402
 from bench import budget, checks, facts, judge, llm  # noqa: E402
 
 BENCH_DIR = REPO_ROOT / "bench"
+DEFAULT_MATRIX = BENCH_DIR / "pool_matrix.yaml"   # the bench's own matrix (3.1 ruling); never written
 
-LOCAL_NOT_RUN_REASON = (
-    "local arm not run in this build: the local model could not be loaded "
-    "(Ollama in Docker, qwen3:4b, timed out twice in work order 3.1, 17-Nov-2026). "
-    "No number is recorded."
-)
+LOCAL_NOT_RUN_REASON = "local arm skipped with --skip-local. No number is recorded."
 
 # Rough conversion used only for estimates.
 CHARS_PER_TOKEN = 3.5   # conservative: filler text with many numbers tokenises densely
@@ -80,7 +78,7 @@ class Config:
     bench_dir: Path = BENCH_DIR
     results_root: Path = BENCH_DIR / "results"
     date: str = field(default_factory=lambda: datetime.now().strftime("%Y_%m_%d"))
-    skip_local: bool = True
+    skip_local: bool = False   # ruling 13: the local model serves; the local arms run
     use_docker: bool = True
     max_run_seconds: int = 1500
     judge_model_ids: list[str] = field(default_factory=list)
@@ -124,12 +122,18 @@ def load_jobs(jobs_dir: Path) -> dict[str, dict]:
     return jobs
 
 
+def _refuse_save() -> None:
+    raise RuntimeError("the bench matrix is an in-memory copy and is never saved")
+
+
 def load_matrix(extra_checked: list[str] = (), path: Optional[Path] = None):
-    """The capability matrix read from disk, with extra rows checked in memory only. Never saved."""
+    """The bench matrix (``bench/pool_matrix.yaml`` unless ``path``), with extra rows checked in memory only.
+    Never saved: its ``save`` raises, so neither this file nor data/capability_matrix.yaml can be written."""
     from src.registry.capability_matrix import CapabilityMatrix
 
-    matrix = CapabilityMatrix(str(path or REPO_ROOT / "data" / "capability_matrix.yaml"))
+    matrix = CapabilityMatrix(str(path or DEFAULT_MATRIX))
     matrix.load()
+    matrix.save = _refuse_save
     for model_id in extra_checked:
         row = matrix.get(model_id)
         if row is None:
@@ -138,9 +142,16 @@ def load_matrix(extra_checked: list[str] = (), path: Optional[Path] = None):
     return matrix
 
 
-def baseline_model(matrix):
+def baseline_model(matrix, pinned: Optional[str] = None):
+    """The direct arm's model: ``pinned`` (``--baseline``), else ``BASELINE_MODEL_ID`` (read from .env first),
+    else the checked model with the highest reasoning score in the matrix file."""
     from src.registry.cost import select_baseline_model
 
+    if pinned:
+        row = matrix.get(pinned)
+        if row is None:
+            raise ValueError(f"--baseline: '{pinned}' is not in the matrix")
+        return row
     return select_baseline_model(matrix, os.getenv("BASELINE_MODEL_ID"))
 
 
@@ -350,11 +361,11 @@ def prompt_overhead_tokens(job: dict, cfg: Config) -> int:
 
 
 def estimate_run(job: dict, arm: str, cfg: Config, baseline, borg_model=None) -> float:
-    """Upper-bound dollars for one run. Local arms cost 0. The direct arm is priced on the baseline.
+    """Upper-bound dollars for one run. The direct arm is priced on the baseline. Local arms are priced like
+    the cloud BORG arm (their planner and compose steps run on cloud models; local calls cost nothing, so
+    this is an upper bound).
     BORG arms are priced at ``borg_model`` (``borg_price_model``: the dearest checked pool prices; the
     baseline if not given) and pay the answerer system prompt once per item (one item for job B)."""
-    if arm_conf(job, arm).get("local") or arm in LOCAL_ARMS:
-        return 0.0
     if baseline is None:
         raise ValueError("no checked model: nothing to price the estimate with")
     units = data_units(job, cfg)
@@ -904,6 +915,12 @@ def _per_mtok(model) -> str:
     return f"${model.pricing.input_per_token * 1e6:.2f} / ${model.pricing.output_per_token * 1e6:.2f} per MTok"
 
 
+def local_skipped(job: dict, arm: str, cfg: Config, matrix) -> bool:
+    """True when this arm is local and will be written as "not run" (flag, or no checked local model)."""
+    local = bool(arm_conf(job, arm).get("local")) or arm in LOCAL_ARMS
+    return local and (cfg.skip_local or not local_model_available(matrix))
+
+
 def dry_run(jobs, cfg, matrix, baseline, only_jobs, arms_filter, repeats, job_repeats, rules, out=print) -> int:
     if baseline is None:
         out("pre-flight: no checked model in the matrix, so the direct arm has no baseline. Nothing was spent.")
@@ -916,15 +933,28 @@ def dry_run(jobs, cfg, matrix, baseline, only_jobs, arms_filter, repeats, job_re
     limit = float(rules.get("estimate_limit_dollars", budget.ESTIMATE_LIMIT_DOLLARS))
     runs = build_matrix(jobs, only_jobs, arms_filter, repeats, job_repeats)
     pool = borg_price_model(matrix, baseline)
-    est = estimate_matrix(runs, jobs, cfg, baseline, jms, pool)
+
+    def estimate(rs):  # runs written as "not run" spend nothing and are not estimated
+        return estimate_matrix([r for r in rs if not local_skipped(jobs[r.job], r.arm, cfg, matrix)],
+                               jobs, cfg, baseline, jms, pool)
+
+    est = estimate(runs)
 
     out(f"BORG_ROUTE bench: dry run (date {cfg.date}; nothing is sent, nothing is spent)")
+    out(f"matrix               : {matrix._path}  (read only; checks are in memory)")
     out(f"baseline, direct arm : {baseline.model_id}  ({_per_mtok(baseline)})")
     for jm in jms:
         out(f"judge, job C         : {jm.model_id}  ({_per_mtok(jm)})  [in neither arm; vendor '{vendor_of(jm.model_id)}']")
     checked = [m.model_id for m in matrix.all() if m.checked]
     out(f"checked models ({len(checked)}): {', '.join(checked)}")
-    out(f"local arms           : {'NOT RUN in this build (--skip-local); no cost, no numbers' if cfg.skip_local else 'will run if a local model is checked'}")
+    local_models = [m.model_id for m in matrix.all()
+                    if m.checked and m.source in ("ollama", "lmstudio", "custom_key") and not m.remote]
+    if cfg.skip_local:
+        out("local arms           : NOT RUN (--skip-local); no numbers")
+    elif local_models:
+        out(f"local arms           : run on {', '.join(local_models)}; priced like the cloud BORG arm (upper bound)")
+    else:
+        out("local arms           : NOT RUN (no checked local model; check one with --check-model)")
     out(f"job B                : needs Docker and the '{checks.BENCH_IMAGE}' image for every run, else all of job B is void")
     out("")
     out(f"{'job':<4}{'arm':<20}{'lane_mode':<14}{'repeats':<9}{'est $/run':>10}{'est $ total':>13}")
@@ -936,9 +966,8 @@ def dry_run(jobs, cfg, matrix, baseline, only_jobs, arms_filter, repeats, job_re
             rs = [r for r in runs if r.job == name and r.arm == arm]
             if not rs:
                 continue
-            e = est["per_run"][rs[0].key]
-            local = bool(arm_conf(job, arm).get("local"))
-            skipped = local and cfg.skip_local
+            skipped = local_skipped(job, arm, cfg, matrix)
+            e = 0.0 if skipped else est["per_run"][rs[0].key]
             n_skip += len(rs) if skipped else 0
             n_run += 0 if skipped else len(rs)
             lane = arm_conf(job, arm).get("lane_mode", "n/a")
@@ -960,7 +989,7 @@ def dry_run(jobs, cfg, matrix, baseline, only_jobs, arms_filter, repeats, job_re
         o = budget.apply_shrink(rules, i)
         r2 = build_matrix(jobs, only_jobs, arms_filter, o["repeats"] if o["repeats"] is not None else repeats,
                           {**(job_repeats or {}), **o["job_repeats"]})
-        e2 = estimate_matrix(r2, jobs, cfg, baseline, jms, pool)["total"]
+        e2 = estimate(r2)["total"]
         out(f"  {i}. {rules['steps'][i - 1].get('name')}: estimate US${e2:.2f} "
             f"({'within' if e2 <= limit else 'still over'} the limit)")
     return 1
@@ -977,8 +1006,8 @@ def main(argv: Optional[list[str]] = None) -> int:
     ap.add_argument("--arms", help="comma list, e.g. direct,borg_cloud (also enables optional arms such as D's direct)")
     ap.add_argument("--repeats", type=int, help="cap repeats for every job")
     ap.add_argument("--shrink-steps", type=int, default=0, help="apply the first N steps of bench/shrink_rules.yaml")
-    ap.add_argument("--skip-local", action=argparse.BooleanOptionalAction, default=True,
-                    help="write 'not run' for local arms (default on in this build)")
+    ap.add_argument("--skip-local", action=argparse.BooleanOptionalAction, default=False,
+                    help="write 'not run' for local arms (default off since ruling 13)")
     ap.add_argument("--judge-model", action="append", default=[],
                     help="model id for the job C judge (in neither arm, vendor outside both sides); "
                          "give it twice for two-judge mode (one per side's vendor), only when no outside vendor exists")
@@ -990,6 +1019,11 @@ def main(argv: Optional[list[str]] = None) -> int:
     ap.add_argument("--force", action="store_true", help="redo runs whose result file exists")
     ap.add_argument("--date", help="results folder date YYYY_MM_DD (default today)")
     ap.add_argument("--results-root")
+    ap.add_argument("--matrix", default=str(DEFAULT_MATRIX),
+                    help="the bench matrix file (default bench/pool_matrix.yaml); read only, never written")
+    ap.add_argument("--baseline", help="pin the direct arm's model (a row of --matrix; it need not be checked)")
+    ap.add_argument("--env-file", default=str(REPO_ROOT / ".env"),
+                    help=".env read before the baseline is chosen (default the repo's .env)")
     args = ap.parse_args(argv)
 
     os.chdir(REPO_ROOT)  # the matrix, skills and prompts are read by relative path
@@ -1011,16 +1045,20 @@ def main(argv: Optional[list[str]] = None) -> int:
     only = args.jobs.split(",") if args.jobs else None
     arms = args.arms.split(",") if args.arms else None
 
+    from dotenv import load_dotenv
+
+    load_dotenv(args.env_file)  # before the baseline is chosen (BASELINE_MODEL_ID); the key is never printed
     jobs = load_jobs(cfg.jobs_dir)
-    matrix = load_matrix(args.check_model)
-    baseline = baseline_model(matrix)
+    matrix = load_matrix(args.check_model, Path(args.matrix))
+    try:
+        baseline = baseline_model(matrix, args.baseline)
+    except ValueError as exc:
+        print(f"preflight: {exc}. Nothing was spent.")
+        return 2
 
     if args.dry_run:
         return dry_run(jobs, cfg, matrix, baseline, only, arms, repeats, job_repeats, rules)
 
-    from dotenv import load_dotenv
-
-    load_dotenv(REPO_ROOT / ".env")  # the key is never printed
     if not os.getenv("OPENROUTER_API_KEY"):
         print("preflight: OPENROUTER_API_KEY is not set (put it in .env). Nothing was spent.")
         return 2

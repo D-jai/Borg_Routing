@@ -216,11 +216,11 @@ async def test_local_arms_write_not_run_with_the_reason_and_no_number(bench):
     matrix = lane_matrix()  # a local model IS checked: skipping is the flag, not the matrix
     baseline = run_bench.baseline_model(matrix)
     stub = _install_stub(mp)
-    assert cfg.skip_local is True  # on by default
+    cfg.skip_local = True  # the flag (off by default since ruling 13), not the matrix, skips the arm
 
     rec = await run_bench.execute_run(RunSpec("T", "borg_local_workers", 1), JOBS, cfg, matrix, baseline)
     out = _read(cfg, "T_borg_local_workers_1")
-    assert out["status"] == "not run" and "could not be loaded" in out["reason"]
+    assert out["status"] == "not run" and "--skip-local" in out["reason"]
     assert out["cost_dollars"] == 0.0 and out["answer"] is None and out["quality"] is None
     assert out["wall_seconds"] is None and out["tokens"] is None
     assert stub.requests == []
@@ -273,7 +273,9 @@ def test_real_jobs_load_with_the_arms_after_ruling_2():
 
 
 def test_dry_run_prints_the_matrix_and_the_estimate(capsys):
-    rc = run_bench.main(["--dry-run", "--date", "2026_01_01"])
+    empty = Path(tempfile.mkdtemp()) / "empty.env"
+    empty.write_text("", encoding="utf-8")
+    rc = run_bench.main(["--dry-run", "--date", "2026_01_01", "--env-file", str(empty)])
     out = capsys.readouterr().out
     assert rc in (0, 1)
     for row in ("A   direct", "A   borg_cloud", "A   borg_local_workers", "B   direct", "C   borg_cloud",
