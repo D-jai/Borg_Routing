@@ -154,7 +154,7 @@ def _get_matrix() -> CapabilityMatrix:
 
 
 def reload_matrix(matrix: Optional[CapabilityMatrix] = None) -> None:
-    """Make the engine see the API's capability matrix (R2, BUG-023).
+    """Make the engine see the API's capability matrix (R2).
 
     The API (Discover, Get Model Info, the checkbox) and the engine must work
     on one matrix object, or a change made in the UI is not routed until a
@@ -770,7 +770,7 @@ async def _invoke_orchestrator_model(
 
     stage_prompt = _safe_sub(_ORCHESTRATOR_TEMPLATE, subs)
 
-    # BUG-017 — inject the current wall-clock date so reasoning models
+    # Inject the current wall-clock date so reasoning models
     # don't fall back to their training-cutoff year when synthesising
     # time-sensitive web_search queries (e.g. "latest space news today
     # 2024 NASA" issued in 2026). Kimi K2 Thinking and other models
@@ -905,7 +905,7 @@ async def _invoke_orchestrator_model(
     tokens_in = usage.get("prompt_tokens", 0)
     tokens_out = usage.get("completion_tokens", 0)
 
-    # BRT-ORC-018 — orchestrator response truncated by the cap (BUG-012).
+    # BRT-ORC-018 — orchestrator response truncated by the cap.
     # Retry ONCE with the cap doubled (capped at 16k) before falling
     # through to the parse-failure retry path. Without this, a "length"
     # cut produces partial JSON that may or may not parse — and even if
@@ -1021,7 +1021,7 @@ async def _invoke_orchestrator_model(
     # the ~5 % of cases where response_format was ignored or the model
     # leaked prose despite it. Second failure propagates the original
     # BRT-ORC-002 so the run fails with a real reason (now captured by
-    # BUG-002/BRT-PIP-010).
+    # BRT-PIP-010).
     retry_system = system_prompt + (
         "\n\nCRITICAL: Your entire reply must be valid JSON only. "
         "Do not emit prose, markdown, or commentary. Return a single JSON "
@@ -2492,10 +2492,9 @@ async def _orchestrate_run(
         return plan_result["direct_answer"]
 
     if not plan or not plan.get("nodes"):
-        # Graceful fallback to compose. BUG-020 — pre-fix this path
-        # also fell through to a vague "I was unable" string when the
-        # model returned an action-shaped control signal. Now uses
-        # the shared compose-result decoder so action=fail surfaces
+        # Graceful fallback to compose. An action-shaped control signal
+        # from the model no longer ends in a vague "I was unable" string:
+        # this uses the shared compose-result decoder so action=fail surfaces
         # the rationale and action=compose lifts from stage_results.
         compose_result = await _invoke_orchestrator_model(
             mode="compose",
@@ -3144,14 +3143,14 @@ async def _handle_compose_result(
     db_path: str,
     reask=None,
 ) -> str:
-    """The run's final answer from a compose reply (BUG-020; planner ruling
+    """The run's final answer from a compose reply (planner ruling
     20, R2). In order:
 
     1. A final text in the reply is used: ``response``, or (wrong shape,
        logged BRT-ORC-028, no second call) ``direct_answer`` or another
        answer field, a non-string response written out as JSON, or a
        response next to an ``action``.
-    2. ``{"action": "fail"}`` returns its rationale (BUG-020) and marks the
+    2. ``{"action": "fail"}`` returns its rationale and marks the
        run ``answer_kind = "declined"``.
     3. Otherwise compose is asked once more (``reask``, logged BRT-ORC-029)
        and its reply goes through 1 and 2.
@@ -3348,7 +3347,7 @@ def _step_text(out: object) -> Optional[str]:
 
 
 def _salvage_answer_from_stage_results(results: dict) -> Optional[str]:
-    """BUG-020 helper: the answer text of the last resolved step that has
+    """Helper: the answer text of the last resolved step that has
     one (``_step_text``), or None. The compose path now salvages every
     finished step instead (``_salvage_finished_results``, ruling 20); this
     stays for callers that want the single most recent answer text.

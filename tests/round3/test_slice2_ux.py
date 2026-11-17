@@ -1,13 +1,13 @@
 """Round-3 Slice 2 — UX fixes.
 
-BUG-021 — the Ask page (ui/ask.html, which replaced chat.html in 4.2) renders
-          answers through Borg.markdown (marked + DOMPurify)
-BUG-018 — _poll_stage_events surfaces orchestrator_decision rows as stage events
-BUG-019 — the Ask page persists the thread to localStorage and reloads on page load
+- the Ask page (ui/ask.html, which replaced chat.html in 4.2) renders
+  answers through Borg.markdown (marked + DOMPurify)
+- _poll_stage_events surfaces orchestrator_decision rows as stage events
+- the Ask page persists the thread to localStorage and reloads on page load
 
-The HTML-side BUG-021 / BUG-019 changes are exercised via a shape-check
-on the file (the JS doesn't have a test runner here — but we can grep
-the contract). The server-side BUG-018 polling helper has a real
+The HTML-side changes are exercised via a shape-check
+on the file (the JS doesn't have a test runner here, but we can grep
+the contract). The server-side polling helper has a real
 end-to-end async test.
 """
 from __future__ import annotations
@@ -26,7 +26,7 @@ from src.logging.writer import write_event
 
 
 # ============================================================
-# BUG-021 / BUG-019 / BUG-018 — the Ask page contract
+# The Ask page contract
 # (ui/chat.html was archived by work order 4.2; ui/ask.html replaces it)
 # ============================================================
 
@@ -39,7 +39,7 @@ def _ask_page() -> str:
 
 
 def test_ask_html_renders_markdown_only_through_the_sanitiser():
-    """TC-BUG-021 — vendored marked + DOMPurify, answers through Borg.markdown,
+    """vendored marked + DOMPurify, answers through Borg.markdown,
     user bubbles stay literal text."""
     page = _ask_page()
     assert 'src="assets/vendor/marked.min.js"' in page
@@ -56,7 +56,7 @@ def test_ask_html_renders_markdown_only_through_the_sanitiser():
 
 
 def test_ask_html_persists_history_in_local_storage_with_the_lane_tag():
-    """TC-BUG-019 — the thread survives a reload; each turn carries its lane mode."""
+    """the thread survives a reload; each turn carries its lane mode."""
     page = _ask_page()
     assert "B.storage.get('localStorage', KEY)" in page
     assert "B.storage.set('localStorage', KEY" in page
@@ -66,7 +66,7 @@ def test_ask_html_persists_history_in_local_storage_with_the_lane_tag():
 
 
 def test_ask_html_has_stage_indicator():
-    """TC-BUG-018-A — stage events update a progress line with a ticking clock."""
+    """stage events update a progress line with a ticking clock."""
     page = _ask_page()
     assert "chunk.event === 'stage'" in page
     assert "function stageLine" in page
@@ -75,7 +75,7 @@ def test_ask_html_has_stage_indicator():
 
 @pytest.mark.asyncio
 async def test_poll_stage_events_returns_recent_orchestrator_decisions(tmp_path):
-    """TC-BUG-018-B — _poll_stage_events surfaces orchestrator_decision
+    """_poll_stage_events surfaces orchestrator_decision
     rows from the logs table, formatted as {stage, detail} dicts, and
     advances the last_seen_log_id cursor so subsequent polls don't
     re-emit the same events."""
@@ -124,7 +124,7 @@ async def test_poll_stage_events_returns_recent_orchestrator_decisions(tmp_path)
 
 @pytest.mark.asyncio
 async def test_poll_stage_events_is_failure_tolerant(tmp_path):
-    """TC-BUG-018-C — when the DB doesn't exist or the schema is
+    """when the DB doesn't exist or the schema is
     missing, _poll_stage_events returns ([], cursor) rather than
     raising. SSE liveness must never depend on the logs table being
     queryable."""

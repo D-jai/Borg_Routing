@@ -233,7 +233,7 @@ async def _call_model(
     must_stay_local: bool = False,
 ) -> tuple[str, int, int, str]:
     """Call model via OpenAI-compat /v1/chat/completions with auto-retry
-    on `finish_reason == "length"` (BRT-ANS-009 / BUG-009).
+    on `finish_reason == "length"` (BRT-ANS-009).
 
     ``must_stay_local`` (a raw task, or any call in ``all_local``) makes
     every attempt, the retry included, pass the lane's call guard.
@@ -282,7 +282,7 @@ async def _call_model(
         url, headers, payload, **lane_kwargs
     )
 
-    # BRT-ANS-009 — silent-truncation cascade (BUG-009 / BUG-012). When a
+    # BRT-ANS-009 — silent-truncation cascade. When a
     # provider stops because it hit the cap, the visible text is almost
     # always a partial JSON object and BRT-ANS-004 then fires on the
     # unparseable tail. Retry ONCE with the cap doubled so the natural
@@ -452,7 +452,7 @@ async def _execute_answerer(task: WrappedTask, db_path: str) -> InboundEnvelope:
 
     # Call model. _call_model honours task.max_output_tokens as a floor
     # over ANSWERER_MAX_TOKENS and auto-retries once at doubled cap on
-    # finish_reason=="length" (BRT-ANS-009 / BUG-009).
+    # finish_reason=="length" (BRT-ANS-009).
     t0 = time.monotonic()
     call_kwargs = {}
     if lane is not None:

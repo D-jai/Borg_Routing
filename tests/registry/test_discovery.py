@@ -386,7 +386,7 @@ async def test_reconcile_end_to_end_via_discover_all():
 
 @pytest.mark.asyncio
 async def test_discover_all_with_unreachable_lmstudio_seeds_zero_rows():
-    """BUG-007 — when every LM Studio port is unreachable, discover_all
+    """When every LM Studio port is unreachable, discover_all
     must not seed or retain any lmstudio rows as live endpoints."""
     cm = CapabilityMatrix()
     # Seed a pre-existing ghost to prove reconciliation kicks in.

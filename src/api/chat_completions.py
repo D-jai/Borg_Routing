@@ -213,7 +213,7 @@ async def _poll_stage_events(
     db_path: str,
     run_id: Optional[str] = None,
 ) -> tuple[list[dict], int]:
-    """BUG-018 — pull recent orchestrator_decision rows from the logs
+    """Pull recent orchestrator_decision rows from the logs
     table so the SSE layer can surface them as stage transitions.
 
     Returns a list of {stage, detail, ts} dicts and the highest log_id
@@ -286,7 +286,7 @@ async def _stream_orchestration_with_heartbeats(
     word-stream the real response. Comments are ignored by SSE consumers
     but reset their idle timers.
 
-    BUG-018 — between heartbeats we poll the logs table for new
+    Between heartbeats we poll the logs table for new
     orchestrator_decision rows and emit them as stage events. The chat
     UI listens for `chunk.event === 'stage'` and updates a thinking
     indicator in place, so multi-stage runs show real progress instead
@@ -314,7 +314,7 @@ async def _stream_orchestration_with_heartbeats(
                 timeout=heartbeat_every,
             )
         except asyncio.TimeoutError:
-            # BUG-018 — emit stage events found since the last poll;
+            # Emit stage events found since the last poll;
             # fall back to a heartbeat comment when nothing's new so
             # the connection still stays warm.
             events, last_log_id = await _poll_stage_events(

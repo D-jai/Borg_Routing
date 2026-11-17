@@ -114,7 +114,7 @@ def test_pipeline_failure_returns_200_with_error_text(client):
 
     assert resp.status_code == 200
     body = resp.json()
-    # BUG-002 fix: response now carries the real failure reason + run_id so
+    # The response now carries the real failure reason + run_id so
     # users can find the trace, instead of a generic "unable to complete".
     content = body["choices"][0]["message"]["content"].lower()
     assert "brt-pip-002" in content
