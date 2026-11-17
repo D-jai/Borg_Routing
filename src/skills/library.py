@@ -127,8 +127,20 @@ class SkillLibrary:
         max_depth: int = 5,
         level_path: str = "1a",
         trigger_reason: str = "initial_plan",
+        step_output_schema: Optional[dict] = None,
     ) -> WrappedTask:
         """Substitute args into the skill template and return a WrappedTask.
+
+        The step's own fields are honoured without changing the skill
+        (planner ruling 20, R4): an ``extra_fields`` arg (a name -> type or
+        description map, a list of names or ``{name, type, description}``
+        entries, a comma string, or that as a JSON string) and the keys of
+        ``step_output_schema`` (the plan node's own ``output_schema``) that
+        the skill's schema lacks are added to the per-item schema, where the
+        inbound check requires them, and listed in one "Also return" line
+        of the instruction. The skill's own keys always win; a key whose
+        hint is a list or object (an aggregate shape, not a per-item field)
+        is not taken from the node's schema.
 
         Raises:
             RuntimeError: BRT-SKL-003/004 if skill not found.
@@ -199,6 +211,14 @@ class SkillLibrary:
             output_schema = _string_schema(skill_id, output_schema_raw, values)
         else:
             output_schema = _substitute_tree(output_schema_raw, values)
+
+        # R4: the step's own extra fields (never the skill's template).
+        added = _step_fields(
+            skill_id, args.get("extra_fields"), step_output_schema, output_schema
+        )
+        if added:
+            output_schema = _with_fields(output_schema, added)
+            instruction = instruction.rstrip() + "\n" + _also_return_line(added)
 
         # Build side_effects
         side_effects = template.get("side_effects", [])
@@ -511,6 +531,82 @@ def _schema_from_fields(skill_id: str, name: str, value: object) -> dict:
             hint += f" — {f['description']}"
         schema[f["name"]] = hint
     return schema
+
+
+def _schema_keys(schema: object) -> set[str]:
+    """The field names of a flat or JSON-Schema-shaped output schema."""
+    if not isinstance(schema, dict):
+        return set()
+    if isinstance(schema.get("properties"), dict):
+        return set(schema["properties"])
+    return set(schema)
+
+
+def _step_fields(
+    skill_id: str, extra_fields: object, step_schema: object, skill_schema: object,
+) -> dict:
+    """The fields a skill step asks for beyond its skill's schema, name ->
+    hint, in order: ``extra_fields`` first, then the node's own schema.
+
+    Raises:
+        RuntimeError: BRT-SKL-008 when ``extra_fields`` is given but holds a
+            nameless, duplicate or malformed entry (or invalid JSON).
+    """
+    have = _schema_keys(skill_schema)
+    added: dict = {}
+    if extra_fields not in (None, "", [], {}):
+        value = extra_fields
+        if isinstance(value, str):
+            text = value.strip()
+            if text.startswith(("[", "{")):
+                try:
+                    value = json.loads(text)
+                except ValueError as exc:
+                    raise _skl_008(skill_id, f"arg 'extra_fields' is not valid JSON: {exc}")
+            else:
+                value = [v.strip() for v in text.split(",")]
+        for f in _normalise_fields(skill_id, "extra_fields", value):
+            hint = str(f.get("type") or "string").strip()
+            if f.get("description"):
+                hint += f" — {f['description']}"
+            if f["name"] not in have:
+                added[f["name"]] = hint
+    if isinstance(step_schema, dict):
+        props = step_schema.get("properties")
+        entries = props if isinstance(props, dict) else step_schema
+        for name, hint in entries.items():
+            name = str(name).strip()
+            if not name or name in have or name in added:
+                continue
+            if isinstance(hint, dict) and isinstance(props, dict):
+                text = str(hint.get("type") or "string")
+                if hint.get("description"):
+                    text += f" — {hint['description']}"
+                added[name] = text
+            elif isinstance(hint, (dict, list)):
+                continue   # an aggregate shape, not a per-item field
+            else:
+                added[name] = str(hint) if hint not in (None, "") else "string"
+    return added
+
+
+def _with_fields(schema: object, added: dict) -> dict:
+    """``schema`` with ``added`` fields, all required by the inbound check."""
+    if isinstance(schema, dict) and isinstance(schema.get("properties"), dict):
+        out = dict(schema)
+        out["properties"] = {**schema["properties"],
+                             **{k: {"type": "string", "description": v} for k, v in added.items()}}
+        if isinstance(schema.get("required"), list):
+            out["required"] = list(schema["required"]) + list(added)
+        return out
+    return {**(schema if isinstance(schema, dict) else {}), **added}
+
+
+def _also_return_line(added: dict) -> str:
+    """One instruction line naming every added field and its hint."""
+    return "Also return these fields: " + "; ".join(
+        f"{name} ({hint})" for name, hint in added.items()
+    ) + "."
 
 
 def _concurrency_limit(skill_id: str, raw: object, values: dict) -> int:

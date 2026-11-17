@@ -590,3 +590,40 @@ async def test_r2_salvage_in_raw_local_never_carries_document_text(tmp_path, mon
     assert text.startswith(engine.SALVAGE_NOTE) and '"bucket": "billing"' in text
     assert "99-ZETA" not in text and "invoice" not in text
     assert await _answer_kind(db_path, result["run_id"]) == "salvaged"
+
+
+# --- R4: a skill step's own extra_fields are asked for and checked ----------
+
+def _classify_step():
+    # Job A's node, with the reviews inline instead of documents.
+    return {"type": "apply_to_each", "id": "classify", "skill_id": "classify_into_buckets",
+            "skill_version": 1, "task_type": "extraction", "tier": "light",
+            "skill_args": {"buckets": ["good", "bad"], "items_ref": REVIEWS,
+                           "extra_fields": {"urgency": "integer from 1 to 5"}},
+            "output_schema": {"category": "string", "urgency": "integer"}}
+
+
+@pytest.mark.parametrize("answer, resolved", [
+    ({"bucket": "good", "confidence": 0.9, "defer_reason": "", "urgency": 2,
+      "category": "good"}, 3),
+    ({"bucket": "good", "confidence": 0.9, "defer_reason": "", "category": "good"}, 0),
+])
+@pytest.mark.asyncio
+async def test_r4_classify_step_asks_for_its_extra_fields_and_checks_them(env, answer, resolved):
+    """TC-SKL-036: every item prompt asks for urgency (and the node's
+    category); an item answer without urgency fails the inbound check
+    (BRT-ENV-011) instead of passing without it."""
+    db_path, mp = env
+    stub = StubModels(plan_nodes=[_classify_step()], answer_for=lambda r: answer).install(mp)
+    result = await run_pipeline("Classify each review with its urgency.", db_path=db_path)
+    await drain_log_writes()
+    items = stub.of_kind("answerer")
+    assert len(items) == len(REVIEWS)
+    for req in items:
+        assert "Also return these fields: urgency (integer from 1 to 5); category (string)." \
+            in req.system
+        assert '"urgency": "integer from 1 to 5"' in req.system
+    compose = stub.of_kind("compose")[-1].system
+    assert f'"success_count": {resolved}' in compose
+    if not resolved:
+        assert "BRT-ENV-011" in compose
