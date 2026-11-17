@@ -354,13 +354,17 @@ async def _close_at_loop_end(clients: dict):
         await _aclose_all(clients)
 
 
-async def shared_client(trust_env: bool, timeout: float) -> httpx.AsyncClient:
+async def shared_client(
+    trust_env: bool, timeout: float, purpose: str = "call"
+) -> httpx.AsyncClient:
     """The running loop's long-lived client of this kind; do not close it.
 
     ``trust_env=False`` builds ``AsyncClient(timeout=..., trust_env=False)``
     (proxy variables ignored); ``True`` builds today's
     ``AsyncClient(timeout=...)``. The key includes the class, so a test that
-    patches ``httpx.AsyncClient`` gets its own entry.
+    patches ``httpx.AsyncClient`` gets its own entry. ``purpose`` is part of
+    the key: the streamed relay (``"relay"``) never shares a pool with the
+    other calls, so open streams cannot starve them.
     """
     loop = asyncio.get_running_loop()
     state = getattr(loop, _LOOP_CLIENTS_ATTR, None)
@@ -372,7 +376,7 @@ async def shared_client(trust_env: bool, timeout: float) -> httpx.AsyncClient:
         setattr(loop, _LOOP_CLIENTS_ATTR, state)
     clients = state[0]
     cls = httpx.AsyncClient
-    key = (cls, bool(trust_env), float(timeout))
+    key = (cls, bool(trust_env), float(timeout), purpose)
     client = clients.get(key)
     if client is None or getattr(client, "is_closed", False) is True:
         kwargs = {"timeout": timeout, "limits": _limits(), "cookies": _no_cookies()}
@@ -484,3 +488,11 @@ async def send_outbound(
     await record_end(request_id, "failed" if failed else "sent", status_code,
                      f"HTTP {status_code}" if failed else None)
     return resp
+
+
+async def relay_client_for(local: bool, timeout: float) -> httpx.AsyncClient:
+    """The streamed bypass relay's client: same policy as ``client_for``
+    (trust_env=False for a local target, same limits, no cookies) but its own
+    pool, so long-open streams cannot starve answerer or bypass calls. Shared:
+    do not close it."""
+    return await shared_client(not local, timeout, purpose="relay")

@@ -229,3 +229,51 @@ async def test_the_relay_uses_the_shared_client_and_a_local_target_ignores_proxi
     assert built == [], built                    # no AsyncClient built per call
     assert loads["n"] == 0                       # no certificate load per call
     assert shared.is_closed is False
+
+
+async def test_open_relay_streams_do_not_starve_an_answerer_call(
+    relay_env, tmp_path, monkeypatch
+):
+    """Round-2 review (3): the streamed relay has its own pool kind, so open
+    streams cannot hold the connections an answerer call needs."""
+    from src.agents import executor
+
+    monkeypatch.setattr(outbound, "POOL_MAX_CONNECTIONS", 2)
+    assert executor._MODEL_CALL_TIMEOUT_SEC == 120   # same timeout as the relay: only the kind separates them
+    held: list[asyncio.StreamWriter] = []
+
+    async def hang(reader, writer):
+        held.append(writer)
+        try:
+            await reader.read(-1)       # never answers
+        except Exception:
+            pass
+
+    slow = await asyncio.start_server(hang, "127.0.0.1", 0)
+    slow_port = slow.sockets[0].getsockname()[1]
+    fast = await FakeUpstream(delay=0.01).start()
+    matrix = _matrix(tmp_path, slow_port)
+    tasks = [asyncio.create_task(_relay_once(relay_env, matrix)) for _ in range(2)]
+    try:
+        await asyncio.sleep(0.5)        # both relays now hold their connections
+        text = await asyncio.wait_for(executor._post_chat_completion(
+            f"http://127.0.0.1:{fast.port}/v1/chat/completions", {}, {"model": "m"}), 5)
+    finally:
+        for t in tasks:
+            t.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        for w in held:
+            w.close()
+        slow.close()
+        await fast.stop()
+    assert text[0] == "answer"
+
+
+async def test_relay_client_is_a_separate_kind_with_the_same_policy():
+    relay = await outbound.relay_client_for(True, 120)
+    other = await outbound.client_for(True, 120)
+    assert relay is not other
+    assert relay is await outbound.relay_client_for(True, 120)
+    assert relay._trust_env is False
+    assert relay.timeout.read == 120
+    assert list(relay.cookies.jar) == []

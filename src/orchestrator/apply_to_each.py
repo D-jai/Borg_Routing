@@ -328,7 +328,27 @@ async def expand_and_run(
     # never exhaust the shared pool (BRT-ANS-011).
     from src.lane.outbound import MAX_CONCURRENCY  # noqa: PLC0415
 
-    concurrency_limit = min(concurrency_limit, MAX_CONCURRENCY)
+    notes: list[str] = []
+    if concurrency_limit > MAX_CONCURRENCY:
+        note = f"concurrency_limit {concurrency_limit} capped at {MAX_CONCURRENCY}"
+        notes.append(note)
+        concurrency_limit = MAX_CONCURRENCY
+        from src.logging.writer import write_event  # noqa: PLC0415
+
+        try:
+            await write_event(
+                "error",
+                run_id=task.run_id,
+                envelope_id=task.envelope_id,
+                decision={
+                    "code": "BRT-APE-CAPPED",
+                    "severity": "warning",
+                    "msg": note,
+                },
+                db_path=db_path,
+            )
+        except Exception:
+            pass
     semaphore = asyncio.Semaphore(concurrency_limit)
     results = []
     failures = []
@@ -376,17 +396,20 @@ async def expand_and_run(
     results.sort(key=lambda r: r["index"])
     failures.sort(key=lambda r: r["index"])
 
+    aggregate = {
+        "results": results,
+        "failures": failures,
+        "total": len(items),
+        "success_count": len(results),
+        "failure_count": len(failures),
+    }
+    if notes:
+        aggregate["notes"] = notes
     return InboundEnvelope(
         envelope_id=task.envelope_id,
         subtask_id=task.subtask_id,
         status="resolved",
-        output={
-            "results": results,
-            "failures": failures,
-            "total": len(items),
-            "success_count": len(results),
-            "failure_count": len(failures),
-        },
+        output=aggregate,
         tokens_used={"input": totals["input"], "output": totals["output"]},
         dollars=totals["dollars"],
         baseline_dollars=totals["baseline"],

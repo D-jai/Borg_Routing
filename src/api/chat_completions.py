@@ -518,7 +518,7 @@ async def _stream_bypass_relay(
     recorded = False
     relay_text: list[str] = []
     from src.lane.context import current_lane  # noqa: PLC0415
-    from src.lane.outbound import client_for, record_end, record_start  # noqa: PLC0415
+    from src.lane.outbound import record_end, record_start, relay_client_for  # noqa: PLC0415
 
     # With the lane on, the relay's request is in the ledger before it is sent.
     relay_lane = current_lane()
@@ -543,7 +543,7 @@ async def _stream_bypass_relay(
         # A local target ignores proxy variables (trust_env=False), the same
         # client every lane call builds; with the lane off, as in Phase 1.
         # The client is shared (work order 1.12): not closed here.
-        client = await client_for(relay_local, 120)
+        client = await relay_client_for(relay_local, 120)
         async with client.stream(
             "POST", url, json=payload, headers=headers
         ) as resp:
