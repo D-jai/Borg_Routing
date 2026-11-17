@@ -254,7 +254,7 @@ async def test_local_arm_runs_in_raw_local_when_enabled_and_a_local_model_is_che
     assert doc_reqs and all(r.is_local for r in doc_reqs)
 
 
-# -- dry run, jobs, scoring, shrink rules -----------------------------------------
+# -- dry run, jobs, scoring -----------------------------------------
 
 def test_real_jobs_load_with_the_arms_after_ruling_2():
     jobs = run_bench.load_jobs(run_bench.BENCH_DIR / "jobs")
@@ -277,43 +277,19 @@ def test_dry_run_prints_the_matrix_and_the_estimate(capsys):
     empty.write_text("", encoding="utf-8")
     rc = run_bench.main(["--dry-run", "--date", "2026_01_01", "--env-file", str(empty)])
     out = capsys.readouterr().out
-    assert rc in (0, 1)
+    assert rc == 0
     for row in ("A   direct", "A   borg_cloud", "A   borg_local_workers", "B   direct", "C   borg_cloud",
                 "D   borg_local_workers"):
         assert row in out
     assert out.count("not run") >= 2 and "27 cells = 21 to run + 6" in out
-    m = [ln for ln in out.splitlines() if ln.startswith("estimate, total")][0]
-    total = float(m.split("US$")[1].split()[0])
-    assert ("VERDICT: within the limit" in out) == (total <= 14.0) == (rc == 0)
+    assert "estimate, total" in out and "VERDICT" not in out and "limit" not in out.split("estimate, total")[1]
 
 
-def test_dry_run_over_limit_says_what_to_shrink(capsys):
-    jobs = run_bench.load_jobs(run_bench.BENCH_DIR / "jobs")
-    cfg = Config(date="2026_01_01", results_root=Path(tempfile.mkdtemp()))
-    matrix = run_bench.load_matrix()
-    baseline = run_bench.baseline_model(matrix)
-    rules = {"estimate_limit_dollars": 2.0, "steps": [
-        {"name": "job C once", "job_repeats": {"C": 1}}, {"name": "two repeats", "repeats": 2}]}
-    rc = run_bench.dry_run(jobs, cfg, matrix, baseline, None, None, None, {}, rules)
-    out = capsys.readouterr().out
-    assert rc == 1 and "OVER the limit" in out
-    assert "1. job C once" in out and "2. two repeats" in out and "--shrink-steps" in out
-
-
-def test_shrink_rules_are_data_and_apply_in_order():
-    rules = budget.load_shrink_rules(run_bench.BENCH_DIR / "shrink_rules.yaml")
-    assert rules["estimate_limit_dollars"] == 14.0 and rules["phase_cap_dollars"] == 20.0
-    assert rules["steps"][0]["job_repeats"] == {"C": 1}      # job C first
-    assert rules["steps"][1]["repeats"] == 2                  # then repeats 3 -> 2
-    jobs = run_bench.load_jobs(run_bench.BENCH_DIR / "jobs")
-    full = run_bench.build_matrix(jobs)
-    o1 = budget.apply_shrink(rules, 1)
-    s1 = run_bench.build_matrix(jobs, repeats=o1["repeats"], job_repeats=o1["job_repeats"])
-    assert len([r for r in s1 if r.job == "C"]) == 2 and len([r for r in s1 if r.job == "A"]) == 9
-    o2 = budget.apply_shrink(rules, 2)
-    s2 = run_bench.build_matrix(jobs, repeats=o2["repeats"], job_repeats=o2["job_repeats"])
-    assert len([r for r in s2 if r.job == "A"]) == 6 and len([r for r in s2 if r.job == "C"]) == 2
-    assert len(full) > len(s1) > len(s2)
+def test_a_paid_run_without_a_stage_is_refused(capsys):
+    empty = Path(tempfile.mkdtemp()) / "empty.env"
+    empty.write_text("", encoding="utf-8")
+    assert run_bench.main(["--env-file", str(empty), "--date", "2026_01_01"]) == 2
+    assert "--stage 1" in capsys.readouterr().out
 
 
 def test_scoring_helpers():

@@ -1,7 +1,9 @@
 """The benchmark runner (work order 3.2).
 
-    python bench/run_bench.py --dry-run          # print the run matrix and the pre-flight estimate; spends nothing
-    python bench/run_bench.py                    # run the matrix (THIS SPENDS MONEY; the lead runs it in 3.3)
+    python bench/run_bench.py --dry-run          # print the run matrix and the estimate; spends nothing
+    python bench/run_bench.py --dry-run --stage 1|2   # print the staged plan (ruling 14); spends nothing
+    python bench/run_bench.py --stage 1          # one repeat of every cell, cheapest estimate first (SPENDS MONEY)
+    python bench/run_bench.py --stage 2          # repeats 2 and 3 by whole job, order A, D, B, C (SPENDS MONEY)
 
 One run = job x arm x repeat. Each BORG arm goes through ``run_pipeline`` with
 the right ``lane_mode`` and the job's folder handed over by reference
@@ -19,8 +21,12 @@ local model is checked (``--check-model ollama/llama3.2:3b``, ruling 13). With
 ``--skip-local``, or with no checked local model, they write a result file with
 status "not run" and the reason, never a number.
 
-Exit codes: 0 ok, 1 dry-run estimate over the limit, 2 setup problem, 3 a run
-was refused by the budget guard, 4 a run failed.
+Staged plan (planner ruling 14, written in bench/README.md): every guard failure STOPS the stage; a run
+whose real cost passes its own estimate trips the wire (re-estimate of the rest, continue only if it fits).
+The add-or-stop decision looks at cost only.
+
+Exit codes: 0 ok, 2 setup problem, 3 a run was refused by the budget guard (the stage stopped),
+4 a run failed (the stage finished), 5 the tripwire stopped the stage.
 """
 from __future__ import annotations
 
@@ -66,6 +72,13 @@ JUDGE_MAX_TOKENS = 4000      # room for a reasoning judge's private thinking bef
 JUDGE_REASK_ALLOWANCE = 1.25  # the estimate allows one re-ask for every four judge calls
 
 LOCAL_ARMS = ("borg_local_workers",)
+# The run time limit (ruling 14), set once: every BORG arm runs under BORG_MAX_RUN_SECONDS=7200 (two hours, so
+# the local arms on a CPU-only machine can finish and be timed as measured); the direct arm's HTTP timeout is the
+# same 7200 s, so a long answer from a reasoning model is never cut by the client.
+MAX_RUN_SECONDS = 7200
+DIRECT_TIMEOUT_S = 7200.0
+STAGE_JOB_ORDER = ("A", "D", "B", "C")   # ruling 14: the order repeats are added by whole job
+TRIPWIRE_STOP_RC = 5
 FINISHED = ("completed", "failed")   # statuses a comparison can use; "refused" and "not run" cannot
 
 
@@ -80,7 +93,8 @@ class Config:
     date: str = field(default_factory=lambda: datetime.now().strftime("%Y_%m_%d"))
     skip_local: bool = False   # ruling 13: the local model serves; the local arms run
     use_docker: bool = True
-    max_run_seconds: int = 1500
+    max_run_seconds: int = MAX_RUN_SECONDS    # BORG_MAX_RUN_SECONDS for every BORG arm (ruling 14)
+    direct_timeout_s: float = DIRECT_TIMEOUT_S  # the direct arm's HTTP timeout for one call
     judge_model_ids: list[str] = field(default_factory=list)
     force: bool = False
     phase_cap: float = budget.PHASE_CAP_DOLLARS
@@ -629,7 +643,40 @@ def logging_chat(chat, calls_log: Path):
     return wrapped
 
 
-async def run_borg(job: dict, spec: RunSpec, cfg: Config, matrix, db_path=None) -> dict:
+def routing_config(cfg: Config, matrix, baseline, mode: str) -> dict:
+    """The routing configuration, fixed for every arm and written into each result file (ruling 14).
+
+    Leaf floors and ``time_cost_per_sec`` are the engine's own defaults (the runner removes any override from
+    the environment for a BORG run). The pool is the checked rows passed to the run. The receipts' baseline is
+    the bench baseline when the engine can resolve it (it looks the id up in the matrix it was given, which
+    holds every row of ``--matrix``, checked or not); if it cannot, the engine's own default is used and the
+    note says so.
+    """
+    from src.registry.cost import _DEFAULT_TIME_COST_PER_SEC, select_baseline_model
+    from src.registry.node_router import DEFAULT_FLOORS
+
+    resolved = baseline is not None and matrix.get(baseline.model_id) is not None
+    if resolved:
+        bid, note = baseline.model_id, "the bench baseline; the engine resolves it from the matrix it is given"
+    else:
+        fallback = select_baseline_model(matrix, None)
+        bid = fallback.model_id if fallback else None
+        note = (f"the bench baseline '{baseline.model_id if baseline else None}' cannot be resolved by the engine "
+                "(not a row of its matrix); the engine's own default (highest-reasoning checked model) is used")
+    return {
+        "leaf_floors": dict(DEFAULT_FLOORS),
+        "time_cost_per_sec": _DEFAULT_TIME_COST_PER_SEC,
+        "pool": sorted(m.model_id for m in matrix.all() if m.checked),
+        "lane_mode": mode,
+        "max_run_seconds": cfg.max_run_seconds,
+        "direct_timeout_seconds": cfg.direct_timeout_s,
+        "baseline_model_id": bid,
+        "baseline_resolved_by_engine": resolved,
+        "baseline_note": note,
+    }
+
+
+async def run_borg(job: dict, spec: RunSpec, cfg: Config, matrix, db_path=None, baseline=None) -> dict:
     """One BORG_ROUTE run through ``run_pipeline`` on a fresh database at ``db_path`` (kept, git-ignored)."""
     from src.db.schema import create_all
     from src.orchestrator import engine
@@ -647,8 +694,12 @@ async def run_borg(job: dict, spec: RunSpec, cfg: Config, matrix, db_path=None) 
     instruction = instruction_of(job, cfg)
     documents = {"folder": folder} if folder else None
 
+    rc = routing_config(cfg, matrix, baseline, mode)
+    # engine defaults for floors and time cost: a stray LEAF_QUALITY_* or TIME_COST_PER_SEC cannot reach the run
     with _Env(BORG_DOCS_ROOT=str(cfg.data_root), BORG_LANE_MODE=mode if mode != "off" else None,
-              BORG_MAX_RUN_SECONDS=str(cfg.max_run_seconds)):
+              BORG_MAX_RUN_SECONDS=str(cfg.max_run_seconds),
+              LEAF_QUALITY_LIGHT=None, LEAF_QUALITY_MID=None, LEAF_QUALITY_HEAVY=None, TIME_COST_PER_SEC=None,
+              BASELINE_MODEL_ID=rc["baseline_model_id"] if rc["baseline_resolved_by_engine"] else None):
         t0 = time.monotonic()
         result = await run_pipeline(instruction, db_path=db_path, documents=documents)
         wall = time.monotonic() - t0
@@ -658,6 +709,7 @@ async def run_borg(job: dict, spec: RunSpec, cfg: Config, matrix, db_path=None) 
         "status": result.get("status", "failed"),
         "error": result.get("error"),
         "lane_mode": mode,
+        "routing_config": rc,
         "run_id": result.get("run_id"),
         "cost_dollars": tree["dollars"],
         "digest_cost_dollars": result.get("cost_dollars"),
@@ -713,6 +765,10 @@ async def run_direct(job: dict, spec: RunSpec, cfg: Config, baseline, chat=llm.c
         chunks.append(cur)
 
     system = "You answer using only the text you are given. Follow the instruction exactly."
+
+    async def send(model, sys_, user, cap):   # the long HTTP timeout of ruling 14 on every direct call
+        return await chat(model, sys_, user, cap, timeout=cfg.direct_timeout_s)
+
     steps, tin, tout, dollars = [], 0, 0, 0.0
     answers: list[str] = []
     status, error = "completed", None
@@ -721,7 +777,7 @@ async def run_direct(job: dict, spec: RunSpec, cfg: Config, baseline, chat=llm.c
     async def call(step: str, text: str) -> str:
         nonlocal tin, tout, dollars
         try:
-            r = await llm.chat_capped(baseline, system, text, out, send=chat)
+            r = await llm.chat_capped(baseline, system, text, out, send=send)
         except llm.ChatError as exc:
             dollars += exc.dollars
             raise
@@ -776,8 +832,11 @@ def local_model_available(matrix) -> bool:
 
 async def execute_run(
     spec: RunSpec, jobs: dict, cfg: Config, matrix, baseline, chat=llm.chat, docker_runner=None,
+    estimate: Optional[float] = None,
 ) -> dict:
-    """Run one cell of the matrix and write its result file. Returns the record (with ``path``)."""
+    """Run one cell of the matrix and write its result file. Returns the record (with ``path``).
+
+    ``estimate`` replaces the conservative estimate the guard uses (a stage's re-estimate from measured costs)."""
     job = jobs[spec.job]
     conf = arm_conf(job, spec.arm)
     is_local = bool(conf.get("local")) or spec.arm in LOCAL_ARMS
@@ -790,7 +849,8 @@ async def execute_run(
         rec["path"] = str(write_result(cfg, spec, {k: v for k, v in rec.items()}))
         return rec
 
-    estimate = estimate_run(job, spec.arm, cfg, baseline, borg_price_model(matrix, baseline))
+    if estimate is None:
+        estimate = estimate_run(job, spec.arm, cfg, baseline, borg_price_model(matrix, baseline))
     try:
         cfg.ledger.check(estimate, cfg.phase_cap)
     except budget.BudgetRefused as exc:
@@ -805,15 +865,19 @@ async def execute_run(
     else:
         db_path = new_db_path(cfg, spec)
     entry = cfg.ledger.start(spec.key, db_path=db_path, calls_log=calls_log, date=cfg.date)
+    t0 = time.monotonic()
     try:
         if spec.arm == "direct":
             rec = await run_direct(job, spec, cfg, baseline, chat=logging_chat(chat, calls_log))
         else:
-            rec = await run_borg(job, spec, cfg, matrix, db_path)
+            rec = await run_borg(job, spec, cfg, matrix, db_path, baseline)
     except Exception as exc:  # a run must never take the matrix down; its spend is still counted
         rec = {"status": "failed", "error": f"{type(exc).__name__}: {str(exc)[:300]}",
                "cost_dollars": budget.logged_dollars(db_path) + budget.calls_log_dollars(calls_log),
+               "wall_seconds": round(time.monotonic() - t0, 3),
                "answer": "", "models": [], "models_per_step": []}
+    rec.setdefault("routing_config", routing_config(
+        cfg, matrix, baseline, rec.get("lane_mode") or conf.get("lane_mode", "n/a (direct call)")))
     rec["db_path"] = str(db_path) if db_path else None
     rec["calls_log"] = str(calls_log) if calls_log else None
     rec["estimate_dollars"] = estimate
@@ -840,6 +904,193 @@ async def run_matrix(runs: list[RunSpec], jobs: dict, cfg: Config, matrix, basel
         if rec["status"] == "refused":
             log("budget guard refused a run; stopping the matrix")
             break
+    return out
+
+
+# --------------------------------------------------------------------------
+# The staged plan (planner ruling 14)
+# --------------------------------------------------------------------------
+
+def ceil_cent(x: float) -> float:
+    """Round up to the next cent (a cost already at a whole cent stays)."""
+    return math.ceil(round(float(x) * 100, 6)) / 100
+
+
+def _cells_to_run(jobs, cfg, matrix, only=None, arms=None):
+    return [(name, arm) for name, job in jobs.items() if not only or name in only
+            for arm in arms_of(job, arms) if not local_skipped(job, arm, cfg, matrix)]
+
+
+def conservative_estimates(runs: list[RunSpec], jobs, cfg, matrix, baseline) -> dict[str, float]:
+    """The conservative estimate of each run (0 for a local cell that will be written "not run")."""
+    pool = borg_price_model(matrix, baseline)
+    return {r.key: 0.0 if local_skipped(jobs[r.job], r.arm, cfg, matrix)
+            else estimate_run(jobs[r.job], r.arm, cfg, baseline, pool) for r in runs}
+
+
+def stage1_plan(jobs, cfg, matrix, baseline, only=None, arms=None) -> list[tuple[RunSpec, float]]:
+    """Stage 1: one repeat of every cell (job x arm), cheapest conservative estimate first."""
+    runs = build_matrix(jobs, only, arms, repeats=1)
+    est = conservative_estimates(runs, jobs, cfg, matrix, baseline)
+    return sorted(((r, est[r.key]) for r in runs), key=lambda p: p[1])   # stable: ties keep job order
+
+
+def load_measured(cfg: Config, jobs: dict) -> dict[tuple[str, str], list[float]]:
+    """Measured cost per cell from the result files. Reads only the run's state and ``cost_dollars``;
+    no quality field is ever read here (the stage decisions look at cost only)."""
+    out: dict[tuple[str, str], list[float]] = {}
+    for name, job in jobs.items():
+        for arm in arms_of(job, list(arm_names_all(job))):
+            for p in sorted(cfg.day_dir.glob(f"{name}_{arm}_*.json")):
+                if not p.stem[len(f"{name}_{arm}_"):].isdigit():
+                    continue
+                try:
+                    rec = json.loads(p.read_text(encoding="utf-8"))
+                except ValueError:
+                    continue
+                if rec.get("status") in FINISHED or rec.get("status") == "not run":
+                    out.setdefault((name, arm), []).append(float(rec.get("cost_dollars") or 0.0))
+    return out
+
+
+def arm_names_all(job: dict) -> list[str]:
+    return list((job.get("arms") or {}).keys()) + list((job.get("optional_arms") or {}).keys())
+
+
+def reestimate(remaining: list[RunSpec], conservative: dict[str, float],
+               measured: dict[tuple[str, str], list[float]]) -> dict[str, float]:
+    """Tripwire re-estimate: each remaining run is the dearest observed run of its own cell, rounded up to
+    the next cent (a run that logged US$0 counts as US$0); a cell not yet measured keeps its conservative estimate."""
+    out = {}
+    for r in remaining:
+        seen = measured.get((r.job, r.arm))
+        out[r.key] = ceil_cent(max(seen)) if seen else conservative[r.key]
+    return out
+
+
+def plan_stage2(jobs: dict, measured: dict, conservative_cells: dict, spent: float, cap: float,
+                extra_fixed: Optional[dict] = None, only=None, arms=None) -> dict:
+    """Stage 2: repeats 2..N by WHOLE JOB, order A, D, B, C. Cost only: nothing here reads a quality field.
+
+    A job's extra repeats cost, per cell, the dearest observed run rounded up to the cent (the conservative
+    estimate for a cell never measured), summed over every arm and every extra repeat, plus ``extra_fixed[job]``
+    (the judge, for job C). A job is added only while ``spent`` + what is already added + its extra <= ``cap``;
+    one that does not fit is skipped and the later jobs are still tried. Every arm of an added job gets the same repeats.
+    """
+    extra_fixed = extra_fixed or {}
+    names = [n for n in STAGE_JOB_ORDER if n in jobs] + [n for n in jobs if n not in STAGE_JOB_ORDER]
+    chosen, skipped, runs, estimates = [], [], [], {}
+    committed = 0.0
+    for name in names:
+        if only and name not in only:
+            continue
+        job = jobs[name]
+        target = int((job.get("repeats", 3)))
+        extra_n = list(range(2, target + 1))
+        job_arms = arms_of(job, arms)
+        per_cell = {}
+        for arm in job_arms:
+            seen = measured.get((name, arm))
+            per_cell[arm] = ceil_cent(max(seen)) if seen else conservative_cells[(name, arm)]
+        extra = sum(per_cell.values()) * len(extra_n) + float(extra_fixed.get(name, 0.0))
+        entry = {"job": name, "extra_estimate": extra, "repeats": extra_n, "per_cell": per_cell}
+        if spent + committed + extra <= cap + 1e-9:
+            committed += extra
+            chosen.append(entry)
+            for n in extra_n:
+                for arm in job_arms:
+                    r = RunSpec(name, arm, n)
+                    runs.append(r)
+                    estimates[r.key] = per_cell[arm]
+        else:
+            skipped.append(entry)
+    return {"jobs": chosen, "skipped": skipped, "runs": runs, "estimates": estimates,
+            "committed": committed, "spent": spent, "cap": cap}
+
+
+def stage_inputs(stage: int, jobs, cfg, matrix, baseline, only=None, arms=None, jms=None) -> dict:
+    """What a stage will do: ``{"sequence": [(RunSpec, estimate)], "tail": judge estimate, "plan": stage-2 plan}``."""
+    judged = [n for n, j in jobs.items() if (j.get("quality") or {}).get("kind") == "pairwise_judge"
+              and (not only or n in only)]
+    if stage == 1:
+        seq = stage1_plan(jobs, cfg, matrix, baseline, only, arms)
+        tail = sum(estimate_judge(jobs[n], 1, jms) for n in judged) if jms else 0.0
+        return {"sequence": seq, "tail": tail, "plan": None, "judge_jobs": judged}
+    rep1 = build_matrix(jobs, only, arms, repeats=1)
+    cons = conservative_estimates(rep1, jobs, cfg, matrix, baseline)
+    cells = {(r.job, r.arm): cons[r.key] for r in rep1}
+    extra_fixed = {n: estimate_judge(jobs[n], int(jobs[n].get("repeats", 3)), jms) for n in judged} if jms else {}
+    plan = plan_stage2(jobs, load_measured(cfg, jobs), cells, cfg.ledger.spent(), cfg.phase_cap,
+                       extra_fixed, only, arms)
+    seq = [(r, plan["estimates"][r.key]) for r in plan["runs"]]
+    tail = sum(extra_fixed.get(j["job"], 0.0) for j in plan["jobs"])
+    return {"sequence": seq, "tail": tail, "plan": plan, "judge_jobs": [j["job"] for j in plan["jobs"] if j["job"] in judged]}
+
+
+async def run_stage(stage: int, jobs, cfg, matrix, baseline, chat=llm.chat, docker_runner=None, log=print,
+                    only=None, arms=None, jms=None) -> dict:
+    """Run stage 1 or 2. Returns ``{"rc", "stopped", "done", "judge_jobs", "tail"}``.
+
+    Before each run the guard checks ledger spend + that run's estimate against the cap; a refusal STOPS the
+    stage (rc 3). After each run, a real cost above the run's own estimate is the tripwire: every remaining
+    run is re-estimated from measured costs, written to ``reestimate_s<stage>_<k>.json`` and printed, and the
+    stage goes on only if ledger spend + the re-estimated remainder fits under the cap (else rc 5).
+    """
+    for e in cfg.ledger.recover():
+        log(f"ledger: recovered unfinished entry {e['key']} (US${e['dollars']:.4f} from its database)")
+    inp = stage_inputs(stage, jobs, cfg, matrix, baseline, only, arms, jms)
+    seq = list(inp["sequence"])
+    measured = load_measured(cfg, jobs)
+    if stage == 2:
+        for j in inp["plan"]["jobs"]:
+            log(f"stage 2: job {j['job']} gets repeats {j['repeats']} (extra estimate US${j['extra_estimate']:.4f})")
+        for j in inp["plan"]["skipped"]:
+            log(f"stage 2: job {j['job']} skipped (extra estimate US${j['extra_estimate']:.4f} does not fit under the cap)")
+    out = {"rc": 0, "stopped": None, "done": [], "judge_jobs": inp["judge_jobs"], "tail": inp["tail"]}
+    trips = 0
+    i = 0
+    while i < len(seq):
+        spec, est = seq[i]
+        i += 1
+        if _is_done(cfg, spec):
+            log(f"skip {spec.key}: result file exists (use --force to redo)")
+            continue
+        rec = await execute_run(spec, jobs, cfg, matrix, baseline, chat=chat, docker_runner=docker_runner,
+                                estimate=est)
+        out["done"].append({"spec": spec, **rec})
+        cost = float(rec.get("cost_dollars") or 0.0)
+        log(f"{spec.key}: {rec['status']} cost=${cost:.4f} estimate=${est:.4f}"
+            + (f" ({rec.get('reason')})" if rec["status"] in ("refused", "not run") else ""))
+        if rec["status"] == "refused":
+            log("budget guard refused a run; stopping the stage (a guard failure is a stop, not a warning)")
+            out.update(rc=3, stopped="guard")
+            return out
+        measured.setdefault((spec.job, spec.arm), []).append(cost)
+        if rec["status"] != "not run" and cost > est + 1e-12:
+            trips += 1
+            rest = [(r, e) for r, e in seq[i:] if not _is_done(cfg, r)]
+            new = reestimate([r for r, _ in rest], {r.key: e for r, e in rest}, measured)
+            spent = cfg.ledger.spent()
+            total = spent + sum(new.values()) + inp["tail"]
+            fits = total <= cfg.phase_cap + 1e-9
+            note = {"stage": stage, "tripped_by": spec.key, "cost": cost, "estimate": est, "remaining": new,
+                    "ledger_spent": spent, "judge_tail": inp["tail"], "total_if_all_run": total,
+                    "cap": cfg.phase_cap, "decision": "continue" if fits else "stop"}
+            cfg.day_dir.mkdir(parents=True, exist_ok=True)
+            (cfg.day_dir / f"reestimate_s{stage}_{trips}.json").write_text(json.dumps(note, indent=1) + "\n",
+                                                                         encoding="utf-8")
+            log(f"tripwire: {spec.key} cost US${cost:.4f} passed its estimate US${est:.4f}; re-estimated "
+                f"{len(new)} remaining runs from measured costs: spend US${spent:.4f} + remainder "
+                f"US${sum(new.values()):.4f} + judge US${inp['tail']:.4f} = US${total:.4f} "
+                f"{'<=' if fits else '>'} cap US${cfg.phase_cap:.2f}: {'continue' if fits else 'STOP'}")
+            for r, _ in rest:
+                log(f"  {r.key}: US${new[r.key]:.4f}")
+            if not fits:
+                out.update(rc=TRIPWIRE_STOP_RC, stopped="tripwire")
+                return out
+            seq[i:] = [(r, new[r.key]) for r, _ in seq[i:] if r.key in new] or seq[i:]
+    if any(d["status"] == "failed" for d in out["done"]):
+        out["rc"] = 4
     return out
 
 
@@ -921,26 +1172,8 @@ def local_skipped(job: dict, arm: str, cfg: Config, matrix) -> bool:
     return local and (cfg.skip_local or not local_model_available(matrix))
 
 
-def dry_run(jobs, cfg, matrix, baseline, only_jobs, arms_filter, repeats, job_repeats, rules, out=print) -> int:
-    if baseline is None:
-        out("pre-flight: no checked model in the matrix, so the direct arm has no baseline. Nothing was spent.")
-        return 2
-    try:
-        jms = pick_judges(matrix, baseline, cfg.judge_model_ids)
-    except ValueError as exc:
-        out(f"pre-flight: {exc}")
-        return 2
-    limit = float(rules.get("estimate_limit_dollars", budget.ESTIMATE_LIMIT_DOLLARS))
-    runs = build_matrix(jobs, only_jobs, arms_filter, repeats, job_repeats)
-    pool = borg_price_model(matrix, baseline)
-
-    def estimate(rs):  # runs written as "not run" spend nothing and are not estimated
-        return estimate_matrix([r for r in rs if not local_skipped(jobs[r.job], r.arm, cfg, matrix)],
-                               jobs, cfg, baseline, jms, pool)
-
-    est = estimate(runs)
-
-    out(f"BORG_ROUTE bench: dry run (date {cfg.date}; nothing is sent, nothing is spent)")
+def _header(out, cfg, matrix, baseline, jms, title):
+    out(f"BORG_ROUTE bench: {title} (date {cfg.date}; nothing is sent, nothing is spent)")
     out(f"matrix               : {matrix._path}  (read only; checks are in memory)")
     out(f"baseline, direct arm : {baseline.model_id}  ({_per_mtok(baseline)})")
     for jm in jms:
@@ -955,8 +1188,40 @@ def dry_run(jobs, cfg, matrix, baseline, only_jobs, arms_filter, repeats, job_re
         out(f"local arms           : run on {', '.join(local_models)}; priced like the cloud BORG arm (upper bound)")
     else:
         out("local arms           : NOT RUN (no checked local model; check one with --check-model)")
+    out(f"run time limit       : BORG_MAX_RUN_SECONDS={cfg.max_run_seconds} for every BORG arm; "
+        f"direct arm HTTP timeout {cfg.direct_timeout_s:.0f} s")
+    out(f"routing              : leaf floors 6.0 / 7.5 / 9.0 and time cost per second at the engine defaults; "
+        f"pool = the {len(checked)} checked rows; receipts baseline {baseline.model_id}")
     out(f"job B                : needs Docker and the '{checks.BENCH_IMAGE}' image for every run, else all of job B is void")
     out("")
+
+
+def _setup(matrix, baseline, cfg, out):
+    if baseline is None:
+        out("pre-flight: no checked model in the matrix, so the direct arm has no baseline. Nothing was spent.")
+        return None
+    try:
+        return pick_judges(matrix, baseline, cfg.judge_model_ids)
+    except ValueError as exc:
+        out(f"pre-flight: {exc}")
+        return None
+
+
+def dry_run(jobs, cfg, matrix, baseline, only_jobs, arms_filter, repeats, job_repeats, out=print) -> int:
+    """The full matrix (all repeats) with its conservative estimate. No limit is applied: the staged plan
+    (``--dry-run --stage 1`` / ``--stage 2``) is what governs spending."""
+    jms = _setup(matrix, baseline, cfg, out)
+    if jms is None:
+        return 2
+    runs = build_matrix(jobs, only_jobs, arms_filter, repeats, job_repeats)
+    pool = borg_price_model(matrix, baseline)
+
+    def estimate(rs):  # runs written as "not run" spend nothing and are not estimated
+        return estimate_matrix([r for r in rs if not local_skipped(jobs[r.job], r.arm, cfg, matrix)],
+                               jobs, cfg, baseline, jms, pool)
+
+    est = estimate(runs)
+    _header(out, cfg, matrix, baseline, jms, "dry run")
     out(f"{'job':<4}{'arm':<20}{'lane_mode':<14}{'repeats':<9}{'est $/run':>10}{'est $ total':>13}")
     n_run = n_skip = 0
     for name, job in jobs.items():
@@ -979,20 +1244,53 @@ def dry_run(jobs, cfg, matrix, baseline, only_jobs, arms_filter, repeats, job_re
         "+ the answerer system prompt once per item")
     out(f"estimate, runs ({n_run})  : US${est['runs_total']:.2f}   (an upper bound)")
     out(f"estimate, judge       : US${est['judge']:.2f}")
-    out(f"estimate, total       : US${est['total']:.2f}   limit US${limit:.2f}   phase cap US${cfg.phase_cap:.2f}")
-    out(f"spent so far (ledger) : US${cfg.ledger.spent():.4f}")
-    if est["total"] <= limit:
-        out("VERDICT: within the limit; the full matrix may run.")
+    out(f"estimate, total       : US${est['total']:.2f}   (all repeats; paid runs go by --stage 1 then --stage 2)")
+    out(f"spent so far (ledger) : US${cfg.ledger.spent():.4f}   phase cap US${cfg.phase_cap:.2f}")
+    return 0
+
+
+def dry_run_stage(stage, jobs, cfg, matrix, baseline, only_jobs, arms_filter, out=print) -> int:
+    jms = _setup(matrix, baseline, cfg, out)
+    if jms is None:
+        return 2
+    _header(out, cfg, matrix, baseline, jms, f"dry run, stage {stage}")
+    spent = cfg.ledger.spent()
+    if stage == 1:
+        inp = stage_inputs(1, jobs, cfg, matrix, baseline, only_jobs, arms_filter, jms)
+        out("stage 1: one repeat of every cell (job x arm), cheapest conservative estimate first.")
+        out("Before each run: refuse if ledger spend + that run's estimate > the cap; a refusal stops the stage.")
+        out(f"{'#':<4}{'run':<26}{'est $':>10}{'cumulative':>12}")
+        cum = 0.0
+        for k, (r, e) in enumerate(inp["sequence"], 1):
+            cum += e
+            tag = "  not run" if e == 0 and local_skipped(jobs[r.job], r.arm, cfg, matrix) else ""
+            out(f"{k:<4}{r.key:<26}{e:>10.4f}{cum:>12.4f}{tag}")
+        total = cum + inp["tail"]
+        out(f"estimate, runs        : US${cum:.2f}   judge US${inp['tail']:.2f}   total US${total:.2f} (upper bounds)")
+        out(f"spent so far (ledger) : US${spent:.4f}   phase cap US${cfg.phase_cap:.2f}")
+        out("If every run cost its full estimate the stage would "
+            + ("fit under the cap." if spent + total <= cfg.phase_cap else "stop at the guard before the end."))
         return 0
-    out("VERDICT: OVER the limit. Shrink in this order (rules in bench/shrink_rules.yaml, apply with --shrink-steps N):")
-    for i in range(1, len(rules.get("steps") or []) + 1):
-        o = budget.apply_shrink(rules, i)
-        r2 = build_matrix(jobs, only_jobs, arms_filter, o["repeats"] if o["repeats"] is not None else repeats,
-                          {**(job_repeats or {}), **o["job_repeats"]})
-        e2 = estimate(r2)["total"]
-        out(f"  {i}. {rules['steps'][i - 1].get('name')}: estimate US${e2:.2f} "
-            f"({'within' if e2 <= limit else 'still over'} the limit)")
-    return 1
+    measured = load_measured(cfg, jobs)
+    if not measured:
+        out(f"stage 2: no stage 1 result files in {cfg.day_dir}. Run stage 1 first (and pass its --date).")
+        return 2
+    inp = stage_inputs(2, jobs, cfg, matrix, baseline, only_jobs, arms_filter, jms)
+    plan = inp["plan"]
+    out("stage 2: repeats 2 and 3 estimated per cell from stage 1's measured cost (dearest observed run, "
+        "rounded up to the cent); repeats are added by whole job, order A, D, B, C,")
+    out("only while ledger spend + that job's extra estimate <= the cap. The decision looks at cost only.")
+    out(f"spent so far (ledger) : US${spent:.4f}   phase cap US${cfg.phase_cap:.2f}")
+    out(f"{'job':<5}{'decision':<10}{'repeats':<10}{'extra est $':>12}   per cell")
+    decided = {j["job"]: ("add", j) for j in plan["jobs"]}
+    decided.update({j["job"]: ("skip", j) for j in plan["skipped"]})
+    for name in [n for n in STAGE_JOB_ORDER if n in decided] + [n for n in decided if n not in STAGE_JOB_ORDER]:
+        d, j = decided[name]
+        cells = ", ".join(f"{a} US${v:.2f}" for a, v in j["per_cell"].items())
+        out(f"{name:<5}{d:<10}{','.join(map(str, j['repeats'])):<10}{j['extra_estimate']:>12.4f}   {cells}")
+    out(f"runs to add: {len(plan['runs'])}   committed estimate US${plan['committed']:.4f}   "
+        f"spend + committed US${spent + plan['committed']:.4f} of US${cfg.phase_cap:.2f}")
+    return 0
 
 
 # --------------------------------------------------------------------------
@@ -1000,12 +1298,14 @@ def dry_run(jobs, cfg, matrix, baseline, only_jobs, arms_filter, repeats, job_re
 # --------------------------------------------------------------------------
 
 def main(argv: Optional[list[str]] = None) -> int:
-    ap = argparse.ArgumentParser(description="BORG_ROUTE benchmark runner (work order 3.2).")
-    ap.add_argument("--dry-run", action="store_true", help="print the matrix and the estimate; spend nothing")
+    ap = argparse.ArgumentParser(description="BORG_ROUTE benchmark runner (work order 3.2, planner ruling 14).")
+    ap.add_argument("--dry-run", action="store_true", help="print the matrix (or, with --stage, the plan) and spend nothing")
+    ap.add_argument("--stage", type=int, choices=(1, 2),
+                    help="1: one repeat of every cell, cheapest estimate first; 2: repeats 2 and 3 by whole job, "
+                         "order A, D, B, C, from stage 1's measured cost")
     ap.add_argument("--jobs", help="comma list, e.g. A,C")
     ap.add_argument("--arms", help="comma list, e.g. direct,borg_cloud (also enables optional arms such as D's direct)")
-    ap.add_argument("--repeats", type=int, help="cap repeats for every job")
-    ap.add_argument("--shrink-steps", type=int, default=0, help="apply the first N steps of bench/shrink_rules.yaml")
+    ap.add_argument("--repeats", type=int, help="cap repeats for every job (full-matrix dry run only)")
     ap.add_argument("--skip-local", action=argparse.BooleanOptionalAction, default=False,
                     help="write 'not run' for local arms (default off since ruling 13)")
     ap.add_argument("--judge-model", action="append", default=[],
@@ -1033,15 +1333,9 @@ def main(argv: Optional[list[str]] = None) -> int:
         cfg.date = args.date
     if args.results_root:
         cfg.results_root = Path(args.results_root)
-    if args.prior_spend is not None:
+    if args.prior_spend is not None and not args.dry_run:
         cfg.ledger.set_prior(args.prior_spend)
 
-    rules = budget.load_shrink_rules(cfg.bench_dir / "shrink_rules.yaml")
-    o = budget.apply_shrink(rules, args.shrink_steps)
-    repeats = o["repeats"] if o["repeats"] is not None else args.repeats
-    if o["repeats"] is not None and args.repeats is not None:
-        repeats = min(o["repeats"], args.repeats)
-    job_repeats = o["job_repeats"]
     only = args.jobs.split(",") if args.jobs else None
     arms = args.arms.split(",") if args.arms else None
 
@@ -1057,28 +1351,40 @@ def main(argv: Optional[list[str]] = None) -> int:
         return 2
 
     if args.dry_run:
-        return dry_run(jobs, cfg, matrix, baseline, only, arms, repeats, job_repeats, rules)
+        if args.stage:
+            return dry_run_stage(args.stage, jobs, cfg, matrix, baseline, only, arms)
+        return dry_run(jobs, cfg, matrix, baseline, only, arms, args.repeats, {})
 
+    if not args.stage and not args.judge_only:
+        print("preflight: a paid run goes by stage: --stage 1, then --stage 2 (planner ruling 14). Nothing was spent.")
+        return 2
     if not os.getenv("OPENROUTER_API_KEY"):
         print("preflight: OPENROUTER_API_KEY is not set (put it in .env). Nothing was spent.")
         return 2
     if baseline is None:
         print("preflight: no checked model in the matrix. Nothing was spent.")
         return 2
+    try:
+        jms = pick_judges(matrix, baseline, cfg.judge_model_ids)
+    except ValueError as exc:
+        print(f"preflight: {exc}. Nothing was spent.")
+        return 2
 
     for e in cfg.ledger.recover():  # a crash in an earlier invocation: count what its database logged
         print(f"ledger: recovered unfinished entry {e['key']} (US${e['dollars']:.4f} from its database)")
-    print(f"results folder: {cfg.day_dir}  (a resume must pass the same --date {cfg.date})")
-    runs = build_matrix(jobs, only, arms, repeats, job_repeats)
+    print(f"results folder: {cfg.day_dir}  (stage 2 and any resume must pass the same --date {cfg.date})")
     rc = 0
-    if not args.judge_only:
-        done = asyncio.run(run_matrix(runs, jobs, cfg, matrix, baseline))
-        if any(r["status"] == "refused" for r in done):
+    judge_jobs = {n: j for n, j in jobs.items() if (j.get("quality") or {}).get("kind") == "pairwise_judge"}
+    if args.stage and not args.judge_only:
+        res = asyncio.run(run_stage(args.stage, jobs, cfg, matrix, baseline, only=only, arms=arms, jms=jms))
+        rc = res["rc"]
+        judge_jobs = {n: jobs[n] for n in res["judge_jobs"]}
+    if not args.no_judge and judge_jobs and rc not in (3, TRIPWIRE_STOP_RC):
+        try:
+            asyncio.run(run_judge(judge_jobs, cfg, matrix, baseline))
+        except budget.BudgetRefused as exc:
+            print(f"judge: {exc}; stopping (a guard failure is a stop).")
             rc = 3
-        elif any(r["status"] == "failed" for r in done):
-            rc = 4
-    if not args.no_judge and rc != 3:
-        asyncio.run(run_judge(jobs, cfg, matrix, baseline))
     print(f"ledger: US${cfg.ledger.spent():.4f} spent of US${cfg.phase_cap:.2f}")
     return rc
 

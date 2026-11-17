@@ -17,7 +17,6 @@ from pathlib import Path
 from typing import Optional
 
 PHASE_CAP_DOLLARS = 20.0
-ESTIMATE_LIMIT_DOLLARS = 14.0
 
 
 LOGGED_EVENTS = ("model_call", "orchestrator_decision")  # the rows that carry dollars (as run_bench.read_run_tree)
@@ -167,20 +166,3 @@ class Ledger:
                 f"budget guard: spent US${spent:.4f} + this run's estimate US${estimate:.4f} "
                 f"would pass the US${cap:.2f} cap; run refused, nothing was spent"
             )
-
-
-def load_shrink_rules(path: Path) -> dict:
-    import yaml
-
-    return yaml.safe_load(Path(path).read_text(encoding="utf-8"))
-
-
-def apply_shrink(rules: dict, steps: int) -> dict:
-    """Overrides after the first ``steps`` shrink steps: ``{"repeats": int|None, "job_repeats": {job: int}}``."""
-    out: dict = {"repeats": None, "job_repeats": {}}
-    for step in (rules.get("steps") or [])[:steps]:
-        if "repeats" in step:
-            out["repeats"] = int(step["repeats"])
-        for job, n in (step.get("job_repeats") or {}).items():
-            out["job_repeats"][job] = int(n)
-    return out

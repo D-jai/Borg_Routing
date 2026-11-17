@@ -90,7 +90,7 @@ def test_an_unfinished_entry_is_recovered_from_its_database_and_calls_log(tmp_pa
 async def test_the_entry_is_written_at_run_start_with_the_db_path(cfg, monkeypatch):
     seen = {}
 
-    async def fake_borg(job, spec, cfg_, matrix, db_path):
+    async def fake_borg(job, spec, cfg_, matrix, db_path, baseline=None):
         seen["entries"] = json.loads((cfg_.results_root / "spend.json").read_text(encoding="utf-8"))["entries"]
         seen["db_path"] = str(db_path)
         fake_logged_db(Path(db_path), 0.4)
@@ -108,7 +108,7 @@ async def test_the_entry_is_written_at_run_start_with_the_db_path(cfg, monkeypat
 
 
 async def test_a_crashed_borg_run_records_its_logged_dollars_never_zero(cfg, monkeypatch):
-    async def crashing_borg(job, spec, cfg_, matrix, db_path):
+    async def crashing_borg(job, spec, cfg_, matrix, db_path, baseline=None):
         fake_logged_db(Path(db_path), 0.3, 0.2)
         raise RuntimeError("engine fell over")
 

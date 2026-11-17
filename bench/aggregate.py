@@ -3,7 +3,8 @@
 Per job, each BORG arm (the candidate) is compared with its base arm: ``direct``
 for jobs A, B and C, ``borg_cloud`` for job D's local arm.
 
-- **Cost:** the median of ``cost_dollars`` over the arm's repeats. Failed runs are
+- **Cost:** the median of ``cost_dollars`` over the arm's repeats (a job with one repeat reports that
+  run's cost and is marked "one run (thinner evidence)"). Failed runs are
   in the median with the dollars they spent. The cost test holds when the
   candidate's median is at most 70% of the base's.
 - **Quality:** per-run pairing. Repeat n of the base is compared with repeat n
@@ -89,11 +90,20 @@ def compare_arms(job: dict, base_arm: str, cand_arm: str, base: dict, cand: dict
         out["status"] = "void"
         return out
 
-    out["base_median_cost"] = statistics.median(float(base[n].get("cost_dollars") or 0.0) for n in reps)
-    out["cand_median_cost"] = statistics.median(float(cand[n].get("cost_dollars") or 0.0) for n in reps)
-    if out["base_median_cost"] > 0:
-        out["cost_ratio"] = out["cand_median_cost"] / out["base_median_cost"]
-    out["cost_holds"] = out["cand_median_cost"] <= COST_SHARE * out["base_median_cost"]
+    base_cost = [float(base[n].get("cost_dollars") or 0.0) for n in reps]
+    cand_cost = [float(cand[n].get("cost_dollars") or 0.0) for n in reps]
+    if len(reps) == 1:
+        # One repeat (ruling 14): report that run's numbers, not a median, and say the evidence is thinner.
+        out["basis"], out["evidence"] = "one run", "one run (thinner evidence)"
+        out["base_run_cost"], out["cand_run_cost"] = base_cost[0], cand_cost[0]
+        b_cost, c_cost = base_cost[0], cand_cost[0]
+    else:
+        out["basis"] = f"median of {len(reps)}"
+        b_cost, c_cost = statistics.median(base_cost), statistics.median(cand_cost)
+        out["base_median_cost"], out["cand_median_cost"] = b_cost, c_cost
+    if b_cost > 0:
+        out["cost_ratio"] = c_cost / b_cost
+    out["cost_holds"] = c_cost <= COST_SHARE * b_cost
 
     if kind == "pairwise_judge":
         if not judge or judge.get("status") != "completed":

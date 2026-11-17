@@ -1,7 +1,5 @@
-# What to shrink when the dry-run estimate for the full matrix is over the limit.
-# Data, not code: the lead can edit it. Steps apply in order; "--shrink-steps N"
-# applies the first N. Job C comes first (its documents are the costly part),
-# then repeats go from three to two.
+# SUPERSEDED by planner ruling 14 (17-Nov-2026): the staged plan (--stage 1, --stage 2) replaced the US$14
+# pre-flight rule and these shrink steps. No code reads this file any more; it is kept for the record only.
 estimate_limit_dollars: 14.0
 phase_cap_dollars: 20.0
 steps:
