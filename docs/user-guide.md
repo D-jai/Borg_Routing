@@ -269,6 +269,8 @@ The planner, re-plan and final write-up (compose) share one prompt. The engine's
 
 If no step finished either, the run fails with BRT-ORC-009 as before.
 
+Every completed run records how its answer was made in `answer_kind` (`GET /runs/{id}`): `composed` (the final write-up), `salvaged` (the finished steps' results with a note, BRT-ORC-030), `direct` (the planner answered without steps), `declined` (the write-up declined with `action: fail` and its reason is the answer, or nothing at all came back with no steps to show) or `shortcut` (a short conversational message answered by the Rule Zero shortcut).
+
 ---
 
 ## Web Search Tool (BRT-WEB-01)

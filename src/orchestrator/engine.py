@@ -2438,6 +2438,7 @@ async def _orchestrate_run(
         )
         shortcut_resp = compose_result.get("response")
         if shortcut_resp:
+            await _mark_answer_kind(run_id, "shortcut", db_path)
             return shortcut_resp
         # BRT-ZERO-01b — the shortcut compose came back empty OR smuggled
         # a plan node under `plan.nodes`. Either way we're about to redo
@@ -2487,6 +2488,7 @@ async def _orchestrate_run(
         )
 
     if plan_result.get("direct_answer"):
+        await _mark_answer_kind(run_id, "direct", db_path)
         return plan_result["direct_answer"]
 
     if not plan or not plan.get("nodes"):
@@ -2522,7 +2524,9 @@ async def _orchestrate_run(
             # _handle_compose_result raises BRT-ORC-009 when nothing is
             # usable. In the empty-plan branch we still want a graceful
             # user-facing string rather than a 500, so preserve the
-            # historical default here.
+            # historical default here. No step ran and nothing was written
+            # up: the run declined to answer (answer_kind "declined").
+            await _mark_answer_kind(run_id, "declined", db_path)
             return "I was unable to generate a response."
 
     current_nodes = plan["nodes"]
@@ -3117,7 +3121,8 @@ async def _handle_compose_result(
        logged BRT-ORC-028, no second call) ``direct_answer`` or another
        answer field, a non-string response written out as JSON, or a
        response next to an ``action``.
-    2. ``{"action": "fail"}`` returns its rationale (BUG-020).
+    2. ``{"action": "fail"}`` returns its rationale (BUG-020) and marks the
+       run ``answer_kind = "declined"``.
     3. Otherwise compose is asked once more (``reask``, logged BRT-ORC-029)
        and its reply goes through 1 and 2.
     4. If that fails too, the finished steps' results are returned with a
@@ -3173,6 +3178,7 @@ async def _handle_compose_result(
             )
         except Exception:
             pass
+        await _mark_answer_kind(run_id, "declined", db_path)
         return rationale
 
     if reask is not None:

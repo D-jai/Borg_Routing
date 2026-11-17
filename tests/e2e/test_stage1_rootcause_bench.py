@@ -804,3 +804,41 @@ async def test_r2_answer_fields_next_to_an_action_still_count(env, field):
     await drain_log_writes()
     assert result["response"] == "THE ANSWER."
     assert len(stub.of_kind("compose")) == 1
+
+
+@pytest.mark.asyncio
+async def test_answer_kind_direct(env):
+    """TC-ORC-031-A: a plan direct_answer marks the run "direct"."""
+    db_path, mp = env
+    StubModels(plan_nodes=[], plan_content_for=lambda r: {
+        "direct_answer": "DIRECT REPLY.", "plan": None, "rationale": "r"}).install(mp)
+    result = await run_pipeline("What is two plus two?", db_path=db_path)
+    await drain_log_writes()
+    assert result["response"] == "DIRECT REPLY."
+    assert await _answer_kind(db_path, result["run_id"]) == "direct"
+
+
+@pytest.mark.asyncio
+async def test_answer_kind_declined(env):
+    """TC-ORC-031-B: compose action fail returns its rationale, "declined"."""
+    db_path, mp = env
+    ComposeSeqStub(plan_nodes=[_ans("One JJJ.", id="a")],
+                   compose_seq=[{"action": "fail", "rationale": "Cannot do that."}]).install(mp)
+    result = await run_pipeline("Do it.", db_path=db_path)
+    await drain_log_writes()
+    assert result["status"] == "completed"
+    assert result["response"] == "Cannot do that."
+    assert await _answer_kind(db_path, result["run_id"]) == "declined"
+
+
+@pytest.mark.asyncio
+async def test_answer_kind_shortcut(env):
+    """TC-ORC-031-C: a Rule Zero shortcut answer marks the run "shortcut"."""
+    db_path, mp = env
+    mp.setenv("BORG_RULE_ZERO_SHORTCUT", "true")
+    stub = StubModels(plan_nodes=[], compose_text="Hello back.").install(mp)
+    result = await run_pipeline("hello there", db_path=db_path)
+    await drain_log_writes()
+    assert result["response"] == "Hello back."
+    assert not stub.of_kind("plan")
+    assert await _answer_kind(db_path, result["run_id"]) == "shortcut"

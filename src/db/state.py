@@ -136,16 +136,19 @@ async def update_run_status(
         await db.commit()
 
 
-ANSWER_KINDS = ("composed", "salvaged")
+ANSWER_KINDS = ("composed", "salvaged", "direct", "declined", "shortcut")
 
 
 async def set_run_answer_kind(run_id: UUID, kind: str, db_path: str = DB_PATH) -> None:
     """Record how the run's final answer was made (planner ruling 20, R2).
 
-    ``composed``: the compose call wrote it. ``salvaged``: compose failed
-    twice and the answer is the finished steps' results with a note
-    (BRT-ORC-030). NULL (never set): a direct answer, a failed run, or a run
-    from before this column. Shown in ``GET /runs/{id}`` as ``run.answer_kind``.
+    ``composed``: the compose call wrote it. ``salvaged``: compose gave no
+    answer (twice, or its call raised) and the answer is the finished steps'
+    results with a note (BRT-ORC-030). ``direct``: the planner's
+    ``direct_answer``. ``declined``: compose replied ``action: fail`` and the
+    answer is its rationale (or no plan and no write-up came back at all).
+    ``shortcut``: the Rule Zero shortcut answered. Every completed run has
+    one (R1-R4 review). NULL: a failed run, or a run from before this column. Shown in ``GET /runs/{id}`` as ``run.answer_kind``.
     A run id with no row is ignored.
 
     Raises:
