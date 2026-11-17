@@ -265,6 +265,16 @@ Writing a synthesis node **without** `depends_on` is an anti-pattern — that no
 ### Observability codes
 - **BRT-ORC-017** — A `depends_on` id referenced a node not present in the plan (orchestrator hallucination). The node dispatches anyway with whatever upstream outputs could be resolved; the trace shows the missing ids.
 
+### When the final write-up goes wrong (BRT-ORC-028, -029, -030)
+
+The planner, re-plan and final write-up (compose) share one prompt. The engine's message to the model names the mode in one line ("Mode: re_plan. Reply with the next action." or "Mode: compose. Reply with the final answer."). If the write-up still comes back in the wrong form, BORG_ROUTE tries, in order:
+
+1. **The answer is there, in the wrong place** (for example `{"action": "compose", "response": "..."}`, or the text under `final_answer` or `answer`, or a list where text was expected): it is used as the answer, with no extra call. The trace shows BRT-ORC-028.
+2. **No answer in the reply:** the write-up is asked for once more (BRT-ORC-029).
+3. **Still no answer:** you get the results of the steps that finished, under a plain note saying the final write-up failed: each step's answer, or for a per-item step each item's result and how many items failed. Finished work is never thrown away. The trace shows BRT-ORC-030 as a warning, and `GET /runs/{id}` shows `"answer_kind": "salvaged"` on the run (a written-up answer shows `"composed"`). With the on-premise lane in `raw_local` or `all_local`, a step that read your documents appears only if its output passed the output check, and only document ids (never document text) are shown for its items.
+
+If no step finished either, the run fails with BRT-ORC-009 as before.
+
 ---
 
 ## Web Search Tool (BRT-WEB-01)

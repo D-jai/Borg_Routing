@@ -51,6 +51,10 @@ _MIGRATIONS = [
     # On-premise lane: the manifest (JSON) of a run that read documents. Such
     # a run is never resumed. NULL for every other run.
     "ALTER TABLE runs ADD COLUMN documents TEXT",
+    # Planner ruling 20 (R2): how the final answer was made, "composed" or
+    # "salvaged" (compose failed; finished step results returned). NULL for
+    # a direct answer, a failed run, or a run from before this column.
+    "ALTER TABLE runs ADD COLUMN answer_kind TEXT",
 ]
 
 _SCHEMA_SQL = """
@@ -69,7 +73,8 @@ CREATE TABLE IF NOT EXISTS runs (
     failure_reason TEXT,
     kind TEXT DEFAULT 'orchestrated',
     route_options TEXT,
-    documents TEXT
+    documents TEXT,
+    answer_kind TEXT
 );
 
 CREATE TABLE IF NOT EXISTS subtasks (

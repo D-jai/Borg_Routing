@@ -1,7 +1,7 @@
 """Bench stage 1 (17-Nov-2026) root causes: reproductions and their fixes.
 
 Planner ruling 16 wrote the reproductions (each failed on the tree it was
-written against); planner ruling 20 fixed R1 and R3 and added the tests below
+written against); planner ruling 20 fixed R1-R3 and added the tests below
 the reproductions for the ruling's conditions (BRT-ORC-026 to -030).
 
 R1  A re_plan "continue" step that reuses the id of a step that already ran
@@ -25,6 +25,7 @@ import json
 from dataclasses import dataclass
 from typing import Optional
 
+import httpx
 import pytest
 
 from src.db.schema import create_all
@@ -150,6 +151,29 @@ async def test_r1_lane_retry_after_lane_002_reaches_the_local_model(tmp_path, mo
     assert [r for r in stub.of_kind("answerer") if r.is_local], (
         "no worker ran: the extraction retry reused id 'classify_emails' and was skipped"
     )
+
+
+# --- R2: compose answers in the re_plan shape -> BRT-ORC-009 ----------------
+
+@pytest.mark.parametrize("compose_reply", [
+    {"action": "compose", "next_nodes": None, "rationale": "can synthesise now"},  # A/D cloud
+    {"action": "continue", "next_nodes": [_ans("More CCC.", id="more")],
+     "rationale": "one more pass"},                                               # A/D local
+])
+@pytest.mark.asyncio
+async def test_r2_compose_in_replan_shape_with_apply_to_each_results_is_not_orc_009(
+    env, compose_reply,
+):
+    db_path, mp = env
+    stub = ComposeShapeStub(plan_nodes=[_per_item()], compose_content=compose_reply,
+                            answer_for=lambda r: {"sentiment": "positive"}).install(mp)
+    result = await run_pipeline("Rate each review; return a JSON list.", db_path=db_path)
+    await drain_log_writes()
+    assert len(_calls_with(stub, PER_ITEM)) == len(REVIEWS)
+    assert "BRT-ORC-009" not in str(result.get("error")), (
+        f"three resolved per-item results were discarded: {result.get('error')}"
+    )
+    assert result["status"] == "completed", result.get("error")
 
 
 # --- R3: a non-object element in the node list ------------------------------
@@ -351,3 +375,218 @@ async def test_r3_plan_with_only_non_objects_and_documents_is_orc_003(tmp_path, 
     result = await run_pipeline("Read it.", db_path=db_path, documents={"folder": "."})
     await drain_log_writes()
     assert result["status"] == "failed" and "BRT-ORC-003" in str(result.get("error"))
+
+
+# --- R2: compose recovery, in the ruling's order -----------------------------
+
+@dataclass
+class ComposeSeqStub(StubModels):
+    """Compose replies taken in turn from ``compose_seq`` (an Exception is
+    raised as the call's error); after the list, the default compose reply."""
+    compose_seq: list = None
+
+    def _answer(self, url, payload):
+        resp = super()._answer(url, payload)
+        if self.requests and self.requests[-1].kind == "compose" and self.compose_seq:
+            nth = len(self.of_kind("compose")) - 1
+            if nth < len(self.compose_seq):
+                reply = self.compose_seq[nth]
+                if isinstance(reply, Exception):
+                    raise reply
+                resp._body["choices"][0]["message"]["content"] = json.dumps(reply)
+        return resp
+
+
+async def _answer_kind(db_path, run_id):
+    from src.db.state import get_run
+    from uuid import UUID
+    return (await get_run(UUID(run_id), db_path=db_path)).get("answer_kind")
+
+
+async def _codes(db_path, run_id):
+    found = []
+    for kind in ("error", "orchestrator_decision"):
+        found += [d.get("code") for d in await _decisions(db_path, run_id, kind)]
+    return found
+
+
+@pytest.mark.parametrize("reply, expected", [
+    ({"action": "compose", "response": "Answer WRONG-SHAPE."}, "Answer WRONG-SHAPE."),
+    ({"final_answer": "Answer FINAL-FIELD."}, "Answer FINAL-FIELD."),
+    ({"response": [{"review": "Kettle", "sentiment": "positive"}]}, '"sentiment": "positive"'),
+])
+@pytest.mark.asyncio
+async def test_r2_wrong_shape_with_final_text_is_used_without_a_second_call(env, reply, expected):
+    """TC-ORC-028-A: step 1, a usable final text in the wrong shape."""
+    db_path, mp = env
+    stub = ComposeSeqStub(plan_nodes=[_per_item()], compose_seq=[reply],
+                          answer_for=lambda r: {"sentiment": "positive"}).install(mp)
+    result = await run_pipeline("Rate each review.", db_path=db_path)
+    await drain_log_writes()
+    assert result["status"] == "completed", result.get("error")
+    assert expected in result["response"]
+    assert len(stub.of_kind("compose")) == 1
+    codes = await _codes(db_path, result["run_id"])
+    assert "BRT-ORC-028" in codes and "BRT-ORC-029" not in codes
+    assert await _answer_kind(db_path, result["run_id"]) == "composed"
+
+
+@pytest.mark.asyncio
+async def test_r2_right_shape_is_not_logged_as_wrong(env):
+    """TC-ORC-028-B: a plain {"response": ...} logs nothing and is composed;
+    the mode is named in the user message of re_plan and compose."""
+    db_path, mp = env
+    stub = ComposeSeqStub(plan_nodes=[_ans("One HHH.", id="a")],
+                          compose_seq=[{"response": "Plain answer."}]).install(mp)
+    result = await run_pipeline("Do it.", db_path=db_path)
+    await drain_log_writes()
+    assert result["response"] == "Plain answer."
+    codes = await _codes(db_path, result["run_id"])
+    assert not {"BRT-ORC-028", "BRT-ORC-029", "BRT-ORC-030"} & set(codes)
+    assert await _answer_kind(db_path, result["run_id"]) == "composed"
+    assert stub.of_kind("re_plan")[0].user == engine._MODE_USER_MESSAGES["re_plan"]
+    assert stub.of_kind("compose")[0].user == engine._MODE_USER_MESSAGES["compose"]
+
+
+@pytest.mark.asyncio
+async def test_r2_no_final_text_asks_compose_once_more(env):
+    """TC-ORC-029-A: step 2, the re-ask's answer is used."""
+    db_path, mp = env
+    stub = ComposeSeqStub(plan_nodes=[_per_item()],
+                          compose_seq=[{"action": "compose"}, {"response": "SECOND TRY."}],
+                          answer_for=lambda r: {"sentiment": "positive"}).install(mp)
+    result = await run_pipeline("Rate each review.", db_path=db_path)
+    await drain_log_writes()
+    assert result["response"] == "SECOND TRY."
+    composes = stub.of_kind("compose")
+    assert len(composes) == 2 and composes[1].user == engine._COMPOSE_REASK
+    codes = await _codes(db_path, result["run_id"])
+    assert "BRT-ORC-029" in codes and "BRT-ORC-030" not in codes
+    assert await _answer_kind(db_path, result["run_id"]) == "composed"
+
+
+@pytest.mark.parametrize("second", [
+    {"action": "continue", "next_nodes": [], "rationale": "again"},
+    httpx.ConnectError("compose unreachable"),
+])
+@pytest.mark.asyncio
+async def test_r2_salvages_finished_results_when_compose_fails_twice(env, second):
+    """TC-ORC-030-A: step 3, the finished apply_to_each results come back with
+    a note, a warning code and answer_kind "salvaged" (shown by GET /runs/{id})."""
+    db_path, mp = env
+    stub = ComposeSeqStub(plan_nodes=[_per_item()],
+                          compose_seq=[{"action": "compose"}, second],
+                          answer_for=lambda r: {"sentiment": "positive"}).install(mp)
+    result = await run_pipeline("Rate each review.", db_path=db_path)
+    await drain_log_writes()
+    assert result["status"] == "completed", result.get("error")
+    text = result["response"]
+    assert text.startswith(engine.SALVAGE_NOTE)
+    assert "## rate (3 item(s) finished)" in text
+    for review in REVIEWS:
+        assert review in text
+    assert text.count('"sentiment": "positive"') == 3
+    assert len(stub.of_kind("compose")) == 2
+    assert "BRT-ORC-030" in await _codes(db_path, result["run_id"])
+
+    from src.api import tasks
+    mp.setattr(tasks, "DB_PATH", db_path)
+    resp = await tasks.get_run_state(result["run_id"])
+    assert json.loads(resp.body)["run"]["answer_kind"] == "salvaged"
+
+
+@pytest.mark.asyncio
+async def test_r2_nothing_finished_is_still_orc_009(env):
+    """TC-ORC-030-B (failure direction): no finished step, compose fails twice:
+    BRT-ORC-009, the run fails, no answer_kind."""
+    db_path, mp = env
+    stub = ComposeSeqStub(
+        plan_nodes=[_ans("Doomed III.", id="a")],
+        compose_seq=[{"action": "compose"}, {"action": "compose"}],
+        error_for=lambda r: httpx.ConnectError("down") if r.kind == "answerer" else None,
+    ).install(mp)
+    result = await run_pipeline("Do it.", db_path=db_path)
+    await drain_log_writes()
+    assert result["status"] == "failed" and "BRT-ORC-009" in str(result.get("error"))
+    assert len(stub.of_kind("compose")) == 2
+    assert await _answer_kind(db_path, result["run_id"]) is None
+
+
+class _RawLane:
+    keeps_raw_local = True
+
+    @staticmethod
+    def is_part_id(value):
+        return isinstance(value, str) and value.startswith("doc_")
+
+
+def _env(output, scope=None, guarded=None, status="resolved"):
+    from uuid import uuid4
+    from src.envelopes.schema import InboundEnvelope
+    env = InboundEnvelope(envelope_id=uuid4(), subtask_id=uuid4(), status=status,
+                          output=output, lane_guarded=guarded,
+                          **({"failure_reason": "x"} if status == "failed" else {}))
+    env._data_scope = scope
+    return env
+
+
+def test_r2_salvage_keeps_raw_text_out_in_raw_local():
+    """TC-ORC-030-C: in raw_local / all_local a raw step's unguarded output is
+    withheld and an item that is not a part id is not shown; guarded output
+    and derived steps are shown."""
+    results = {
+        "raw_unguarded": _env({"result": "SECRET DOCUMENT TEXT"}, "raw", None),
+        "raw_guarded": _env({"result": "guarded summary"}, "raw", True),
+        "raw_each": _env({"results": [
+            {"index": 0, "item": "doc_001", "output": {"bucket": "billing"}},
+            {"index": 1, "item": "RAW ITEM TEXT", "output": {"bucket": "tech"}},
+        ], "failures": [], "success_count": 2}, "raw", False),
+        "derived": _env({"response": "derived answer"}, "derived"),
+        "failed": _env({"result": "FAILED OUT"}, "derived", status="failed"),
+    }
+    text = engine._salvage_finished_results(results, _RawLane())
+    assert "SECRET DOCUMENT TEXT" not in text and "RAW ITEM TEXT" not in text
+    assert "FAILED OUT" not in text
+    assert "guarded summary" in text and "derived answer" in text
+    assert "doc_001" in text and '"bucket": "tech"' in text
+    assert "raw_unguarded" in text.split("Not shown")[1]
+    # Lane off (or by_reference): everything finished is shown.
+    open_text = engine._salvage_finished_results(results, None)
+    assert "SECRET DOCUMENT TEXT" in open_text and "RAW ITEM TEXT" in open_text
+
+
+@pytest.mark.asyncio
+async def test_r2_salvage_in_raw_local_never_carries_document_text(tmp_path, monkeypatch):
+    """TC-ORC-030-D: end to end in raw_local, a salvaged answer over a
+    per-document step shows the outputs and part ids, never the text."""
+    secret = "My invoice number 99-ZETA is wrong, please fix it today."
+    docs = tmp_path / "docs"
+    docs.mkdir()
+    (docs / "email_001.txt").write_text(secret, encoding="utf-8")
+    db_path = str(tmp_path / "salvage_lane.db")
+    await create_all(db_path)
+    for name in ("BORG_LANE_MANIFEST", "BORG_LOCAL_HOSTS", "BORG_LANE_LOCAL_ALLOWLIST",
+                 "BORG_LANE_MAX_OUTPUT_CHARS", "BORG_LANE_MAX_VERBATIM_CHARS",
+                 "BORG_LANE_MAX_NGRAM_SHARE", "BORG_LANE_PART_CHARS"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("BORG_DOCS_ROOT", str(docs))
+    monkeypatch.setenv("BORG_LANE_MODE", "raw_local")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test-salvage-lane")
+    monkeypatch.setenv("BORG_RULE_ZERO_SHORTCUT", "false")
+    monkeypatch.setattr(engine, "_shared_matrix", lane_matrix())
+    step = {"type": "apply_to_each", "id": "classify", "skill_id": "classify_into_buckets",
+            "skill_version": 1, "task_type": "extraction", "tier": "light",
+            "skill_args": {"buckets": ["billing", "technical"], "items_ref": "documents"}}
+    stub = ComposeSeqStub(
+        plan_nodes=[step], compose_seq=[{"action": "compose"}, {"action": "compose"}],
+        answer_for=lambda r: {"bucket": "billing", "confidence": 0.9, "defer_reason": ""},
+    ).install(monkeypatch)
+    result = await run_pipeline("Classify each email.", db_path=db_path,
+                                documents={"folder": "."})
+    await drain_log_writes()
+    assert result["status"] == "completed", result.get("error")
+    assert [r for r in stub.of_kind("answerer") if r.is_local]
+    text = result["response"]
+    assert text.startswith(engine.SALVAGE_NOTE) and '"bucket": "billing"' in text
+    assert "99-ZETA" not in text and "invoice" not in text
+    assert await _answer_kind(db_path, result["run_id"]) == "salvaged"

@@ -13,7 +13,7 @@ Error codes:
 - BRT-ORC-007: no orchestrator model available
 - BRT-ORC-007-DEGRADED: quality bar relaxed below the default because no model qualified
 - BRT-ORC-008: node builder failed for a plan node
-- BRT-ORC-009: compose mode returned no response
+- BRT-ORC-009: compose mode returned no response (and no step finished)
 - BRT-ORC-015: default answerer selection failed; fell back to orchestrator
                model (warning; run continues)
 - BRT-ORC-016: envelope persistence (save/update_inbound) failed (error;
@@ -41,6 +41,12 @@ Error codes:
                (warning; the step runs)
 - BRT-ORC-027: non-object entries dropped from a plan / re_plan step list
                (warning; nothing valid left = no steps, never an empty plan)
+- BRT-ORC-028: compose reply in the wrong shape; its final text was used
+               (info; no second call)
+- BRT-ORC-029: compose reply had no final text; compose asked once more
+- BRT-ORC-030: compose gave no final text twice; the answer is the finished
+               steps' results with a note, runs.answer_kind = "salvaged"
+               (warning; the run completes)
 
 On-premise lane (docs/design/on_premise_lane.md; on only when the run has a
 lane context, see src/lane/context.py):
@@ -622,6 +628,20 @@ async def _select_orchestrator_model(
     )
 
 
+# The user message of a re_plan or compose call: one short line naming the
+# mode (planner ruling 20, R2: re_plan and compose both sent "continue", and
+# compose replies came back in the re_plan shape). The shared template in
+# src/prompts/ is unchanged.
+_MODE_USER_MESSAGES = {
+    "re_plan": "Mode: re_plan. Reply with the next action.",
+    "compose": "Mode: compose. Reply with the final answer.",
+}
+# The one compose re-ask after a reply with no final answer (R2 step 2).
+_COMPOSE_REASK = (
+    'Mode: compose. Your last reply had no final answer. Reply with '
+    '{"response": "<the final answer>"} only.'
+)
+
 _FAILURE_MESSAGE_MAX = 200   # deliberate cap on a failure message sent to plan / re_plan
 _FAILURE_CODE_FALLBACK = "BRT-ORC-004"
 _MODEL_FAILURE_CODE = "BRT-ANS-010"   # the model itself declined or reported failure
@@ -692,8 +712,13 @@ async def _invoke_orchestrator_model(
     orchestrator_model: ModelInfo,
     db_path: str,
     governance_instruction: Optional[str] = None,
+    user_message: Optional[str] = None,
 ) -> dict:
     """One call to the orchestrator model. Returns parsed JSON dict.
+
+    The user message is the instruction in plan mode and one short line
+    naming the mode otherwise (``_MODE_USER_MESSAGES``; planner ruling 20,
+    R2). ``user_message`` replaces it (the compose re-ask).
 
     ``user_instruction`` is what this run must deliver. ``governance_instruction``
     is the operator's verbatim instruction for the whole job (Law 1); it
@@ -777,7 +802,7 @@ async def _invoke_orchestrator_model(
     # Law 1 — in a child run the governance block shows the operator's
     # instruction, so the child's own assignment is stated here instead.
     # (Only plan mode sends it as the user message; re_plan and compose send
-    # "continue".) A top-level run needs no such block: the two are the same.
+    # one line naming the mode.) A top-level run needs no such block: the two are the same.
     governing = governance_instruction or user_instruction
     if governing.strip() != (user_instruction or "").strip():
         assignment_block = (
@@ -815,7 +840,11 @@ async def _invoke_orchestrator_model(
         "model": body_model,
         "messages": [
             {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_instruction if mode == "plan" else "continue"},
+            {"role": "user", "content": (
+                user_message if user_message is not None
+                else user_instruction if mode == "plan"
+                else _MODE_USER_MESSAGES.get(mode, "continue")
+            )},
         ],
         "temperature": 0.1,
         "max_tokens": max_tokens,
@@ -2369,12 +2398,22 @@ async def _orchestrate_run(
             child_scratch_digest={},
             **base_kwargs,
         )
+        async def _reask_empty() -> dict:
+            return await _invoke_orchestrator_model(
+                mode="compose",
+                stage_results={},
+                child_scratch_digest={},
+                user_message=_COMPOSE_REASK,
+                **base_kwargs,
+            )
+
         try:
             return await _handle_compose_result(
                 compose_result=compose_result,
                 results={},
                 run_id=run_id,
                 db_path=db_path,
+                reask=_reask_empty,
             )
         except ValueError:
             # _handle_compose_result raises BRT-ORC-009 when nothing is
@@ -2892,12 +2931,65 @@ async def _orchestrate_run(
         **base_kwargs,
     )
 
+    async def _reask() -> dict:
+        return await _invoke_orchestrator_model(
+            mode="compose",
+            stage_results=results,
+            child_scratch_digest=child_digests,
+            user_message=_COMPOSE_REASK,
+            **base_kwargs,
+        )
+
     return await _handle_compose_result(
         compose_result=compose_result,
         results=results,
         run_id=run_id,
         db_path=db_path,
+        reask=_reask,
     )
+
+
+# Reply fields read as the final answer when compose put it somewhere other
+# than "response" (R2 step 1). "rationale" is never an answer.
+_ANSWER_FIELDS = (
+    "response", "direct_answer", "final_answer", "final_response", "answer",
+    "final", "text", "content", "output", "result", "message",
+)
+
+
+def _compose_text(compose_result: object) -> tuple[str, Optional[str], bool]:
+    """(final text, field it came from, wrong shape) from a compose reply.
+
+    The text is the first non-empty answer field (``_ANSWER_FIELDS``); a
+    list or object there is written out as indented JSON. The shape is
+    right only for a string ``response`` in a reply with no ``action``.
+    ("", None, False) when the reply carries no final text.
+    """
+    if not isinstance(compose_result, dict):
+        return "", None, False
+    for field in _ANSWER_FIELDS:
+        value = compose_result.get(field)
+        if isinstance(value, str) and value.strip():
+            text = value
+        elif isinstance(value, (list, dict)) and value:
+            text = json.dumps(value, indent=2, ensure_ascii=False)
+        else:
+            continue
+        wrong = (
+            field != "response" or not isinstance(value, str) or "action" in compose_result
+        )
+        return text, field, wrong
+    return "", None, False
+
+
+async def _mark_answer_kind(run_id: UUID, kind: str, db_path: str) -> None:
+    """runs.answer_kind for this run; a database hiccup never fails the run."""
+    try:
+        from src.db.state import set_run_answer_kind  # noqa: PLC0415
+
+        await set_run_answer_kind(run_id, kind, db_path=db_path)
+    except Exception:
+        logger.warning("could not record answer_kind=%s for run %s", kind, run_id)
 
 
 async def _handle_compose_result(
@@ -2905,29 +2997,49 @@ async def _handle_compose_result(
     results: dict,
     run_id: UUID,
     db_path: str,
+    reask=None,
 ) -> str:
-    """BUG-020 (regression of round-2 BUG-010) — compose-result decoder.
+    """The run's final answer from a compose reply (BUG-020; planner ruling
+    20, R2). In order:
 
-    Compose mode previously only recognised `{"response": "..."}` and
-    `{"direct_answer": "..."}`; when the orchestrator returned a
-    re_plan-shaped control signal in compose mode
-    (`{"action": "fail|compose|continue"}`), every branch fell through
-    and BRT-ORC-009 fired even when stage_results contained a perfectly
-    usable answerer envelope. This decoder explicitly covers all three
-    control-signal shapes plus the `direct_answer` alias, and only
-    raises BRT-ORC-009 when there is genuinely no usable text anywhere
-    in the run. Used by every site that calls compose-mode (the main
-    plan→re_plan→compose loop AND the empty-plan graceful fallback).
+    1. A final text in the reply is used: ``response``, or (wrong shape,
+       logged BRT-ORC-028, no second call) ``direct_answer`` or another
+       answer field, a non-string response written out as JSON, or a
+       response next to an ``action``.
+    2. ``{"action": "fail"}`` returns its rationale (BUG-020).
+    3. Otherwise compose is asked once more (``reask``, logged BRT-ORC-029)
+       and its reply goes through 1 and 2.
+    4. If that fails too, the finished steps' results are returned with a
+       plain note that the write-up failed (BRT-ORC-030, warning) and the
+       run is marked ``answer_kind = "salvaged"``; finished work is never
+       thrown away. Raw step output is kept out of it in raw_local and
+       all_local (``_salvage_finished_results``).
+    5. Nothing finished: BRT-ORC-009.
+
+    A composed answer marks the run ``answer_kind = "composed"``.
     """
-    response = (
-        compose_result.get("response")
-        or compose_result.get("direct_answer")
-        or ""
-    )
-    if response and response.strip():
-        return response
+    text, field, wrong = _compose_text(compose_result)
+    if text:
+        if wrong:
+            try:
+                await write_event(
+                    "orchestrator_decision",
+                    run_id=run_id,
+                    decision={
+                        "code": "BRT-ORC-028",
+                        "msg": "compose reply in the wrong shape; its final text was used",
+                        "field": field,
+                        "compose_action": compose_result.get("action"),
+                    },
+                    db_path=db_path,
+                )
+            except Exception:
+                pass
+        await _mark_answer_kind(run_id, "composed", db_path)
+        return text
 
-    action = (compose_result.get("action") or "").lower().strip()
+    action = str(compose_result.get("action") or "").lower().strip() if isinstance(
+        compose_result, dict) else ""
 
     # action == "fail" — surface rationale instead of silently 500ing.
     # Run completes (not raises); user sees a coherent decline message.
@@ -2952,27 +3064,52 @@ async def _handle_compose_result(
             pass
         return rationale
 
-    # action == "compose" or "continue" or anything else WITHOUT a
-    # `response` field — lift the most recent resolved answerer envelope
-    # from stage_results. Pre-fix this path raised BRT-ORC-009 and
-    # discarded all the upstream answerer work.
-    salvaged = _salvage_answer_from_stage_results(results)
-    if salvaged:
+    if reask is not None:
         try:
             await write_event(
                 "orchestrator_decision",
                 run_id=run_id,
                 decision={
-                    "code": "BUG-020-COMPOSE-USED-STAGE-RESULTS",
-                    "msg": "compose returned no response; lifted answer "
-                           "from a resolved answerer envelope to avoid "
-                           "discarding upstream work",
+                    "code": "BRT-ORC-029",
+                    "msg": "compose reply had no final answer; asking compose once more",
                     "compose_action": action or "(missing)",
                 },
                 db_path=db_path,
             )
         except Exception:
             pass
+        try:
+            second = await reask()
+        except LaneError:
+            raise
+        except ValueError as exc:
+            # The re-ask itself failed (BRT-ORC-001/002): salvage below.
+            logger.warning("compose re-ask failed for run %s: %s", run_id, exc)
+            second = None
+        if second is not None:
+            # No reask this time: a second reply with no final text salvages.
+            return await _handle_compose_result(second, results, run_id, db_path)
+
+    salvaged = _salvage_finished_results(results, current_lane())
+    if salvaged:
+        try:
+            await write_event(
+                "error",
+                run_id=run_id,
+                decision={
+                    "code": "BRT-ORC-030",
+                    "severity": "warning",
+                    "msg": "compose returned no final answer, also when asked again; "
+                           "the answer is the finished steps' results with a note",
+                    "compose_action": action or "(missing)",
+                    "steps": [k for k, v in results.items()
+                              if getattr(v, "status", None) == "resolved"],
+                },
+                db_path=db_path,
+            )
+        except Exception:
+            pass
+        await _mark_answer_kind(run_id, "salvaged", db_path)
         return salvaged
 
     # Genuinely nothing usable anywhere — keep the original error so
@@ -2980,38 +3117,98 @@ async def _handle_compose_result(
     raise ValueError("BRT-ORC-009: compose mode returned no response")
 
 
-def _salvage_answer_from_stage_results(results: dict) -> Optional[str]:
-    """BUG-020 helper — extract the best textual answer from any resolved
-    envelope in stage_results. Iterates in insertion order and prefers
-    later resolved envelopes (closer to compose); falls back to earlier
-    ones. Recognises `output.response`, `output.answer`, `output.text`,
-    `output.content` plus the bare `output` string for legacy shapes.
-    Returns None if nothing usable is found.
+SALVAGE_NOTE = (
+    "The final write-up step failed, so this answer was not composed. "
+    "Below are the results of the steps that finished, as they came back."
+)
+
+
+def _salvage_finished_results(results: dict, lane: Optional[LaneContext] = None) -> Optional[str]:
+    """The finished steps' results under a plain note, or None when no step
+    finished (planner ruling 20, R2 step 4).
+
+    One section per resolved step, in run order: its answer text when the
+    output has one (``_step_text``), otherwise its output as indented JSON;
+    an apply_to_each step lists each item's output (with the item and its
+    index) and says how many items failed.
+
+    Lane rule: in raw_local and all_local a raw step's output appears only
+    when it passed the output guard (``lane_guarded``); an apply_to_each
+    step's per-item outputs each passed it, but an item is shown only when
+    it is a document part id, never text. Anything else from a raw step is
+    named as withheld, with no content.
     """
     if not results:
         return None
-
-    candidates: list[str] = []
-    for _node_id, env in results.items():
-        if env is None:
+    hide_raw = lane is not None and lane.keeps_raw_local
+    sections: list[str] = []
+    withheld: list[str] = []
+    for step_id, env in results.items():
+        if env is None or getattr(env, "status", None) != "resolved":
             continue
-        status = getattr(env, "status", None)
-        if status != "resolved":
+        out = getattr(env, "output", None)
+        raw = hide_raw and getattr(env, "_data_scope", None) == "raw"
+        aggregate = isinstance(out, dict) and isinstance(out.get("results"), list) and (
+            "success_count" in out or "failures" in out
+        )
+        if raw and not aggregate and env.lane_guarded is not True:
+            withheld.append(str(step_id))
             continue
-        out = getattr(env, "output", None) or {}
-        if isinstance(out, str) and out.strip():
-            candidates.append(out.strip())
+        if aggregate:
+            rows = []
+            for entry in out["results"]:
+                if not isinstance(entry, dict):
+                    continue
+                row = {"index": entry.get("index")}
+                item = entry.get("item")
+                if not raw or (lane is not None and lane.is_part_id(item)):
+                    row["item"] = item
+                row["output"] = entry.get("output")
+                rows.append(row)
+            failed = len(out.get("failures") or [])
+            head = f"## {step_id} ({len(rows)} item(s) finished"
+            head += f", {failed} failed)" if failed else ")"
+            sections.append(head + "\n" + json.dumps(rows, indent=2, ensure_ascii=False))
             continue
-        if not isinstance(out, dict):
-            continue
-        for key in ("response", "answer", "text", "content", "summary"):
-            val = out.get(key)
-            if isinstance(val, str) and val.strip():
-                candidates.append(val.strip())
-                break
-
-    if not candidates:
+        body = _step_text(out)
+        if body is None and out:
+            body = json.dumps(out, indent=2, ensure_ascii=False, default=str)
+        if body:
+            sections.append(f"## {step_id}\n{body}")
+    if not sections:
         return None
-    # Prefer the last (most recent) candidate — matches the temporal
-    # intent of "use what came right before compose".
-    return candidates[-1]
+    text = SALVAGE_NOTE + "\n\n" + "\n\n".join(sections)
+    if withheld:
+        text += (
+            "\n\nNot shown (steps that read your documents whose output did not pass "
+            "the on-premise output check): " + ", ".join(withheld)
+        )
+    return text
+
+
+def _step_text(out: object) -> Optional[str]:
+    """A step output's answer text (``response``, ``answer``, ``text``,
+    ``content``, ``summary``; or a bare string), or None."""
+    if isinstance(out, str) and out.strip():
+        return out.strip()
+    if not isinstance(out, dict):
+        return None
+    for key in ("response", "answer", "text", "content", "summary"):
+        val = out.get(key)
+        if isinstance(val, str) and val.strip():
+            return val.strip()
+    return None
+
+
+def _salvage_answer_from_stage_results(results: dict) -> Optional[str]:
+    """BUG-020 helper: the answer text of the last resolved step that has
+    one (``_step_text``), or None. The compose path now salvages every
+    finished step instead (``_salvage_finished_results``, ruling 20); this
+    stays for callers that want the single most recent answer text.
+    """
+    candidates = [
+        text for env in (results or {}).values()
+        if env is not None and getattr(env, "status", None) == "resolved"
+        for text in [_step_text(getattr(env, "output", None))] if text
+    ]
+    return candidates[-1] if candidates else None
