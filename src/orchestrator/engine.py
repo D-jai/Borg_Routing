@@ -938,6 +938,7 @@ async def _invoke_orchestrator_model(
                             "mode": mode,
                             "parsed": None,
                             "length_retry_failed": True,
+                            "finish_reason": "length",
                             "code": "BRT-ORC-018",
                             "error": str(exc)[:300],
                         },
@@ -986,6 +987,10 @@ async def _invoke_orchestrator_model(
                 "parsed": parsed,
                 "rationale": (parsed or {}).get("rationale", ""),
                 "parse_error": str(parse_error) if parse_error else None,
+                # Always logged (planner ruling 20): settles truncation
+                # questions from the database. After a length retry it is
+                # the retry's; the first attempt's was "length".
+                "finish_reason": finish_reason,
                 # BRT-ORC-018 — recorded on this same event (no new
                 # event_type: logs.event_type has a CHECK constraint).
                 # tokens_input/tokens_output above are the sum of both
@@ -995,6 +1000,7 @@ async def _invoke_orchestrator_model(
                         "length_retry": True,
                         "code": "BRT-ORC-018",
                         "retry_max_tokens": max_tokens,
+                        "first_finish_reason": "length",
                     }
                     if length_retried
                     else {}
@@ -1022,7 +1028,7 @@ async def _invoke_orchestrator_model(
         "object matching the schema described above."
     )
     payload["messages"][0]["content"] = retry_system
-    content_retry, usage_retry, latency_retry, _finish_retry = await _post_and_collect()
+    content_retry, usage_retry, latency_retry, finish_retry = await _post_and_collect()
     tokens_in_retry = usage_retry.get("prompt_tokens", 0)
     tokens_out_retry = usage_retry.get("completion_tokens", 0)
 
@@ -1052,6 +1058,7 @@ async def _invoke_orchestrator_model(
                 "parsed": parsed_retry,
                 "rationale": (parsed_retry or {}).get("rationale", ""),
                 "retry": True,
+                "finish_reason": finish_retry,
                 "parse_error": str(retry_error) if retry_error else None,
             },
             payload_in=retry_system[:2000],

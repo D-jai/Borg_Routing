@@ -43,7 +43,8 @@ def _plain_model() -> ModelInfo:
 
 
 async def _invoke(
-    db: str, responses: list[MagicMock], run_id: uuid.UUID | None = None
+    db: str, responses: list[MagicMock], run_id: uuid.UUID | None = None,
+    mode: str = "plan",
 ) -> tuple[dict, list[int]]:
     """Run one plan-mode call; return (parsed, max_tokens seen on each POST)."""
     caps: list[int] = []
@@ -61,7 +62,7 @@ async def _invoke(
         mock_cls.return_value = client
 
         parsed = await _invoke_orchestrator_model(
-            mode="plan",
+            mode=mode,
             run_id=run_id or uuid.uuid4(),
             user_instruction="Hi",
             current_depth=0,
@@ -141,6 +142,8 @@ async def test_orchestrator_retry_is_recorded_on_the_decision_event(monkeypatch,
     assert decision["length_retry"] is True
     assert decision["code"] == "BRT-ORC-018"
     assert decision["retry_max_tokens"] == 2000
+    assert decision["finish_reason"] == "stop"
+    assert decision["first_finish_reason"] == "length"
     assert (tokens_in, tokens_out) == (20, 10)  # 10+10 in, 5+5 out
 
 
@@ -185,3 +188,33 @@ def test_plan_node_can_ask_for_its_own_token_cap():
 def test_unusable_node_token_cap_falls_back_to_the_schema_default():
     assert _build(_answerer_node(max_output_tokens="lots")).max_output_tokens == 4000
     assert _build(_answerer_node()).max_output_tokens == 4000
+
+
+@pytest.mark.parametrize("mode", ["plan", "re_plan", "compose"])
+@pytest.mark.asyncio
+async def test_finish_reason_is_logged_on_every_decision(monkeypatch, db, mode):
+    """TC-ORC-FINISH-A (planner ruling 20): finish_reason is on the decision
+    event of every orchestrator call, not only after a length cut."""
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test-xyz")
+    monkeypatch.setenv("ORCHESTRATOR_MAX_TOKENS", "1000")
+    run_id = uuid.uuid4()
+    await _invoke(db, [_resp(json.dumps({"response": "ok"}), "stop")],
+                  run_id=run_id, mode=mode)
+    rows = await _decision_rows(db, run_id)
+    assert [r[2]["finish_reason"] for r in rows] == ["stop"]
+
+
+@pytest.mark.asyncio
+async def test_finish_reason_is_logged_on_the_json_retry(monkeypatch, db):
+    """TC-ORC-FINISH-B: the JSON-only retry's own event carries its own
+    finish_reason; a missing finish_reason is logged as ""."""
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test-xyz")
+    monkeypatch.setenv("ORCHESTRATOR_MAX_TOKENS", "1000")
+    run_id = uuid.uuid4()
+    await _invoke(db, [_resp("not json at all", "stop"),
+                       _resp(json.dumps({"response": "ok"}), "")],
+                  run_id=run_id, mode="compose")
+    rows = await _decision_rows(db, run_id)
+    assert [(r[2].get("retry", False), r[2]["finish_reason"]) for r in rows] == [
+        (False, "stop"), (True, ""),
+    ]
