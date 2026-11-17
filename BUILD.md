@@ -382,6 +382,7 @@ Filled by 5.5. No claim leaves the building without a row.
 | 16-Nov-2026 | 3ce6e16 round-2 review (3): final focused fix checked by the lead. Generated step ids are unique across the whole run (never a key already in `results` or an id already in the plan), so no-id re_plan steps and no-id siblings never shadow real steps; any step (answerer included) whose `depends_on` step failed or was cycle-failed fails loudly with a new code before any model call (consistent with BRT-APE-005; a dead chain stops paying). Queued after the 1.11 fix builder | Lead |
 | 16-Nov-2026 | **Ruling 9:** a second small additive edit to the planner prompt, for the list hand-over, work order 1.10 only: the `items` line and the "Where the items come from" paragraph, wording exactly as in planner ruling 1. If attempt 3 of Check 1 fails, no fourth attempt: the trace goes under "Needs planner" | Deej (relayed by the planner) |
 | 16-Nov-2026 | Skill render fix (`e8fe3a3`): extract_fields' output schema is built from its `fields` arg (job A depends on it); a skill's own schema still wins over a schema the planner writes on the node (unchanged) | Lead |
+| 16-Nov-2026 | **Ruling 10:** one existing example line in the planner prompt changed so it agrees with ruling 9's paragraph (the apply_to_each `inputs_ref` example). No new live run for this line alone | Deej (relayed by the planner) |
 | 16-Nov-2026 | Fable's first deck cut (`ca69806`) is kept as the starting point for 6.1, not reviewed until 6.1 | Lead |
 
 ## 9. Build log

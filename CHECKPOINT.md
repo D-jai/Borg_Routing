@@ -62,6 +62,7 @@ After the build, on Deej's word only: make the repo public, deploy the replay de
 7. Opus 5.5 and Sonnet 5.5, both at medium effort, do the work. Fable plans only.
 8. LM Studio removed (evening of 15-Nov-2026). The local model runs as Ollama in Docker; see `BUILD.md` section 8.
 9. A second small additive edit to the planner prompt, for the list hand-over, work order 1.10 only (16-Nov-2026; Deej's yes given in the planner's session and relayed by the planner): one `items` line in the apply_to_each JSON shape and one "Where the items come from" paragraph in `src/prompts/orchestrator.py`.
+10. One existing example line in the planner prompt changed so it agrees with ruling 9's paragraph (16-Nov-2026; Deej's yes relayed by the planner): the apply_to_each `inputs_ref` example now reads "id of the earlier step that produces the list (omit when you give items)".
 
 Standing permissions: local commits on `showcase`; pushes of `showcase` to the private `origin`; merge of its pull request into `master` when CI is green and the reviewer has no objection.
 
