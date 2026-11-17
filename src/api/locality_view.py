@@ -62,6 +62,18 @@ def _is_call(ev: dict) -> bool:
     )
 
 
+def _left_by_rules(model_id: str, matrix, rules) -> Optional[bool]:
+    """True when a call to ``model_id`` left the machine, False when it did
+    not, None when its locality is unknown. A ``tool:*`` id (web search) is a
+    call to an outside service, so it always left."""
+    if model_id.startswith("tool:"):
+        return True
+    model = matrix.get(model_id) if matrix is not None else None
+    if model is None:
+        return None
+    return not model_is_local(model, rules)
+
+
 def calls_left_machine(
     *,
     lane_mode: Optional[str],
@@ -69,20 +81,32 @@ def calls_left_machine(
     events: list[dict],
     matrix,
     rules,
+    envelopes: Optional[list[dict]] = None,
 ) -> dict:
     """See the module docstring. ``events`` are the log rows of the run and
-    every descendant run."""
+    every descendant run; ``envelopes`` are their envelope rows. With the lane
+    off, a step whose model call failed has an envelope but no ``model_call``
+    event, so the envelope's model counts too (once: a step with an event is
+    not counted twice). The allow-list applies only when the lane is on."""
     lane_on = lane_mode in ("raw_local", "all_local", "by_reference")
     if lane_on or outbound:
         return {"count": len(outbound), "source": "ledger"}
+    hosts, allow = rules
+    rules = (hosts, allow if lane_on else [])
     calls = [ev for ev in events if _is_call(ev)]
-    if not calls:
+    seen = {str(ev["envelope_id"]) for ev in calls if ev.get("envelope_id")}
+    judged = [ev["model_id"] for ev in calls]
+    for env in envelopes or []:
+        mid = env.get("model_id")
+        if (mid and env.get("type") == "answerer"
+                and str(env.get("envelope_id")) not in seen):
+            judged.append(mid)
+    if not judged:
         return {"count": None, "source": None}
     count = 0
-    for ev in calls:
-        model = matrix.get(ev["model_id"]) if matrix is not None else None
-        if model is None:
+    for mid in judged:
+        left = _left_by_rules(mid, matrix, rules)
+        if left is None:
             return {"count": None, "source": None}
-        if not model_is_local(model, rules):
-            count += 1
+        count += 1 if left else 0
     return {"count": count, "source": "locality"}

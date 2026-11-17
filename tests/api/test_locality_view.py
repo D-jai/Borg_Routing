@@ -161,3 +161,58 @@ async def test_a_pipeline_run_records_off_when_there_is_no_lane(tmp_path, monkey
         {"type": "answerer", "id": "n1", "instruction": "Say hi.", "output_schema": {"result": "string"}}])
     monkeypatch.setattr(tasks_api, "DB_PATH", path)
     assert client().get(f"/runs/{result['run_id']}").json()["run"]["lane_mode"] == "off"
+
+
+# ---- 4.2 round 2: failed calls, tool calls, the allow-list is a lane thing -------------------------
+
+def add_envelope(path, run_id, model_id, status="failed", type_="answerer"):
+    with sqlite3.connect(path) as c:
+        c.execute(
+            "INSERT INTO envelopes(envelope_id, run_id, subtask_id, type, level_path, model_id, trigger_reason, status, outbound_payload)"
+            " VALUES (?,?,?,?,?,?,?,?,?)",
+            (str(uuid.uuid4()), str(run_id), str(uuid.uuid4()), type_, "1a", model_id, "initial", status, "{}"))
+        c.commit()
+
+
+@pytest.mark.asyncio
+async def test_a_failed_cloud_step_with_no_model_call_event_counts_one(matrix, db):
+    run = await create_run("q", db_path=db, lane_mode="off")
+    log_call(db, run, "lmstudio/here")
+    add_envelope(db, run, "openrouter/x/y", status="failed")     # HTTP 503: no model_call row
+    assert left(run) == {"count": 1, "source": "locality"}
+
+
+@pytest.mark.asyncio
+async def test_a_step_with_an_event_is_not_counted_twice(matrix, db):
+    run = await create_run("q", db_path=db, lane_mode="off")
+    env_id = str(uuid.uuid4())
+    with sqlite3.connect(db) as c:
+        c.execute(
+            "INSERT INTO envelopes(envelope_id, run_id, subtask_id, type, level_path, model_id, trigger_reason, status, outbound_payload)"
+            " VALUES (?,?,?,?,?,?,?,?,?)", (env_id, str(run), str(uuid.uuid4()), "answerer", "1a", "openrouter/x/y", "initial", "completed", "{}"))
+        c.execute(
+            "INSERT INTO logs(run_id, envelope_id, event_type, model_id, tokens_input, tokens_output, dollars)"
+            " VALUES (?,?,'model_call','openrouter/x/y',10,5,0.01)", (str(run), env_id))
+        c.commit()
+    assert left(run) == {"count": 1, "source": "locality"}
+
+
+@pytest.mark.asyncio
+async def test_a_tool_call_counts_as_leaving_the_machine(matrix, db):
+    run = await create_run("q", db_path=db, lane_mode="off")
+    log_call(db, run, "lmstudio/here")
+    with sqlite3.connect(db) as c:
+        c.execute("INSERT INTO logs(run_id, event_type, model_id, dollars) VALUES (?, 'model_call', 'tool:web_search', 0.0)",
+                  (str(run),))
+        c.commit()
+    assert left(run) == {"count": 1, "source": "locality"}
+
+
+@pytest.mark.asyncio
+async def test_the_allow_list_is_ignored_when_the_lane_is_off(matrix, db, monkeypatch):
+    monkeypatch.setenv("BORG_LANE_LOCAL_ALLOWLIST", "something/else")
+    off = await create_run("q", db_path=db, lane_mode="off")
+    log_call(db, off, "lmstudio/here")                  # loopback lmstudio: local by endpoint
+    assert left(off) == {"count": 0, "source": "locality"}
+    # The model rows (what the lane would do) still honour it.
+    assert rows("/models")["lmstudio/here"]["is_local"] is False
