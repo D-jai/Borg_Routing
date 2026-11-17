@@ -122,6 +122,7 @@
 | BRT-SKL-005 | Missing required arg | `src/skills/library.py::SkillLibrary.render` | A required arg for this skill was not provided. Check the skill's `required_args` section. |
 | BRT-SKL-006 | Invalid envelope_type in skill | `src/skills/library.py::SkillLibrary.render` | The skill's `envelope_type` is not one of the valid types. Check data/skills.yaml. |
 | BRT-SKL-007 | skill_usage_log write failed | `src/skills/library.py::log_usage` | SQLite write failed. Check disk space and database file permissions. |
+| BRT-SKL-008 | Template placeholder not filled | `src/skills/library.py::SkillLibrary.render` | A `{name}` in the skill's instruction, output_schema, state_query or inputs_ref is neither an arg nor derivable from one (`<arg>_formatted` from a non-empty `<arg>`, `<arg>_instruction` from `<arg>`), or the arg it derives from is empty (e.g. `fields: []`). Render fails before any model call; the engine fails the step with BRT-ORC-008 and re_plan sees the reason. Check the step's `skill_args` against the template. |
 
 ## BRT-SOP — State Operators Module
 

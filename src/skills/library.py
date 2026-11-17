@@ -13,8 +13,10 @@ Error codes:
 - BRT-SKL-005: render failed — missing required arg
 - BRT-SKL-006: render failed — invalid outbound_template type
 - BRT-SKL-007: skill_usage_log write failed
+- BRT-SKL-008: render failed — a template placeholder no arg can fill
 """
 import json
+import re
 from typing import Optional
 from uuid import UUID, uuid4
 
@@ -127,6 +129,8 @@ class SkillLibrary:
             RuntimeError: BRT-SKL-003/004 if skill not found.
             RuntimeError: BRT-SKL-005 if a required arg is missing.
             RuntimeError: BRT-SKL-006 if the envelope_type is not valid.
+            RuntimeError: BRT-SKL-008 if a placeholder in the instruction,
+                output_schema, state_query or inputs_ref cannot be filled.
         """
         skill = self.get(skill_id, version)
         required_args = skill.get("required_args", {})
@@ -145,17 +149,35 @@ class SkillLibrary:
 
         template = skill.get("outbound_template", {})
 
-        # Build instruction by substituting args into the template instruction
+        # Every placeholder the model will see must be filled: from an arg, or
+        # from a derived arg (``fields_formatted`` from ``fields`` ...). One
+        # that nothing fills fails here, before any model call (BRT-SKL-008).
         raw_instruction = template.get("instruction", skill.get("description", ""))
-        instruction = _safe_substitute(raw_instruction, args)
+        output_schema_raw = template.get("output_schema", {})
+        state_query_raw = template.get("state_query")
+        inputs_ref_raw = (
+            template.get("inputs_ref", args.get("items_ref", ""))
+            if env_type == "apply_to_each" else ""
+        )
+        values = _fill_values(
+            skill_id,
+            [raw_instruction, output_schema_raw, state_query_raw, inputs_ref_raw],
+            args,
+        )
+
+        instruction = _safe_substitute(raw_instruction, values)
 
         # Build output_schema
-        output_schema_raw = template.get("output_schema", {})
         if isinstance(output_schema_raw, str):
-            # String schema (e.g. "derived from fields") — pass as-is
-            output_schema = {"schema_note": output_schema_raw}
+            whole = _PLACEHOLDER.fullmatch(output_schema_raw.strip())
+            if whole and isinstance(values.get(whole.group(1)), dict):
+                # "{expected_return_schema}" given as a dict: use the dict.
+                output_schema = values[whole.group(1)]
+            else:
+                # String schema (e.g. "derived from fields") — pass as a note
+                output_schema = {"schema_note": _safe_substitute(output_schema_raw, values)}
         else:
-            output_schema = output_schema_raw
+            output_schema = _substitute_tree(output_schema_raw, values)
 
         # Build side_effects
         side_effects = template.get("side_effects", [])
@@ -165,14 +187,12 @@ class SkillLibrary:
             side_effects = []
 
         # state_query
-        state_query_raw = template.get("state_query")
-        state_query = _safe_substitute(state_query_raw, args) if state_query_raw else None
+        state_query = _safe_substitute(state_query_raw, values) if state_query_raw else None
 
         # dependency_input — include inputs_ref if apply_to_each
         dependency_input = {}
         if env_type == "apply_to_each":
-            inputs_ref_raw = template.get("inputs_ref", args.get("items_ref", ""))
-            dependency_input["inputs_ref"] = _safe_substitute(str(inputs_ref_raw), args)
+            dependency_input["inputs_ref"] = _safe_substitute(str(inputs_ref_raw), values)
             cl_raw = template.get("concurrency_limit", args.get("concurrency_limit", 20))
             try:
                 dependency_input["concurrency_limit"] = int(str(cl_raw).strip("{} "))
@@ -203,16 +223,123 @@ class SkillLibrary:
         )
 
 
+_PLACEHOLDER = re.compile(r"\{(\w+)\}")
+
+# Wording for an optional arg's ``<arg>_instruction`` line; any other arg
+# reads "<Arg words>: <value>". A null or empty arg gives no line at all.
+_INSTRUCTION_WORDING = {
+    "focus": "Focus on: {value}.",
+    "target_format": "Target format: {value}.",
+    "max_length": "Keep it to at most {value} words.",
+}
+
+
+def _placeholders(part: object) -> set[str]:
+    """Placeholder names in a template part (a string, or a dict/list of them)."""
+    if isinstance(part, str):
+        return set(_PLACEHOLDER.findall(part))
+    if isinstance(part, dict):
+        return set().union(*(_placeholders(v) for v in part.values())) if part else set()
+    if isinstance(part, list):
+        return set().union(*(_placeholders(v) for v in part)) if part else set()
+    return set()
+
+
+def _format_entry(entry: object) -> str:
+    """One line for a field or criterion: name (type/weight/values): description."""
+    if not isinstance(entry, dict):
+        return str(entry)
+    name = entry.get("name")
+    details = []
+    for key, value in entry.items():
+        if key in ("name", "description") or value in (None, "", []):
+            continue
+        if isinstance(value, list):
+            value = ", ".join(str(v) for v in value)
+        details.append(str(value) if key == "type" else f"{key.replace('_', ' ')} {value}")
+    head = str(name) if name else json.dumps({k: v for k, v in entry.items() if k != "description"})
+    line = f"{head} ({'; '.join(details)})" if details and name else head
+    if entry.get("description"):
+        line += f": {entry['description']}"
+    return line
+
+
+def _derive(skill_id: str, name: str, args: dict) -> str:
+    """Build a derived arg the template names from the arg it is derived from.
+
+    ``<arg>_formatted`` is ``<arg>`` as a bullet list (one line per entry);
+    ``<arg>_instruction`` is one sentence from an optional ``<arg>``, or "".
+
+    Raises:
+        RuntimeError: BRT-SKL-008 if no arg supplies it, or its source is empty.
+    """
+    for suffix in ("_formatted", "_instruction"):
+        source = name[: -len(suffix)] if name.endswith(suffix) else None
+        if source and source in args:
+            value = args[source]
+            if suffix == "_instruction":
+                if value in (None, "", [], {}):
+                    return ""
+                if isinstance(value, (list, dict)):
+                    value = json.dumps(value)
+                wording = _INSTRUCTION_WORDING.get(
+                    source, source.replace("_", " ").capitalize() + ": {value}."
+                )
+                return wording.format(value=value)
+            entries = value if isinstance(value, list) else ([value] if value else [])
+            if isinstance(value, dict):
+                entries = [{"name": k, **(v if isinstance(v, dict) else {"type": v})}
+                           for k, v in value.items()]
+            if not entries:
+                raise RuntimeError(
+                    f"BRT-SKL-008: render failed — placeholder '{{{name}}}' in skill "
+                    f"'{skill_id}' cannot be filled: arg '{source}' is empty"
+                )
+            return "\n".join(f"- {_format_entry(e)}" for e in entries)
+    raise RuntimeError(
+        f"BRT-SKL-008: render failed — placeholder '{{{name}}}' in skill '{skill_id}' "
+        f"is not filled by any arg (given: {sorted(args)})"
+    )
+
+
+def _fill_values(skill_id: str, parts: list, args: dict) -> dict:
+    """Args plus every derived arg the template parts name; fails on a gap."""
+    values = dict(args)
+    for name in sorted(set().union(*(_placeholders(p) for p in parts))):
+        if name not in values:
+            values[name] = _derive(skill_id, name, args)
+    return values
+
+
+def _value_text(value: object) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, (list, dict)):
+        return json.dumps(value)
+    return str(value)
+
+
 def _safe_substitute(template: str, args: dict) -> str:
-    """Replace {key} placeholders in template with args values. Unknown keys left as-is."""
-    result = template
-    for key, value in args.items():
-        if isinstance(value, (list, dict)):
-            value_str = json.dumps(value)
-        else:
-            value_str = str(value)
-        result = result.replace("{" + key + "}", value_str)
-    return result
+    """Replace {key} placeholders in one pass. Unknown keys left as-is.
+
+    One pass, so braces inside a substituted value are never read as a
+    placeholder. A null value renders as "".
+    """
+    return _PLACEHOLDER.sub(
+        lambda m: _value_text(args[m.group(1)]) if m.group(1) in args else m.group(0),
+        template,
+    )
+
+
+def _substitute_tree(part: object, args: dict) -> object:
+    """_safe_substitute over every string in a dict/list template part."""
+    if isinstance(part, str):
+        return _safe_substitute(part, args)
+    if isinstance(part, dict):
+        return {k: _substitute_tree(v, args) for k, v in part.items()}
+    if isinstance(part, list):
+        return [_substitute_tree(v, args) for v in part]
+    return part
 
 
 async def log_usage(
