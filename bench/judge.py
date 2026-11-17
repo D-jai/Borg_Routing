@@ -8,7 +8,15 @@ Rules, all enforced here:
   name the same answer, the pair is a tie (a split is a tie);
 - before judging real answers, a sanity case must pass: a deliberately
   truncated wrong answer must lose both times, or the judge refuses to judge
-  (``JudgeRefused``) and the judge model should be replaced.
+  (``JudgeRefused``) and the judge model should be replaced. With two judges,
+  every judge must pass it;
+- a reply that cannot be read is re-asked once; still unreadable, the round
+  counts for the direct answer (conservative), and in the sanity case it is no
+  vote, so the sanity case fails;
+- every repeat pair is a comparison: a failed run against a completed one is
+  won by the completed one (no judge call), two failed runs are a tie;
+- two-judge mode (ruling 11, only when no judge vendor outside both sides
+  exists): BORG_ROUTE takes a comparison only when both judges prefer it.
 
 ``ask`` is any async callable ``(system, user) -> {"content": str, "dollars": float, ...}``.
 """
@@ -73,11 +81,16 @@ def parse_verdict(text: str) -> Optional[str]:
     return None
 
 
-async def judge_pair(ask: Ask, key: dict, answer_a: str, answer_b: str) -> dict:
+REASK = "\n\nYour last reply could not be read. Reply with the JSON object only, for example {\"better\": \"1\", \"reason\": \"...\"}."
+
+
+async def judge_pair(ask: Ask, key: dict, answer_a: str, answer_b: str, on_unreadable: Optional[str] = None) -> dict:
     """Judge A against B twice, order swapped. ``winner`` is ``"a"``, ``"b"`` or ``"tie"``.
 
-    ``rounds`` lists both verdicts mapped back to a/b/tie (``None`` if unreadable,
-    which counts as no vote and makes the pair a tie).
+    A reply that cannot be read is re-asked once. If it is still unreadable, the
+    round goes to ``on_unreadable`` (``"a"`` or ``"b"``; verdict ``"unreadable"``),
+    or, when that is None (the sanity case), the round has no vote, which fails a
+    sanity case and makes a real pair a tie.
     """
     rounds = []
     dollars = 0.0
@@ -87,13 +100,22 @@ async def judge_pair(ask: Ask, key: dict, answer_a: str, answer_b: str) -> dict:
         reply = await ask(system, user)
         dollars += float(reply.get("dollars") or 0.0)
         v = parse_verdict(reply.get("content", ""))
+        reasked = False
+        if v is None:
+            reasked = True
+            reply = await ask(system, user + REASK)
+            dollars += float(reply.get("dollars") or 0.0)
+            v = parse_verdict(reply.get("content", ""))
         if v == "1":
             mapped = "a" if first_is_a else "b"
         elif v == "2":
             mapped = "b" if first_is_a else "a"
+        elif v is None and on_unreadable in ("a", "b"):
+            v, mapped = "unreadable", on_unreadable
         else:
             mapped = v  # "tie" or None
-        rounds.append({"a_shown_as": "1" if first_is_a else "2", "verdict": v, "winner": mapped})
+        rounds.append({"a_shown_as": "1" if first_is_a else "2", "verdict": v, "winner": mapped,
+                       "reasked": reasked})
     w1, w2 = rounds[0]["winner"], rounds[1]["winner"]
     winner = w1 if (w1 == w2 and w1 in ("a", "b")) else "tie"
     return {"winner": winner, "rounds": rounds, "dollars": dollars}
@@ -123,22 +145,51 @@ async def sanity_check(ask: Ask, key: dict) -> dict:
     return {"passed": True, "rounds": res["rounds"], "dollars": res["dollars"]}
 
 
-async def judge_all(ask: Ask, key: dict, pairs: list[dict]) -> dict:
-    """Sanity first, then every pair.
+async def judge_all(ask, key: dict, pairs: list[dict]) -> dict:
+    """Sanity first (for every judge), then every repeat pair.
 
-    ``pairs``: ``[{"id": str, "direct": str, "borg": str}]``. Which answer is "a"
-    or "b" here is internal; the model only ever sees "1" and "2".
-    Returns the counts and ``direct_preferred_in_majority`` (the win rule's
-    test for job C: true means BORG_ROUTE did not hold quality).
+    ``ask`` is one judge or a list of judges (two-judge mode, ruling 11: used when
+    no judge vendor outside both sides exists; one judge per side's vendor).
+    ``pairs``: ``[{"id", "direct", "borg", "direct_failed"?, "borg_failed"?}]``, one
+    per repeat (per-run pairing). A failed run against a completed one: the
+    completed one wins, with no judge call. Both failed: a tie. Otherwise each
+    judge judges the pair twice, order swapped; an unreadable verdict (after one
+    re-ask) counts for direct. With several judges BORG takes the comparison only
+    when every judge prefers it; any judge preferring direct gives it to direct;
+    anything else is a tie.
+
+    Which answer is "a" or "b" here is internal; the model only ever sees "1" and "2".
+    Returns the counts and ``direct_preferred_in_majority`` (the win rule's test for
+    job C: true means BORG_ROUTE did not hold quality). Failed runs are counted.
     """
-    sanity = await sanity_check(ask, key)  # may raise JudgeRefused
+    asks = list(ask) if isinstance(ask, (list, tuple)) else [ask]
+    needs_judge = any(not p.get("direct_failed") and not p.get("borg_failed") for p in pairs)
+    sanity = []
+    dollars = 0.0
+    if needs_judge:
+        for i, a in enumerate(asks, 1):
+            try:
+                s = await sanity_check(a, key)
+            except JudgeRefused as exc:
+                raise JudgeRefused(f"judge {i}: {exc}") from exc
+            sanity.append(s)
+            dollars += s["dollars"]
     out_pairs = []
-    dollars = sanity["dollars"]
     for p in pairs:
-        r = await judge_pair(ask, key, p["direct"], p["borg"])
-        dollars += r["dollars"]
-        winner = {"a": "direct", "b": "borg", "tie": "tie"}[r["winner"]]
-        out_pairs.append({"id": p["id"], "winner": winner, "rounds": r["rounds"]})
+        df, bf = bool(p.get("direct_failed")), bool(p.get("borg_failed"))
+        if df or bf:
+            winner = "tie" if (df and bf) else ("borg" if df else "direct")
+            note = "both runs failed" if (df and bf) else f"{'direct' if df else 'borg'} run failed"
+            out_pairs.append({"id": p["id"], "winner": winner, "note": note, "judges": []})
+            continue
+        verdicts = []
+        for a in asks:
+            r = await judge_pair(a, key, p["direct"], p["borg"], on_unreadable="a")
+            dollars += r["dollars"]
+            verdicts.append({"winner": {"a": "direct", "b": "borg", "tie": "tie"}[r["winner"]], "rounds": r["rounds"]})
+        ws = [v["winner"] for v in verdicts]
+        winner = "borg" if all(w == "borg" for w in ws) else ("direct" if "direct" in ws else "tie")
+        out_pairs.append({"id": p["id"], "winner": winner, "judges": verdicts, "rounds": verdicts[0]["rounds"]})
     n = len(out_pairs)
     direct = sum(1 for p in out_pairs if p["winner"] == "direct")
     borg = sum(1 for p in out_pairs if p["winner"] == "borg")

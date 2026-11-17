@@ -64,8 +64,10 @@ DIRECT_CONTEXT_SHARE = 0.85      # a direct call may fill this share of the mode
 DIRECT_OUTPUT_FACTOR = 3.0       # same reason, for the direct arm's priced output
 JUDGE_CALL_INPUT_TOKENS = 5_000
 JUDGE_CALL_OUTPUT_TOKENS = 300
+JUDGE_MAX_TOKENS = 4000      # room for a reasoning judge's private thinking before the one-line verdict
 
 LOCAL_ARMS = ("borg_local_workers",)
+FINISHED = ("completed", "failed")   # statuses a comparison can use; "refused" and "not run" cannot
 
 
 # --------------------------------------------------------------------------
@@ -80,7 +82,7 @@ class Config:
     skip_local: bool = True
     use_docker: bool = True
     max_run_seconds: int = 1500
-    judge_model_id: Optional[str] = None
+    judge_model_ids: list[str] = field(default_factory=list)
     force: bool = False
     phase_cap: float = budget.PHASE_CAP_DOLLARS
 
@@ -141,25 +143,81 @@ def baseline_model(matrix):
     return select_baseline_model(matrix, os.getenv("BASELINE_MODEL_ID"))
 
 
+_SOURCES = ("openrouter", "ollama", "lmstudio", "custom_key")
+
+
+def vendor_of(model_id: str) -> str:
+    """The vendor part of a model id: ``openrouter/qwen/qwen4-max`` -> ``qwen``; ``anthropic/x`` -> ``anthropic``."""
+    parts = [p for p in str(model_id).split("/") if p]
+    if len(parts) >= 2 and parts[0] in _SOURCES:
+        parts = parts[1:]
+    return parts[0].lower() if parts else ""
+
+
+def side_vendors(matrix, baseline) -> tuple[set[str], set[str]]:
+    """``(BORG side vendors, direct side vendors)``: vendors of the checked pool, and of the baseline."""
+    borg = {vendor_of(m.model_id) for m in matrix.all() if m.checked}
+    direct = {vendor_of(baseline.model_id)} if baseline is not None else set()
+    return borg, direct
+
+
+def _judge_row(matrix, baseline, model_id: str):
+    row = matrix.get(model_id)
+    if row is None:
+        raise ValueError(f"judge model '{model_id}' is not in the matrix")
+    if row.checked or (baseline is not None and row.model_id == baseline.model_id):
+        raise ValueError(f"judge model '{model_id}' is in an arm (checked or the baseline)")
+    if row.pricing is None:
+        raise ValueError(f"judge model '{model_id}' has no price")
+    return row
+
+
 def pick_judge_model(matrix, baseline, explicit: Optional[str] = None):
-    """A priced OpenRouter model that is in neither arm: not checked (BORG_ROUTE routes only checked rows)
-    and not the baseline (the direct arm)."""
+    """The single judge (ruling 11): a priced model in neither arm (not checked, not the baseline) whose
+    vendor has no model in the checked pool and is not the baseline's vendor."""
+    borg_v, direct_v = side_vendors(matrix, baseline)
+    banned = borg_v | direct_v
     if explicit:
-        row = matrix.get(explicit)
-        if row is None:
-            raise ValueError(f"judge model '{explicit}' is not in the matrix")
-        if row.checked or (baseline is not None and row.model_id == baseline.model_id):
-            raise ValueError(f"judge model '{explicit}' is in an arm (checked or the baseline)")
+        row = _judge_row(matrix, baseline, explicit)
+        if vendor_of(row.model_id) in banned:
+            raise ValueError(
+                f"judge model '{explicit}': vendor '{vendor_of(row.model_id)}' has a model on one side "
+                f"(pool vendors {sorted(borg_v)}, baseline vendor {sorted(direct_v)}); choose another vendor, "
+                "or, if none exists, two judges (--judge-model twice, one per side's vendor)")
         return row
     pool = [
         m for m in matrix.all()
         if m.source == "openrouter" and not m.checked and m.pricing is not None
         and (baseline is None or m.model_id != baseline.model_id)
-        and "search" not in m.model_id
+        and "search" not in m.model_id and vendor_of(m.model_id) not in banned
     ]
     if not pool:
-        raise ValueError("no model is available for the judge outside both arms")
+        raise ValueError("no judge vendor outside both sides is in the matrix: pass two judges "
+                         "(--judge-model twice, one per side's vendor)")
     return min(pool, key=lambda m: (-m.task_scores.get("reasoning", 0.0), m.model_id))
+
+
+def pick_judges(matrix, baseline, explicit: Optional[list[str]] = None) -> list:
+    """One judge (the vendor rule), or, only when no outside vendor exists, two: one per side's vendor."""
+    explicit = [e for e in (explicit or []) if e]
+    if len(explicit) <= 1:
+        return [pick_judge_model(matrix, baseline, explicit[0] if explicit else None)]
+    if len(explicit) > 2:
+        raise ValueError("at most two judges (one per side's vendor)")
+    try:
+        outside = pick_judge_model(matrix, baseline)
+    except ValueError:
+        outside = None
+    if outside is not None:
+        raise ValueError(f"a judge outside both sides exists ({outside.model_id}); two-judge mode is only "
+                         "for when none does")
+    rows = [_judge_row(matrix, baseline, e) for e in explicit]
+    borg_v, direct_v = side_vendors(matrix, baseline)
+    vs = [vendor_of(r.model_id) for r in rows]
+    if not ((vs[0] in direct_v and vs[1] in borg_v) or (vs[0] in borg_v and vs[1] in direct_v)) or vs[0] == vs[1]:
+        raise ValueError(f"two judges must be one per side: one from the baseline's vendor {sorted(direct_v)} "
+                         f"and one from a pool vendor {sorted(borg_v)}; got {vs}")
+    return rows
 
 
 # --------------------------------------------------------------------------
@@ -289,11 +347,15 @@ def estimate_run(job: dict, arm: str, cfg: Config, baseline) -> float:
 
 
 def estimate_judge(job: dict, repeats: int, judge_model) -> float:
-    """Two calls per pair plus two for the sanity case."""
-    if judge_model is None:
-        return 0.0
-    calls = 2 * repeats + 2
-    return _price(judge_model, calls * JUDGE_CALL_INPUT_TOKENS, calls * JUDGE_CALL_OUTPUT_TOKENS)
+    """Per judge: two calls per pair plus two for the sanity case. ``judge_model`` may be a list (two judges)."""
+    models = judge_model if isinstance(judge_model, (list, tuple)) else [judge_model]
+    total = 0.0
+    for jm in models:
+        if jm is None:
+            continue
+        calls = 2 * repeats + 2
+        total += _price(jm, calls * JUDGE_CALL_INPUT_TOKENS, calls * JUDGE_CALL_OUTPUT_TOKENS)
+    return total
 
 
 def estimate_matrix(runs: list[RunSpec], jobs: dict, cfg: Config, baseline, judge_model) -> dict:
@@ -705,35 +767,42 @@ async def run_judge(jobs: dict, cfg: Config, matrix, baseline, chat=llm.chat, lo
     for name, job in jobs.items():
         if (job.get("quality") or {}).get("kind") != "pairwise_judge":
             continue
-        pairs = []
+        pairs, incomplete = [], []
         for n in range(1, 10):
             d, b = (cfg.day_dir / f"{name}_direct_{n}.json"), (cfg.day_dir / f"{name}_borg_cloud_{n}.json")
-            if not (d.exists() and b.exists()):
+            if not (d.exists() or b.exists()):
                 continue
-            dr, br = json.loads(d.read_text(encoding="utf-8")), json.loads(b.read_text(encoding="utf-8"))
-            if dr.get("status") == "completed" and br.get("status") == "completed":
-                pairs.append({"id": f"{name}_{n}", "direct": dr["answer"], "borg": br["answer"]})
+            dr = json.loads(d.read_text(encoding="utf-8")) if d.exists() else {}
+            br = json.loads(b.read_text(encoding="utf-8")) if b.exists() else {}
+            if dr.get("status") in FINISHED and br.get("status") in FINISHED:
+                pairs.append({"id": f"{name}_{n}", "direct": dr.get("answer") or "", "borg": br.get("answer") or "",
+                              "direct_failed": dr["status"] == "failed", "borg_failed": br["status"] == "failed"})
+            else:
+                incomplete.append({"id": f"{name}_{n}", "direct": dr.get("status"), "borg": br.get("status")})
         if not pairs:
-            log(f"judge {name}: no completed direct/borg_cloud pair; nothing to judge")
+            log(f"judge {name}: no finished direct/borg_cloud pair; nothing to judge")
             continue
-        jm = pick_judge_model(matrix, baseline, cfg.judge_model_id)
-        estimate = estimate_judge(job, len(pairs), jm)
+        jms = pick_judges(matrix, baseline, cfg.judge_model_ids)
+        to_judge = sum(1 for p in pairs if not p["direct_failed"] and not p["borg_failed"])
+        estimate = estimate_judge(job, to_judge, jms) if to_judge else 0.0
         cfg.ledger.check(estimate, cfg.phase_cap)
         key = load_answers(job, cfg)
         spent = {"dollars": 0.0}
 
-        async def ask(system: str, user: str) -> dict:
-            r = await chat(jm, system, user, 400)
-            spent["dollars"] += r["dollars"]
-            return r
+        def make_ask(jm):
+            async def ask(system: str, user: str) -> dict:
+                r = await chat(jm, system, user, JUDGE_MAX_TOKENS)
+                spent["dollars"] += r["dollars"]
+                return r
+            return ask
 
         try:
-            results = await judge.judge_all(ask, key, pairs)
+            results = await judge.judge_all([make_ask(jm) for jm in jms], key, pairs)
             results["status"] = "completed"
         except judge.JudgeRefused as exc:
             results = {"status": "refused", "reason": str(exc)}
-        results.update({"job": name, "judge_model": jm.model_id, "estimate_dollars": estimate,
-                        "cost_dollars": spent["dollars"]})
+        results.update({"job": name, "judge_models": [jm.model_id for jm in jms], "estimate_dollars": estimate,
+                        "cost_dollars": spent["dollars"], "incomplete_repeats": incomplete})
         cfg.ledger.record(f"judge_{name}", spent["dollars"], kind="judge")
         cfg.day_dir.mkdir(parents=True, exist_ok=True)
         (cfg.day_dir / f"judge_{name}.json").write_text(json.dumps(results, indent=1) + "\n", encoding="utf-8")
@@ -758,17 +827,18 @@ def dry_run(jobs, cfg, matrix, baseline, only_jobs, arms_filter, repeats, job_re
         out("pre-flight: no checked model in the matrix, so the direct arm has no baseline. Nothing was spent.")
         return 2
     try:
-        jm = pick_judge_model(matrix, baseline, cfg.judge_model_id)
+        jms = pick_judges(matrix, baseline, cfg.judge_model_ids)
     except ValueError as exc:
         out(f"pre-flight: {exc}")
         return 2
     limit = float(rules.get("estimate_limit_dollars", budget.ESTIMATE_LIMIT_DOLLARS))
     runs = build_matrix(jobs, only_jobs, arms_filter, repeats, job_repeats)
-    est = estimate_matrix(runs, jobs, cfg, baseline, jm)
+    est = estimate_matrix(runs, jobs, cfg, baseline, jms)
 
     out(f"BORG_ROUTE bench: dry run (date {cfg.date}; nothing is sent, nothing is spent)")
     out(f"baseline, direct arm : {baseline.model_id}  ({_per_mtok(baseline)})")
-    out(f"judge, job C         : {jm.model_id}  ({_per_mtok(jm)})  [in neither arm]")
+    for jm in jms:
+        out(f"judge, job C         : {jm.model_id}  ({_per_mtok(jm)})  [in neither arm; vendor '{vendor_of(jm.model_id)}']")
     checked = [m.model_id for m in matrix.all() if m.checked]
     out(f"checked models ({len(checked)}): {', '.join(checked)}")
     out(f"local arms           : {'NOT RUN in this build (--skip-local); no cost, no numbers' if cfg.skip_local else 'will run if a local model is checked'}")
@@ -804,7 +874,7 @@ def dry_run(jobs, cfg, matrix, baseline, only_jobs, arms_filter, repeats, job_re
         o = budget.apply_shrink(rules, i)
         r2 = build_matrix(jobs, only_jobs, arms_filter, o["repeats"] if o["repeats"] is not None else repeats,
                           {**(job_repeats or {}), **o["job_repeats"]})
-        e2 = estimate_matrix(r2, jobs, cfg, baseline, jm)["total"]
+        e2 = estimate_matrix(r2, jobs, cfg, baseline, jms)["total"]
         out(f"  {i}. {rules['steps'][i - 1].get('name')}: estimate US${e2:.2f} "
             f"({'within' if e2 <= limit else 'still over'} the limit)")
     return 1
@@ -823,7 +893,9 @@ def main(argv: Optional[list[str]] = None) -> int:
     ap.add_argument("--shrink-steps", type=int, default=0, help="apply the first N steps of bench/shrink_rules.yaml")
     ap.add_argument("--skip-local", action=argparse.BooleanOptionalAction, default=True,
                     help="write 'not run' for local arms (default on in this build)")
-    ap.add_argument("--judge-model", help="model id for the job C judge (in neither arm)")
+    ap.add_argument("--judge-model", action="append", default=[],
+                    help="model id for the job C judge (in neither arm, vendor outside both sides); "
+                         "give it twice for two-judge mode (one per side's vendor), only when no outside vendor exists")
     ap.add_argument("--check-model", action="append", default=[], help="check this matrix row in memory for the run (never saved)")
     ap.add_argument("--prior-spend", type=float, help="set the dollars already spent earlier in the phase (ledger)")
     ap.add_argument("--no-docker", action="store_true", help="skip job B's container test step")
@@ -836,7 +908,7 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     os.chdir(REPO_ROOT)  # the matrix, skills and prompts are read by relative path
     cfg = Config(skip_local=args.skip_local, use_docker=not args.no_docker,
-                 judge_model_id=args.judge_model, force=args.force)
+                 judge_model_ids=list(args.judge_model), force=args.force)
     if args.date:
         cfg.date = args.date
     if args.results_root:

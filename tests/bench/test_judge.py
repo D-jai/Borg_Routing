@@ -108,3 +108,108 @@ async def test_majority_flag_when_borg_does_not_lose():
     out = await judge.judge_all(ask, KEY, [{"id": "C_1", "direct": "long answer here", "borg": "short"}])
     assert out["borg_wins"] == 1 and out["direct_preferred_in_majority"] is False
     assert out["dollars"] == pytest.approx(0.01 * len(ask.prompts))
+
+
+# -- review fixes: re-ask, unreadable verdicts, failed runs, two judges --------------------------
+
+class Script:
+    """A judge that replies with the next scripted text, whatever the prompt."""
+
+    def __init__(self, *texts):
+        self.texts = list(texts)
+        self.prompts: list[tuple[str, str]] = []
+
+    async def __call__(self, system: str, user: str) -> dict:
+        self.prompts.append((system, user))
+        return {"content": self.texts.pop(0), "dollars": 0.01}
+
+
+async def test_an_unreadable_verdict_is_re_asked_once():
+    ask = Script("I think the first", '{"better": "1"}', '{"better": "2"}')
+    res = await judge.judge_pair(ask, KEY, "a", "b", on_unreadable="a")
+    assert len(ask.prompts) == 3
+    assert res["rounds"][0]["reasked"] is True and res["rounds"][0]["winner"] == "a"
+    assert res["rounds"][1]["reasked"] is False and res["rounds"][1]["winner"] == "a"
+    assert res["winner"] == "a" and res["dollars"] == pytest.approx(0.03)
+
+
+async def test_still_unreadable_counts_for_the_on_unreadable_side():
+    ask = Script("??", "still ??", "??", "nope")
+    res = await judge.judge_pair(ask, KEY, "a", "b", on_unreadable="a")
+    assert [r["verdict"] for r in res["rounds"]] == ["unreadable", "unreadable"]
+    assert res["winner"] == "a" and len(ask.prompts) == 4
+
+
+async def test_an_unreadable_sanity_round_fails_the_sanity_case():
+    ask = Script("??", "??", '{"better": "2"}')  # round 1 unreadable twice, round 2 correct
+    with pytest.raises(judge.JudgeRefused):
+        await judge.sanity_check(ask, KEY)
+
+
+async def test_unreadable_real_pair_goes_to_direct():
+    def rule(one, two):
+        if "I could not find it" in one or "I could not find it" in two:
+            return longer_wins(one, two)
+        return "maybe"  # never a valid verdict
+
+    ask = Fake(rule)
+    out = await judge.judge_all(ask, KEY, [{"id": "C_1", "direct": "d", "borg": "b"}])
+    assert out["direct_wins"] == 1 and out["pairs"][0]["winner"] == "direct"
+    assert out["direct_preferred_in_majority"] is True
+
+
+async def test_failed_runs_are_compared_without_a_judge_call():
+    ask = Fake(longer_wins)
+    pairs = [
+        {"id": "C_1", "direct": "x", "borg": "", "borg_failed": True},
+        {"id": "C_2", "direct": "", "borg": "y", "direct_failed": True},
+        {"id": "C_3", "direct": "", "borg": "", "direct_failed": True, "borg_failed": True},
+    ]
+    out = await judge.judge_all(ask, KEY, pairs)
+    assert ask.prompts == [], "no pair needed a judge, so not even the sanity case ran"
+    assert [p["winner"] for p in out["pairs"]] == ["direct", "borg", "tie"]
+    assert (out["comparisons"], out["direct_wins"], out["borg_wins"], out["ties"]) == (3, 1, 1, 1)
+    assert out["direct_preferred_in_majority"] is False
+
+
+async def test_failed_run_still_counts_in_the_majority():
+    ask = Fake(longer_wins)
+    pairs = [{"id": "C_1", "direct": "x", "borg": "", "borg_failed": True},
+             {"id": "C_2", "direct": "x", "borg": "", "borg_failed": True},
+             {"id": "C_3", "direct": "short", "borg": "a much longer answer"}]
+    out = await judge.judge_all(ask, KEY, pairs)
+    assert out["direct_wins"] == 2 and out["borg_wins"] == 1 and out["direct_preferred_in_majority"] is True
+
+
+def _sane(rule):
+    def wrapped(one, two):
+        if "I could not find it" in one or "I could not find it" in two:
+            return longer_wins(one, two)
+        return rule(one, two)
+    return wrapped
+
+
+async def test_two_judges_borg_takes_a_comparison_only_when_both_prefer_it():
+    borg_text, direct_text = "BORG ANSWER", "DIRECT"
+
+    def prefers(text):
+        return _sane(lambda one, two: "1" if one == text else "2")
+
+    def tie(one, two):
+        return "tie"
+
+    cases = [((prefers(borg_text), prefers(borg_text)), "borg"),
+             ((prefers(borg_text), prefers(direct_text)), "direct"),
+             ((prefers(borg_text), _sane(tie)), "tie")]
+    for (r1, r2), expected in cases:
+        out = await judge.judge_all([Fake(r1), Fake(r2)], KEY, [{"id": "C_1", "direct": direct_text, "borg": borg_text}])
+        assert out["pairs"][0]["winner"] == expected, (expected, out["pairs"][0])
+        assert len(out["pairs"][0]["judges"]) == 2 and len(out["sanity"]) == 2
+
+
+async def test_the_sanity_case_applies_to_every_judge():
+    good = Fake(longer_wins)
+    biased = Fake(lambda one, two: "1")
+    with pytest.raises(judge.JudgeRefused) as ei:
+        await judge.judge_all([good, biased], KEY, [{"id": "C_1", "direct": "a", "borg": "b"}])
+    assert "judge 2" in str(ei.value)

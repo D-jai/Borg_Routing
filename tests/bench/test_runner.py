@@ -360,7 +360,8 @@ async def test_run_judge_counts_its_dollars_in_the_ledger(bench):
         (cfg.day_dir / f"C_{arm}_1.json").write_text(json.dumps({"status": "completed", "answer": text}), encoding="utf-8")
     matrix = three_tier_matrix()
     from tests.e2e.stub_model_server import stub_model
-    matrix.upsert(stub_model("judge", 9.0, 1e-6, 2e-6, checked=False))
+    judge_row = stub_model("judge", 9.0, 1e-6, 2e-6, checked=False)
+    matrix.upsert(judge_row.model_copy(update={"model_id": "openrouter/judgeco/judge"}))  # vendor outside both sides
     baseline = run_bench.baseline_model(matrix)
 
     async def chat(model, system, user, max_tokens, timeout=0):
@@ -371,6 +372,6 @@ async def test_run_judge_counts_its_dollars_in_the_ledger(bench):
                 "tokens_in": 100, "tokens_out": 10, "dollars": 0.5, "model": model.model_id}
 
     res = await run_bench.run_judge({"C": cjob}, cfg, matrix, baseline, chat=chat, log=lambda *_: None)
-    assert res["status"] == "completed" and res["direct_wins"] == 1 and res["judge_model"].endswith("stub/judge")
+    assert res["status"] == "completed" and res["direct_wins"] == 1 and res["judge_models"] == ["openrouter/judgeco/judge"]
     assert cfg.ledger.spent() == pytest.approx(0.5 * 4)  # two sanity calls + two for the pair
     assert (cfg.day_dir / "judge_C.json").exists()
