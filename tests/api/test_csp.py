@@ -42,3 +42,9 @@ def test_no_page_has_an_inline_script_or_handler():
         for m in re.finditer(r"<script\b([^>]*)>(.*?)</script>", html, re.S | re.I):
             assert "src=" in m.group(1) and not m.group(2).strip(), f"{page.name}: inline script"
         assert not re.search(r"\son[a-z]+\s*=", html, re.I), f"{page.name}: inline event handler"
+
+
+@pytest.mark.parametrize("path", ["/docs", "/redoc", "/docs/oauth2-redirect"])
+def test_the_api_doc_pages_are_off(client, path):
+    """FastAPI's /docs and /redoc load their scripts from a CDN, which the policy blocks."""
+    assert client.get(path).status_code == 404

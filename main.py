@@ -46,7 +46,8 @@ async def lifespan(app: FastAPI):
     # Shutdown: nothing to clean up yet.
 
 
-app = FastAPI(title="BORG_ROUTE", version="0.1.0", lifespan=lifespan)
+# /docs and /redoc load their scripts from a CDN, which the CSP blocks: off.
+app = FastAPI(title="BORG_ROUTE", version="0.1.0", lifespan=lifespan, docs_url=None, redoc_url=None)
 
 # Content-Security-Policy on every response (4.2 review): nothing loads from another
 # site, no inline script. 'unsafe-inline' is allowed for styles only: the pages set
