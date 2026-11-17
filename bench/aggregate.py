@@ -9,11 +9,14 @@ for jobs A, B and C, ``borg_cloud`` for job D's local arm.
   candidate's median is at most 70% of the base's.
 - **Quality:** per-run pairing. Repeat n of the base is compared with repeat n
   of the candidate, and every repeat pair is one comparison, failed runs
-  included. A failed run loses to a completed one; two failed runs tie. Between
+  included. A failed run loses to a completed one; two failed runs give no
+  verdict (the pair is left out of the comparisons; it is not a tie). Between
   two completed runs: jobs A and D, a preference needs a gap of more than the
   job's margin (2 accuracy points), else a tie; job B, more machine checks
   passed, else a tie; job C, the judge's verdict for that pair. The quality test
   holds unless the base is preferred in a majority of all comparisons.
+- **A cost win** also needs at least one completed candidate run and a base
+  cost above zero.
 - **A win** needs both tests to hold. Any unfinished repeat (missing, refused)
   means no verdict ("incomplete"); a local arm written as "not run" gives "not
   run"; a job B run without the container steps makes all of job B "void".
@@ -44,10 +47,11 @@ def _failed(rec: dict) -> bool:
 
 
 def compare_repeat(job: dict, base: dict, cand: dict) -> str:
-    """``"base"``, ``"cand"`` or ``"tie"`` for one repeat pair of finished runs (not job C)."""
+    """``"base"``, ``"cand"``, ``"tie"`` or ``"none"`` (both failed: no verdict) for one repeat pair of finished
+    runs (not job C)."""
     bf, cf = _failed(base), _failed(cand)
     if bf and cf:
-        return "tie"
+        return "none"   # no verdict: excluded from the comparisons, never counted as a tie
     if cf:
         return "base"
     if bf:
@@ -101,9 +105,14 @@ def compare_arms(job: dict, base_arm: str, cand_arm: str, base: dict, cand: dict
         out["basis"] = f"median of {len(reps)}"
         b_cost, c_cost = statistics.median(base_cost), statistics.median(cand_cost)
         out["base_median_cost"], out["cand_median_cost"] = b_cost, c_cost
+    out["aborted_attempt_dollars"] = {
+        "base": sum(_aborted_dollars(base[n]) for n in reps), "cand": sum(_aborted_dollars(cand[n]) for n in reps)}
     if b_cost > 0:
         out["cost_ratio"] = c_cost / b_cost
-    out["cost_holds"] = c_cost <= COST_SHARE * b_cost
+    # A cost win needs at least one completed candidate run and a base cost above zero (round-2 review (1)):
+    # an arm whose every run failed, or a comparison against a zero cost, cannot buy a win.
+    cand_completed = any(cand[n].get("status") == "completed" for n in reps)
+    out["cost_holds"] = bool(cand_completed and b_cost > 0 and c_cost <= COST_SHARE * b_cost)
 
     if kind == "pairwise_judge":
         if not judge or judge.get("status") != "completed":
@@ -121,18 +130,30 @@ def compare_arms(job: dict, base_arm: str, cand_arm: str, base: dict, cand: dict
                 out["cost_holds"] = None
                 out["reason"] = f"no judge verdict for repeat {n}"
                 return out
-            outcomes[n] = {"direct": "base", "borg": "cand", "tie": "tie"}[w]
+            outcomes[n] = {"direct": "base", "borg": "cand", "tie": "tie", "none": "none"}[w]
     else:
         outcomes = {n: compare_repeat(job, base[n], cand[n]) for n in reps}
 
     out["outcomes"] = outcomes
-    out["comparisons"] = len(outcomes)
+    out["no_verdict"] = sum(1 for v in outcomes.values() if v == "none")
+    out["comparisons"] = len(outcomes) - out["no_verdict"]
     out["base_preferred"] = sum(1 for v in outcomes.values() if v == "base")
     out["cand_preferred"] = sum(1 for v in outcomes.values() if v == "cand")
-    out["ties"] = out["comparisons"] - out["base_preferred"] - out["cand_preferred"]
+    out["ties"] = sum(1 for v in outcomes.values() if v == "tie")
+    if out["comparisons"] == 0:
+        # every pair failed on both sides: there is nothing to compare, so no verdict for the job
+        out["status"] = "no verdict"
+        out["reason"] = "every repeat pair failed on both sides"
+        out["quality_holds"] = None
+        return out
     out["quality_holds"] = out["base_preferred"] * 2 <= out["comparisons"]
     out["wins"] = bool(out["cost_holds"] and out["quality_holds"])
     return out
+
+
+def _aborted_dollars(rec: dict) -> float:
+    """Real spend of the transport-failed attempts a run replaced (listed beside it, not in its cost)."""
+    return sum(float(a.get("cost_dollars") or 0.0) for a in rec.get("aborted_attempts") or [])
 
 
 def _load_arm(day_dir: Path, job: str, arm: str) -> dict:

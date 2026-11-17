@@ -26,7 +26,8 @@ whose real cost passes its own estimate trips the wire (re-estimate of the rest,
 The add-or-stop decision looks at cost only.
 
 Exit codes: 0 ok, 2 setup problem, 3 a run was refused by the budget guard (the stage stopped),
-4 a run failed (the stage finished), 5 the tripwire stopped the stage.
+4 a run failed (the stage finished), 5 the tripwire stopped the stage, 6 the judge failed or failed its
+sanity case.
 """
 from __future__ import annotations
 
@@ -79,6 +80,7 @@ MAX_RUN_SECONDS = 7200
 DIRECT_TIMEOUT_S = 7200.0
 STAGE_JOB_ORDER = ("A", "D", "B", "C")   # ruling 14: the order repeats are added by whole job
 TRIPWIRE_STOP_RC = 5
+JUDGE_FAILED_RC = 6   # the judge failed or refused (sanity case): no job C verdict, so the invocation fails
 FINISHED = ("completed", "failed")   # statuses a comparison can use; "refused" and "not run" cannot
 
 
@@ -172,12 +174,38 @@ def baseline_model(matrix, pinned: Optional[str] = None):
 _SOURCES = ("openrouter", "ollama", "lmstudio", "custom_key")
 
 
+# One name per vendor, whatever the id spells it as (OpenRouter's vendor ids, and local model families).
+_VENDOR_ALIASES = {"meta-llama": "meta", "mistralai": "mistral", "x-ai": "xai", "moonshotai": "moonshot",
+                   "z-ai": "zhipu", "thudm": "zhipu"}
+# A local row (``ollama/llama3.2:3b``) names a model family, not a vendor: the family's maker is the vendor,
+# so a judge from that maker is refused while the local model is in the pool (round-2 review (10)).
+_LOCAL_FAMILY_VENDORS = (
+    ("llama", "meta"), ("codellama", "meta"), ("qwen", "qwen"), ("qwq", "qwen"), ("gemma", "google"),
+    ("mistral", "mistral"), ("mixtral", "mistral"), ("codestral", "mistral"), ("ministral", "mistral"),
+    ("phi", "microsoft"), ("deepseek", "deepseek"), ("gpt-oss", "openai"), ("granite", "ibm"),
+    ("command-r", "cohere"), ("kimi", "moonshot"), ("glm", "zhipu"), ("olmo", "allenai"),
+)
+
+
 def vendor_of(model_id: str) -> str:
-    """The vendor part of a model id: ``openrouter/qwen/qwen4-max`` -> ``qwen``; ``anthropic/x`` -> ``anthropic``."""
+    """The vendor of a model id: ``openrouter/qwen/qwen4-max`` -> ``qwen``; ``openrouter/meta-llama/x`` -> ``meta``;
+    a local row is mapped from its family to its maker: ``ollama/llama3.2:3b`` -> ``meta``,
+    ``ollama/qwen3:4b`` -> ``qwen`` (an unknown family keeps the family's name)."""
     parts = [p for p in str(model_id).split("/") if p]
-    if len(parts) >= 2 and parts[0] in _SOURCES:
+    source = parts[0].lower() if len(parts) >= 2 and parts[0] in _SOURCES else None
+    if source:
         parts = parts[1:]
-    return parts[0].lower() if parts else ""
+    if not parts:
+        return ""
+    if source in ("ollama", "lmstudio") or (source and len(parts) == 1):
+        name = parts[-1].lower()
+        for family, vendor in _LOCAL_FAMILY_VENDORS:
+            if name.startswith(family):
+                return vendor
+        if len(parts) == 1:
+            return name.split(":")[0].rstrip("0123456789.-_") or name
+    head = parts[0].lower()
+    return _VENDOR_ALIASES.get(head, head)
 
 
 def side_vendors(matrix, baseline) -> tuple[set[str], set[str]]:
@@ -1098,9 +1126,27 @@ async def run_stage(stage: int, jobs, cfg, matrix, baseline, chat=llm.chat, dock
 # Judging job C
 # --------------------------------------------------------------------------
 
+def _stored_judge(cfg: Config, name: str) -> Optional[dict]:
+    """The stored ``judge_<job>.json`` whose verdicts are reused (ruling 14 adjustment), or None."""
+    p = cfg.day_dir / f"judge_{name}.json"
+    if not p.exists():
+        return None
+    try:
+        return json.loads(p.read_text(encoding="utf-8"))
+    except ValueError:
+        return None
+
+
 async def run_judge(jobs: dict, cfg: Config, matrix, baseline, chat=llm.chat, log=print) -> Optional[dict]:
-    """Judge direct against borg_cloud for every judged job. Writes ``judge_<job>.json``. Counted in the ledger."""
+    """Judge direct against borg_cloud for every judged job. Writes ``judge_<job>.json``. Counted in the ledger.
+
+    Verdicts already stored in ``judge_<job>.json`` (stage 1's repeat 1) are kept and reused, never re-judged:
+    only pairs without a stored verdict are judged (with a fresh sanity case), and only their calls are new spend.
+    If the new judging fails, the stored verdicts stay in the file beside the failure.
+    Returns the result of the first judged job that did not complete, else the last one (None if nothing was
+    judged); ``main`` exits non-zero when it did not complete."""
     results = None
+    worst = None
     for name, job in jobs.items():
         if (job.get("quality") or {}).get("kind") != "pairwise_judge":
             continue
@@ -1119,8 +1165,15 @@ async def run_judge(jobs: dict, cfg: Config, matrix, baseline, chat=llm.chat, lo
         if not pairs:
             log(f"judge {name}: no finished direct/borg_cloud pair; nothing to judge")
             continue
+        stored = _stored_judge(cfg, name)
+        kept = {p["id"]: p for p in (stored or {}).get("pairs") or [] if p.get("winner") is not None}
+        new_pairs = [p for p in pairs if p["id"] not in kept]
+        if not new_pairs:
+            log(f"judge {name}: every finished pair already has a stored verdict; nothing new to judge")
+            results = stored
+            continue
         jms = pick_judges(matrix, baseline, cfg.judge_model_ids)
-        to_judge = sum(1 for p in pairs if not p["direct_failed"] and not p["borg_failed"])
+        to_judge = sum(1 for p in new_pairs if not p["direct_failed"] and not p["borg_failed"])
         estimate = estimate_judge(job, to_judge, jms) if to_judge else 0.0
         cfg.ledger.check(estimate, cfg.phase_cap)
         key = load_answers(job, cfg)
@@ -1136,24 +1189,38 @@ async def run_judge(jobs: dict, cfg: Config, matrix, baseline, chat=llm.chat, lo
                 return r
             return ask
 
+        reused = sorted(kept, key=lambda i: int(i.rsplit("_", 1)[-1]))
+        prior_sanity = list((stored or {}).get("sanity") or [])
+        prior_cost = float((stored or {}).get("cost_dollars") or 0.0)
         try:
-            results = await judge.judge_all([make_ask(jm) for jm in jms], key, pairs)
+            fresh = await judge.judge_all([make_ask(jm) for jm in jms], key, new_pairs)
+            merged = sorted(list(kept.values()) + fresh["pairs"], key=lambda p: int(p["id"].rsplit("_", 1)[-1]))
+            results = judge.summarise(merged, prior_sanity + fresh["sanity"], fresh["dollars"])
             results["status"] = "completed"
         except judge.JudgeRefused as exc:
             results = {"status": "refused", "reason": str(exc)}
         except Exception as exc:  # spend is still counted
             results = {"status": "failed", "reason": f"{type(exc).__name__}: {str(exc)[:300]}"}
+        if results["status"] != "completed":
+            # the stored verdicts are never lost: they stay in the file beside the failure
+            results["pairs"] = [kept[i] for i in reused]
         spent["dollars"] = max(spent["dollars"], budget.calls_log_dollars(calls_log))
         results.update({"job": name, "judge_models": [jm.model_id for jm in jms], "estimate_dollars": estimate,
-                        "cost_dollars": spent["dollars"], "incomplete_repeats": incomplete})
+                        "cost_dollars": prior_cost + spent["dollars"], "this_call_dollars": spent["dollars"],
+                        "reused_pairs": reused, "incomplete_repeats": incomplete})
+        results["calls_logs"] = list((stored or {}).get("calls_logs") or
+                                     ([stored["calls_log"]] if stored and stored.get("calls_log") else [])) + [str(calls_log)]
         results["calls_log"] = str(calls_log)
         cfg.ledger.finish(entry, spent["dollars"])
         cfg.day_dir.mkdir(parents=True, exist_ok=True)
         (cfg.day_dir / f"judge_{name}.json").write_text(json.dumps(results, indent=1) + "\n", encoding="utf-8")
         log(f"judge {name}: {results['status']}"
             + (f" direct_wins={results['direct_wins']} borg_wins={results['borg_wins']} ties={results['ties']}"
+               f" no_verdict={results['no_verdict']} (reused {len(reused)} stored verdict(s))"
                if results["status"] == "completed" else f" ({results['reason']})"))
-    return results
+        if results["status"] != "completed" and worst is None:
+            worst = results
+    return worst or results
 
 
 # --------------------------------------------------------------------------
@@ -1312,7 +1379,9 @@ def main(argv: Optional[list[str]] = None) -> int:
                     help="model id for the job C judge (in neither arm, vendor outside both sides); "
                          "give it twice for two-judge mode (one per side's vendor), only when no outside vendor exists")
     ap.add_argument("--check-model", action="append", default=[], help="check this matrix row in memory for the run (never saved)")
-    ap.add_argument("--prior-spend", type=float, help="set the dollars already spent earlier in the phase (ledger)")
+    ap.add_argument("--prior-spend", type=float,
+                    help="set the dollars already spent earlier in the phase (ledger): the 3.1 cloud rescoring "
+                         "plus the ruling-13 scoring of the local model, summed")
     ap.add_argument("--no-docker", action="store_true", help="skip job B's container test step")
     ap.add_argument("--no-judge", action="store_true")
     ap.add_argument("--judge-only", action="store_true")
@@ -1381,10 +1450,14 @@ def main(argv: Optional[list[str]] = None) -> int:
         judge_jobs = {n: jobs[n] for n in res["judge_jobs"]}
     if not args.no_judge and judge_jobs and rc not in (3, TRIPWIRE_STOP_RC):
         try:
-            asyncio.run(run_judge(judge_jobs, cfg, matrix, baseline))
+            jres = asyncio.run(run_judge(judge_jobs, cfg, matrix, baseline))
         except budget.BudgetRefused as exc:
             print(f"judge: {exc}; stopping (a guard failure is a stop).")
             rc = 3
+        else:
+            if jres is not None and jres.get("status") != "completed":
+                print(f"judge: {jres.get('status')} ({jres.get('reason')}); exit code {JUDGE_FAILED_RC}")
+                rc = JUDGE_FAILED_RC
     print(f"ledger: US${cfg.ledger.spent():.4f} spent of US${cfg.phase_cap:.2f}")
     return rc
 

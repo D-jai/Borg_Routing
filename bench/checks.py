@@ -7,8 +7,9 @@ with ``safe_load``).
 
 Spec checks, read from bench/jobs/job_b_spec.md: the SQL creates every table
 the spec names; the OpenAPI YAML has every endpoint (path and method; path
-parameter names may differ); app.py assigns ``app = FastAPI(...)`` and has a
-route decorator for every endpoint (found with ``ast``).
+parameter names may differ). There is no source-reading handler check (round-2
+review (8), 17-Nov-2026): whether app.py serves every endpoint is decided by
+the reference suite, which calls the endpoints.
 
 Two test runs, both only inside ``docker run --network none`` with a memory
 cap, a process cap, a read-only file system and a timeout: the answer's own
@@ -164,58 +165,6 @@ def check_spec_paths(files: dict[str, str], req: dict) -> tuple[bool, str]:
     return (not missing), ("every required path and method" if not missing else "missing: " + ", ".join(missing))
 
 
-def _route_of(dec: ast.expr) -> list[tuple[str, str]]:
-    """``(METHOD, path)`` pairs a decorator such as ``@app.get("/x")`` or ``@app.api_route("/x", methods=[...])`` adds."""
-    if not (isinstance(dec, ast.Call) and isinstance(dec.func, ast.Attribute)):
-        return []
-    path_ = None
-    if dec.args and isinstance(dec.args[0], ast.Constant) and isinstance(dec.args[0].value, str):
-        path_ = dec.args[0].value
-    for kw in dec.keywords:
-        if kw.arg == "path" and isinstance(kw.value, ast.Constant) and isinstance(kw.value.value, str):
-            path_ = kw.value.value
-    if path_ is None:
-        return []
-    attr = dec.func.attr.lower()
-    if attr in HTTP_METHODS:
-        return [(attr.upper(), norm_path(path_))]
-    if attr == "api_route":
-        for kw in dec.keywords:
-            if kw.arg == "methods" and isinstance(kw.value, (ast.List, ast.Tuple)):
-                return [(str(e.value).upper(), norm_path(path_)) for e in kw.value.elts
-                        if isinstance(e, ast.Constant) and isinstance(e.value, str)]
-    return []
-
-
-def check_spec_handlers(files: dict[str, str], req: dict) -> tuple[bool, str]:
-    text = files.get("app.py")
-    if text is None:
-        return False, "no app.py"
-    try:
-        tree = ast.parse(text, filename="app.py")
-    except SyntaxError as exc:
-        return False, f"app.py: line {exc.lineno}: {exc.msg}"
-    has_app = False
-    for node in tree.body:
-        if isinstance(node, (ast.Assign, ast.AnnAssign)):
-            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
-            value = node.value
-            if any(isinstance(t, ast.Name) and t.id == "app" for t in targets) and isinstance(value, ast.Call):
-                f = value.func
-                name = f.id if isinstance(f, ast.Name) else (f.attr if isinstance(f, ast.Attribute) else "")
-                has_app = has_app or name == "FastAPI"
-    routes: set[tuple[str, str]] = set()
-    for node in ast.walk(tree):
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            for dec in node.decorator_list:
-                routes.update(_route_of(dec))
-    problems = [] if has_app else ["no module-level 'app = FastAPI(...)'"]
-    missing = [f"{m} {p}" for m, p in req["endpoints"] if (m, norm_path(p)) not in routes]
-    if missing:
-        problems.append("no handler for: " + ", ".join(missing))
-    return (not problems), ("app and a handler for every endpoint" if not problems else "; ".join(problems))
-
-
 def reference_test_names(folder: Path = REFERENCE_DIR) -> list[str]:
     """The test functions of our reference suite (our own files; parsed, not imported)."""
     names: list[str] = []
@@ -362,8 +311,7 @@ def run_checks(answer: str, with_docker: bool = True, runner: Callable = subproc
     for name, fn in (("sql_executes", check_sql), ("python_parses", check_python), ("openapi_loads", check_yaml)):
         ok, detail = fn(files)
         checks[name] = {"status": "pass" if ok else "fail", "detail": detail}
-    for name, fn in (("spec_tables", check_spec_tables), ("spec_openapi_paths", check_spec_paths),
-                     ("spec_handlers", check_spec_handlers)):
+    for name, fn in (("spec_tables", check_spec_tables), ("spec_openapi_paths", check_spec_paths)):
         ok, detail = fn(files, req)
         checks[name] = {"status": "pass" if ok else "fail", "detail": detail}
 

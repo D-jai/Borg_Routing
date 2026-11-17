@@ -167,8 +167,9 @@ async def test_failed_runs_are_compared_without_a_judge_call():
     ]
     out = await judge.judge_all(ask, KEY, pairs)
     assert ask.prompts == [], "no pair needed a judge, so not even the sanity case ran"
-    assert [p["winner"] for p in out["pairs"]] == ["direct", "borg", "tie"]
-    assert (out["comparisons"], out["direct_wins"], out["borg_wins"], out["ties"]) == (3, 1, 1, 1)
+    assert [p["winner"] for p in out["pairs"]] == ["direct", "borg", "none"]   # both failed: no verdict
+    assert (out["comparisons"], out["direct_wins"], out["borg_wins"], out["ties"]) == (2, 1, 1, 0)
+    assert out["no_verdict"] == 1
     assert out["direct_preferred_in_majority"] is False
 
 
@@ -213,3 +214,24 @@ async def test_the_sanity_case_applies_to_every_judge():
     with pytest.raises(judge.JudgeRefused) as ei:
         await judge.judge_all([good, biased], KEY, [{"id": "C_1", "direct": "a", "borg": "b"}])
     assert "judge 2" in str(ei.value)
+
+
+def test_answer_markers_count_length_and_format():
+    text = ("# Answers\n## Facts\n1. one (doc_001#2)\n2. two\n- a point from doc_014\n* another\n"
+            "```\ncode\n```\nplain line")
+    m = judge.answer_markers(text)
+    assert m == {"chars": len(text), "words": len(text.split()), "headings": 2, "list_items": 4,
+                 "code_blocks": 1, "part_id_refs": 2}
+    assert judge.answer_markers("")["chars"] == 0
+
+
+async def test_every_pair_records_both_answers_markers():
+    ask = Fake(longer_wins)
+    pairs = [{"id": "C_1", "direct": "# H\n- x", "borg": "plain answer, see doc_002"},
+             {"id": "C_2", "direct": "x", "borg": "", "borg_failed": True}]
+    out = await judge.judge_all(ask, KEY, pairs)
+    p1, p2 = out["pairs"]
+    assert p1["answer_markers"]["direct"]["headings"] == 1 and p1["answer_markers"]["direct"]["list_items"] == 1
+    assert p1["answer_markers"]["borg"]["part_id_refs"] == 1
+    assert p2["answer_markers"]["direct"]["chars"] == 1 and p2["answer_markers"]["borg"]["chars"] == 0
+    assert not any("headings" in s + u for s, u in ask.prompts)     # never shown to the judge

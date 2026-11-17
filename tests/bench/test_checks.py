@@ -167,11 +167,11 @@ def test_the_do_nothing_answer_fails_every_spec_check():
     st = {k: v["status"] for k, v in res["checks"].items()}
     assert st["spec_tables"] == "fail" and "notes" in res["checks"]["spec_tables"]["detail"]
     assert st["spec_openapi_paths"] == "fail" and "/notes" in res["checks"]["spec_openapi_paths"]["detail"]
-    assert st["spec_handlers"] == "fail" and "FastAPI" in res["checks"]["spec_handlers"]["detail"]
     assert all(st[f"ref_{n}"] == "fail" for n in REF_NAMES)
     assert res["void"] is False
     good = checks.run_checks(MINIMAL, runner=docker_ok())
-    assert res["machine_checks_passed"] < good["machine_checks_passed"] - len(REF_NAMES) - 2
+    # it loses exactly the two spec checks and every reference test
+    assert res["machine_checks_passed"] == good["machine_checks_passed"] - len(REF_NAMES) - 2
 
 
 def test_a_correct_minimal_service_passes_every_check_with_docker_mocked():
@@ -179,19 +179,20 @@ def test_a_correct_minimal_service_passes_every_check_with_docker_mocked():
     res = checks.run_checks(MINIMAL, runner=runner)
     failed = {k: v for k, v in res["checks"].items() if v["status"] != "pass"}
     assert failed == {}, failed
-    assert res["machine_checks_passed"] == len(res["checks"]) == 8 + len(REF_NAMES)
+    assert res["machine_checks_passed"] == len(res["checks"]) == 7 + len(REF_NAMES)
     assert res["void"] is False
 
 
-def test_handlers_need_a_fastapi_app_and_every_route():
+def test_the_handler_check_is_dropped_and_the_reference_tests_decide():
+    """Round-2 review (8): an app with its routes registered another way (``add_api_route``, a router) is not
+    scored down by a source-reading check; whether the endpoints work is for the reference suite to say."""
+    assert not hasattr(checks, "check_spec_handlers")
     files = checks.extract_files(MINIMAL)
-    req = checks.load_spec_requirements()
-    assert checks.check_spec_handlers(files, req)[0] is True
-    no_delete = dict(files, **{"app.py": files["app.py"].replace('@app.delete("/notes/{note_id}", status_code=204)', "@staticmethod")})
-    ok, detail = checks.check_spec_handlers(no_delete, req)
-    assert not ok and "DELETE /notes/{id}" in detail
-    renamed = dict(files, **{"app.py": files["app.py"].replace("app = FastAPI()", "app = None\nother = FastAPI()")})
-    assert checks.check_spec_handlers(renamed, req)[0] is False
+    other_style = MINIMAL.replace('@app.delete("/notes/{note_id}", status_code=204)', "@staticmethod")
+    res = checks.run_checks(other_style, runner=docker_ok())
+    assert "spec_handlers" not in res["checks"]
+    assert all(v["status"] == "pass" for v in res["checks"].values())
+    assert "app.py" in files
 
 
 def test_openapi_paths_need_each_method_and_accept_any_parameter_name():
