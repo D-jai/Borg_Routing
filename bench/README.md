@@ -45,7 +45,9 @@ All rows come from the bench's own matrix, `bench/pool_matrix.yaml` (`--matrix`,
 
 ## Fairness rules for the two arms
 
-- **Same output caps.** The direct arm uses BORG_ROUTE's own answerer cap policy (the engine's `_answerer_caps`): `ANSWERER_MAX_TOKENS` (default 2000), raised to at least 8000 for reasoning-family models, with the job's expected output (`est_output_tokens`) as a floor, the same way a step's `max_output_tokens` is a floor inside BORG_ROUTE. On `finish_reason` "length" it retries once at double the cap (at most 16,000), as BORG answerers do. Each result records every call's `finish_reason` and both attempts' caps, tokens and dollars.
+- **Same output caps.** The direct arm uses BORG_ROUTE's own answerer cap policy (the engine's `_answerer_caps`) with the same pinned value: `ANSWERER_MAX_TOKENS` 6000 (the value in `.env`; the engine's default when unset is 2000), so a plain model gets 6000 and a reasoning-family model four times that, 24,000; the job's expected output (`est_output_tokens`) is a floor, the same way a step's `max_output_tokens` is a floor inside BORG_ROUTE. On `finish_reason` "length" it retries once at double the cap, at most 16,000; a first cap already at 16,000 or more (24,000 for a reasoning model) gets no retry, exactly as BORG answerers. BORG's planner and compose calls use `ORCHESTRATOR_MAX_TOKENS` 6000 the same way. Each result records every call's `finish_reason` and both attempts' caps, tokens and dollars.
+- **Web search is off** for every bench run, on both arms, so tool spend cannot hide in either arm: the direct arm has no tools, and for each BORG run the runner swaps every registered tool (today only `web_search`) for an unavailable stand-in, so a step that asks for a search gets a failed tool result (BRT-TOOL-001) and no search provider (Tavily, Perplexity) is called. The product's own defaults are unchanged. Every result records `tools_enabled: false` in `routing_config`.
+- **Transport errors** (an HTTP 429, an HTTP 5xx, a connection error, a connect or read timeout: only a provider or network failure) that fail a run, on either arm, make the runner **rerun that run once, automatically**, the same way for both arms. Both attempts are recorded: the result file lists the aborted attempt under `aborted_attempts` (its error, database or calls log, and real spend) beside the run that replaced it, and each attempt has its own ledger entry, so the aborted attempt's real spend counts toward the US$20 cap. A second failure counts as a failed run. Nothing else is ever rerun: never a BRT-* failure of BORG_ROUTE's own making (a lane refusal such as BRT-LANE-002, the cut-off BRT-ANS-009, a malformed answer, a plan error, the local connection pool BRT-ANS-011, the run time limit BRT-PIP-008), a refusal, a cut-off or empty answer, a bad answer, or a 4xx other than 429; these stay failed runs under the conservative rule. (BORG_ROUTE reports a provider or network failure under its own wrapping codes, BRT-ANS-002 "HTTP 503 ...", BRT-ANS-006 "model call timed out", BRT-ORC-001 "HTTP 429 ..." or "orchestrator call timed out"; the runner reads the HTTP status or timeout in that message, never the code alone.)
 - **Same text.** The direct arm gets the instruction and the documents in one call, or the fewest calls that fit its context, then a merge call. BORG_ROUTE gets the same instruction with the documents handed over by reference.
 - **The judge** sees answers only as "1" and "2", judges each pair twice with the order swapped (a split is a tie), and has up to 4000 output tokens per call (room for a reasoning model to think). A reply that cannot be read is asked again once; if it is still unreadable, that round counts as **"direct preferred"** (the conservative side). Before judging, it must pass a sanity case: a deliberately truncated wrong answer has to lose both times (an unreadable sanity round counts as a failure), or it refuses to judge. **A judge that fails or refuses makes the runner exit non-zero (exit code 6)**: there is no job C verdict.
 - **Length and format are recorded.** `judge_C.json` records, beside each pair's verdict, each answer's length (characters, words) and format markers (heading count, list-item count, code blocks, document part-id references such as `doc_003#2`), so a reader can see whether the verdicts tracked length or format. The judge never sees these numbers.
@@ -102,12 +104,36 @@ Paid runs go in two stages, so that money is spent on measured cost, not on gues
 
 ### The run time limit (fixed before stage 1)
 
-Every arm runs under **`BORG_MAX_RUN_SECONDS=7200`** (two hours), set by the runner for each BORG run, so no run is cut by the engine's default 300 s. Reason: the local arms run `ollama/llama3.2:3b` on a CPU-only 16 GB machine, and they must be able to finish and be timed as measured; the same limit applies to the cloud arms so that no arm is helped or hurt by a clock. The direct arm's HTTP timeout is also **7200 s** per call, so a long answer from a reasoning model is not cut by the client. Each result records its wall time (`wall_seconds`); local wall time is reported as measured, never adjusted.
+Every arm runs under **`BORG_MAX_RUN_SECONDS=7200`** (two hours), set by the runner for each BORG run, so no run is cut by the engine's default 300 s. Reason: the local arms run `ollama/llama3.2:3b` on a CPU-only 16 GB machine, and they must be able to finish and be timed as measured; the same limit applies to the cloud arms so that no arm is helped or hurt by a clock. The direct arm's HTTP timeout is also **7200 s** per call, so a long answer from a reasoning model is not cut by the client, and BORG's own per-call timeouts are set to match for every BORG run: `BORG_ANSWERER_CALL_TIMEOUT=7200` and `BORG_ORCHESTRATOR_CALL_TIMEOUT=7200`. These 7200 s per-call timeouts are bench settings and are **not** the product defaults: the product's defaults stay 120 s for an answerer (step) call and 180 s for an orchestrator (planner or compose) call. Each result records its wall time (`wall_seconds`); local wall time is reported as measured, never adjusted.
 
 ### The routing configuration (fixed for every arm, written into every result file as `routing_config`)
 
-- **Leaf floors 6.0 / 7.5 / 9.0** (light / mid / heavy): the engine defaults, unchanged. The runner removes any `LEAF_QUALITY_*` override from the environment for a BORG run.
-- **Time cost per second:** the engine default (0.0001); any `TIME_COST_PER_SEC` override is removed for a BORG run.
+Every routing-relevant setting is **pinned by the runner** for each run, whatever the shell or `.env` holds, and recorded in `routing_config.env`. The values are today's effective values (from `.env` and the engine defaults, read 17-Nov-2026), so the bench measures the product as configured:
+
+| Setting | Pinned value | Where today's value comes from |
+|---|---|---|
+| `ANSWERER_MAX_TOKENS` | 6000 (reasoning-family models 24,000) | `.env` |
+| `ORCHESTRATOR_MAX_TOKENS` | 6000 (reasoning-family models 24,000) | `.env` |
+| `ORCHESTRATOR_QUALITY_REQUIREMENT` | 9.0 | `.env` and engine default |
+| `BORG_RULE_ZERO_SHORTCUT` | true (a run with documents never takes the shortcut) | `.env` and engine default |
+| `LEAF_QUALITY_LIGHT` / `LEAF_QUALITY_MID` / `LEAF_QUALITY_HEAVY` | 6.0 / 7.5 / 9.0 | engine defaults |
+| `TIME_COST_PER_SEC` | 0.0001 | `.env` and engine default |
+| `BORG_LANE_MAX_OUTPUT_CHARS` | 1500 | lane default |
+| `BORG_LANE_MAX_VERBATIM_CHARS` | 120 | lane default |
+| `BORG_LANE_MAX_NGRAM_SHARE` | 0.10 | lane default |
+| `BORG_LANE_MANIFEST` | names | lane default |
+| `BORG_LANE_PART_CHARS` | 8000 | lane default |
+| `BORG_LANE_LOCAL_ALLOWLIST` | unset (removed) | not set in `.env` |
+| `BORG_LOCAL_HOSTS` | unset (removed: only the built-in loopback hosts count as local) | not set in `.env` |
+| `BORG_ANSWERER_CALL_TIMEOUT` | 7200 (bench only; product default 120 s) | round-2 ruling (2) |
+| `BORG_ORCHESTRATOR_CALL_TIMEOUT` | 7200 (bench only; product default 180 s) | round-2 ruling (2) |
+| `BORG_MAX_RUN_SECONDS` | 7200 | ruling 14 |
+| `BORG_LANE_MODE` | per arm (below) | the job file |
+| `BASELINE_MODEL_ID` | the bench baseline (below) | `--baseline` |
+
+- **Leaf floors 6.0 / 7.5 / 9.0** (light / mid / heavy): the engine defaults, unchanged, pinned explicitly.
+- **Time cost per second:** the engine default (0.0001), pinned explicitly.
+- **Tools:** off (`tools_enabled: false`), see "Fairness rules".
 - **The pool:** the checked rows passed to the run (`bench/pool_matrix.yaml` with the `--check-model` rows). Nothing outside it can be chosen.
 - **Lane mode per arm:** `borg_cloud` is `by_reference` (jobs A, C, D) or no lane (job B); `borg_local_workers` is `raw_local` (jobs A and D); the direct arm has no lane.
 - **Receipts baseline:** `BASELINE_MODEL_ID` is set to the bench baseline (`openrouter/anthropic/claude-opus-5.5`) for each BORG run. The engine looks the id up in the matrix it is given, which holds every row of `bench/pool_matrix.yaml` whether checked or not, so it can resolve a baseline that is not in the pool. If it could not, the run would use the engine's own default (the highest-reasoning checked model) and `routing_config.baseline_note` would say so.

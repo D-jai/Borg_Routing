@@ -420,7 +420,8 @@ async def test_a_borg_run_uses_the_fixed_routing_configuration_and_writes_it_int
     rec = await run_bench.execute_run(RunSpec("T", "borg_cloud", 1), {"T": JOB_T}, cfg, matrix, baseline)
     await drain_log_writes()
     assert seen["BORG_MAX_RUN_SECONDS"] == "7200"
-    assert seen["LEAF_QUALITY_HEAVY"] is None and seen["TIME_COST_PER_SEC"] is None   # engine defaults apply
+    # pinned to the engine defaults: the stray overrides never reach the run
+    assert seen["LEAF_QUALITY_HEAVY"] == "9.0" and seen["TIME_COST_PER_SEC"] == "0.0001"
     assert seen["BASELINE_MODEL_ID"] == baseline.model_id and seen["BORG_LANE_MODE"] == "by_reference"
     rc = _read(cfg, "T_borg_cloud_1")["routing_config"]
     assert rc["leaf_floors"] == {"light": 6.0, "mid": 7.5, "heavy": 9.0}

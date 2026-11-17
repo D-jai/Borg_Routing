@@ -16,11 +16,24 @@ DEFAULT_TIMEOUT_S = 900.0
 
 
 class ChatError(RuntimeError):
-    """A model call failed; ``dollars`` is what was spent before the failure (0 if unknown)."""
+    """A model call failed; ``dollars`` is what was spent before the failure (0 if unknown).
 
-    def __init__(self, message: str, dollars: float = 0.0):
+    ``transport`` is True only for a provider or network failure (HTTP 429 or 5xx, a connection error, a
+    connect or read timeout): the bench reruns such a run once. A bad request, an auth error or an unreadable
+    answer is not transport."""
+
+    def __init__(self, message: str, dollars: float = 0.0, transport: bool = False):
         super().__init__(message)
         self.dollars = dollars
+        self.transport = transport
+
+
+def is_transport_exception(exc: BaseException) -> bool:
+    """True for HTTP 429 or 5xx, a connection error, or a timeout (connect, read, write, pool)."""
+    if isinstance(exc, httpx.HTTPStatusError):
+        code = exc.response.status_code
+        return code == 429 or 500 <= code <= 599
+    return isinstance(exc, (httpx.TimeoutException, httpx.NetworkError, httpx.RemoteProtocolError))
 
 
 async def chat(model, system: str, user: str, max_tokens: int, timeout: float = DEFAULT_TIMEOUT_S) -> dict:
@@ -41,7 +54,8 @@ async def chat(model, system: str, user: str, max_tokens: int, timeout: float = 
             resp.raise_for_status()
             body = resp.json()
     except (httpx.HTTPError, ValueError) as exc:
-        raise ChatError(f"call to {model.model_id} failed: {type(exc).__name__}: {str(exc)[:200]}") from exc
+        raise ChatError(f"call to {model.model_id} failed: {type(exc).__name__}: {str(exc)[:200]}",
+                        transport=is_transport_exception(exc)) from exc
     try:
         choice = body["choices"][0]
         content = choice["message"]["content"] or ""
@@ -89,7 +103,8 @@ async def chat_capped(model, system: str, user: str, requested_max_tokens=None, 
         try:
             r = await send(model, system, user, retry_cap)
         except ChatError as exc:
-            raise ChatError(str(exc), dollars=attempts[0]["dollars"] + exc.dollars) from exc
+            raise ChatError(str(exc), dollars=attempts[0]["dollars"] + exc.dollars,
+                            transport=getattr(exc, "transport", False)) from exc
         attempts.append(_attempt(retry_cap, r))
     return {
         "content": r.get("content") or "",

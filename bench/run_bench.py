@@ -83,6 +83,98 @@ TRIPWIRE_STOP_RC = 5
 JUDGE_FAILED_RC = 6   # the judge failed or refused (sanity case): no job C verdict, so the invocation fails
 FINISHED = ("completed", "failed")   # statuses a comparison can use; "refused" and "not run" cannot
 
+# Every routing-relevant setting, pinned by the runner for each run (round-2 review (5)); written into every
+# result file as routing_config.env. The values are today's effective values (.env and the engine defaults,
+# read 17-Nov-2026), so the bench measures the product as it is configured; None means "removed from the
+# environment" (the engine's built-in behaviour). Per-run values (BORG_LANE_MODE, BORG_DOCS_ROOT,
+# BORG_MAX_RUN_SECONDS, BASELINE_MODEL_ID) are added in run_borg.
+PINNED_ENV: dict[str, Optional[str]] = {
+    "ANSWERER_MAX_TOKENS": "6000",               # .env; reasoning-family models get 4x = 24000 (no retry above 16000)
+    "ORCHESTRATOR_MAX_TOKENS": "6000",           # .env; reasoning-family orchestrators get 24000
+    "ORCHESTRATOR_QUALITY_REQUIREMENT": "9.0",   # .env and engine default
+    "BORG_RULE_ZERO_SHORTCUT": "true",           # .env and engine default (a run with documents never takes it)
+    "LEAF_QUALITY_LIGHT": "6.0",                 # engine default floors (node_router.DEFAULT_FLOORS)
+    "LEAF_QUALITY_MID": "7.5",
+    "LEAF_QUALITY_HEAVY": "9.0",
+    "TIME_COST_PER_SEC": "0.0001",               # .env and engine default
+    "BORG_LANE_MAX_OUTPUT_CHARS": "1500",        # lane defaults (src/lane/settings.py); none is set in .env
+    "BORG_LANE_MAX_VERBATIM_CHARS": "120",
+    "BORG_LANE_MAX_NGRAM_SHARE": "0.10",
+    "BORG_LANE_MANIFEST": "names",
+    "BORG_LANE_PART_CHARS": "8000",
+    "BORG_LANE_LOCAL_ALLOWLIST": None,           # unset: only the built-in local hosts count as local
+    "BORG_LOCAL_HOSTS": None,
+    "BORG_ANSWERER_CALL_TIMEOUT": "7200",        # bench only: the product defaults are 120 s and 180 s
+    "BORG_ORCHESTRATOR_CALL_TIMEOUT": "7200",
+}
+# Web search is off for every bench run, both arms (round-2 review (6)): the direct arm has no tools, and for
+# a BORG run the web_search tool is swapped for an unavailable stand-in (``tools_off``), so a step that asks for
+# it gets a failed tool result (BRT-TOOL-001) and no search provider is called. Production is unchanged.
+TOOLS_ENABLED = False
+
+
+class _ToolOff:
+    """Stands in for a registered tool during a bench run: same name, never available, never runs."""
+
+    def __init__(self, name: str):
+        self.name = name
+
+    def is_available(self) -> bool:
+        return False
+
+    async def run(self, args: dict):  # pragma: no cover - the registry never calls an unavailable tool
+        raise RuntimeError(f"{self.name} is off for bench runs")
+
+
+class tools_off:
+    """Context manager: every registered tool is unavailable inside it (names stay registered, so a plan that
+    names a tool still validates); the real tools are put back on exit."""
+
+    def __enter__(self):
+        from src.tools.registry import TOOL_REGISTRY
+
+        self.saved = dict(TOOL_REGISTRY)
+        for name in list(TOOL_REGISTRY):
+            TOOL_REGISTRY[name] = _ToolOff(name)
+        return self
+
+    def __exit__(self, *exc):
+        from src.tools.registry import TOOL_REGISTRY
+
+        TOOL_REGISTRY.clear()
+        TOOL_REGISTRY.update(self.saved)
+
+
+# Transport errors (round-2 review (7); planner condition, 17-Nov-2026): ONLY a provider or network failure,
+# that is HTTP 429, HTTP 5xx, a connection error, a connect/read timeout. BORG_ROUTE reports these under its
+# own wrapping codes (BRT-ANS-002 "HTTP 503 from ...", BRT-ANS-006 "model call timed out", BRT-ORC-001 "HTTP 429
+# from orchestrator" / "orchestrator call timed out" / "request error calling ..."), and the message text is
+# what is matched. Every other failure (a BRT-* failure of BORG_ROUTE's own making such as a lane refusal,
+# BRT-ANS-009 truncation, a malformed answer, a plan error, the local pool BRT-ANS-011; a refusal; a cut-off
+# or empty direct answer; a 4xx other than 429) is never rerun.
+_TRANSPORT_PATTERNS = (
+    r"\bHTTP (?:429|5\d\d)\b",
+    r"\bmodel call timed out\b",
+    r"\borchestrator call timed out\b",
+    r"\brequest error calling\b",
+    r"^(?:ConnectError|ConnectTimeout|ReadTimeout|WriteTimeout|ReadError|WriteError|RemoteProtocolError|"
+    r"NetworkError|TimeoutException)\b",
+)
+
+
+def is_transport_failure(rec: dict) -> bool:
+    """True when a failed run failed on a transport error (see ``_TRANSPORT_PATTERNS``); False otherwise."""
+    import re
+
+    if rec.get("status") != "failed":
+        return False
+    if rec.get("failure_kind") in ("transport", "other"):
+        return rec["failure_kind"] == "transport"
+    err = str(rec.get("error") or "")
+    if not err or "BRT-ANS-011" in err:
+        return False
+    return any(re.search(p, err, re.MULTILINE) for p in _TRANSPORT_PATTERNS)
+
 
 # --------------------------------------------------------------------------
 # Config, jobs, matrix
@@ -691,6 +783,10 @@ def routing_config(cfg: Config, matrix, baseline, mode: str) -> dict:
         bid = fallback.model_id if fallback else None
         note = (f"the bench baseline '{baseline.model_id if baseline else None}' cannot be resolved by the engine "
                 "(not a row of its matrix); the engine's own default (highest-reasoning checked model) is used")
+    env = dict(PINNED_ENV)
+    env.update({"BORG_LANE_MODE": mode if mode not in ("off", None) and not str(mode).startswith("n/a") else None,
+                "BORG_MAX_RUN_SECONDS": str(cfg.max_run_seconds),
+                "BASELINE_MODEL_ID": bid if resolved else None})
     return {
         "leaf_floors": dict(DEFAULT_FLOORS),
         "time_cost_per_sec": _DEFAULT_TIME_COST_PER_SEC,
@@ -698,6 +794,10 @@ def routing_config(cfg: Config, matrix, baseline, mode: str) -> dict:
         "lane_mode": mode,
         "max_run_seconds": cfg.max_run_seconds,
         "direct_timeout_seconds": cfg.direct_timeout_s,
+        "answerer_call_timeout_seconds": float(PINNED_ENV["BORG_ANSWERER_CALL_TIMEOUT"]),
+        "orchestrator_call_timeout_seconds": float(PINNED_ENV["BORG_ORCHESTRATOR_CALL_TIMEOUT"]),
+        "tools_enabled": TOOLS_ENABLED,
+        "env": env,
         "baseline_model_id": bid,
         "baseline_resolved_by_engine": resolved,
         "baseline_note": note,
@@ -723,11 +823,9 @@ async def run_borg(job: dict, spec: RunSpec, cfg: Config, matrix, db_path=None, 
     documents = {"folder": folder} if folder else None
 
     rc = routing_config(cfg, matrix, baseline, mode)
-    # engine defaults for floors and time cost: a stray LEAF_QUALITY_* or TIME_COST_PER_SEC cannot reach the run
-    with _Env(BORG_DOCS_ROOT=str(cfg.data_root), BORG_LANE_MODE=mode if mode != "off" else None,
-              BORG_MAX_RUN_SECONDS=str(cfg.max_run_seconds),
-              LEAF_QUALITY_LIGHT=None, LEAF_QUALITY_MID=None, LEAF_QUALITY_HEAVY=None, TIME_COST_PER_SEC=None,
-              BASELINE_MODEL_ID=rc["baseline_model_id"] if rc["baseline_resolved_by_engine"] else None):
+    # every routing-relevant setting pinned (rc["env"]): no stray value from the shell or .env reaches the run;
+    # tools (web search) off for the run
+    with _Env(BORG_DOCS_ROOT=str(cfg.data_root), **rc["env"]), tools_off():
         t0 = time.monotonic()
         result = await run_pipeline(instruction, db_path=db_path, documents=documents)
         wall = time.monotonic() - t0
@@ -799,7 +897,7 @@ async def run_direct(job: dict, spec: RunSpec, cfg: Config, baseline, chat=llm.c
 
     steps, tin, tout, dollars = [], 0, 0, 0.0
     answers: list[str] = []
-    status, error = "completed", None
+    status, error, failure_kind = "completed", None, None
     t0 = time.monotonic()
 
     async def call(step: str, text: str) -> str:
@@ -839,9 +937,11 @@ async def run_direct(job: dict, spec: RunSpec, cfg: Config, baseline, chat=llm.c
             final = await call("direct_merge", merge_prompt)
     except (llm.ChatError, _DirectCut) as exc:
         status, error, final = "failed", str(exc), "\n".join(answers)
+        failure_kind = "transport" if getattr(exc, "transport", False) else "other"
     return {
         "status": status,
         "error": error,
+        **({"failure_kind": failure_kind} if status == "failed" else {}),
         "lane_mode": "n/a (direct call)",
         "run_id": None,
         "cost_dollars": dollars,
@@ -879,24 +979,52 @@ async def execute_run(
 
     if estimate is None:
         estimate = estimate_run(job, spec.arm, cfg, baseline, borg_price_model(matrix, baseline))
-    try:
-        cfg.ledger.check(estimate, cfg.phase_cap)
-    except budget.BudgetRefused as exc:
-        rec = {"status": "refused", "reason": str(exc), "estimate_dollars": estimate, "cost_dollars": 0.0,
-               "answer": None, "quality": None}
-        rec["path"] = str(write_result(cfg, spec, {k: v for k, v in rec.items()}))
-        return rec
 
+    aborted: list[dict] = []
+    for attempt in (1, 2):
+        try:
+            cfg.ledger.check(estimate, cfg.phase_cap)
+        except budget.BudgetRefused as exc:
+            reason = str(exc) if attempt == 1 else f"the transport rerun was refused: {exc}"
+            rec = {"status": "refused", "reason": reason, "estimate_dollars": estimate, "cost_dollars": 0.0,
+                   "answer": None, "quality": None, "aborted_attempts": aborted}
+            rec["path"] = str(write_result(cfg, spec, {k: v for k, v in rec.items()}))
+            return rec
+        rec = await _one_attempt(spec, job, conf, cfg, matrix, baseline, chat, attempt)
+        if rec["status"] == "failed":
+            rec.setdefault("failure_kind", "transport" if is_transport_failure(rec) else "other")
+        if attempt == 1 and rec["status"] == "failed" and rec["failure_kind"] == "transport":
+            # a provider or network failure: rerun once, the same way on both arms; the aborted attempt's
+            # real spend is in the ledger and listed beside the run that replaces it
+            aborted.append({**{k: rec.get(k) for k in ("status", "error", "failure_kind", "wall_seconds",
+                                                        "db_path", "calls_log", "run_id")},
+                            "cost_dollars": rec["ledger_dollars"]})
+            continue
+        break
+    rec["aborted_attempts"] = aborted
+    rec["estimate_dollars"] = estimate
+    rec["quality"] = score_answer(job, rec.get("answer") or "", cfg, runner=docker_runner)
+    rec["path"] = str(write_result(cfg, spec, {k: v for k, v in rec.items()}))
+    return rec
+
+
+async def _one_attempt(spec: RunSpec, job: dict, conf: dict, cfg: Config, matrix, baseline, chat,
+                       attempt: int) -> dict:
+    """One attempt of a run: its own database or calls log, its own ledger entry (opened at start, closed with
+    ``max(cost_dollars, dollars logged)``). Returns the run's record (not yet scored or written)."""
     db_path = calls_log = None
     if spec.arm == "direct":
         calls_log = new_calls_log(cfg, spec.key)
+        calls_log.parent.mkdir(parents=True, exist_ok=True)
+        calls_log.touch()   # claimed now, so a rerun gets its own log even when this attempt paid for nothing
     else:
         db_path = new_db_path(cfg, spec)
     entry = cfg.ledger.start(spec.key, db_path=db_path, calls_log=calls_log, date=cfg.date)
     t0 = time.monotonic()
     try:
         if spec.arm == "direct":
-            rec = await run_direct(job, spec, cfg, baseline, chat=logging_chat(chat, calls_log))
+            with _Env(ANSWERER_MAX_TOKENS=PINNED_ENV["ANSWERER_MAX_TOKENS"]):   # the same cap policy as BORG
+                rec = await run_direct(job, spec, cfg, baseline, chat=logging_chat(chat, calls_log))
         else:
             rec = await run_borg(job, spec, cfg, matrix, db_path, baseline)
     except Exception as exc:  # a run must never take the matrix down; its spend is still counted
@@ -904,15 +1032,17 @@ async def execute_run(
                "cost_dollars": budget.logged_dollars(db_path) + budget.calls_log_dollars(calls_log),
                "wall_seconds": round(time.monotonic() - t0, 3),
                "answer": "", "models": [], "models_per_step": []}
+        rec["failure_kind"] = "transport" if llm.is_transport_exception(exc) else "other"
     rec.setdefault("routing_config", routing_config(
         cfg, matrix, baseline, rec.get("lane_mode") or conf.get("lane_mode", "n/a (direct call)")))
     rec["db_path"] = str(db_path) if db_path else None
     rec["calls_log"] = str(calls_log) if calls_log else None
-    rec["estimate_dollars"] = estimate
-    rec["quality"] = score_answer(job, rec.get("answer") or "", cfg, runner=docker_runner)
+    rec["attempt"] = attempt
     logged = budget.logged_dollars(db_path) + budget.calls_log_dollars(calls_log)
-    cfg.ledger.finish(entry, max(float(rec.get("cost_dollars") or 0.0), logged))
-    rec["path"] = str(write_result(cfg, spec, {k: v for k, v in rec.items()}))
+    rec["ledger_dollars"] = max(float(rec.get("cost_dollars") or 0.0), logged)
+    rerun = attempt == 1 and is_transport_failure(rec)
+    cfg.ledger.finish(entry, rec["ledger_dollars"],
+                      note="attempt 1 failed on a transport error; rerun once" if rerun else None)
     return rec
 
 
@@ -1336,8 +1466,17 @@ def _header(out, cfg, matrix, baseline, jms, title):
         out("local arms           : NOT RUN (no checked local model; check one with --check-model)")
     out(f"run time limit       : BORG_MAX_RUN_SECONDS={cfg.max_run_seconds} for every BORG arm; "
         f"direct arm HTTP timeout {cfg.direct_timeout_s:.0f} s")
-    out(f"routing              : leaf floors 6.0 / 7.5 / 9.0 and time cost per second at the engine defaults; "
-        f"pool = the {len(checked)} checked rows; receipts baseline {baseline.model_id}")
+    out(f"per-call timeouts    : BORG_ANSWERER_CALL_TIMEOUT={PINNED_ENV['BORG_ANSWERER_CALL_TIMEOUT']}, "
+        f"BORG_ORCHESTRATOR_CALL_TIMEOUT={PINNED_ENV['BORG_ORCHESTRATOR_CALL_TIMEOUT']} (bench only; "
+        "product defaults 120 s / 180 s)")
+    out(f"routing              : pool = the {len(checked)} checked rows; receipts baseline {baseline.model_id}; "
+        "pinned for every run:")
+    pinned = [f"{k}={'(unset)' if v is None else v}" for k, v in PINNED_ENV.items() if "CALL_TIMEOUT" not in k]
+    for k in range(0, len(pinned), 4):
+        out("                       " + "  ".join(pinned[k:k + 4]))
+    out(f"tools                : {'on' if TOOLS_ENABLED else 'OFF'} for every run, both arms (web search off)")
+    out("transport errors     : a run failed by HTTP 429/5xx, a connection error or a timeout is rerun once "
+        "(both arms); nothing else is rerun")
     out(f"job B                : needs Docker and the '{checks.BENCH_IMAGE}' image for every run, else all of job B is void")
     out("")
 
