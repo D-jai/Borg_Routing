@@ -22,7 +22,8 @@ before. With the lane on, before anything is sent:
    total budget of 30 s, then the send is blocked.
    Secret fields (``api_key``) are redacted in the stored copy only.
 4. Local calls are built with ``trust_env=False``, so a proxy variable cannot
-   carry them off the machine.
+   carry them off the machine. Clients are shared per event loop, one per
+   (trust_env, timeout) kind (work order 1.12, ``shared_client``).
 
 Callers keep their own error mapping: this function returns the response or
 lets the ``httpx`` exception through; only lane refusals raise ``LaneError``.
@@ -292,15 +293,83 @@ async def record_end(
     await _finish_row(lane.db_path, request_id, status, http_status, error)
 
 
-def client_for(local: bool, timeout: float) -> httpx.AsyncClient:
-    """THE way a lane call builds its HTTP client.
+# -- shared HTTP clients (work order 1.12) ------------------------------------
+#
+# Building an httpx.AsyncClient loads the CA bundle, which blocks the event
+# loop (about 1.5 s on the ThinkPad). Every model and tool send therefore
+# reuses one client per kind, (trust_env, timeout), created lazily per event
+# loop and kept on the loop object (no module-level reference to a loop).
+# Lifecycle: the clients are closed when their loop ends, by an async
+# generator the loop finalises in ``shutdown_asyncgens`` (asyncio.run, the
+# asyncio.Runner of uvicorn and pytest-asyncio). ``close_shared_clients``
+# closes them earlier on demand.
+
+_LOOP_CLIENTS_ATTR = "_borg_http_clients"
+
+
+async def _aclose_all(clients: dict) -> None:
+    for client in list(clients.values()):
+        aclose = getattr(client, "aclose", None)
+        if aclose is None:
+            continue
+        try:
+            await aclose()
+        except Exception:
+            pass
+    clients.clear()
+
+
+async def _close_at_loop_end(clients: dict):
+    """Started once per loop; the loop closes it (and so the clients) when
+    it shuts down its async generators."""
+    try:
+        yield
+    finally:
+        await _aclose_all(clients)
+
+
+async def shared_client(trust_env: bool, timeout: float) -> httpx.AsyncClient:
+    """The running loop's long-lived client of this kind; do not close it.
+
+    ``trust_env=False`` builds ``AsyncClient(timeout=..., trust_env=False)``
+    (proxy variables ignored); ``True`` builds today's
+    ``AsyncClient(timeout=...)``. The key includes the class, so a test that
+    patches ``httpx.AsyncClient`` gets its own entry.
+    """
+    loop = asyncio.get_running_loop()
+    state = getattr(loop, _LOOP_CLIENTS_ATTR, None)
+    if state is None:
+        clients: dict = {}
+        closer = _close_at_loop_end(clients)
+        await closer.asend(None)   # runs to its yield; the loop now tracks it
+        state = (clients, closer)
+        setattr(loop, _LOOP_CLIENTS_ATTR, state)
+    clients = state[0]
+    cls = httpx.AsyncClient
+    key = (cls, bool(trust_env), float(timeout))
+    client = clients.get(key)
+    if client is None or getattr(client, "is_closed", False) is True:
+        client = cls(timeout=timeout) if trust_env else cls(timeout=timeout, trust_env=False)
+        clients[key] = client
+    return client
+
+
+async def close_shared_clients() -> None:
+    """Close the running loop's shared clients now (they are rebuilt on the
+    next send)."""
+    state = getattr(asyncio.get_running_loop(), _LOOP_CLIENTS_ATTR, None)
+    if state is not None:
+        await _aclose_all(state[0])
+
+
+async def client_for(local: bool, timeout: float) -> httpx.AsyncClient:
+    """THE client a lane call uses: the shared client of its kind.
 
     A local target gets ``trust_env=False``, so ``HTTP_PROXY``/``ALL_PROXY``
     cannot carry it off the machine (design note section 3). Used by
-    ``send_outbound`` and by the streamed bypass relay."""
-    if local:
-        return httpx.AsyncClient(timeout=timeout, trust_env=False)
-    return httpx.AsyncClient(timeout=timeout)
+    ``send_outbound`` and by the streamed bypass relay. The client is shared:
+    do not close it."""
+    return await shared_client(not local, timeout)
 
 
 def check_backstop(url: str, body: dict, destination: Optional[str]) -> Optional[str]:
@@ -352,8 +421,8 @@ async def send_outbound(
     """
     lane = current_lane()
     if lane is None:
-        async with httpx.AsyncClient(timeout=timeout) as client:
-            return await client.post(url, json=body, headers=headers)
+        client = await shared_client(True, timeout)
+        return await client.post(url, json=body, headers=headers)
 
     local = lane.is_local(model, url) if model is not None else lane.is_local_url(url)
     dest = destination or (model.model_id if model is not None else url)
@@ -376,8 +445,8 @@ async def send_outbound(
         destination=dest, attempt=attempt,
     )
     try:
-        async with client_for(local, timeout) as client:
-            resp = await client.post(url, json=body, headers=headers)
+        client = await client_for(local, timeout)
+        resp = await client.post(url, json=body, headers=headers)
     except BaseException as exc:
         await record_end(request_id, "failed", None, f"{type(exc).__name__}: {exc}"[:500])
         raise

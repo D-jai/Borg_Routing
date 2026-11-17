@@ -59,7 +59,7 @@ A model is local only when its URL is local **and**:
 - it is not an Ollama model whose tag ends in `-cloud`, and discovery did not report it as remote (Ollama lists cloud models with a remote host); such rows get `remote: true` and are never local;
 - if `lane_local_allowlist` (env `BORG_LANE_LOCAL_ALLOWLIST`: model ids and/or `host:port` entries) is set, it is on the list. Unset means every local URL counts.
 
-Every local model, tool and bypass call (the calls made through `send_outbound()` while the lane is on, and the streamed bypass relay) is built with `httpx.AsyncClient(trust_env=False)` by `client_for()` in `src/lane/outbound.py`, so a `HTTP_PROXY`/`ALL_PROXY` variable cannot carry it off the machine. Not covered: model discovery, Get Model Info scoring and the status probes build their own clients and honour proxy variables; they carry no document text. The same function produces the ledger's `left_machine` flag (section 9), so routing and record cannot disagree.
+Every local model, tool and bypass call (the calls made through `send_outbound()` while the lane is on, and the streamed bypass relay) is built with `httpx.AsyncClient(trust_env=False)` by `client_for()` in `src/lane/outbound.py`, so a `HTTP_PROXY`/`ALL_PROXY` variable cannot carry it off the machine. (Work order 1.12: the client is shared, one per kind `(trust_env, timeout)` per event loop and closed when the loop ends; a local call always gets the `trust_env=False` kind.) Not covered: model discovery, Get Model Info scoring and the status probes build their own clients and honour proxy variables; they carry no document text. The same function produces the ledger's `left_machine` flag (section 9), so routing and record cannot disagree.
 
 ## 4. Documents by reference
 
