@@ -8,7 +8,8 @@ before. With the lane on, before anything is sent:
    task, or any call in ``all_local``) headed for a non-local address raises
    BRT-LANE-003 and nothing is sent. Retries pass the guard again.
 2. **Content backstop** (section 7): a body headed for a non-local address,
-   in a run that has documents, is checked against the document text
+   in a run that has documents (``raw_local``/``all_local``; not in
+   ``by_reference``), is checked against the document text
    (``src/lane/backstop.py``). A hit raises BRT-LANE-006; nothing is sent.
 3. **Ledger** (section 9, P3): one ``outbound_requests`` row per HTTP
    request, local or not (``left_machine`` says which), with the exact JSON
@@ -191,9 +192,11 @@ def client_for(local: bool, timeout: float) -> httpx.AsyncClient:
 
 def check_backstop(url: str, body: dict, destination: Optional[str]) -> Optional[str]:
     """The backstop's verdict for a body headed off the machine: None, or the
-    refusal message (document id and rule, never the matched text)."""
+    refusal message (document id and rule, never the matched text).
+    Never runs in ``by_reference`` (no privacy promise; the ledger still
+    records every request)."""
     lane = current_lane()
-    if lane is None or not lane.has_documents:
+    if lane is None or not lane.has_documents or not lane.keeps_raw_local:
         return None
     hit = find_leak(
         body, lane.indexes(),

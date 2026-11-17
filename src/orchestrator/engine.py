@@ -48,7 +48,8 @@ Raw marking: a step is raw when its node names documents (``documents``,
 ``"inputs_ref": "documents"``, a skill's ``items_ref: documents``) or reads,
 through ``depends_on``, ``inputs_ref``, ``source`` or any of a skill's
 ``*_ref`` args (``items_ref``, ``failed_items_ref``, ``evidence_ref``), a raw
-step whose output did not pass the output guard. Raw steps are routed to local models only.
+step whose output did not pass the output guard. Raw steps are routed to local models only,
+except in ``by_reference``, where any checked model may serve them.
 
 Optimisation hooks (no error code):
 - BRT-ZERO-01: for unambiguously conversational short prompts, skip
@@ -2178,7 +2179,9 @@ async def _orchestrate_run(
             if lane is not None:
                 reads_docs = _node_reads_documents(node)
                 raw = reads_docs or any(ref in raw_unstamped for ref in _node_refs(node))
-                local_only = all_local or raw
+                # by_reference: a raw step is marked and handed its documents
+                # the same way, but may be routed to any checked model.
+                local_only = all_local or (raw and lane.keeps_raw_local)
                 if reads_docs and has_documents:
                     try:
                         node_docs = _node_document_ids(node, lane)
@@ -2234,6 +2237,9 @@ async def _orchestrate_run(
                 lane_kwargs: dict = {}
                 if local_only:
                     lane_kwargs["local_filter"] = local_filter
+                if local_only or raw:
+                    # The document text the step reads counts toward its size
+                    # (by_reference too, where any checked model may serve it).
                     lane_kwargs["extra_input_tokens"] = _doc_tokens(node, node_docs, lane)
                 try:
                     step_model, route_decision = select_model_for_node(

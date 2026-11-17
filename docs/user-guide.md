@@ -495,8 +495,15 @@ Set `lane_mode` in Admin (or `BORG_LANE_MODE` in `.env`):
 | `off` (default) | as before | documents are refused | as before | allowed | allowed |
 | `raw_local` | may use a cloud model | **local models only** | may use a cloud model | allowed, checked, listed | allowed and listed; documents refused |
 | `all_local` | **local only** | **local only** | **local only** | refused | refused |
+| `by_reference` | may use a cloud model | **any ticked model, cloud included** | may use a cloud model | allowed, listed | allowed and listed; documents refused |
 
 With `off`, nothing changes from the behaviour before the lane existed.
+
+### By reference, for cloud models (`by_reference`)
+
+`by_reference` makes no privacy promise. It hands documents over exactly as `raw_local` does (`BORG_DOCS_ROOT` and its path checks, a manifest to the planner, the text loaded inside the step that reads it, long documents in parts), but the step that reads a document may be served by any ticked model, cloud included, and that model receives the document's text. The output guard (**BRT-LANE-004**) and the check on everything sent out (**BRT-LANE-006**) do not run, so no step is refused for reading or copying a document. Every request is still written to `outbound_requests`, with whether it left the machine, and listed under the run. The planner's manifest says the steps that read documents may run on cloud models. A run that read documents is still not resumed (**BRT-LANE-008**), as in the other modes.
+
+Use it to keep bulk data out of the prompt. Lists of more than a few dozen items go in as documents, not in the prompt.
 
 ### Handing over documents
 
@@ -510,7 +517,7 @@ The planner never sees the text. It gets a list: an id per document (`doc_001`),
 
 ### How a step that reads documents works
 
-- The runtime, not the planner, marks a step **raw** when it reads documents (`"inputs_ref": "documents"`, `"documents": ["doc_001"]`, or a skill given `items_ref: documents`), or when it reads the output of a raw step that was withheld. Raw steps run on local models only.
+- The runtime, not the planner, marks a step **raw** when it reads documents (`"inputs_ref": "documents"`, `"documents": ["doc_001"]`, or a skill given `items_ref: documents`), or when it reads the output of a raw step that was withheld. Raw steps run on local models only (in `by_reference`, on any ticked model, with no output guard and no call check; the limits and checks below are those of `raw_local` and `all_local`).
 - The text is loaded inside the step, right before its own (local) request. Plans, saved envelopes and results carry document ids, never text.
 - **What a local step returns can be passed on.** That is the limit of the promise, so it is bounded: an output longer than `lane_max_output_chars` (default 1500 characters), one that copies a passage of `lane_max_verbatim_chars` (default 120) characters from the document, or one that holds a short document (under that limit) whole, is withheld (**BRT-LANE-004**). The check reads the output's values as text, so line breaks and accented letters do not hide a copy. Ask such steps for short fields (names, dates, labels).
 - When a raw step fails, the planner and the final answer see only the code and the document id, for example `{"code": "BRT-LANE-004", "doc": "doc_001"}`. A failure the local model itself reported always shows as **BRT-LANE-004**, whatever code or text it wrote. Only a failure BORG_ROUTE itself raised keeps its own code (for example **BRT-ANS-009** for a truncated answer, or a `BRT-LANE-*` refusal). The full error stays in the local trace.
@@ -520,7 +527,7 @@ The planner never sees the text. It gets a list: an id per document (`doc_001`),
 
 ### The check on everything sent out, and the record
 
-- While the lane is on and the run has documents, every request headed off the machine (planner, final answer, cloud steps, web search, direct-to-model) is compared with the documents first. If it holds a passage of 120 characters, more than 10% of a document's 8-word sequences (`lane_max_ngram_share`), or a short document whole, it is blocked (**BRT-LANE-006**). Case, punctuation, line breaks, repeated JSON escaping, invisible characters (zero-width space, soft hyphen) and a copy split one word per field do not hide a match. What it does not catch is listed under "What is not promised".
+- While the lane is `raw_local` or `all_local` and the run has documents, every request headed off the machine (planner, final answer, cloud steps, web search, direct-to-model) is compared with the documents first. If it holds a passage of 120 characters, more than 10% of a document's 8-word sequences (`lane_max_ngram_share`), or a short document whole, it is blocked (**BRT-LANE-006**). Case, punctuation, line breaks, repeated JSON escaping, invisible characters (zero-width space, soft hyphen) and a copy split one word per field do not hide a match. What it does not catch is listed under "What is not promised".
 - Every request a run makes while the lane is on is written to the `outbound_requests` table before it is sent, with its exact body (secret fields such as `api_key` are blanked in the stored copy), and whether it left the machine. If that write fails, the request is not sent (**BRT-LANE-007**). A retry is its own row.
 - Local calls ignore proxy settings (`HTTP_PROXY` and the like), so a proxy cannot carry them off the machine.
 

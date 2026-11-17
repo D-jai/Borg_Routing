@@ -56,6 +56,12 @@ class LaneContext:
         return self.settings.mode == "all_local"
 
     @property
+    def keeps_raw_local(self) -> bool:
+        """``raw_local``/``all_local``: raw steps stay local, guard and
+        backstop run. False in ``by_reference`` (no privacy promise)."""
+        return self.settings.keeps_raw_local
+
+    @property
     def has_documents(self) -> bool:
         return bool(self.docs and self.docs.documents)
 
@@ -154,11 +160,22 @@ class LaneContext:
             else:
                 name = f" {row['name']}" if "name" in row else " (a file)"
                 lines.append(f"-{name} ({row['type']}, {row['size']} bytes): unsupported, not read")
+        if self.keeps_raw_local:
+            where = (
+                "The operator attached the documents below. You never see their text:\n"
+                "steps that read them run on the operator's own machines. Refer to\n"
+                "them by id only:\n"
+            )
+        else:
+            # by_reference: honest wording, no claim that the text stays local.
+            where = (
+                "The operator attached the documents below. You never see their text:\n"
+                "the step that reads a document is given its text, and the models\n"
+                "serving such steps may be cloud models. Refer to them by id only:\n"
+            )
         return (
             "# Documents (by reference)\n"
-            "The operator attached the documents below. You never see their text:\n"
-            "steps that read them run on the operator's own machines. Refer to\n"
-            "them by id only:\n"
+            + where +
             '- an apply_to_each step with "inputs_ref": "documents" runs once per\n'
             "  document (or part of one). \"documents\" is the one reserved name that\n"
             "  is not a step id; use it, do not copy document ids into \"items\";\n"
@@ -197,7 +214,8 @@ async def prepare_lane(documents: Optional[dict], db_path: str) -> Optional[Lane
         if documents:
             raise LaneError(
                 "BRT-LANE-005",
-                "documents need the on-premise lane: set lane_mode to raw_local or all_local",
+                "documents need the on-premise lane: set lane_mode to raw_local, "
+                "all_local or by_reference",
             )
         return None
     docs = load_documents(documents, part_chars=settings.part_chars) if documents else None
@@ -308,7 +326,12 @@ def guard_envelope(env: InboundEnvelope, task: WrappedTask, ctx: LaneContext) ->
     The code is decided by source: a failure the model reported (the
     envelope was built from its JSON, ``mark_model_reason``) is always
     ``BRT-LANE-004``; only a failure the runtime wrote keeps its own code.
+
+    ``by_reference`` (``not ctx.keeps_raw_local``): the guard does not run;
+    the envelope comes back unchanged and unstamped.
     """
+    if not ctx.keeps_raw_local:
+        return env
     if env.status != "resolved":
         code = (
             RAW_FAILURE_DEFAULT if env._reason_from_model

@@ -6,7 +6,7 @@ read first; while it is ``off`` no other lane setting is read or validated.
 
 | Config key              | Env                          | Default | Meaning |
 |-------------------------|------------------------------|---------|---------|
-| lane_mode               | BORG_LANE_MODE               | off     | off, raw_local or all_local |
+| lane_mode               | BORG_LANE_MODE               | off     | off, raw_local, all_local or by_reference |
 | lane_max_output_chars   | BORG_LANE_MAX_OUTPUT_CHARS   | 1500    | P2 size cap per raw item |
 | lane_max_verbatim_chars | BORG_LANE_MAX_VERBATIM_CHARS | 120     | longest passage copied from a document |
 | lane_max_ngram_share    | BORG_LANE_MAX_NGRAM_SHARE    | 0.10    | backstop coverage limit (word 8-grams) |
@@ -29,7 +29,7 @@ from src.registry.locality import local_hosts_from_env, parse_list
 
 from .errors import LaneError
 
-LANE_MODES = ("off", "raw_local", "all_local")
+LANE_MODES = ("off", "raw_local", "all_local", "by_reference")
 MANIFEST_MODES = ("names", "ids")
 
 # Defaults. Primary: single developer running locally with small text files.
@@ -69,6 +69,14 @@ class LaneSettings:
     @property
     def on(self) -> bool:
         return self.mode != "off"
+
+    @property
+    def keeps_raw_local(self) -> bool:
+        """True in ``raw_local`` and ``all_local``: steps that read documents
+        stay local and the output guard and content backstop run. False in
+        ``by_reference``, which hands documents over the same way but lets
+        any checked model read them and makes no privacy promise."""
+        return self.mode in ("raw_local", "all_local")
 
 
 def validate_value(key: str, value: object) -> Optional[str]:

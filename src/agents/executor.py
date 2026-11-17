@@ -443,8 +443,11 @@ async def _execute_answerer(task: WrappedTask, db_path: str) -> InboundEnvelope:
     t0 = time.monotonic()
     call_kwargs = {}
     if lane is not None:
-        # The call guard: a raw task, or any call in all_local, must stay local.
-        call_kwargs["must_stay_local"] = lane.all_local or task.data_scope == "raw"
+        # The call guard: a raw task, or any call in all_local, must stay
+        # local. In by_reference a raw task may go to any checked model.
+        call_kwargs["must_stay_local"] = lane.all_local or (
+            task.data_scope == "raw" and lane.keeps_raw_local
+        )
     try:
         with call_scope(task.run_id, task.envelope_id):
             content, tokens_in, tokens_out, finish_reason = await _call_model(

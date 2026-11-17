@@ -169,7 +169,7 @@ _EFFECTIVE_SETTINGS: list[dict[str, Any]] = [
     # On-premise lane (docs/design/on_premise_lane.md). Read once per run.
     {
         "key": "lane_mode",
-        "type": "choice", "choices": ["off", "raw_local", "all_local"],
+        "type": "choice", "choices": ["off", "raw_local", "all_local", "by_reference"],
         "env_var": "BORG_LANE_MODE",
         "default": "off",
         "cast": str,

@@ -33,8 +33,11 @@ Config key `lane_mode` (env `BORG_LANE_MODE`), default `off`.
 | `off` | routed as in Phase 1 | routed as in Phase 1 | routed | allowed | allowed |
 | `raw_local` | routed (may be cloud) | **local only** | routed (may be cloud) | allowed, checked, listed | bypass with documents refused |
 | `all_local` | **local only** | **local only** | **local only** | refused | refused |
+| `by_reference` | routed (may be cloud) | routed (may be cloud) | routed (may be cloud) | allowed, listed | bypass with documents refused |
 
 With `off`, behaviour is byte-for-byte Phase 1: no new field is read, no guard, backstop or ledger runs.
+
+`by_reference` (work order 2.4, added 16-Nov-2026) makes no privacy promise and is outside sections 1 and 5 to 8. Documents are handed over exactly as in `raw_local` (section 4, raw marking of 5.2, ids only, text loaded in the child, parts), but `local_only` is not set for raw steps, the call guard does not apply to them, and the output guard (8) and content backstop (7) do not run. The ledger (9) records every request; resume stays refused (5.7); an `orchestrate` step with documents stays refused (5.8). `raw_local` and `all_local` decide exactly as before.
 
 ## 3. What "local" means
 
