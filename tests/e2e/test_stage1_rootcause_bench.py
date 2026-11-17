@@ -767,3 +767,40 @@ async def test_r1_numeric_ids_are_compared_like_strings(env):
     renames = [d for d in await _decisions(db_path, result["run_id"])
                if d.get("code") == "BRT-ORC-026"]
     assert renames and renames[0]["renamed"] == [{"from": "1", "to": "1_2"}]
+
+
+@pytest.mark.parametrize("reply", [
+    {"action": "continue", "next_nodes": [{"type": "answerer", "id": "x"}],
+     "message": "Retrying the failed items first."},
+    {"action": "compose", "next_nodes": None,
+     "output": {"next_nodes": [], "status": "ready"}, "rationale": "synthesise now"},
+])
+@pytest.mark.asyncio
+async def test_r2_control_reply_fields_are_not_an_answer(env, reply):
+    """TC-ORC-028-C: with action or next_nodes present, message/output/etc.
+    are not taken as the answer; compose is asked again."""
+    db_path, mp = env
+    stub = ComposeSeqStub(plan_nodes=[_per_item()], compose_seq=[reply],
+                          compose_text="AFTER RE-ASK.",
+                          answer_for=lambda r: {"sentiment": "positive"}).install(mp)
+    result = await run_pipeline("Rate each review.", db_path=db_path)
+    await drain_log_writes()
+    assert result["response"] == "AFTER RE-ASK."
+    assert len(stub.of_kind("compose")) == 2
+    codes = await _codes(db_path, result["run_id"])
+    assert "BRT-ORC-029" in codes and "BRT-ORC-028" not in codes
+
+
+@pytest.mark.parametrize("field", ["response", "direct_answer", "final_answer", "answer"])
+@pytest.mark.asyncio
+async def test_r2_answer_fields_next_to_an_action_still_count(env, field):
+    """TC-ORC-028-D: the four answer fields count next to action/next_nodes."""
+    db_path, mp = env
+    stub = ComposeSeqStub(plan_nodes=[_per_item()],
+                          compose_seq=[{"action": "compose", "next_nodes": None,
+                                        field: "THE ANSWER."}],
+                          answer_for=lambda r: {"sentiment": "positive"}).install(mp)
+    result = await run_pipeline("Rate each review.", db_path=db_path)
+    await drain_log_writes()
+    assert result["response"] == "THE ANSWER."
+    assert len(stub.of_kind("compose")) == 1

@@ -3059,6 +3059,10 @@ _ANSWER_FIELDS = (
     "response", "direct_answer", "final_answer", "final_response", "answer",
     "final", "text", "content", "output", "result", "message",
 )
+# The only answer fields of a reply that also carries ``action`` or
+# ``next_nodes`` (a control reply): there "message", "output" and the like
+# are the planner's notes, never the answer (R1-R4 review, R2).
+_CONTROL_ANSWER_FIELDS = ("response", "direct_answer", "final_answer", "answer")
 
 
 def _compose_text(compose_result: object) -> tuple[str, Optional[str], bool]:
@@ -3067,11 +3071,14 @@ def _compose_text(compose_result: object) -> tuple[str, Optional[str], bool]:
     The text is the first non-empty answer field (``_ANSWER_FIELDS``); a
     list or object there is written out as indented JSON. The shape is
     right only for a string ``response`` in a reply with no ``action``.
-    ("", None, False) when the reply carries no final text.
+    When ``action`` or ``next_nodes`` is present, only
+    ``_CONTROL_ANSWER_FIELDS`` count. ("", None, False) when the reply
+    carries no final text.
     """
     if not isinstance(compose_result, dict):
         return "", None, False
-    for field in _ANSWER_FIELDS:
+    control = "action" in compose_result or "next_nodes" in compose_result
+    for field in (_CONTROL_ANSWER_FIELDS if control else _ANSWER_FIELDS):
         value = compose_result.get(field)
         if isinstance(value, str) and value.strip():
             text = value
@@ -3080,7 +3087,7 @@ def _compose_text(compose_result: object) -> tuple[str, Optional[str], bool]:
         else:
             continue
         wrong = (
-            field != "response" or not isinstance(value, str) or "action" in compose_result
+            field != "response" or not isinstance(value, str) or control
         )
         return text, field, wrong
     return "", None, False
