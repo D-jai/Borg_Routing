@@ -75,14 +75,13 @@ def _rows(db_path, env_type):
 
 
 def _resend_waiting_once(waiting):
-    """re_plan: continue once with the steps that waited, then compose."""
-    sent = []
-
+    """re_plan: compose. The steps that waited already ran in a later wave of
+    the same plan (ruling 1a), so there is nothing to resend. (This used to
+    resend ``waiting``, a no-op while a finished id meant "done"; under
+    planner ruling 20, R1, a resent finished id runs again, renamed, so the
+    tests below would count a second run.)"""
     def replan(_req):
-        if sent:
-            return {"action": "compose", "rationale": "done"}
-        sent.append(1)
-        return {"action": "continue", "next_nodes": waiting, "rationale": "wave 2"}
+        return {"action": "compose", "rationale": "done"}
     return replan
 
 

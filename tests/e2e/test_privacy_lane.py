@@ -129,19 +129,10 @@ async def _run(lane, mode, matrix, plan=PLAN_RAW, documents={"folder": "."},
     lane["mp"].setenv("BORG_LANE_MODE", mode)
     lane["mp"].setattr(engine, "_shared_matrix", matrix)
     stub_kwargs.setdefault("answer_for", _answers)
-    waiting = [n for n in plan if n.get("depends_on")]
-    if waiting and "replan_for" not in stub_kwargs:
-        # The engine runs one wave, then asks re_plan: continue once with the
-        # steps that waited on the first wave, then compose.
-        sent = {"done": False}
-
-        def replan_for(req):
-            if sent["done"]:
-                return {"action": "compose", "rationale": "all steps done"}
-            sent["done"] = True
-            return {"action": "continue", "next_nodes": waiting, "rationale": "wave 2"}
-
-        stub_kwargs["replan_for"] = replan_for
+    # Steps that wait on others run in later waves of the same plan (ruling
+    # 1a), so re_plan has nothing to resend and the default stub composes.
+    # (It used to resend them, a no-op while a finished id meant "done";
+    # under planner ruling 20, R1, a resent finished id runs again, renamed.)
     stub = stub_cls(plan_nodes=plan, **stub_kwargs).install(lane["mp"])
     result = await run_pipeline(instruction, db_path=lane["db"], documents=documents)
     await drain_log_writes()
