@@ -26,6 +26,29 @@ class LaneError(ValueError):
         self.doc = doc
 
 
+class RawStepError(ValueError):
+    """``by_reference`` only: a raw step failed while it ran (a ``LaneError``
+    such as a ledger write that failed, ``BRT-LANE-007``, or a runtime error
+    such as ``BRT-ANS-003``).
+
+    ``by_reference`` makes no privacy promise, so the failure goes up as
+    ``failure``: ``{"code", "doc", "message"}``, its own code, the document
+    ids and the first ``MESSAGE_MAX`` characters of the message.
+    """
+
+    MESSAGE_MAX = 200
+
+    def __init__(self, code: str, message: str, doc: Optional[str] = None) -> None:
+        super().__init__(message)
+        self.code = code
+        self.doc = doc
+        self.message = message[: self.MESSAGE_MAX]
+
+    @property
+    def failure(self) -> dict:
+        return {"code": self.code, "doc": self.doc, "message": self.message}
+
+
 def code_of(text: object, default: str = "BRT-ANS-008") -> str:
     """The first ``BRT-...`` code in ``text``, else ``default``."""
     if isinstance(text, LaneError):

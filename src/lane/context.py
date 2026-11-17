@@ -31,7 +31,7 @@ from src.registry.models import ModelInfo
 
 from .backstop import DocIndex, copied_rule, normalise, serialise
 from .documents import LoadedDocuments, load_documents
-from .errors import LaneError
+from .errors import LaneError, RawStepError
 from .settings import LaneSettings, load_lane_settings
 
 _current: contextvars.ContextVar[Optional["LaneContext"]] = contextvars.ContextVar(
@@ -278,12 +278,35 @@ def raw_failure_code(reason: object, default: str = RAW_FAILURE_DEFAULT) -> str:
     else the fixed ``default``; nothing later in the text (which may quote
     model output) is read.
     """
-    if isinstance(reason, LaneError):
+    if isinstance(reason, (LaneError, RawStepError)):
         return reason.code
     m = _RAW_CODE_RE.match(str(reason or ""))
     if m and len(m.group(1)) <= _RAW_CODE_MAX:
         return m.group(1)
     return default
+
+
+def raw_step_error(exc: BaseException, part_ids: list[str], default: str) -> RawStepError:
+    """``by_reference``: ``exc``, raised while a raw step ran, as the
+    ``RawStepError`` that carries its code (the runtime code it starts with,
+    else ``default``), the document ids and the first 200 characters."""
+    if isinstance(exc, RawStepError):
+        return exc
+    return RawStepError(raw_failure_code(exc, default), str(exc), doc_label(part_ids))
+
+
+def raw_step_failed_envelope(task: WrappedTask, exc: BaseException, default: str) -> InboundEnvelope:
+    """``by_reference``: a failed envelope whose failure, as re_plan sees it,
+    is ``{"code", "doc", "message"}`` (``raw_step_error``)."""
+    failure = raw_step_error(exc, list(task.documents), default).failure
+    return InboundEnvelope(
+        envelope_id=task.envelope_id,
+        subtask_id=task.subtask_id,
+        status="failed",
+        output={"failure": failure},
+        failure_reason=json.dumps(failure, ensure_ascii=False),
+        lane_guarded=False,
+    )
 
 
 def mark_model_reason(env: InboundEnvelope) -> InboundEnvelope:

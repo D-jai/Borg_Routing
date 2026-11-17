@@ -186,7 +186,8 @@ def _make_child_task(
 
 
 def _failure_reason(child: WrappedTask, reason: object,
-                    env: Optional[InboundEnvelope] = None) -> object:
+                    env: Optional[InboundEnvelope] = None,
+                    exc: Optional[BaseException] = None) -> object:
     """A raw child's failure as seen upward: code plus document id only.
 
     Model-written text is never parsed for a code, in any mode: a failure
@@ -197,6 +198,12 @@ def _failure_reason(child: WrappedTask, reason: object,
     """
     if child.data_scope != "raw":
         return reason
+    from src.lane.errors import RawStepError  # noqa: PLC0415
+
+    if isinstance(exc, RawStepError):
+        # by_reference: raised while the item ran (a LaneError such as
+        # BRT-LANE-007, or a runtime error): code + doc ids + 200 characters.
+        return exc.failure
     from src.lane.context import (  # noqa: PLC0415
         RAW_FAILURE_DEFAULT, failure_of, lane_failure_code, raw_failure_code,
         raw_failures_hidden,
@@ -353,7 +360,7 @@ async def expand_and_run(
                 failures.append({
                     "index": index,
                     "item": item,
-                    "reason": _failure_reason(child, f"BRT-APE-002: {exc}"),
+                    "reason": _failure_reason(child, f"BRT-APE-002: {exc}", exc=exc),
                     "model_id": child.model_name,
                 })
 

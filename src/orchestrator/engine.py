@@ -85,9 +85,9 @@ from src.db.state import (
 from src.envelopes.schema import InboundEnvelope, ToolRequest, WrappedTask
 from src.lane.context import (
     RAW_FAILURE_DEFAULT, LaneContext, current_lane, doc_label, failure_of, prompt_json,
-    raw_failure_code, raw_failures_hidden,
+    raw_failure_code, raw_failures_hidden, raw_step_failed_envelope,
 )
-from src.lane.errors import LaneError
+from src.lane.errors import LaneError, RawStepError
 from src.lane.outbound import call_scope, send_outbound
 from src.logging.writer import write_event
 from src.orchestrator.apply_to_each import (
@@ -626,7 +626,12 @@ def _stage_output_for_prompt(env: InboundEnvelope, mode: str = "re_plan") -> dic
         shown = (env.output or {}).get("failure")
         if env.lane_guarded is False and isinstance(shown, dict) and shown.get("code"):
             # A failure the runtime built (a lane refusal): code + doc ids.
-            return {"failure": {"code": shown["code"], "doc": shown.get("doc")}}
+            # by_reference: a failure raised while the step ran also carries
+            # its first 200 characters (not shown to compose).
+            failure = {"code": shown["code"], "doc": shown.get("doc")}
+            if "message" in shown and mode != "compose":
+                failure["message"] = str(shown["message"])[:_FAILURE_MESSAGE_MAX]
+            return {"failure": failure}
     if env._data_scope == "raw" and raw_failures_hidden():
         code = (
             RAW_FAILURE_DEFAULT if env._reason_from_model
@@ -2617,6 +2622,11 @@ async def _orchestrate_run(
                     except Exception:
                         pass
                     env = failed_envelope(task, code)
+                elif task.data_scope == "raw" and isinstance(exc, (LaneError, RawStepError)):
+                    # by_reference: a failure raised while a raw step ran
+                    # reaches plan/re_plan as its own code + the document
+                    # ids + the first 200 characters (not BRT-ORC-004).
+                    env = raw_step_failed_envelope(task, exc, "BRT-ORC-004")
                 else:
                     env = InboundEnvelope(
                         envelope_id=task.envelope_id,

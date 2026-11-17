@@ -153,7 +153,8 @@ async def test_every_lane_and_log_connection_sets_a_busy_timeout(lane):
         cur = await db.execute("PRAGMA busy_timeout")
         assert (await cur.fetchone())[0] == BUSY_TIMEOUT_MS
     assert BUSY_TIMEOUT_MS >= 30000
-    for rel in ("src/lane/outbound.py", "src/logging/writer.py", "src/db/state.py"):
+    for rel in ("src/lane/outbound.py", "src/logging/writer.py", "src/db/state.py",
+                "src/db/scratch.py"):
         text = (ROOT / rel).read_text(encoding="utf-8")
         assert "aiosqlite.connect(" not in text, f"{rel} opens a connection without the busy timeout"
 
@@ -364,3 +365,201 @@ def test_user_guide_scopes_stay_local_and_not_promised_to_name_by_reference():
     assert "In `raw_local` and `all_local`, when a step must stay local" in lane_text
     not_promised = _guide_section("What is not promised", "###")
     assert "by_reference" in not_promised and "no privacy promise" in not_promised
+
+
+# -- round-2 review (5): failures raised while a raw step runs ---------------------
+#
+# In by_reference a LaneError (or another runtime error) raised while a raw
+# step runs reaches plan/re_plan as {"code", "doc", "message"}: its own code,
+# the document ids and the first 200 characters, never BRT-ORC-004 or
+# BRT-APE-002. raw_local/all_local keep code + doc only.
+
+_SUMMARY_NODE = {"type": "answerer", "id": "n2", "depends_on": ["n1"],
+                 "instruction": "Say which client is high risk.", "task_type": "reasoning",
+                 "tier": "mid", "output_schema": {"result": "string"}}
+PLAN_RAW_ANSWERER = [
+    {"type": "answerer", "id": "n1", "documents": ["doc_001"], "instruction": EXTRACT,
+     "task_type": "extraction", "tier": "light",
+     "output_schema": {"client": "string", "risk": "string"}},
+    _SUMMARY_NODE,
+]
+PLAN_RAW_ITEMS = [dict(PLAN_RAW[0]), _SUMMARY_NODE]
+
+
+def _break_extract_ledger_writes(lane) -> None:
+    """The ledger row of every request carrying the extract step fails to be
+    written (not a "locked" error, so it is not retried): BRT-LANE-007."""
+    import sqlite3
+
+    from src.lane import outbound
+
+    real = outbound._insert_once
+
+    async def broken(db_path, row):
+        if row.get("purpose") == "answerer" and EXTRACT in (row.get("body") or ""):
+            raise sqlite3.DatabaseError("disk I/O error")
+        await real(db_path, row)
+
+    lane["mp"].setattr(outbound, "_insert_once", broken)
+
+
+def _failure_shown(system: str, code: str) -> dict:
+    """The {"failure": {...}} entry with ``code`` in a re_plan system prompt."""
+    import re
+
+    m = re.search(r'\{\s*"code":\s*"' + re.escape(code) + r'"[^{}]*\}', system)
+    assert m, f"{code} not shown to re_plan"
+    return json.loads(m.group(0))
+
+
+async def test_by_reference_ledger_failure_in_a_raw_answerer_reaches_re_plan_as_lane_007(lane):
+    _break_extract_ledger_writes(lane)
+    stub, result = await _run(lane, "by_reference", three_tier_matrix(),
+                              plan=PLAN_RAW_ANSWERER, answer_for=_cloud_extract)
+    replan = stub.of_kind("re_plan")
+    assert replan, "no re_plan request"
+    system = replan[0].system
+    shown = _failure_shown(system, "BRT-LANE-007")
+    assert shown["doc"].startswith("doc_001")
+    assert shown["message"].startswith("BRT-LANE-007: the ledger row")
+    assert len(shown["message"]) <= 200
+    assert "BRT-ORC-004" not in system
+
+
+async def test_raw_local_ledger_failure_in_a_raw_answerer_stays_code_and_doc(lane):
+    _break_extract_ledger_writes(lane)
+    stub, result = await _run(lane, "raw_local", lane_matrix(), plan=PLAN_RAW_ANSWERER)
+    system = stub.of_kind("re_plan")[0].system
+    shown = _failure_shown(system, "BRT-LANE-007")
+    assert set(shown) == {"code", "doc"} and shown["doc"].startswith("doc_001")
+    assert "could not be written" not in system
+
+
+async def test_by_reference_runtime_error_in_a_raw_answerer_keeps_its_code_and_message(lane):
+    from src.agents import executor
+
+    real = executor._execute_answerer
+    text = "BRT-ANS-003: could not build InboundEnvelope from model response: " + "w" * 300
+
+    async def boom(task, db_path):
+        if EXTRACT in (task.instruction or ""):
+            raise ValueError(text)
+        return await real(task, db_path)
+
+    lane["mp"].setattr(executor, "_execute_answerer", boom)
+    stub, result = await _run(lane, "by_reference", three_tier_matrix(),
+                              plan=PLAN_RAW_ANSWERER, answer_for=_cloud_extract)
+    system = stub.of_kind("re_plan")[0].system
+    shown = _failure_shown(system, "BRT-ANS-003")
+    assert shown["message"] == text[:200]
+    assert shown["doc"].startswith("doc_001")
+    assert "BRT-ORC-004" not in system
+
+
+async def test_by_reference_ledger_failure_in_raw_items_reaches_re_plan_as_lane_007(lane):
+    _break_extract_ledger_writes(lane)
+    stub, result = await _run(lane, "by_reference", three_tier_matrix(),
+                              plan=PLAN_RAW_ITEMS, answer_for=_cloud_extract)
+    system = stub.of_kind("re_plan")[0].system
+    shown = _failure_shown(system, "BRT-LANE-007")
+    assert shown["doc"].startswith("doc_00")
+    assert shown["message"].startswith("BRT-LANE-007: the ledger row")
+    assert "BRT-APE-002" not in system
+
+
+async def test_by_reference_executor_raises_code_doc_and_message(lane):
+    """The executor itself (not only the engine) hands the shape upward."""
+    from src.agents.executor import execute
+    from src.lane.context import lane_scope, prepare_lane
+    from src.lane.errors import RawStepError
+
+    _break_extract_ledger_writes(lane)
+    lane["mp"].setenv("BORG_LANE_MODE", "by_reference")
+    lane["mp"].setattr(engine, "_shared_matrix", three_tier_matrix())
+    StubModels(plan_nodes=[], answer_for=_cloud_extract).install(lane["mp"])
+    from tests.e2e.test_privacy_lane import _raw_task
+
+    ctx = await prepare_lane({"folder": "."}, lane["db"])
+    task = await _raw_task(lane, "openrouter/stub/top", "https://openrouter.ai/api")
+    with lane_scope(ctx):
+        with pytest.raises(RawStepError) as info:
+            await execute(task, db_path=lane["db"])
+    assert info.value.failure == {
+        "code": "BRT-LANE-007", "doc": "doc_001",
+        "message": info.value.failure["message"],
+    }
+    assert info.value.failure["message"].startswith("BRT-LANE-007: the ledger row")
+
+
+# -- round-2 review (5): ledger locks and the write budget -------------------------
+
+def _ledger_row(request_id: str) -> dict:
+    return {
+        "request_id": request_id, "run_id": None, "envelope_id": None, "attempt": 1,
+        "purpose": "test", "destination": None, "url": "http://x", "left_machine": 0,
+        "body": "{}",
+    }
+
+
+def test_ledger_locks_do_not_keep_event_loops_alive(tmp_path):
+    import asyncio
+    import gc
+    import weakref
+
+    from src.db.schema import create_all
+    from src.lane import outbound
+
+    db = str(tmp_path / "locks.db")
+    asyncio.run(create_all(db))
+    loops: list = []
+
+    async def two_writers(i: int) -> None:
+        loops.append(weakref.ref(asyncio.get_running_loop()))
+        await asyncio.gather(*(outbound._insert_row(db, _ledger_row(f"r{i}-{k}"))
+                               for k in range(2)))
+
+    for i in range(50):
+        asyncio.run(two_writers(i))
+    gc.collect()
+    alive = [r for r in loops if r() is not None]
+    assert alive == [], f"{len(alive)} closed event loops still referenced"
+
+
+async def test_one_ledger_write_fails_closed_within_its_budget(lane):
+    import asyncio
+    import sqlite3
+    import time
+
+    from src.lane import outbound
+    from src.lane.context import lane_scope, prepare_lane
+    from src.lane.errors import LaneError
+
+    lane["mp"].setattr(outbound, "_WRITE_BUDGET_SECONDS", 1.0)
+    lane["mp"].setattr(outbound, "_TRY_TIMEOUT_SECONDS", 0.3)
+    lane["mp"].setenv("BORG_LANE_MODE", "raw_local")
+    ctx = await prepare_lane(None, lane["db"])
+    holder = sqlite3.connect(lane["db"], isolation_level=None)
+    holder.execute("BEGIN IMMEDIATE")   # another connection holds the write lock
+    try:
+        t0 = time.monotonic()
+        with lane_scope(ctx):
+            with pytest.raises(LaneError) as info:
+                await asyncio.wait_for(outbound.record_start(
+                    "http://127.0.0.1:1/v1", {}, left_machine=False, purpose="test",
+                    destination=None,
+                ), timeout=10)
+        elapsed = time.monotonic() - t0
+    finally:
+        holder.rollback()
+        holder.close()
+    assert info.value.code == "BRT-LANE-007"
+    assert elapsed <= 1.0 + 0.5, elapsed
+    assert outbound._WRITE_BUDGET_SECONDS == 1.0
+
+
+def test_the_ledger_write_budget_is_30_seconds_and_every_try_fits():
+    from src.lane import outbound
+
+    assert outbound._WRITE_BUDGET_SECONDS == 30.0
+    backoff = sum(outbound._RETRY_BASE_SECONDS * 2 ** i for i in range(outbound._RETRY_TRIES - 1))
+    assert outbound._RETRY_TRIES * outbound._TRY_TIMEOUT_SECONDS + backoff <= 30.0

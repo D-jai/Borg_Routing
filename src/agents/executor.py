@@ -49,6 +49,7 @@ from src.envelopes.schema import InboundEnvelope, WrappedTask
 from src.envelopes.validator import validate_inbound
 from src.lane.context import (
     current_lane, failed_envelope, failure_of, guard_envelope, mark_model_reason, raw_failure_code,
+    raw_step_error,
 )
 from src.lane.errors import LaneError
 from src.lane.outbound import call_scope, send_outbound
@@ -657,6 +658,8 @@ async def _execute_raw_answerer(task: WrappedTask, db_path: str, lane) -> Inboun
     Raises:
         LaneError: BRT-LANE-003 from the call guard (the message holds no
             document text), or the failure's own code with ids only.
+        RawStepError: ``by_reference``: the failure's own code, the
+            document ids and the first 200 characters of its message.
     """
     block = lane.text_block(list(task.documents))
     loaded = (
@@ -665,12 +668,14 @@ async def _execute_raw_answerer(task: WrappedTask, db_path: str, lane) -> Inboun
     )
     try:
         env = await _execute_answerer(loaded, db_path)
-    except LaneError:
-        raise
     except Exception as exc:
         if not lane.keeps_raw_local:
-            # by_reference: no privacy promise; the failure goes up by the
-            # non-raw rules (code + message), as for any other step.
+            # by_reference: no privacy promise. A failure raised while the
+            # step ran (a LaneError such as BRT-LANE-007, or a runtime error)
+            # goes up as its own code + the document ids + the first 200
+            # characters, never as BRT-ORC-004 / BRT-APE-002.
+            raise raw_step_error(exc, list(task.documents), "BRT-ANS-008") from exc
+        if isinstance(exc, LaneError):
             raise
         code = raw_failure_code(exc, "BRT-ANS-008")
         failure = failure_of(code, list(task.documents))

@@ -17,8 +17,9 @@ before. With the lane on, before anything is sent:
    write blocks the request (BRT-LANE-007). After the POST the row gets its
    status, HTTP status and error. A retry is its own row (``attempt``).
    Ledger writes for one database go through one serialised writer, each
-   connection waits for the lock (busy timeout), and a "database is locked"
-   is retried with backoff (5 tries) before the send is blocked.
+   connection waits for the lock (busy timeout, 5 s per try), and a
+   "database is locked" is retried with backoff (5 tries); one write has a
+   total budget of 30 s, then the send is blocked.
    Secret fields (``api_key``) are redacted in the stored copy only.
 4. Local calls are built with ``trust_env=False``, so a proxy variable cannot
    carry them off the machine.
@@ -43,7 +44,7 @@ import contextvars
 import json
 import os
 import sqlite3
-import weakref
+import time
 from contextlib import contextmanager
 from typing import Iterator, Optional
 from uuid import UUID, uuid4
@@ -108,16 +109,38 @@ def _redacted(body: object) -> object:
 
 # One serialised writer per database: concurrent sends (an apply_to_each of
 # many parts) queue here instead of racing for SQLite's write lock. The lock
-# is per event loop (an asyncio.Lock belongs to one loop) and per path.
-_LOCKS: "weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, dict[str, asyncio.Lock]]" = (
-    weakref.WeakKeyDictionary()
-)
+# is per event loop (an asyncio.Lock belongs to one loop) and per path. The
+# locks are kept on the loop object itself, never in a module-level map: a
+# used asyncio.Lock refers to its loop, so a map keyed by loop would keep
+# every finished loop alive.
+_LOOP_LOCKS_ATTR = "_borg_ledger_locks"
 _RETRY_TRIES = 5            # attempts on "database is locked" before giving up
 _RETRY_BASE_SECONDS = 0.05  # backoff: 0.05, 0.1, 0.2, 0.4 s between attempts
+# One ledger write (insert or finish) has this total budget across the lock
+# wait, every try and the backoff; then it fails (the send is blocked,
+# BRT-LANE-007). Each try waits for SQLite's lock at most _TRY_TIMEOUT_SECONDS
+# (its busy timeout), so 5 tries plus backoff (about 25.8 s) fit the budget.
+_WRITE_BUDGET_SECONDS = 30.0
+_TRY_TIMEOUT_SECONDS = 5.0
+
+_try_timeout: contextvars.ContextVar[Optional[float]] = contextvars.ContextVar(
+    "borg_ledger_try_timeout", default=None
+)
+
+
+def loop_store(name: str) -> dict:
+    """A dict kept as attribute ``name`` on the running event loop: per-loop
+    state that ends with the loop (no module-level reference to the loop)."""
+    loop = asyncio.get_running_loop()
+    store = getattr(loop, name, None)
+    if store is None:
+        store = {}
+        setattr(loop, name, store)
+    return store
 
 
 def _writer_lock(db_path: str) -> asyncio.Lock:
-    per_loop = _LOCKS.setdefault(asyncio.get_running_loop(), {})
+    per_loop = loop_store(_LOOP_LOCKS_ATTR)
     key = os.path.normcase(os.path.abspath(db_path))
     lock = per_loop.get(key)
     if lock is None:
@@ -131,23 +154,52 @@ def _is_locked(exc: BaseException) -> bool:
     )
 
 
+def _budget_spent() -> sqlite3.OperationalError:
+    return sqlite3.OperationalError(
+        f"database is locked: ledger write budget ({_WRITE_BUDGET_SECONDS:g} s) spent"
+    )
+
+
 async def _serialised(db_path: str, write) -> None:
     """Run ``write()`` under the database's writer lock, retrying a
-    "database is locked" up to ``_RETRY_TRIES`` times with backoff. The last
-    failure is raised."""
-    async with _writer_lock(db_path):
+    "database is locked" up to ``_RETRY_TRIES`` times with backoff, all
+    within ``_WRITE_BUDGET_SECONDS``. The last failure is raised."""
+    deadline = time.monotonic() + _WRITE_BUDGET_SECONDS
+    lock = _writer_lock(db_path)
+    try:
+        await asyncio.wait_for(lock.acquire(), timeout=_WRITE_BUDGET_SECONDS)
+    except asyncio.TimeoutError:
+        raise _budget_spent() from None
+    try:
         for attempt in range(1, _RETRY_TRIES + 1):
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise _budget_spent()
+            token = _try_timeout.set(min(_TRY_TIMEOUT_SECONDS, remaining))
             try:
                 await write()
                 return
             except Exception as exc:
                 if not _is_locked(exc) or attempt == _RETRY_TRIES:
                     raise
-                await asyncio.sleep(_RETRY_BASE_SECONDS * (2 ** (attempt - 1)))
+            finally:
+                _try_timeout.reset(token)
+            pause = _RETRY_BASE_SECONDS * (2 ** (attempt - 1))
+            if time.monotonic() + pause >= deadline:
+                raise _budget_spent()
+            await asyncio.sleep(pause)
+    finally:
+        lock.release()
+
+
+def _ledger_connect(db_path: str):
+    """A connection whose busy timeout is this try's share of the budget."""
+    seconds = _try_timeout.get()
+    return connect(db_path, timeout_s=seconds if seconds is not None else _TRY_TIMEOUT_SECONDS)
 
 
 async def _insert_once(db_path: str, row: dict) -> None:
-    async with connect(db_path) as db:
+    async with _ledger_connect(db_path) as db:
         await db.execute(
             """INSERT INTO outbound_requests(
                 request_id, run_id, envelope_id, attempt, purpose, destination,
@@ -171,7 +223,7 @@ async def _finish_once(
     db_path: str, request_id: str, status: str,
     http_status: Optional[int], error: Optional[str],
 ) -> None:
-    async with connect(db_path) as db:
+    async with _ledger_connect(db_path) as db:
         await db.execute(
             """UPDATE outbound_requests SET status=?, http_status=?, error=?,
                finished_at=CURRENT_TIMESTAMP WHERE request_id=?""",
