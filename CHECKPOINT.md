@@ -98,6 +98,8 @@ Standing permissions: local commits on `showcase`; pushes of `showcase` to the p
 
 ## Questions for Deej after the build (not blocking)
 
+- **Cold-start defaults after the 17-Nov rescore.** The research route now scores Kimi K2 Thinking at 8.7 reasoning, below the 9.0 floor the shipped defaults must meet (`tests/registry/test_cold_start_defaults.py`). The shipped matrix keeps the April scores for now; the rescored pool lives in `bench/pool_matrix.yaml`. Options: keep as is, or pick a new second default (e.g. Gemini 3.1 Pro 9.7 or Grok 4.20 9.4 by the new scores) and update the test.
+
 - **Local model on this machine (17-Nov-2026).** Ollama in Docker (`borg_ollama`) has `qwen3:4b` but could not load it inside Ollama's 5-minute start limit, twice (likely the Docker VM short of CPU while tests ran). Per the ruling, the proof's local arms are marked "not run". This weakens the on-premise story for the showcase. Options: retry with `OLLAMA_LOAD_TIMEOUT` raised and the machine idle; a smaller model; or run the local arms later on the DGX Spark or the VPS. The container is left running; `docker rm -f borg_ollama` removes it (the `borg_ollama` volume keeps the model).
 
 - **Spend control.** Anyone who can reach the app can start paid runs (`/v1/task`, chat, MCP, "Run again"); there is no notion of who owns a run, so anyone can also read every run. The admin lock covers settings and sensitive logs only. Options: leave it (single-operator install), lock all paid entry points behind the token, or a daily spend cap. Raised by the 4.4 reviewer, 16-Nov-2026.
