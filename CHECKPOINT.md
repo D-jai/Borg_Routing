@@ -11,18 +11,19 @@ Build under way, run by the lead session (`borg-route-f1`, Opus 5.5) since 02:20
 | 0.1, 0.2, 0.3 | Done and reviewed (0.1 fixed in `3c62112`) |
 | 1.1, 1.2, 1.3, 1.4 | Done and reviewed (fixes `917cba3`, `30a3071`, `e1861e2`) |
 | 1.5, 1.6, 1.7 (+R14), 1.8, 1.9 | Done and reviewed (see build log) |
-| 1.10 Check 1 | **Blocked** (two failed attempts, US$0.07 spent). See "Blocked" and "Needs planner" below |
+| 1.10 Check 1 | **Passed on attempt 3** (after planner rulings 1-3 and ruling 9). Skill placeholder bug found in the trace; fix in progress |
+| 1.11 failure reasons to re_plan; ruling 1a inline items and refs | Done and reviewed |
+| 4.4 Admin lock | Done and reviewed |
 | 2.1 on-premise lane design | Done: attacked by a fresh reviewer (24 findings), revised `8dee12c`, `13a1799` |
 | 2.2, 2.3 lane build and privacy test | **Done** after two review rounds (Check 2). Full suite **919 passed** at `99bba7d` |
 | 4.1 shared interface assets | Done and reviewed |
 | 5.7 MCP | Done and reviewed |
 | 4.3 Admin pages | Done after two review rounds |
-| 4.4 Admin lock | In progress |
 | Everything else | Open |
 
 If this session stopped abruptly: `git log` and `git status` show what landed; any uncommitted changes in `src/` or `ui/` belong to the in-progress builders above: read the diff, finish or stash it, record which in the build log.
 
-**Next action for the lead:** 4.4 (admin lock; also wire `/logs/entities` and `/logs/export` into `lane_admin_allowed`), then 5.2 parts that need no replay, 5.3. Work that needs proof results (3.x, 4.2 receipt numbers, 4.5 replay, 5.1 README numbers, 6.1 deck numbers) waits for Check 1, which waits for the planner's answer. A 5-hour usage limit stopped agents at about 07:00 on 16-Nov-2026; it reset at 07:10.
+**Next action for the lead:** skill placeholder fix (in progress), then the Phase 1 phase-end full run and push, then 2.4 (by_reference documents), then 3.1 (Ollama in Docker, pool), 3.2, 3.3. Waiting on Deej via the planner: one protected-line change to the apply_to_each shape example (`inputs_ref` comment). Work that needs proof results (3.x, 4.2 receipt numbers, 4.5 replay, 5.1 README numbers, 6.1 deck numbers) waits for Check 1, which waits for the planner's answer. A 5-hour usage limit stopped agents at about 07:00 on 16-Nov-2026; it reset at 07:10.
 
 ## Start the build (Deej)
 
@@ -83,7 +84,9 @@ Standing permissions: local commits on `showcase`; pushes of `showcase` to the p
 
 ## Blocked
 
-- **1.10 Check 1 (16-Nov-2026).** Both live runs (temp DBs `borg_smoke_vksjf2ab`, `borg_smoke_uegi1bfr` under `%TEMP%`) failed the same way: the planner points an `apply_to_each` (attempt 1: `inputs_ref: "reviews"`) or a skill step (attempt 2: `extract_fields` with `items_ref: "reviews_list"`) at a list that exists only inside the operator's message. Nothing resolves it, the step runs no model, its dependants never run, and re_plan composes the whole answer on the planner model. Routing per step works (route decisions chose `gpt-5.4-nano` for the extraction step); the steps just never get their items. **When resuming:** `scripts/smoke_live.py` must check its cheap models (`deepseek-v3.2`, `gpt-5.4-nano`, both live on OpenRouter) in a temporary copy of the matrix; the shipped `data/capability_matrix.yaml` keeps only the two cold-start defaults checked (`tests/registry/test_cold_start_defaults.py`).
+(none open; the entry below is resolved: Check 1 passed on attempt 3, 16-Nov-2026)
+
+- **Resolved: 1.10 Check 1 (16-Nov-2026).** Both live runs (temp DBs `borg_smoke_vksjf2ab`, `borg_smoke_uegi1bfr` under `%TEMP%`) failed the same way: the planner points an `apply_to_each` (attempt 1: `inputs_ref: "reviews"`) or a skill step (attempt 2: `extract_fields` with `items_ref: "reviews_list"`) at a list that exists only inside the operator's message. Nothing resolves it, the step runs no model, its dependants never run, and re_plan composes the whole answer on the planner model. Routing per step works (route decisions chose `gpt-5.4-nano` for the extraction step); the steps just never get their items. **When resuming:** `scripts/smoke_live.py` must check its cheap models (`deepseek-v3.2`, `gpt-5.4-nano`, both live on OpenRouter) in a temporary copy of the matrix; the shipped `data/capability_matrix.yaml` keeps only the two cold-start defaults checked (`tests/registry/test_cold_start_defaults.py`).
 
 ## Needs Deej
 
