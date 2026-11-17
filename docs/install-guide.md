@@ -34,12 +34,7 @@ specifically asks for NER. (The `spacy` library itself is still a
 dependency because tests import it, but the language model download
 is optional.)
 
-**Test-count math (BRT-QA-01):** on a fresh install without
-`en_core_web_sm`, the three NER worker tests skip automatically
-(TC-S5-010 / 011 / 012). You should see `293 passed, 3 skipped,
-0 failed` (i.e. 296 tests collected, 3 skipped). Installing the
-language model flips those three from skip to pass, giving the
-full `296 passed` result.
+**Test counts:** on a fresh install without `en_core_web_sm`, the three NER worker tests skip automatically (TC-S5-010 / 011 / 012); installing the language model turns those skips into passes. Run `python -m pytest` and expect no failures; the total grows with the project, so do not rely on a fixed number.
 
 ### Success criteria
 The install is done when all of these pass:
@@ -108,7 +103,7 @@ python -m uvicorn main:app --reload
 3. **Click Discover Models.** Expect 7 LM Studio rows (if LM Studio is running) + 12 curated OpenRouter rows.
 4. **Click Get Model Info.** Scorer runs for 30-90 seconds; fills relative 0-10 task scores per row. Requires `OPENROUTER_API_KEY`.
 5. **Tick the checkbox** on any row you want in today's routing pool (typical: 3-6 total).
-6. **Kick a test run** from `http://localhost:8000/ui/` (it opens the Admin overview) — the orchestrator will route to one of the checked models.
+6. **Kick a test run** from `http://localhost:8000/ui/` (it opens the Ask page) — the orchestrator will route to one of the checked models.
 
 ## Production Deployment
 

@@ -1,6 +1,6 @@
 # User Guide — BORG_ROUTE
 > Audience: Non-technical end users
-> Updated with every feature — see Parallel Commit Law in CODING_STANDARD_CORE.md
+> Updated with every feature — see the commit law in CONTRIBUTING.md
 
 ---
 

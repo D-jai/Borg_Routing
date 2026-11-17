@@ -1,5 +1,5 @@
 """The planner is told where an apply_to_each step's items come from
-(Deej's ruling 9, 16-Nov-2026: the second approved additive edit to the
+(Planner ruling 9, 16-Nov-2026: the second approved additive edit to the
 planner prompt, for the list hand-over, work order 1.10 only).
 """
 import pytest

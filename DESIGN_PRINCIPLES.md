@@ -134,6 +134,6 @@ If any of these look necessary: stop, document why, and escalate before coding.
 ---
 
 ## Further Reading
-- `CODING_STANDARD_CORE.md` — commit + error-code + test conventions.
+- `CONTRIBUTING.md`: commit law and conventions.
 - `docs/user-guide.md` — operator-facing behaviour.
 - `docs/install-guide.md` — install + LLM-installer notes.
