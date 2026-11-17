@@ -56,6 +56,13 @@ def reasoning_model():
     return m
 
 
+@pytest.fixture(autouse=True)
+def _no_cap_override(monkeypatch):
+    """main.py loads .env (ANSWERER_MAX_TOKENS=6000) when other suites import it at collection; these tests
+    assume the engine default unless they set the value themselves."""
+    monkeypatch.delenv("ANSWERER_MAX_TOKENS", raising=False)
+
+
 def test_direct_caps_are_the_engines_answerer_caps():
     from src.agents.executor import _answerer_caps
 
