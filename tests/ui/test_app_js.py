@@ -413,7 +413,8 @@ def test_markdown_turns_an_external_link_into_plain_text(tmp_path):
         STANDIN + "return [Borg.markdown('[site](https://evil.example/a) [back](#top) [x](javascript:alert(1)) [ok](/ui/runs.html)')];",
     )
     html = out[0]
-    assert "evil.example" not in html and "javascript:" not in html
+    assert 'href="https://evil.example' not in html and "javascript:" not in html
+    assert "site (https://evil.example/a)" in html      # not clickable, address still visible
     assert 'href="#top"' in html and 'href="/ui/runs.html"' in html
 
 
@@ -435,3 +436,19 @@ def test_the_hook_drops_srcset_and_poster_that_leave_the_origin(tmp_path):
     )
     assert out[0] == {}
     assert out[1] == {"srcset": "/a.png 1x, /b.png 2x"}
+
+
+def test_an_external_markdown_link_keeps_its_address_visible_as_text(tmp_path):
+    out = run_js(
+        tmp_path,
+        STANDIN + "return [Borg.markdown('see [source](https://example.com/x?a=1&b=2) and [back](#top) and [ok](/ui/runs.html)')];",
+    )
+    html = out[0]
+    assert "source (https://example.com/x?a=1&amp;b=2)" in html
+    assert 'href="https://example.com' not in html
+    assert 'href="#top"' in html and 'href="/ui/runs.html"' in html
+
+
+def test_an_external_image_is_still_dropped_and_not_turned_into_text(tmp_path):
+    out = run_js(tmp_path, STANDIN + "return [Borg.markdown('![alt](https://x.example/p.png)')];")
+    assert "x.example" not in out[0] and "src=" not in out[0]

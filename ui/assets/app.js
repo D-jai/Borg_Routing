@@ -276,6 +276,16 @@
       if (!okLoad(attr, v, tag)) node.removeAttribute(attr);
     });
   }
+  /* An external link is not clickable: it becomes its own text followed by its address in
+   * brackets, so the reader still sees where it points. Runs on marked's output (its href is
+   * already HTML-escaped, so it is safe as text). Same-origin and #anchor links stay links. */
+  function externalLinksToText(html) {
+    return String(html).replace(/<a\b[^>]*?\bhref="([^"]*)"[^>]*>([\s\S]*?)<\/a>/gi, function (m, href, inner) {
+      var raw = href.replace(/&amp;/g, '&');
+      if (!/^(https?:)?\/\//i.test(raw) || sameOrigin(raw)) return m;   // other schemes: the hook drops the href
+      return inner + ' (' + escapeHtml(raw) + ')';
+    });
+  }
   var hooked = false;
   function markdown(text) {
     var src = text === null || text === undefined ? '' : String(text);
@@ -285,7 +295,8 @@
         hooked = true;
       }
       var parse = window.marked.parse || window.marked;
-      return window.DOMPurify.sanitize(parse.call(window.marked, src, { gfm: true, breaks: true }));
+      var out = parse.call(window.marked, src, { gfm: true, breaks: true });
+      return window.DOMPurify.sanitize(externalLinksToText(out));
     }
     // Libraries not loaded: show plain escaped text rather than unsanitised HTML.
     return '<p>' + escapeHtml(src).replace(/\n/g, '<br>') + '</p>';

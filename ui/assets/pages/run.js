@@ -12,14 +12,6 @@ Borg.ready(function () {
     if (l === undefined) return h('span', {}, W.shortModel(m) || '-');
     return h('span', {}, [W.shortModel(m) + ' ', h('span', { class: 'chip' }, [W.whereDot(l), l ? 'this machine' : 'cloud'])]);
   }
-  // Whether this run used the lane: what the run recorded when it started, never today's
-  // setting. A run that recorded nothing is judged by its own ledger and documents.
-  function laneOn() {
-    var m = W.runLaneMode(data);
-    if (m) return m !== 'off';
-    return (data && data.outbound && data.outbound.length > 0) || !!(data && data.run && data.run.documents);
-  }
-
   // ---------- header ----------
   function renderHeader() {
     var run = data.run || {};
@@ -234,10 +226,12 @@ Borg.ready(function () {
     answerer: 'A step’s request', bypass: 'A direct question', relay: 'A direct question', tool: 'A tool call (such as a web search)' };
   function renderLeft() {
     var card = A.$('left-card');
-    card.classList.toggle('hidden', !laneOn());
-    if (!laneOn()) return;
+    var lc = W.leftCard(data);
+    card.classList.toggle('hidden', !lc.show);
+    if (!lc.show) return;
     var box = A.clear(A.$('left-list'));
     var rows = data.outbound || [];
+    if (rows.length && lc.note) box.appendChild(h('p', { class: 'small muted', style: 'margin:0 0 8px' }, lc.note));
     if (!rows.length) { box.appendChild(h('p', { class: 'small muted', style: 'margin:0' }, 'Nothing left this machine for this run.')); return; }
     var hasBodies = rows.some(function (o) { return typeof o.body === 'string'; });
     box.appendChild(A.table(['To', 'What was sent', 'Size', 'Status'], rows.map(function (o) {

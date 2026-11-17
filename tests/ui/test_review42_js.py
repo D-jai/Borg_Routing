@@ -310,3 +310,21 @@ def test_is_local_model_uses_the_servers_flag_only(tmp_path):
       A.isLocalModel({source: 'lmstudio', model_id: 'z'}),                            // no flag: not local
     ];""")
     assert out == [False, False, True, False]
+
+
+# ---------- round 2: the "What left this machine" card ----------
+
+def test_the_left_card_shows_whenever_the_ledger_has_rows(tmp_path):
+    def card(mode, rows, docs=None):
+        data = run_body([env("n1")])
+        data["run"]["lane_mode"] = mode
+        data["run"]["documents"] = docs
+        data["outbound"] = [{"envelope_id": "e1"}] * rows
+        return js(tmp_path, f"return W.leftCard({json.dumps(data)});")
+    assert card("off", 1)["show"] is True and "off" in card("off", 1)["note"]
+    assert card(None, 2)["show"] is True
+    assert "raw_local" in card("raw_local", 1)["note"]
+    assert card("off", 0)["show"] is False
+    assert card("raw_local", 0)["show"] is True        # the lane ran: an empty list is a real answer
+    assert card(None, 0)["show"] is False
+    assert card(None, 0, docs="[1]")["show"] is True

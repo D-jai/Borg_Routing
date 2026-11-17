@@ -329,6 +329,18 @@
     return m ? LANE_WORDS[m] : 'Lane mode not recorded for this run';
   }
 
+  /* The "What left this machine" card: shown whenever the ledger has rows, whatever mode the run
+   * recorded; otherwise when the run used the lane (its recorded mode, else its documents). The
+   * note follows the recorded mode. */
+  function leftCard(data) {
+    var rows = data && data.outbound ? data.outbound.length : 0;
+    var m = runLaneMode(data);
+    var used = m ? m !== 'off' : !!(data && data.run && data.run.documents);
+    var note = m === 'off' ? 'The lane was off for this run; these are the requests that were recorded.'
+      : m ? 'Lane ' + m + ': every request below left this machine.' : '';
+    return { show: rows > 0 || used, note: rows > 0 ? note : '' };
+  }
+
   /* The four tiles of the Run header as plain text: [{k, v, sub}]. No baseline figure and no
    * flagship-comparison wording (ruling 18): the cost tile says what the run cost, nothing else. */
   function headerTiles(data) {
@@ -578,7 +590,7 @@
 
   window.BorgWork = {
     LANE_MODES: LANE_MODES, laneTag: laneTag, historyForMode: historyForMode, laneLine: laneLine,
-    readLaneMode: readLaneMode, prepareSend: prepareSend, runLaneMode: runLaneMode, runLaneWords: runLaneWords,
+    readLaneMode: readLaneMode, prepareSend: prepareSend, runLaneMode: runLaneMode, runLaneWords: runLaneWords, leftCard: leftCard,
     headerTiles: headerTiles, receiptFrom: receiptFrom, receiptStats: receiptStats, leftChipText: leftChipText,
     stripBaseline: stripBaseline, whyRows: whyRows, makeRefresher: makeRefresher, makeLiveStream: makeLiveStream,
     parseJSON: parseJSON, decisionOf: decisionOf, shortModel: shortModel, shortText: shortText,
