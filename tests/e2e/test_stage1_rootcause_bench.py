@@ -842,3 +842,39 @@ async def test_answer_kind_shortcut(env):
     assert result["response"] == "Hello back."
     assert not stub.of_kind("plan")
     assert await _answer_kind(db_path, result["run_id"]) == "shortcut"
+
+
+@pytest.mark.parametrize("error", [httpx.ConnectError("compose unreachable"),
+                                   httpx.ReadTimeout("compose slow")])
+@pytest.mark.asyncio
+async def test_first_compose_call_raising_salvages_finished_work(env, error):
+    """TC-ORC-030-E (overrule): the first compose call raises; the finished
+    steps' results are salvaged (BRT-ORC-030, "salvaged"), the run completes."""
+    db_path, mp = env
+    stub = ComposeSeqStub(plan_nodes=[_per_item()], compose_seq=[error],
+                          answer_for=lambda r: {"sentiment": "positive"}).install(mp)
+    result = await run_pipeline("Rate each review.", db_path=db_path)
+    await drain_log_writes()
+    assert result["status"] == "completed", result.get("error")
+    assert result["response"].startswith(engine.SALVAGE_NOTE)
+    assert result["response"].count('"sentiment": "positive"') == 3
+    assert len(stub.of_kind("compose")) == 1
+    assert "BRT-ORC-030" in await _codes(db_path, result["run_id"])
+    assert await _answer_kind(db_path, result["run_id"]) == "salvaged"
+
+
+@pytest.mark.asyncio
+async def test_first_compose_call_raising_with_nothing_finished_fails(env):
+    """TC-ORC-030-F (failure direction): no step finished, the first compose
+    call raises: the run fails as before, no answer_kind."""
+    db_path, mp = env
+    ComposeSeqStub(
+        plan_nodes=[_ans("Doomed KKK.", id="a")],
+        compose_seq=[httpx.ConnectError("compose down")],
+        error_for=lambda r: httpx.ConnectError("down") if r.kind == "answerer" else None,
+    ).install(mp)
+    result = await run_pipeline("Do it.", db_path=db_path)
+    await drain_log_writes()
+    assert result["status"] == "failed"
+    assert "BRT-ORC-001" in str(result.get("error"))
+    assert await _answer_kind(db_path, result["run_id"]) is None

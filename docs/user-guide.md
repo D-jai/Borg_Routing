@@ -267,7 +267,9 @@ The planner, re-plan and final write-up (compose) share one prompt. The engine's
 2. **No answer in the reply:** the write-up is asked for once more (BRT-ORC-029).
 3. **Still no answer:** you get the results of the steps that finished, under a plain note saying the final write-up failed: each step's answer, or for a per-item step each item's result and how many items failed. Finished work is never thrown away. The trace shows BRT-ORC-030 as a warning, and `GET /runs/{id}` shows `"answer_kind": "salvaged"` on the run (a written-up answer shows `"composed"`). With the on-premise lane in `raw_local` or `all_local`, a step that read your documents appears only if its output passed the output check, and only document ids (never document text) are shown for its items.
 
-If no step finished either, the run fails with BRT-ORC-009 as before.
+If the write-up call itself fails (a timeout, a connection error, a reply that is not JSON), step 3 happens straight away: the finished steps' results come back with the note, BRT-ORC-030 and `"answer_kind": "salvaged"`.
+
+If no step finished either, the run fails with BRT-ORC-009 (or the failed call's own error) as before.
 
 Every completed run records how its answer was made in `answer_kind` (`GET /runs/{id}`): `composed` (the final write-up), `salvaged` (the finished steps' results with a note, BRT-ORC-030), `direct` (the planner answered without steps), `declined` (the write-up declined with `action: fail` and its reason is the answer, or nothing at all came back with no steps to show) or `shortcut` (a short conversational message answered by the Rule Zero shortcut).
 

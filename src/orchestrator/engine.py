@@ -3032,12 +3032,42 @@ async def _orchestrate_run(
         )
 
     # --- COMPOSE MODE ---
-    compose_result = await _invoke_orchestrator_model(
-        mode="compose",
-        stage_results=results,
-        child_scratch_digest=child_digests,
-        **base_kwargs,
-    )
+    try:
+        compose_result = await _invoke_orchestrator_model(
+            mode="compose",
+            stage_results=results,
+            child_scratch_digest=child_digests,
+            **base_kwargs,
+        )
+    except LaneError:
+        raise
+    except ValueError as exc:
+        # The compose call itself failed (BRT-ORC-001/002, a transport
+        # error): finished work is salvaged, never thrown away (ruling 20;
+        # the lead's overrule in the R1-R4 review). Nothing finished: the
+        # run fails with the call's error, as before.
+        salvaged = _salvage_finished_results(results, current_lane())
+        if not salvaged:
+            raise
+        try:
+            await write_event(
+                "error",
+                run_id=run_id,
+                decision={
+                    "code": "BRT-ORC-030",
+                    "severity": "warning",
+                    "msg": "the compose call failed; the answer is the finished "
+                           "steps' results with a note",
+                    "err": str(exc)[:300],
+                    "steps": [k for k, v in results.items()
+                              if getattr(v, "status", None) == "resolved"],
+                },
+                db_path=db_path,
+            )
+        except Exception:
+            pass
+        await _mark_answer_kind(run_id, "salvaged", db_path)
+        return salvaged
 
     async def _reask() -> dict:
         return await _invoke_orchestrator_model(
