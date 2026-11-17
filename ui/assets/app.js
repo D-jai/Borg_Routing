@@ -251,9 +251,39 @@
       return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
     });
   }
+  /* A model's answer must never make the page load something from another site (a
+   * tracking pixel, an exfiltrating image). Run by DOMPurify on every sanitised element:
+   * src, srcset and poster survive only when they point at this origin (images may also
+   * be data:image/); a link to another site loses its href and stays as plain text. The
+   * Content-Security-Policy header (main.py) refuses the same loads a second time. */
+  function sameOrigin(url) {
+    try { return new URL(String(url).trim(), location.href).origin === location.origin; } catch (_) { return false; }
+  }
+  function okLoad(attr, value, tag) {
+    var v = String(value).trim();
+    if (attr === 'srcset') {
+      return v.split(',').every(function (part) { var u = part.trim().split(/\s+/)[0]; return !u || okLoad('src', u, tag); });
+    }
+    if (/^data:image\/(png|jpe?g|gif|webp|svg\+xml);/i.test(v) && attr !== 'href') return true;
+    return sameOrigin(v);
+  }
+  function dropExternalLoads(node) {
+    if (!node || !node.tagName || !node.getAttribute) return;
+    var tag = String(node.tagName).toLowerCase();
+    ['src', 'srcset', 'poster', 'href', 'xlink:href', 'action'].forEach(function (attr) {
+      var v = node.getAttribute(attr);
+      if (v === null || v === undefined) return;
+      if (!okLoad(attr, v, tag)) node.removeAttribute(attr);
+    });
+  }
+  var hooked = false;
   function markdown(text) {
     var src = text === null || text === undefined ? '' : String(text);
     if (window.marked && window.DOMPurify && window.DOMPurify.isSupported !== false) {
+      if (!hooked && typeof window.DOMPurify.addHook === 'function') {
+        window.DOMPurify.addHook('afterSanitizeAttributes', dropExternalLoads);
+        hooked = true;
+      }
       var parse = window.marked.parse || window.marked;
       return window.DOMPurify.sanitize(parse.call(window.marked, src, { gfm: true, breaks: true }));
     }
@@ -335,7 +365,7 @@
   window.Borg = {
     api: api, download: download, notify: notify, clearNotices: clearNotices, ready: ready,
     money: money, duration: duration, parseWhen: parseWhen, dateTime: dateTime, timeOnly: timeOnly,
-    markdown: markdown, escapeHtml: escapeHtml, el: el,
+    markdown: markdown, escapeHtml: escapeHtml, el: el, dropExternalLoads: dropExternalLoads,
     getToken: getToken, setToken: setToken,
     storage: { get: safeGet, set: safeSet },
     nav: NAV

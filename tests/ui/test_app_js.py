@@ -360,3 +360,78 @@ def test_download_goes_through_api_with_token_retry_and_saves_a_blob(tmp_path):
     assert out["calls"] == [["/logs/export?limit=1000", None], ["/logs/export?limit=1000", "Bearer good"]]
     assert out["anchors"] == [["blob:x", "borg_route_logs.jsonl"]]
     assert out["size"] == 7 and out["type"] == "application/x-ndjson"
+
+
+# ---- markdown never loads from another site (4.2 review) ----
+# Node has no DOM, so DOMPurify itself cannot run here. These tests use the real marked and the
+# real app.js hook; a stand-in sanitiser feeds each <img>/<a> of marked's output through the
+# hook DOMPurify would run ("afterSanitizeAttributes") and writes the result back. The
+# Content-Security-Policy header (tests/api/test_csp.py) is the second line.
+
+STANDIN = r"""
+const {Borg, window} = H.load({vendor: ['marked.min.js']});
+const hooks = [];
+window.DOMPurify = {
+  isSupported: true,
+  addHook(name, fn) { hooks.push([name, fn]); },
+  sanitize(html) {
+    return html.replace(/<(img|a)\b([^>]*)>/g, (m, tag, rest) => {
+      const el = new H.FakeEl(tag);
+      rest.replace(/([\w:-]+)="([^"]*)"/g, (mm, k, v) => { el.setAttribute(k, v); return mm; });
+      hooks.filter(h => h[0] === 'afterSanitizeAttributes').forEach(h => h[1](el));
+      return '<' + tag + Object.keys(el.attrs).map(k => ' ' + k + '="' + el.attrs[k] + '"').join('') + '>';
+    });
+  },
+};
+"""
+
+
+def test_markdown_drops_an_external_image_src(tmp_path):
+    out = run_js(tmp_path, STANDIN + "return [Borg.markdown('![](https://x.example/p.png)'), hooks.length];")
+    html, hooks = out
+    assert "<img" in html and "https://x.example" not in html and "src=" not in html
+    assert hooks == 1
+
+
+def test_markdown_keeps_same_origin_and_data_images_and_registers_the_hook_once(tmp_path):
+    out = run_js(
+        tmp_path,
+        STANDIN + "Borg.markdown('a'); Borg.markdown('b');"
+        "return [Borg.markdown('![](/ui/assets/logo.svg) ![](data:image/png;base64,AAAA) "
+        "![](http://127.0.0.1:8000/x.png)'), hooks.length];",
+    )
+    html, hooks = out
+    assert 'src="/ui/assets/logo.svg"' in html
+    assert 'src="data:image/png;base64,AAAA"' in html
+    assert 'src="http://127.0.0.1:8000/x.png"' in html
+    assert hooks == 1
+
+
+def test_markdown_turns_an_external_link_into_plain_text(tmp_path):
+    out = run_js(
+        tmp_path,
+        STANDIN + "return [Borg.markdown('[site](https://evil.example/a) [back](#top) [x](javascript:alert(1)) [ok](/ui/runs.html)')];",
+    )
+    html = out[0]
+    assert "evil.example" not in html and "javascript:" not in html
+    assert 'href="#top"' in html and 'href="/ui/runs.html"' in html
+
+
+def test_the_hook_drops_srcset_and_poster_that_leave_the_origin(tmp_path):
+    out = run_js(
+        tmp_path,
+        """
+        const {Borg} = H.load();
+        const img = new H.FakeEl('img');
+        img.setAttribute('srcset', '/a.png 1x, https://x.example/b.png 2x');
+        img.setAttribute('poster', 'https://x.example/p.png');
+        img.setAttribute('src', 'data:text/html;base64,AAAA');
+        Borg.dropExternalLoads(img);
+        const ok = new H.FakeEl('img');
+        ok.setAttribute('srcset', '/a.png 1x, /b.png 2x');
+        Borg.dropExternalLoads(ok);
+        return [img.attrs, ok.attrs];
+        """,
+    )
+    assert out[0] == {}
+    assert out[1] == {"srcset": "/a.png 1x, /b.png 2x"}

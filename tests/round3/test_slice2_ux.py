@@ -31,12 +31,17 @@ from src.logging.writer import write_event
 # ============================================================
 
 ASK = Path("ui/ask.html")
+ASK_JS = Path("ui/assets/pages/ask.js")  # the page script lives beside the page (CSP: no inline script)
+
+
+def _ask_page() -> str:
+    return ASK.read_text(encoding="utf-8") + "\n" + ASK_JS.read_text(encoding="utf-8")
 
 
 def test_ask_html_renders_markdown_only_through_the_sanitiser():
     """TC-BUG-021 — vendored marked + DOMPurify, answers through Borg.markdown,
     user bubbles stay literal text."""
-    page = ASK.read_text(encoding="utf-8")
+    page = _ask_page()
     assert 'src="assets/vendor/marked.min.js"' in page
     assert 'src="assets/vendor/purify.min.js"' in page
     assert "B.markdown(" in page
@@ -52,7 +57,7 @@ def test_ask_html_renders_markdown_only_through_the_sanitiser():
 
 def test_ask_html_persists_history_in_local_storage_with_the_lane_tag():
     """TC-BUG-019 — the thread survives a reload; each turn carries its lane mode."""
-    page = ASK.read_text(encoding="utf-8")
+    page = _ask_page()
     assert "B.storage.get('localStorage', KEY)" in page
     assert "B.storage.set('localStorage', KEY" in page
     assert "lane: tag" in page
@@ -62,7 +67,7 @@ def test_ask_html_persists_history_in_local_storage_with_the_lane_tag():
 
 def test_ask_html_has_stage_indicator():
     """TC-BUG-018-A — stage events update a progress line with a ticking clock."""
-    page = ASK.read_text(encoding="utf-8")
+    page = _ask_page()
     assert "chunk.event === 'stage'" in page
     assert "function stageLine" in page
     assert "setInterval" in page

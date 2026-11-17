@@ -20,6 +20,7 @@ class FakeEl {
   }
   setAttribute(k, v) { this.attrs[k] = String(v); }
   getAttribute(k) { return k in this.attrs ? this.attrs[k] : null; }
+  removeAttribute(k) { delete this.attrs[k]; }
   appendChild(c) { this.children.push(c); c.parentNode = this; return c; }
   insertBefore(c) { this.children.unshift(c); c.parentNode = this; return c; }
   removeChild(c) { this.children = this.children.filter((x) => x !== c); c.parentNode = null; return c; }

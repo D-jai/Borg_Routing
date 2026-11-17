@@ -48,6 +48,45 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="BORG_ROUTE", version="0.1.0", lifespan=lifespan)
 
+# Content-Security-Policy on every response (4.2 review): nothing loads from another
+# site, no inline script. 'unsafe-inline' is allowed for styles only: the pages set
+# style="..." attributes, and a style cannot send data out when img-src, font-src and
+# connect-src are 'self'.
+CSP = "; ".join([
+    "default-src 'self'",
+    "img-src 'self' data:",
+    "script-src 'self'",
+    "style-src 'self' 'unsafe-inline'",
+    "connect-src 'self'",
+    "object-src 'none'",
+    "base-uri 'self'",
+    "form-action 'self'",
+    "frame-ancestors 'none'",
+])
+
+
+class CSPHeaderMiddleware:
+    """Pure ASGI, so streamed answers and the static mount get the header too."""
+
+    def __init__(self, inner):
+        self.inner = inner
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            return await self.inner(scope, receive, send)
+
+        async def send_with_csp(message):
+            if message["type"] == "http.response.start":
+                headers = [h for h in message.get("headers", []) if h[0].lower() != b"content-security-policy"]
+                headers.append((b"content-security-policy", CSP.encode("latin-1")))
+                message = dict(message, headers=headers)
+            await send(message)
+
+        return await self.inner(scope, receive, send_with_csp)
+
+
+app.add_middleware(CSPHeaderMiddleware)
+
 # Serve static UI files if the ui/ directory exists. The Ask page is the front
 # door (work order 4.2): `/`, `/ui`, `/ui/` and the retired chat page
 # (`/ui/chat.html`, archived) all redirect to it. These routes are registered
