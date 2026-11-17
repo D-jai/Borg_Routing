@@ -22,6 +22,10 @@ One logical change per commit. If the message needs "and", split it. Commit only
 
 Run the tests for the code you changed. Run the whole suite (`python -m pytest`) before a pull request or at the end of a phase of work, not after every edit. Do not run the same full set twice on one tree.
 
+## Never delete
+
+Do not delete files or data. Move them to an archive folder outside the repository and record what moved, and only with the owner's agreement. Inside git, use `git rm` only after the file is archived.
+
 ## Rules that do not bend
 
 - Four step types only: `orchestrate`, `answerer`, `apply_to_each`, `state_op`. New behaviour is an attribute, never a new type.

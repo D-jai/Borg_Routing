@@ -41,8 +41,12 @@ Every `feat:` or `fix:` commit ships together: code, error code (if a new failur
 - Reintroducing the rejected Coach/critic.
 - Adding frameworks outside the tech stack (FastAPI, aiosqlite, httpx, Pydantic, PyYAML, spaCy).
 
+## Never Delete
+
+Do not delete files or data. Move them to an archive folder outside the repository and record what moved, and only with the owner's agreement. Inside git, use `git rm` only after the file is archived.
+
 ## Session End Hygiene
 
-1. Tests pass (`python -m pytest`), or say which do not.
+1. Run the tests for what you changed; the full suite (`python -m pytest`) before a pull request or at the end of a phase, never twice on the same tree (when CI is available, its run is the full run). Say which tests do not pass.
 2. Commit scoped, descriptive changes. One logical change per commit.
 3. Do not push unless asked.

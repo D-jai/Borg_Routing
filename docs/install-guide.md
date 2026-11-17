@@ -38,10 +38,10 @@ is optional.)
 
 ### Success criteria
 The install is done when all of these pass:
-- `python -m pytest` → exits 0 with 296 passing
+- `python -m pytest` → exits 0; all tests pass (the count grows over time)
 - `GET http://localhost:8000/health` → `{"status":"ok"}`
 - `GET http://localhost:8000/models/matrix` → returns 19 rows (7 LM Studio + 12 OpenRouter) with `checked: false` defaults
-- At least one row has been ticked with `PATCH /models/<id>/checked` (use `d-jai/test-model` from LM Studio, or any one you plan to use)
+- At least one row has been ticked with `PATCH /models/<id>/checked` (any one you plan to use, for example a model id as LM Studio shows it, like `your-org/your-model`)
 
 ---
 
@@ -57,13 +57,13 @@ The install is done when all of these pass:
 
 ### Windows (PowerShell)
 ```powershell
-cd C:\Stage\BORG_ROUTE                      # or wherever you extracted it
+cd BORG_ROUTE                              # the folder you cloned or extracted
 
 copy .env.example .env
 # Edit .env — add OPENROUTER_API_KEY (and any LM Studio paths)
 
 python -m pip install -e ".[dev]"
-python -m pytest                            # expect 296 passing
+python -m pytest                            # expect all tests to pass
 
 uvicorn main:app --reload
 # Server at http://localhost:8000
@@ -77,7 +77,7 @@ cp .env.example .env
 # Edit .env — add OPENROUTER_API_KEY (and any LM Studio paths)
 
 python3 -m pip install -e ".[dev]"
-python3 -m pytest                           # expect 296 passing
+python3 -m pytest                           # expect all tests to pass
 
 uvicorn main:app --reload
 # Server at http://localhost:8000
