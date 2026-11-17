@@ -1,0 +1,126 @@
+{
+ "prior_dollars": 0.07,
+ "entries": [
+  {
+   "id": "102fb710eee5",
+   "key": "B_direct_1",
+   "kind": "run",
+   "date": "2026_11_17",
+   "db_path": null,
+   "calls_log": "C:\\Stage\\BORG_ROUTE\\bench\\results\\2026_11_17\\dbs\\B_direct_1.calls.jsonl",
+   "status": "ended",
+   "started_at": "2026-11-17T16:50:40+00:00",
+   "dollars": 0.328144,
+   "ended_at": "2026-11-17T16:52:48+00:00"
+  },
+  {
+   "id": "54c5db842e89",
+   "key": "A_direct_1",
+   "kind": "run",
+   "date": "2026_11_17",
+   "db_path": null,
+   "calls_log": "C:\\Stage\\BORG_ROUTE\\bench\\results\\2026_11_17\\dbs\\A_direct_1.calls.jsonl",
+   "status": "ended",
+   "started_at": "2026-11-17T16:53:05+00:00",
+   "dollars": 0.208472,
+   "ended_at": "2026-11-17T16:53:54+00:00"
+  },
+  {
+   "id": "a2f895a8517c",
+   "key": "C_direct_1",
+   "kind": "run",
+   "date": "2026_11_17",
+   "db_path": null,
+   "calls_log": "C:\\Stage\\BORG_ROUTE\\bench\\results\\2026_11_17\\dbs\\C_direct_1.calls.jsonl",
+   "status": "ended",
+   "started_at": "2026-11-17T16:53:54+00:00",
+   "dollars": 0.79766,
+   "ended_at": "2026-11-17T16:54:05+00:00"
+  },
+  {
+   "id": "9a4a4b9f396b",
+   "key": "B_borg_cloud_1",
+   "kind": "run",
+   "date": "2026_11_17",
+   "db_path": "C:\\Stage\\BORG_ROUTE\\bench\\results\\2026_11_17\\dbs\\B_borg_cloud_1.db",
+   "calls_log": null,
+   "status": "ended",
+   "started_at": "2026-11-17T16:54:05+00:00",
+   "dollars": 0.3020055,
+   "ended_at": "2026-11-17T16:57:59+00:00"
+  },
+  {
+   "id": "2c7e204c8dfc",
+   "key": "D_borg_cloud_1",
+   "kind": "run",
+   "date": "2026_11_17",
+   "db_path": "C:\\Stage\\BORG_ROUTE\\bench\\results\\2026_11_17\\dbs\\D_borg_cloud_1.db",
+   "calls_log": null,
+   "status": "ended",
+   "started_at": "2026-11-17T16:58:30+00:00",
+   "dollars": 0.17545625,
+   "ended_at": "2026-11-17T16:59:19+00:00"
+  },
+  {
+   "id": "c2139047ebb5",
+   "key": "D_borg_local_workers_1",
+   "kind": "run",
+   "date": "2026_11_17",
+   "db_path": "C:\\Stage\\BORG_ROUTE\\bench\\results\\2026_11_17\\dbs\\D_borg_local_workers_1.db",
+   "calls_log": null,
+   "status": "ended",
+   "started_at": "2026-11-17T16:59:19+00:00",
+   "dollars": 0.05891,
+   "ended_at": "2026-11-17T18:16:44+00:00"
+  },
+  {
+   "id": "704dcd197626",
+   "key": "C_borg_cloud_1",
+   "kind": "run",
+   "date": "2026_11_17",
+   "db_path": "C:\\Stage\\BORG_ROUTE\\bench\\results\\2026_11_17\\dbs\\C_borg_cloud_1.db",
+   "calls_log": null,
+   "status": "ended",
+   "started_at": "2026-11-17T18:16:44+00:00",
+   "dollars": 0.21187425,
+   "ended_at": "2026-11-17T18:17:23+00:00"
+  },
+  {
+   "id": "d0d9d8237068",
+   "key": "A_borg_cloud_1",
+   "kind": "run",
+   "date": "2026_11_17",
+   "db_path": "C:\\Stage\\BORG_ROUTE\\bench\\results\\2026_11_17\\dbs\\A_borg_cloud_1.db",
+   "calls_log": null,
+   "status": "ended",
+   "started_at": "2026-11-17T18:17:23+00:00",
+   "dollars": 0.36231575,
+   "ended_at": "2026-11-17T18:18:05+00:00"
+  },
+  {
+   "id": "62bb8623d765",
+   "key": "A_borg_local_workers_1",
+   "kind": "run",
+   "date": "2026_11_17",
+   "db_path": "C:\\Stage\\BORG_ROUTE\\bench\\results\\2026_11_17\\dbs\\A_borg_local_workers_1.db",
+   "calls_log": null,
+   "status": "ended",
+   "started_at": "2026-11-17T18:18:05+00:00",
+   "dollars": 0.044685,
+   "ended_at": "2026-11-17T18:18:21+00:00"
+  },
+  {
+   "id": "b8aba7043a4c",
+   "key": "judge_C",
+   "kind": "judge",
+   "date": "2026_11_17",
+   "db_path": null,
+   "calls_log": "C:\\Stage\\BORG_ROUTE\\bench\\results\\2026_11_17\\dbs\\judge_C.calls.jsonl",
+   "status": "ended",
+   "started_at": "2026-11-17T18:18:21+00:00",
+   "dollars": 0.0,
+   "ended_at": "2026-11-17T18:18:21+00:00"
+  }
+ ],
+ "total_dollars": 2.55952275
+}
