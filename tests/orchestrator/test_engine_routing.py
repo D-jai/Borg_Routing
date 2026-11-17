@@ -285,3 +285,34 @@ async def test_an_unexpected_routing_error_still_fills_every_decision_field(db, 
     assert "router exploded" in d["error"]
     assert model_id == d["chosen"] == "openrouter/stub/top"
     assert stub.step_request("Extract the names.").model == "stub/top"
+
+
+@pytest.mark.asyncio
+async def test_every_envelope_records_its_plan_node_id_state_ops_included(db, env):
+    """4.2 review: the diagram maps envelopes to plan nodes by the node_id the
+    engine stamps on each task (state_ops have no route event)."""
+    import json
+
+    env.setattr(engine, "_shared_matrix", three_tier_matrix())
+    plan = [
+        {"type": "answerer", "id": "n1", "instruction": "List the items.",
+         "output_schema": {"items": "array"}},
+        {"type": "state_op", "id": "n2", "op": "count", "inputs_ref": "n1"},
+        {"type": "answerer", "id": "n3", "instruction": "Write it up.",
+         "depends_on": ["n2"], "output_schema": {"result": "string"}},
+    ]
+    StubModels(plan_nodes=plan).install(env)
+
+    result = await run_pipeline(INSTRUCTION, db_path=db)
+    await drain_log_writes()
+    assert result["status"] == "completed", result.get("error")
+
+    with sqlite3.connect(db) as conn:
+        rows = conn.execute(
+            "SELECT type, outbound_payload FROM envelopes WHERE run_id=?",
+            (result["run_id"],),
+        ).fetchall()
+    by_node = {json.loads(p).get("node_id"): t for t, p in rows}
+    assert by_node.get("n1") == "answerer"
+    assert by_node.get("n2") == "state_op"
+    assert by_node.get("n3") == "answerer"

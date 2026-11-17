@@ -89,6 +89,9 @@ class WrappedTask(BaseModel):
     # without immediately tripping finish_reason=length.
     max_output_tokens: int = 4000
     trigger_reason: str = "initial_plan"
+    # The plan node this envelope runs (set by the engine); the Run page's
+    # diagram maps envelopes to plan nodes by it. None for tasks built elsewhere.
+    node_id: Optional[str] = None
     skill_id: Optional[str] = None
     skill_version: Optional[int] = None
     skill_args: Optional[dict] = None

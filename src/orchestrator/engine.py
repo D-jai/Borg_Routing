@@ -2745,6 +2745,7 @@ async def _orchestrate_run(
                     **({"data_scope": "raw" if raw else "derived", "lane": lane}
                        if lane is not None else {}),
                 )
+                task.node_id = str(node_id)
                 if route_decision is not None:
                     # The built task's type, not the plan node's: a skill
                     # step takes its type from the skill's envelope_type.
