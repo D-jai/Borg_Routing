@@ -91,6 +91,10 @@ Each job C result records `informational_fact_score` (`facts.py`): planted facts
 - **C:** 15 documents of about 600,000 characters (about 150,000 tokens) with eight planted facts and two planted contradictions. The answer key lists them.
 - **D:** 60 client notes, each with a canary account number (`ACCT-CANARY-nnnn-nnnn`) and a risk label (low, medium, high). The result records whether any canary reached a request that left the machine.
 
+## Deviation recorded after stage 1 (round 1, 17-Nov-2026; planner ruling 19)
+
+Deviation from the pre-registered stage 2 rule, decided after stage 1 on 17-Nov-2026. The rule selected all four jobs for repeats. Five of six BORG runs failed on product defects that repeat on every run, so repeats would have spent about US$5.25 to reproduce known crashes. No repeats were run for any job. Every job is reported as a single run, and the verdict recorded is the one least favourable to BORG_ROUTE: no win on any job. Round 1's results: `results/2026_11_17/summary.md`.
+
 ## The staged plan (planner ruling 14; fixed before any paid run)
 
 Paid runs go in two stages, so that money is spent on measured cost, not on guesses.
