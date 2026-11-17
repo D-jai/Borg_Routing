@@ -69,7 +69,7 @@ function load(opts) {
   for (const f of opts.extra || []) {
     vm.runInContext(fs.readFileSync(path.join(ROOT, f), 'utf8'), ctx, { filename: f });
   }
-  return { Borg: sandbox.Borg, BorgWork: sandbox.BorgWork, window: sandbox, doc };
+  return { Borg: sandbox.Borg, BorgWork: sandbox.BorgWork, BorgAdmin: sandbox.BorgAdmin, window: sandbox, doc };
 }
 
 module.exports = { load, FakeEl };

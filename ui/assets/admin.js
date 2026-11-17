@@ -21,12 +21,12 @@
   function whereChip(local) {
     return h('span', { class: 'chip' }, [h('span', { class: 'dot ' + (local ? 'local' : 'cloud') }), local ? 'this machine' : 'cloud']);
   }
-  // A model is local when it runs on this machine: an lmstudio or ollama row (unless the
-  // server said it runs elsewhere), or a local OpenAI-compatible row (custom_local_*).
+  // A model is local when the SERVER says so: every row of GET /models and /models/matrix
+  // carries is_local, worked out from the endpoint's host, -cloud tags and the allow-list
+  // (src/registry/locality.py). The page never guesses from the source label; a row without
+  // the field counts as not local.
   function isLocalModel(m) {
-    if (m.remote) return false;
-    if (m.source === 'lmstudio' || m.source === 'ollama') return true;
-    return m.source === 'custom_key' && String(m.model_id || '').indexOf('custom_local_') === 0;
+    return !!m && m.is_local === true;
   }
 
   function table(headers, rows, opts) {

@@ -39,6 +39,24 @@
    * sent again. An untagged turn, or a mode that could not be read, counts as all_local
    * (fail closed). */
   function laneTag(mode) { return LANE_MODES.indexOf(mode) >= 0 ? mode : 'all_local'; }
+  /* The lane mode, read right now (never remembered from page load: it can change while the
+   * page is open). `api` is Borg.api. A value that is not one of the four modes is "unknown",
+   * not "off"; so is a setting that is missing or a request that fails. Unknown fails closed:
+   * laneTag() gives all_local and historyForMode() resends no all_local turn. */
+  function readLaneMode(api) {
+    return Promise.resolve().then(function () { return api('/config/effective', { quiet: true }); }).then(function (cfg) {
+      var row = cfg && Array.isArray(cfg.settings) ? cfg.settings.filter(function (s) { return s.key === 'lane_mode'; })[0] : null;
+      var v = row ? String(row.value) : '';
+      return LANE_MODES.indexOf(v) >= 0 ? v : 'unknown';
+    }, function () { return 'unknown'; });
+  }
+  /* prepareSend(api, turns) -> {mode, tag, history, docs}: everything the send path needs
+   * from the lane, worked out from a mode read for THIS send. */
+  function prepareSend(api, turns) {
+    return readLaneMode(api).then(function (mode) {
+      return { mode: mode, tag: laneTag(mode), history: historyForMode(turns, mode), docs: laneLine(mode).docs };
+    });
+  }
   function historyForMode(turns, mode) {
     var known = LANE_MODES.indexOf(mode) >= 0;
     return (Array.isArray(turns) ? turns : []).filter(function (t) {
@@ -55,7 +73,7 @@
       case 'raw_local': return { on: true, docs: true, local: true, text: 'Lane on (raw_local): raw documents are read only by models on this machine.' };
       case 'all_local': return { on: true, docs: true, local: true, text: 'Lane on (all_local): nothing is sent to any cloud model.' };
       case 'by_reference': return { on: true, docs: true, local: false, text: 'Lane by_reference: cloud models may read your documents. This mode makes no privacy promise.' };
-      default: return { on: true, docs: false, text: 'Could not read the lane setting. Earlier turns are kept on screen but not resent.' };
+      default: return { on: true, docs: false, text: 'Could not read the lane setting. Earlier turns are kept on screen but not resent, and new turns are treated as all_local.' };
     }
   }
 
@@ -111,7 +129,8 @@
       var out = parseJSON(e.outbound_payload) || {};
       var inb = parseJSON(e.inbound_payload) || {};
       var routing = e.routing && typeof e.routing === 'object' ? e.routing : null;
-      var id = routing && routing.node_id ? String(routing.node_id) : null;
+      // The engine stamps each envelope with its plan node id (state_ops have no route event).
+      var id = out.node_id ? String(out.node_id) : (routing && routing.node_id ? String(routing.node_id) : null);
       if (!id && out.instruction) {
         // No route event (a skill or state step): match the plan node by its instruction.
         for (var k = 0; k < plan.order.length; k++) {
@@ -123,8 +142,10 @@
       usedIds[id] = true;
       var pnode = plan.byId[id] || null;
       var deps = pnode ? nodeRefs(pnode) : [];
-      var up = out.dependency_input && out.dependency_input.upstream_results;
+      var di = out.dependency_input && typeof out.dependency_input === 'object' ? out.dependency_input : null;
+      var up = di && di.upstream_results;
       if (up && typeof up === 'object') deps = deps.concat(Object.keys(up));
+      if (di && typeof di.source_ref === 'string' && di.source_ref) deps.push(di.source_ref);
       var items = num(routing && routing.items) || childCount[e.envelope_id] ||
         (pnode && Array.isArray(pnode.items) ? pnode.items.length : null);
       var tin = num(e.tokens_input), tout = num(e.tokens_output);
@@ -252,11 +273,11 @@
     });
     return order.map(function (m) { return { model: m, calls: out[m] }; });
   }
-  /* runTotals(data, isLocal) -> {cost, costSoFar, seconds, steps, calls, left, leftSource}.
+  /* runTotals(data) -> {cost, costSoFar, seconds, steps, calls, left, leftSource}.
    * Cost is the digest's total for the whole run tree. Child envelopes' dollars are already
    * inside it and are never added again. Before a digest exists, the run's own logged
    * dollars are summed and marked "so far". */
-  function runTotals(data, isLocal) {
+  function runTotals(data) {
     data = data || {};
     var run = data.run || {};
     var digest = data.digest || null;
@@ -264,13 +285,12 @@
     (data.events || []).forEach(function (ev) { var d = num(ev.dollars); if (d !== null) soFar += d; });
     var cost = digest && num(digest.cost_dollars) !== null ? num(digest.cost_dollars) : null;
     var calls = (data.events || []).filter(isCall);
-    var outbound = Array.isArray(data.outbound) ? data.outbound : [];
-    var left, leftSource;
-    if (outbound.length) { left = outbound.length; leftSource = 'ledger'; }
-    else if (isLocal) {
-      left = calls.filter(function (ev) { return isLocal(ev.model_id) === false; }).length;
-      leftSource = 'calls';
-    } else { left = null; leftSource = 'unknown'; }
+    // Worked out by the server (ledger, else the locality of every call, child runs included).
+    // Unknown stays null and the page says "Not recorded": it is never turned into 0.
+    var clm = data.calls_left_machine;
+    var left = clm && typeof clm.count === 'number' ? clm.count : null;
+    var leftSource = left !== null && (clm.source === 'ledger' || clm.source === 'locality') ? clm.source : 'unknown';
+    if (left === null) leftSource = 'unknown';
     var done = run.status === 'completed' || run.status === 'failed';
     return {
       cost: cost, costSoFar: cost === null ? soFar : null,
@@ -283,7 +303,7 @@
 
   /* RULING 18 (BUILD.md section 8, 17-Nov-2026): the baseline figure (baseline_dollars /
    * baseline_est_cost: BORG's own tokens priced at the flagship) must not be shown as
-   * "what one top model would have cost". This is the single switch for the receipt's and
+   * "what the same work would have cost on one flagship model". This is the single switch for the receipt's and
    * the Run header's "Estimate, same steps on <baseline model>" line. It renders nothing
    * until the planner's replacement figure exists; the replacement plugs in here and both
    * pages pick it up (ask.html receipt grid, run.html Cost tile). */
@@ -291,6 +311,152 @@
   function baselineEstimate(data) {
     if (!SHOW_BASELINE_ESTIMATE) return null;
     return null; // replacement figure goes here (ruling 18)
+  }
+
+  // ---------- what the run was run under, and what the pages show about it ----------
+  /* The lane mode the run recorded when it started (runs.lane_mode). Not the setting now.
+   * null means the run did not record one (a run from before the column). */
+  function runLaneMode(data) {
+    var m = data && data.run ? data.run.lane_mode : null;
+    return LANE_MODES.indexOf(m) >= 0 ? m : null;
+  }
+  var LANE_WORDS = { off: 'Lane off: any step could use a cloud model',
+    raw_local: 'Lane raw_local: raw documents were read only on this machine',
+    all_local: 'Lane all_local: nothing was sent to a cloud model',
+    by_reference: 'Lane by_reference: cloud models could read the documents (no privacy promise)' };
+  function runLaneWords(data) {
+    var m = runLaneMode(data);
+    return m ? LANE_WORDS[m] : 'Lane mode not recorded for this run';
+  }
+
+  /* The four tiles of the Run header as plain text: [{k, v, sub}]. No baseline figure and no
+   * flagship-comparison wording (ruling 18): the cost tile says what the run cost, nothing else. */
+  function headerTiles(data) {
+    var B = window.Borg;
+    var t = runTotals(data);
+    var longest = 0;
+    stepsFromRun(data).forEach(function (s) { longest = Math.max(longest, s.latency_ms || 0); });
+    var est = baselineEstimate(data);
+    return [
+      { k: t.cost !== null ? 'Cost of this run' : 'Cost so far', v: B.money(t.cost !== null ? t.cost : t.costSoFar),
+        sub: est ? est.label + ': ' + B.money(est.value) : (t.cost !== null ? 'Whole run, steps’ own runs included' : 'This run’s logged calls') },
+      { k: 'Time', v: B.duration(t.seconds), sub: longest ? 'Longest step: ' + B.duration(longest / 1000) : null },
+      { k: 'Steps', v: String(t.steps), sub: t.calls + (t.calls === 1 ? ' model call' : ' model calls') },
+      { k: 'Calls that left this machine', v: t.left === null ? 'Not recorded' : String(t.left),
+        sub: t.leftSource === 'ledger' ? 'From the lane’s record of every request'
+          : t.leftSource === 'locality' ? 'Calls to models that are not on this machine, from where each model runs' : 'Could not be worked out for this run' }
+    ];
+  }
+  /* The receipt's figures: numbers only, so they can be stored with the turn. */
+  function receiptFrom(data, modelLocal) {
+    var t = runTotals(data);
+    var mode = runLaneMode(data);
+    return {
+      steps: t.steps, seconds: t.seconds, cost: t.cost, costSoFar: t.costSoFar,
+      models: callsByModel(data), left: t.left, leftSource: t.leftSource,
+      laneMode: mode,
+      rawStayed: !!(data.run && data.run.documents) && (mode === 'raw_local' || mode === 'all_local'),
+      estimate: baselineEstimate(data)    // ruling 18: null until its replacement exists
+    };
+  }
+  /* The receipt's stat boxes as [k, v] pairs. */
+  function receiptStats(r) {
+    var B = window.Borg;
+    var out = [['Steps', String(r.steps)], ['Models used', String(r.models.length)], ['Time', B.duration(r.seconds)],
+      r.cost !== null && r.cost !== undefined ? ['Cost of this run', B.money(r.cost)] : ['Cost so far', B.money(r.costSoFar)]];
+    if (r.estimate) out.push([r.estimate.label, B.money(r.estimate.value)]);
+    return out;
+  }
+  function leftChipText(left) {
+    if (left === null || left === undefined) return 'Calls that left this machine: not recorded';
+    return left === 0 ? 'No call left this machine' : left + (left === 1 ? ' call' : ' calls') + ' left this machine';
+  }
+
+  /* Ruling 18: the raw Details view carries no baseline figure. Removes every key that starts
+   * with "baseline" (baseline_dollars, baseline_est_cost, routing.baseline, baseline_note,
+   * per_item_baseline_est_cost) at any depth, also inside payloads stored as JSON text. */
+  function stripBaseline(v) {
+    if (typeof v === 'string') {
+      if (!/baseline/i.test(v)) return v;
+      var p = parseJSON(v);
+      return p && typeof p === 'object' ? JSON.stringify(stripBaseline(p)) : v;
+    }
+    if (Array.isArray(v)) return v.map(stripBaseline);
+    if (v && typeof v === 'object') {
+      var out = {};
+      Object.keys(v).forEach(function (k) { if (!/baseline/i.test(k)) out[k] = stripBaseline(v[k]); });
+      return out;
+    }
+    return v;
+  }
+
+  /* "Why this model" rows. The router ranks the models that clear the bar by effective cost
+   * (dollars plus waiting time); est_dollars is the dollars part alone. The row it chose is
+   * labelled by what actually decided it: lowest effective cost, a name from the planner, or
+   * an alias or strategy (written in routing.notes). */
+  function whyRows(routing) {
+    var cands = routing && Array.isArray(routing.candidates) ? routing.candidates : [];
+    var lowest = null;
+    cands.forEach(function (c) { var v = num(c.est_cost); if (v !== null && (lowest === null || v < lowest)) lowest = v; });
+    return cands.map(function (c) {
+      var won = c.model_id === routing.chosen;
+      var note = '';
+      if (won) {
+        if (routing.reason === 'planner_pick') note = 'Router’s choice: the planner named it';
+        else if (routing.reason === 'fallback_default') note = 'Run’s default model: none cleared the bar';
+        else if (lowest === null || num(c.est_cost) === lowest) note = 'Router’s choice: lowest effective cost (dollars plus time) among those that clear ' + routing.floor;
+        else note = 'Router’s choice: picked by the routing alias or strategy (see the notes), not by cost alone';
+      }
+      return { model_id: c.model_id, won: won, score: c.score === undefined ? null : c.score,
+        est_cost: num(c.est_cost), est_dollars: num(c.est_dollars), note: note };
+    });
+  }
+
+  // ---------- live refresh (Run page) ----------
+  /* makeRefresher({get, apply}) -> {request, cancel}. One GET in flight at a time: a request
+   * made while one is running is remembered and sent once when it returns. Every GET gets a
+   * sequence number; a response is applied only if it is the newest one issued and nothing
+   * cancelled it, so an old answer can never overwrite a newer screen. */
+  function makeRefresher(opts) {
+    var seq = 0, applied = 0, inflight = false, again = false, dead = false;
+    function run() {
+      inflight = true; again = false;
+      var mine = ++seq;
+      return Promise.resolve().then(opts.get).then(function (data) {
+        inflight = false;
+        if (!dead && mine === seq && mine > applied) { applied = mine; opts.apply(data, mine); }
+      }, function (err) {
+        inflight = false;
+        if (opts.onError && !dead) opts.onError(err);
+      }).then(function () { if (again && !dead) return run(); });
+    }
+    return {
+      request: function () { if (dead) return Promise.resolve(); if (inflight) { again = true; return Promise.resolve(); } return run(); },
+      cancel: function () { dead = true; }
+    };
+  }
+  /* makeLiveStream({open, finished, wait, onMessage}) -> {start, stop}. Opens the run's event
+   * stream and, when it errors or closes, reconnects with a growing wait (1 s, 2 s, 4 s ... up
+   * to 15 s; reset by any message) for as long as the run is not finished. `open(onmsg, onerr)`
+   * returns an object with close(); `wait(fn, ms)` is setTimeout. */
+  function makeLiveStream(opts) {
+    var src = null, delay = 1000, timer = null, stopped = false;
+    function lost() {
+      if (src) { try { src.close(); } catch (_) {} src = null; }
+      if (stopped || opts.finished() || timer) return;
+      var d = delay; delay = Math.min(delay * 2, 15000);
+      timer = opts.wait(connect, d);
+    }
+    function connect() {
+      timer = null;
+      if (stopped || src || opts.finished()) return;
+      src = opts.open(function (msg) { delay = 1000; opts.onMessage(msg); }, lost);
+    }
+    return {
+      start: connect, lost: lost,
+      stop: function () { stopped = true; if (src) { try { src.close(); } catch (_) {} src = null; } },
+      delay: function () { return delay; }
+    };
   }
 
   // ---------- plain words ----------
@@ -327,7 +493,7 @@
     return m + ':' + (s < 10 ? '0' : '') + s;
   }
 
-  var REASONS = { routed: 'the cheapest that clears the bar', planner_pick: 'the planner named it',
+  var REASONS = { routed: 'the lowest effective cost among the models that clear the bar', planner_pick: 'the planner named it',
     fallback_default: 'no model cleared the bar, so the run’s default model was used' };
 
   /* eventSentences(data) -> [{at: "m:ss", text}]. Back-to-back calls to one model become one
@@ -412,6 +578,9 @@
 
   window.BorgWork = {
     LANE_MODES: LANE_MODES, laneTag: laneTag, historyForMode: historyForMode, laneLine: laneLine,
+    readLaneMode: readLaneMode, prepareSend: prepareSend, runLaneMode: runLaneMode, runLaneWords: runLaneWords,
+    headerTiles: headerTiles, receiptFrom: receiptFrom, receiptStats: receiptStats, leftChipText: leftChipText,
+    stripBaseline: stripBaseline, whyRows: whyRows, makeRefresher: makeRefresher, makeLiveStream: makeLiveStream,
     parseJSON: parseJSON, decisionOf: decisionOf, shortModel: shortModel, shortText: shortText,
     planNodesById: planNodesById, stepsFromRun: stepsFromRun, planLayout: planLayout,
     callsByModel: callsByModel, runTotals: runTotals, baselineEstimate: baselineEstimate,

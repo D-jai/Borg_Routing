@@ -2,20 +2,22 @@ Borg.ready(function () {
   'use strict';
   var B = window.Borg, W = window.BorgWork, A = window.BorgAdmin, h = A.h;
   var runId = new URLSearchParams(location.search).get('id');
-  var data = null, laneMode = null, modelLocal = {}, selected = 'plan', showRaw = false;
-  var source = null, refreshTimer = null, tickTimer = null;
+  var data = null, modelLocal = {}, selected = 'plan', showRaw = false;
+  var refreshTimer = null, tickTimer = null, refresher = null, stream = null;
 
   if (!runId) { A.$('loading').textContent = 'No run chosen. Open one from the Runs page.'; return; }
 
-  function isLocal(m) { return modelLocal[m]; }
   function where(m) {
     var l = modelLocal[m];
     if (l === undefined) return h('span', {}, W.shortModel(m) || '-');
     return h('span', {}, [W.shortModel(m) + ' ', h('span', { class: 'chip' }, [W.whereDot(l), l ? 'this machine' : 'cloud'])]);
   }
+  // Whether this run used the lane: what the run recorded when it started, never today's
+  // setting. A run that recorded nothing is judged by its own ledger and documents.
   function laneOn() {
-    return (data && data.outbound && data.outbound.length > 0) || !!(data && data.run && data.run.documents) ||
-      (laneMode !== null && laneMode !== 'off');
+    var m = W.runLaneMode(data);
+    if (m) return m !== 'off';
+    return (data && data.outbound && data.outbound.length > 0) || !!(data && data.run && data.run.documents);
   }
 
   // ---------- header ----------
@@ -42,22 +44,12 @@ Borg.ready(function () {
       A.$('failure-detail').textContent = f.detail;
     }
 
-    var t = W.runTotals(data, isLocal);
+    A.$('run-lane').textContent = W.runLaneWords(data);
     var tiles = A.clear(A.$('tiles'));
-    function tile(k, v, sub) {
-      return h('div', { class: 'tile' }, [h('div', { class: 'k' }, k), h('div', { class: 'v num' }, v), sub ? h('div', { class: 'small muted' }, sub) : null]);
-    }
-    // Ruling 18: no baseline estimate line until its replacement exists (workspace.js).
-    var est = W.baselineEstimate(data);
-    tiles.appendChild(tile(t.cost !== null ? 'Cost' : 'Cost so far', B.money(t.cost !== null ? t.cost : t.costSoFar),
-      est ? est.label + ': ' + B.money(est.value) : (t.cost !== null ? 'Whole run, steps’ own runs included' : 'This run’s logged calls')));
-    var longest = 0;
-    W.stepsFromRun(data).forEach(function (s) { longest = Math.max(longest, s.latency_ms || 0); });
-    tiles.appendChild(tile('Time', B.duration(t.seconds), longest ? 'Longest step: ' + B.duration(longest / 1000) : null));
-    tiles.appendChild(tile('Steps', String(t.steps), t.calls + (t.calls === 1 ? ' model call' : ' model calls')));
-    tiles.appendChild(tile('Calls that left this machine', t.left === null ? '-' : String(t.left),
-      t.leftSource === 'ledger' ? 'From the lane’s record of every request'
-        : t.leftSource === 'calls' ? 'Calls to cloud models in this run' : 'Not recorded'));
+    // Ruling 18: no baseline figure and no flagship-comparison wording (workspace.js headerTiles).
+    W.headerTiles(data).forEach(function (t) {
+      tiles.appendChild(h('div', { class: 'tile' }, [h('div', { class: 'k' }, t.k), h('div', { class: 'v num' }, t.v), t.sub ? h('div', { class: 'small muted' }, t.sub) : null]));
+    });
   }
 
   // ---------- plan diagram ----------
@@ -152,23 +144,23 @@ Borg.ready(function () {
   function whyTable(routing) {
     var cands = Array.isArray(routing.candidates) ? routing.candidates : [];
     if (!cands.length) return h('p', { class: 'small muted' }, 'No candidate list was recorded for this step.');
-    var floor = routing.floor;
-    var rows = cands.map(function (c) {
-      var won = c.model_id === routing.chosen;
-      var note = won ? (routing.reason === 'routed' ? 'Chosen: cheapest that clears ' + floor
-        : routing.reason === 'planner_pick' ? 'Chosen: the planner named it' : 'Chosen') : '';
+    var rows = W.whyRows(routing).map(function (c) {
       var l = modelLocal[c.model_id];
       var name = h('span', {}, [l !== undefined ? W.whereDot(l) : null, ' ' + W.shortModel(c.model_id)]);
       name.setAttribute('title', c.model_id);
-      return h('tr', won ? { class: 'win' } : {}, [A.td(name), A.td(c.score === null || c.score === undefined ? '-' : String(c.score), 'num'),
-        A.td(B.money(c.est_dollars !== undefined ? c.est_dollars : c.est_cost), 'num'), A.td(note)]);
+      var money = function (v) { return v === null ? '-' : B.money(v); };
+      return h('tr', c.won ? { class: 'win' } : {}, [A.td(name), A.td(c.score === null ? '-' : String(c.score), 'num'),
+        A.td(money(c.est_cost), 'num'), A.td(money(c.est_dollars), 'num'), A.td(c.note)]);
     });
-    var t = A.table(['Model', 'Score', 'Est. cost', ''], rows);
+    var t = A.table([
+      'Model', 'Score',
+      { label: 'Est. effective cost', title: 'What the router ranks by: estimated dollars plus the cost of waiting (time cost per second).' },
+      { label: 'Est. dollars', title: 'Estimated dollars only (0 for a model on this machine).' }, ''], rows);
     var box = h('div', {}, [h('h3', { style: 'margin-bottom:6px' }, 'Why this model'), t]);
     if (routing.reason === 'fallback_default') box.appendChild(h('p', { class: 'small muted', style: 'margin:6px 0 0' }, 'No ticked model cleared the bar, so the run’s default model was used.'));
     if (routing.local_only) box.appendChild(h('p', { class: 'small muted', style: 'margin:6px 0 0' }, 'This step reads raw documents, so only models on this machine were offered.'));
     (Array.isArray(routing.notes) ? routing.notes : []).forEach(function (n) { box.appendChild(h('p', { class: 'small muted', style: 'margin:4px 0 0' }, String(n))); });
-    box.appendChild(h('p', { class: 'small muted', style: 'margin:6px 0 0' }, 'Costs in this table are estimates made before the step ran.'));
+    box.appendChild(h('p', { class: 'small muted', style: 'margin:6px 0 0' }, 'The router ranks the models that clear the bar by effective cost (dollars plus time), lowest first. Both cost columns are estimates made before the step ran.'));
     return box;
   }
   function rawSwitch(obj) {
@@ -176,7 +168,8 @@ Borg.ready(function () {
     var wrap = h('div', {}, btn);
     if (showRaw) {
       var text;
-      try { text = JSON.stringify(obj, null, 2); } catch (_) { text = String(obj); }
+      // Ruling 18: baseline figures are not shown in the raw record either.
+      try { text = JSON.stringify(W.stripBaseline(obj), null, 2); } catch (_) { text = String(obj); }
       wrap.appendChild(h('pre', { class: 'raw', style: 'margin-top:8px' }, text));
     }
     btn.addEventListener('click', function () { showRaw = !showRaw; renderPanel(); });
@@ -269,48 +262,51 @@ Borg.ready(function () {
   }
 
   // ---------- loading and live updates ----------
-  function fetchRun() {
-    return B.api('/runs/' + encodeURIComponent(runId), { quiet: true }).then(function (d) {
-      data = d; renderAll(); return d;
-    }, function (err) {
+  // One GET /runs/{id} in flight at a time; each response carries a sequence number and a
+  // stale one is dropped (W.makeRefresher). The event stream reconnects with a growing wait
+  // for as long as the run is not finished (W.makeLiveStream).
+  function finished() { return !!data && (data.run.status === 'completed' || data.run.status === 'failed'); }
+  refresher = W.makeRefresher({
+    get: function () { return B.api('/runs/' + encodeURIComponent(runId), { quiet: true }); },
+    apply: function (d) { data = d; renderAll(); if (finished()) stopLive(); },
+    onError: function (err) {
       if (!data) A.$('loading').textContent = err && err.status === 404 ? 'No run with this id.' : 'Could not load the run: ' + A.errorMessage(err);
-      return null;
-    });
-  }
+    }
+  });
+  function fetchRun() { return refresher.request(); }
   function scheduleRefresh() {
     if (refreshTimer) return;
     refreshTimer = setTimeout(function () { refreshTimer = null; fetchRun(); }, 400);
   }
   function stopLive() {
-    if (source) { source.close(); source = null; }
+    if (stream) stream.stop();
     if (tickTimer) { clearInterval(tickTimer); tickTimer = null; }
     A.$('live').classList.add('hidden');
   }
   function startLive() {
-    if (!data || data.run.status === 'completed' || data.run.status === 'failed' || source || !window.EventSource) return;
+    if (!data || finished() || stream || !window.EventSource) return;
     A.$('live').classList.remove('hidden');
-    source = new EventSource('/runs/' + encodeURIComponent(runId) + '/stream');
-    source.onmessage = function (e) {
-      var msg;
-      try { msg = JSON.parse(e.data); } catch (_) { return; }
-      if (msg.type === 'envelope_update') scheduleRefresh();
-      else if (msg.type === 'run_terminal' || msg.type === 'error') { stopLive(); fetchRun(); }
-    };
-    // The stream closes itself after 90 s: reconnect while the run is still going.
-    source.onerror = function () {
-      stopLive();
-      fetchRun().then(function (d) { if (d) setTimeout(startLive, 1500); });
-    };
+    stream = W.makeLiveStream({
+      finished: finished,
+      wait: function (fn, ms) { return setTimeout(fn, ms); },
+      open: function (onmsg, onerr) {
+        var es = new EventSource('/runs/' + encodeURIComponent(runId) + '/stream');
+        es.onmessage = function (e) { var msg; try { msg = JSON.parse(e.data); } catch (_) { return; } onmsg(msg); };
+        es.onerror = function () { fetchRun(); onerr(); };   // the server closes the stream after 90 s too
+        return es;
+      },
+      onMessage: function (msg) {
+        if (msg.type === 'envelope_update') scheduleRefresh();
+        else if (msg.type === 'run_terminal') { fetchRun(); }
+        else if (msg.type === 'error') { fetchRun(); stream.lost(); }
+      }
+    });
+    stream.start();
     tickTimer = setInterval(function () { if (data) renderHeader(); }, 1000);
   }
 
-  Promise.all([
-    B.api('/config/effective', { quiet: true }).catch(function () { return null; }),
-    B.api('/models/matrix', { quiet: true }).catch(function () { return null; })
-  ]).then(function (r) {
-    var lane = r[0] && (r[0].settings || []).filter(function (s) { return s.key === 'lane_mode'; })[0];
-    laneMode = lane ? String(lane.value) : null;
-    (r[1] || []).forEach(function (m) { modelLocal[m.model_id] = A.isLocalModel(m); });
+  B.api('/models/matrix', { quiet: true }).catch(function () { return null; }).then(function (rows) {
+    (rows || []).forEach(function (m) { modelLocal[m.model_id] = A.isLocalModel(m); });
     return fetchRun();
-  }).then(function (d) { if (d) startLive(); });
+  }).then(function () { startLive(); });
 });

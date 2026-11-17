@@ -61,7 +61,7 @@ def test_ask_html_persists_history_in_local_storage_with_the_lane_tag():
     assert "B.storage.get('localStorage', KEY)" in page
     assert "B.storage.set('localStorage', KEY" in page
     assert "lane: tag" in page
-    assert "W.historyForMode(turns, laneMode)" in page
+    assert "W.prepareSend(B.api, turns)" in page  # the mode is re-read for every send
     assert 'id="clear"' in page, "Clear button must be present"
 
 

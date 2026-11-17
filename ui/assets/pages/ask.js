@@ -3,7 +3,7 @@ Borg.ready(function () {
   var B = window.Borg, W = window.BorgWork, A = window.BorgAdmin, h = A.h;
   var KEY = 'borg_ask_history_v2', MAX_TURNS = 60;
   var thread = A.$('thread'), q = A.$('q'), send = A.$('send');
-  var laneMode = null;          // null until read; unknown counts as all_local for the tag
+  var laneMode = null;          // last mode read (null until read); re-read before every send
   var modelLocal = {};          // model_id -> true (this machine) / false (cloud)
   var turns = [];
   var pending = null;           // {stage, live, shown} while a question is running
@@ -62,17 +62,7 @@ Borg.ready(function () {
     return c;
   }
   /* Receipt figures from GET /runs/{id}; numbers only, so they can be stored with the turn. */
-  function receiptFrom(data) {
-    var isLocal = function (m) { return modelLocal[m]; };
-    var t = W.runTotals(data, isLocal);
-    return {
-      steps: t.steps, seconds: t.seconds, cost: t.cost, costSoFar: t.costSoFar,
-      models: W.callsByModel(data), left: t.left, leftSource: t.leftSource,
-      rawStayed: !!(data.run && data.run.documents) && laneMode !== 'by_reference',
-      // Ruling 18: no baseline line until its replacement exists (see workspace.js).
-      estimate: W.baselineEstimate(data)
-    };
-  }
+  function receiptFrom(data) { return W.receiptFrom(data); }
   function receiptNode(turn) {
     var r = turn.receipt;
     var box = h('div', { class: 'receipt' }, h('h3', {}, 'Receipt'));
@@ -80,19 +70,13 @@ Borg.ready(function () {
       box.appendChild(h('p', { class: 'small muted' }, turn.runId ? 'Loading the receipt...' : 'No run was recorded for this answer, so there is no receipt.'));
       return box;
     }
-    var grid = h('div', { class: 'receipt-grid' }, [
-      stat('Steps', String(r.steps)),
-      stat('Models used', String(r.models.length)),
-      stat('Time', B.duration(r.seconds)),
-      r.cost !== null && r.cost !== undefined ? stat('Cost', B.money(r.cost)) : stat('Cost so far', B.money(r.costSoFar))
-    ]);
-    if (r.estimate) grid.appendChild(stat(r.estimate.label, B.money(r.estimate.value), 'est'));
+    var grid = h('div', { class: 'receipt-grid' }, W.receiptStats(r).map(function (p) { return stat(p[0], p[1]); }));
     box.appendChild(grid);
     var row = h('div', { class: 'row' }, r.models.map(function (m) { return modelChip(m.model, m.calls); }));
     if (r.rawStayed) row.appendChild(h('span', { class: 'chip' }, [h('span', { class: 'dot gold' }), 'Raw documents stayed on this machine']));
-    if (r.left !== null && r.left !== undefined) {
-      row.appendChild(h('span', { class: 'chip' }, [W.whereDot(r.left === 0), r.left === 0 ? 'No call left this machine' : r.left + (r.left === 1 ? ' call' : ' calls') + ' left this machine']));
-    }
+    // Worked out by the server. Unknown is "not recorded", never a zero.
+    row.appendChild(h('span', { class: 'chip' }, r.left === null || r.left === undefined
+      ? W.leftChipText(null) : [W.whereDot(r.left === 0), W.leftChipText(r.left)]));
     box.appendChild(row);
     return box;
   }
@@ -173,11 +157,19 @@ Borg.ready(function () {
   function sendQuestion() {
     var text = q.value.trim();
     if (!text || send.disabled) return;
-    var tag = W.laneTag(laneMode);
-    var history = W.historyForMode(turns, laneMode);
+    send.disabled = true;
+    // The lane mode is read again right now: it may have changed since the page opened.
+    // An unknown or unreadable mode counts as all_local (nothing all_local is resent).
+    W.prepareSend(B.api, turns).then(function (p) {
+      laneMode = p.mode; showLane();
+      doSend(text, p);
+    });
+  }
+  function doSend(text, prep) {
+    var tag = prep.tag;
     var folder = A.$('docs-folder').value.trim();
-    var body = { model: A.$('alias').value, stream: true, messages: history.concat([{ role: 'user', content: text }]) };
-    if (folder && W.laneLine(laneMode).docs) body.documents = { folder: folder };
+    var body = { model: A.$('alias').value, stream: true, messages: prep.history.concat([{ role: 'user', content: text }]) };
+    if (folder && prep.docs) body.documents = { folder: folder };
 
     q.value = '';
     var userTurn = { role: 'user', content: text, lane: tag, folder: folder || null };
@@ -186,7 +178,6 @@ Borg.ready(function () {
     var live = h('article', { class: 'card answer' }, h('div', { class: 'md' }));
     pending = { stage: stage, live: live, shown: false };
     thread.appendChild(stage.node);
-    send.disabled = true;
 
     var full = '', runId = null, shown = false;
     function finish(failed) {
@@ -251,11 +242,10 @@ Borg.ready(function () {
   turns = load();
   render();
   Promise.all([
-    B.api('/config/effective', { quiet: true }).catch(function () { return null; }),
+    W.readLaneMode(B.api),
     B.api('/models/matrix', { quiet: true }).catch(function () { return null; })
   ]).then(function (r) {
-    var lane = r[0] && (r[0].settings || []).filter(function (s) { return s.key === 'lane_mode'; })[0];
-    laneMode = lane && W.LANE_MODES.indexOf(String(lane.value)) >= 0 ? String(lane.value) : (r[0] ? 'off' : null);
+    laneMode = r[0];
     (r[1] || []).forEach(function (m) { modelLocal[m.model_id] = A.isLocalModel(m); });
     showLane();
     render();

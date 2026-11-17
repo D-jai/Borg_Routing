@@ -210,13 +210,20 @@ def test_before_a_digest_cost_is_this_runs_logged_dollars_so_far(tmp_path):
     assert t["cost"] is None and t["costSoFar"] == pytest.approx(0.01)
 
 
-def test_calls_that_left_come_from_the_ledger_when_there_is_one(tmp_path):
-    data = run_body([env("n1")], [plan_event([{"id": "n1"}])],
-                    outbound=[{"envelope_id": None, "purpose": "plan"}, {"envelope_id": None, "purpose": "compose"}])
-    t = js(tmp_path, f"return W.runTotals({json.dumps(data)}, () => true);")
+def totals(tmp_path, data):
+    return js(tmp_path, f"return W.runTotals({json.dumps(data)});")
+
+
+def test_calls_that_left_are_the_servers_figure_and_unknown_is_never_zero(tmp_path):
+    base = run_body([env("n1")], [plan_event([{"id": "n1"}])])
+    t = totals(tmp_path, dict(base, calls_left_machine={"count": 2, "source": "ledger"}))
     assert (t["left"], t["leftSource"]) == (2, "ledger")
-    t2 = js(tmp_path, f"return W.runTotals({json.dumps(dict(data, outbound=[]))}, () => false);")
-    assert (t2["left"], t2["leftSource"]) == (1, "calls")
+    t = totals(tmp_path, dict(base, calls_left_machine={"count": 0, "source": "locality"}))
+    assert (t["left"], t["leftSource"]) == (0, "locality")          # a real zero stays a zero
+    for unknown in ({"count": None, "source": None}, None):
+        t = totals(tmp_path, dict(base, calls_left_machine=unknown))
+        assert (t["left"], t["leftSource"]) == (None, "unknown")
+    assert totals(tmp_path, base)["left"] is None                   # an older server: not recorded
 
 
 def test_ruling_18_baseline_estimate_renders_nothing(tmp_path):
