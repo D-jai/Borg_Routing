@@ -1,242 +1,355 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Run Trace — BORG_ROUTE</title>
-  <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: monospace; background: #0f0f1a; color: #ddd; }
-    nav { background: #1a1a2e; color: #eee; padding: 10px 20px; display: flex; gap: 20px; align-items: center; }
-    nav .brand { font-weight: bold; color: #e94560; font-size: 1.1em; font-family: sans-serif; }
-    nav a { color: #eee; text-decoration: none; font-family: sans-serif; }
-    nav a:hover { color: #e94560; }
-    .container { padding: 20px; max-width: 1200px; margin: 0 auto; }
-    h1 { font-size: 1.1em; color: #e94560; margin-bottom: 6px; font-family: sans-serif; }
-    .meta { font-size: 0.8em; color: #666; margin-bottom: 20px; }
-    .meta span { color: #aaa; }
-    h2 { font-size: 0.95em; color: #ccc; margin: 24px 0 8px; font-family: sans-serif; }
-    table { width: 100%; border-collapse: collapse; font-size: 0.78em; }
-    th { background: #1a1a2e; color: #888; padding: 6px 10px; text-align: left; border-bottom: 1px solid #2a2a3e; }
-    td { padding: 5px 10px; border-bottom: 1px solid #1a1a2e; vertical-align: top; word-break: break-all; }
-    tr:hover td { background: #151524; }
-    .badge { display: inline-block; padding: 1px 6px; border-radius: 3px; font-size: 0.75em; }
-    .badge.resolved { background: #1a3a1a; color: #4c4; }
-    .badge.failed { background: #3a1a1a; color: #c44; }
-    .badge.in_flight { background: #1a2a3a; color: #48f; }
-    .badge.pending { background: #2a2a1a; color: #aa8; }
-    .badge.completed { background: #1a3a1a; color: #4c4; }
-    .badge.running { background: #1a2a3a; color: #48f; }
-    .event-row { border-left: 3px solid #333; padding: 6px 10px; margin-bottom: 8px; font-size: 0.78em; background: #111120; }
-    .event-row.orchestrator_decision { border-color: #e94560; }
-    .event-row.child_residue { border-color: #ffa500; }
-    .event-row.model_call { border-color: #4080c0; }
-    .event-time { color: #555; font-size: 0.8em; }
-    .decision { color: #aaa; white-space: pre-wrap; max-height: 120px; overflow-y: auto; }
-    #status { padding: 20px; color: #888; font-family: sans-serif; }
-    #live-bar { background: #1a1a2e; border: 1px solid #2a2a3e; border-radius: 4px; padding: 8px 14px; margin-bottom: 16px; font-size: 0.82em; display: flex; gap: 20px; align-items: center; }
-    #live-dot { width: 8px; height: 8px; border-radius: 50%; background: #555; display: inline-block; margin-right: 6px; }
-    #live-dot.live { background: #4c4; animation: pulse 1.2s ease-in-out infinite; }
-    @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }
-  </style>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Run - BORG_ROUTE</title>
+<link rel="stylesheet" href="assets/app.css">
 </head>
 <body>
-<nav>
-  <span class="brand">BORG_ROUTE</span>
-  <a href="/ui/chat.html">Chat</a>
-  <a href="/ui/models.html">Models</a>
-  <a href="/ui/keys.html">API Keys</a>
-  <a href="/ui/dashboard.html">Dashboard</a>
-  <a href="/ui/logs.html">Logs</a>
-  <a href="/ui/skills.html">Skills</a>
-  <a href="/ui/admin.html">Admin</a>
-</nav>
+<main id="page" data-page="run" class="stack">
+  <div class="row"><h1>Run</h1><span id="status-chip"></span><span class="muted small num" id="run-meta"></span><span id="live" class="stage hidden"><span class="spin" aria-hidden="true"></span><span>Live</span></span></div>
+  <p class="muted small" id="loading">Loading the run...</p>
+  <div id="content" class="stack hidden">
+    <div class="card"><h3>Asked</h3><p class="prompt" id="prompt"></p><p class="small muted hidden" id="parent-line"></p></div>
+    <div class="card failure hidden" id="failure"><h3>Why it failed</h3><p id="failure-words" style="margin:6px 0 4px"></p><p class="small muted" id="failure-detail" style="margin:0"></p></div>
+    <div class="tiles" id="tiles"></div>
 
-<div class="container">
-  <div id="status">Loading run trace…</div>
-  <div id="content" style="display:none">
-    <h1>Run Trace</h1>
-    <div class="meta">
-      Run ID: <span id="run-id"></span> &nbsp;|&nbsp;
-      Status: <span id="run-status"></span> &nbsp;|&nbsp;
-      Created: <span id="run-created"></span>
-    </div>
-    <div style="background:#1a1a2e;border-radius:6px;padding:12px 16px;margin-bottom:20px;font-size:0.85em;color:#ccc;white-space:pre-wrap;" id="instruction"></div>
-
-    <div id="live-bar">
-      <span><span id="live-dot"></span><span id="live-label">Connecting…</span></span>
-      <span>Envelopes: <strong id="env-count">0</strong></span>
-      <span>apply_to_each: <strong id="ate-count">0</strong></span>
+    <div class="split">
+      <div class="card">
+        <h2 style="margin-bottom:12px">Plan</h2>
+        <div class="plan-scroll" id="plan-box"></div>
+        <p class="small muted legend" style="margin:10px 0 0"><span class="dot local"></span> on this machine &nbsp; <span class="dot cloud"></span> cloud &nbsp; Select a step to see why its model was chosen.</p>
+      </div>
+      <aside class="card stack" id="panel" aria-live="polite"></aside>
     </div>
 
-    <h2>Envelopes</h2>
-    <table id="envelope-table">
-      <thead>
-        <tr>
-          <th>Level</th><th>Type</th><th>Skill</th><th>Trigger</th>
-          <th>Model</th><th>Tokens In</th><th>Tokens Out</th><th>Status</th><th>Child Run</th>
-        </tr>
-      </thead>
-      <tbody id="envelope-body"></tbody>
-    </table>
-
-    <h2>Orchestrator Decisions + Events</h2>
-    <div id="events"></div>
+    <div class="split">
+      <div class="card"><h2 style="margin-bottom:8px">What happened</h2><ol class="timeline" id="timeline"></ol></div>
+      <div class="card hidden" id="left-card"><h2 style="margin-bottom:8px">What left this machine</h2><div id="left-list"></div></div>
+    </div>
   </div>
-</div>
-
+</main>
+<script src="assets/app.js"></script>
+<script src="assets/admin.js"></script>
+<script src="assets/workspace.js"></script>
 <script>
-  const params = new URLSearchParams(window.location.search);
-  const runId = params.get('id');
+Borg.ready(function () {
+  'use strict';
+  var B = window.Borg, W = window.BorgWork, A = window.BorgAdmin, h = A.h;
+  var runId = new URLSearchParams(location.search).get('id');
+  var data = null, laneMode = null, modelLocal = {}, selected = 'plan', showRaw = false;
+  var source = null, refreshTimer = null, tickTimer = null;
 
-  // envelope_id -> <tr> element
-  const envRows = {};
-  let ateCount = 0;
+  if (!runId) { A.$('loading').textContent = 'No run chosen. Open one from the Runs page.'; return; }
 
-  if (!runId) {
-    document.getElementById('status').textContent = 'No run ID provided. Add ?id=<run_id> to the URL.';
-  } else {
-    // Initial load — populate header and events
-    fetch(`/runs/${runId}`)
-      .then(r => r.json())
-      .then(data => {
-        document.getElementById('status').style.display = 'none';
-        document.getElementById('content').style.display = 'block';
-
-        const run = data.run || {};
-        document.getElementById('run-id').textContent = run.run_id || runId;
-        document.getElementById('run-status').innerHTML = badge(run.status);
-        document.getElementById('run-created').textContent = run.created_at || '—';
-        document.getElementById('instruction').textContent = run.user_instruction || '—';
-
-        // Seed envelope table from initial snapshot
-        (data.envelopes || []).forEach(upsertEnvelopeRow);
-
-        // Events (static — populated once from initial fetch)
-        const eventsDiv = document.getElementById('events');
-        (data.events || []).forEach(ev => {
-          eventsDiv.appendChild(buildEventDiv(ev));
-        });
-        if (!data.events || data.events.length === 0) {
-          eventsDiv.innerHTML = '<p style="color:#555;font-size:0.85em;">No events yet.</p>';
-        }
-
-        // Start SSE stream for live updates
-        startStream(run.status);
-      })
-      .catch(err => {
-        document.getElementById('status').textContent = `Error loading run: ${err.message}`;
-      });
+  function isLocal(m) { return modelLocal[m]; }
+  function where(m) {
+    var l = modelLocal[m];
+    if (l === undefined) return h('span', {}, W.shortModel(m) || '-');
+    return h('span', {}, [W.shortModel(m) + ' ', h('span', { class: 'chip' }, [W.whereDot(l), l ? 'this machine' : 'cloud'])]);
+  }
+  function laneOn() {
+    return (data && data.outbound && data.outbound.length > 0) || !!(data && data.run && data.run.documents) ||
+      (laneMode !== null && laneMode !== 'off');
   }
 
-  function startStream(initialStatus) {
-    if (initialStatus === 'completed' || initialStatus === 'failed') {
-      setLiveBar(false, initialStatus);
+  // ---------- header ----------
+  function renderHeader() {
+    var run = data.run || {};
+    var status = run.status || '-';
+    var cls = status === 'completed' ? 'ok' : status === 'failed' ? 'bad' : 'run';
+    var words = { completed: 'Completed', failed: 'Failed', running: 'Running', pending: 'Waiting to start' };
+    A.clear(A.$('status-chip')).appendChild(h('span', { class: 'status ' + cls }, words[status] || status));
+    A.$('run-meta').textContent = B.dateTime(run.created_at) + ' · run ' + String(run.run_id || runId).slice(0, 8) + '…';
+    A.$('prompt').textContent = run.user_instruction || '-';
+    var pl = A.$('parent-line');
+    if (run.parent_run_id) {
+      A.clear(pl).appendChild(document.createTextNode('This run was started by a step of '));
+      pl.appendChild(h('a', { href: 'run.html?id=' + encodeURIComponent(run.parent_run_id) }, 'another run'));
+      pl.appendChild(document.createTextNode('.'));
+      pl.classList.remove('hidden');
+    } else pl.classList.add('hidden');
+
+    var f = status === 'failed' ? W.failureWords(run.failure_reason || 'failed') : null;
+    A.$('failure').classList.toggle('hidden', !f);
+    if (f) {
+      A.$('failure-words').textContent = f.words + (f.code ? ' (' + f.code + ')' : '');
+      A.$('failure-detail').textContent = f.detail;
+    }
+
+    var t = W.runTotals(data, isLocal);
+    var tiles = A.clear(A.$('tiles'));
+    function tile(k, v, sub) {
+      return h('div', { class: 'tile' }, [h('div', { class: 'k' }, k), h('div', { class: 'v num' }, v), sub ? h('div', { class: 'small muted' }, sub) : null]);
+    }
+    // Ruling 18: no baseline estimate line until its replacement exists (workspace.js).
+    var est = W.baselineEstimate(data);
+    tiles.appendChild(tile(t.cost !== null ? 'Cost' : 'Cost so far', B.money(t.cost !== null ? t.cost : t.costSoFar),
+      est ? est.label + ': ' + B.money(est.value) : (t.cost !== null ? 'Whole run, steps’ own runs included' : 'This run’s logged calls')));
+    var longest = 0;
+    W.stepsFromRun(data).forEach(function (s) { longest = Math.max(longest, s.latency_ms || 0); });
+    tiles.appendChild(tile('Time', B.duration(t.seconds), longest ? 'Longest step: ' + B.duration(longest / 1000) : null));
+    tiles.appendChild(tile('Steps', String(t.steps), t.calls + (t.calls === 1 ? ' model call' : ' model calls')));
+    tiles.appendChild(tile('Calls that left this machine', t.left === null ? '-' : String(t.left),
+      t.leftSource === 'ledger' ? 'From the lane’s record of every request'
+        : t.leftSource === 'calls' ? 'Calls to cloud models in this run' : 'Not recorded'));
+  }
+
+  // ---------- plan diagram ----------
+  function coreFigures(modes) {
+    var out = { model: null, dollars: 0, ms: 0, tokens: 0, calls: 0, events: [] };
+    (data.events || []).forEach(function (ev) {
+      if (ev.event_type !== 'orchestrator_decision') return;
+      var d = W.decisionOf(ev);
+      if (!d || modes.indexOf(d.mode) < 0) return;
+      out.events.push(ev);
+      out.model = out.model || ev.model_id;
+      out.calls += 1;
+      out.dollars += Number(ev.dollars) || 0;
+      out.ms += Number(ev.latency_ms) || 0;
+      out.tokens += (Number(ev.tokens_input) || 0) + (Number(ev.tokens_output) || 0);
+    });
+    return out;
+  }
+  function renderPlan() {
+    var steps = W.stepsFromRun(data);
+    var lay = W.planLayout(steps);
+    var running = !(data.run.status === 'completed' || data.run.status === 'failed');
+    var svg = W.svgEl('svg', { class: 'plan fixed', viewBox: '0 0 ' + lay.width + ' ' + lay.height, width: lay.width, height: lay.height,
+      role: 'img', 'aria-label': 'Plan diagram: plan, ' + steps.length + ' steps, compose' });
+    lay.edges.forEach(function (e) { svg.appendChild(W.svgEl('path', { class: 'edge', d: e.d })); });
+    var plan = coreFigures(['plan', 're_plan']), compose = coreFigures(['compose']);
+    lay.nodes.forEach(function (n) {
+      var cls = 'node' + (n.kind !== 'step' ? ' core' : '') + (selected === n.key ? ' sel' : '');
+      var s = n.step;
+      if (s && s.status === 'failed') cls += ' failed';
+      if (s && s.status === 'in_flight') cls += ' live';
+      var g = W.svgEl('g', { class: cls, tabindex: '0', role: 'button', 'data-key': n.key });
+      g.appendChild(W.svgEl('rect', { x: n.x, y: n.y, width: n.w, height: n.h }));
+      var x = n.x + 14, y = n.y;
+      function dotFor(model, cx, cy) {
+        var l = modelLocal[model];
+        if (l === undefined || !model) return;
+        g.appendChild(W.svgEl('circle', { class: l ? 'loc' : 'cld', cx: cx, cy: cy, r: 4 }));
+      }
+      if (n.kind !== 'step') {
+        var f = n.kind === 'plan' ? plan : compose;
+        g.appendChild(W.svgEl('text', { class: 't', x: x, y: y + 24 }, n.kind === 'plan' ? 'Plan' : 'Compose answer'));
+        if (f.model) {
+          dotFor(f.model, x + 4, y + 42);
+          g.appendChild(W.svgEl('text', { class: 'm', x: x + 14, y: y + 46 }, W.shortText(W.shortModel(f.model), 14)));
+          g.appendChild(W.svgEl('text', { class: 'c', x: n.x + n.w - 8, y: y + 46, 'text-anchor': 'end' }, B.money(f.dollars)));
+        } else {
+          g.appendChild(W.svgEl('text', { class: 'm', x: x, y: y + 46 }, running ? 'waiting' : 'no call recorded'));
+        }
+      } else {
+        g.appendChild(W.svgEl('text', { class: 't', x: x, y: y + 22 }, s.label));
+        var meta = [];
+        if (s.items) meta.push(s.items + ' items');
+        if (s.type === 'state_op') meta.push('no model needed');
+        else if (s.childRunId || (s.routing && s.routing.served_by === 'child_run')) meta.push('its own run');
+        if (s.task_type) meta.push(s.task_type);
+        if (s.tier) meta.push(s.tier);
+        g.appendChild(W.svgEl('text', { class: 'm', x: x, y: y + 39 }, W.shortText(meta.join(' · ') || s.type, 30)));
+        if (s.status === 'failed') {
+          g.appendChild(W.svgEl('text', { class: 'm bad', x: x, y: y + 63 }, 'Failed'));
+        } else if (s.model && s.type !== 'state_op') {
+          dotFor(s.model, x + 4, y + 59);
+          g.appendChild(W.svgEl('text', { class: 'm', x: x + 14, y: y + 63 }, W.shortText(W.shortModel(s.model), 13)));
+        }
+        var cost = s.status === 'in_flight' ? 'running' : B.money(s.dollars) + (s.latency_ms !== null ? ' · ' + B.duration(s.latency_ms / 1000) : '');
+        g.appendChild(W.svgEl('text', { class: 'c', x: n.x + n.w - 8, y: y + 63, 'text-anchor': 'end' }, cost));
+      }
+      function pick() { selected = n.key; showRaw = false; renderPlan(); renderPanel(); }
+      g.addEventListener('click', pick);
+      g.addEventListener('keydown', function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pick(); } });
+      svg.appendChild(g);
+    });
+    A.clear(A.$('plan-box')).appendChild(svg);
+  }
+
+  // ---------- side panel ----------
+  function kv(rows) {
+    var dl = h('dl', { class: 'kv' });
+    rows.forEach(function (r) { if (r) { dl.appendChild(h('dt', {}, r[0])); dl.appendChild(h('dd', r[2] ? { class: r[2] } : {}, r[1])); } });
+    return dl;
+  }
+  function leftFor(step) {
+    var rows = (data.outbound || []).filter(function (o) { return o.envelope_id === step.envelope.envelope_id; });
+    if (rows.length) return 'Yes: ' + rows.length + (rows.length === 1 ? ' request' : ' requests') + ' (listed below)';
+    if ((data.outbound || []).length) return 'No';
+    var l = modelLocal[step.model];
+    if (step.type === 'state_op') return 'No (no model call)';
+    if (l === true) return 'No (a model on this machine)';
+    if (l === false) return 'Yes (a cloud model)';
+    return 'Not recorded';
+  }
+  function whyTable(routing) {
+    var cands = Array.isArray(routing.candidates) ? routing.candidates : [];
+    if (!cands.length) return h('p', { class: 'small muted' }, 'No candidate list was recorded for this step.');
+    var floor = routing.floor;
+    var rows = cands.map(function (c) {
+      var won = c.model_id === routing.chosen;
+      var note = won ? (routing.reason === 'routed' ? 'Chosen: cheapest that clears ' + floor
+        : routing.reason === 'planner_pick' ? 'Chosen: the planner named it' : 'Chosen') : '';
+      var l = modelLocal[c.model_id];
+      var name = h('span', {}, [l !== undefined ? W.whereDot(l) : null, ' ' + W.shortModel(c.model_id)]);
+      name.setAttribute('title', c.model_id);
+      return h('tr', won ? { class: 'win' } : {}, [A.td(name), A.td(c.score === null || c.score === undefined ? '-' : String(c.score), 'num'),
+        A.td(B.money(c.est_dollars !== undefined ? c.est_dollars : c.est_cost), 'num'), A.td(note)]);
+    });
+    var t = A.table(['Model', 'Score', 'Est. cost', ''], rows);
+    var box = h('div', {}, [h('h3', { style: 'margin-bottom:6px' }, 'Why this model'), t]);
+    if (routing.reason === 'fallback_default') box.appendChild(h('p', { class: 'small muted', style: 'margin:6px 0 0' }, 'No ticked model cleared the bar, so the run’s default model was used.'));
+    if (routing.local_only) box.appendChild(h('p', { class: 'small muted', style: 'margin:6px 0 0' }, 'This step reads raw documents, so only models on this machine were offered.'));
+    (Array.isArray(routing.notes) ? routing.notes : []).forEach(function (n) { box.appendChild(h('p', { class: 'small muted', style: 'margin:4px 0 0' }, String(n))); });
+    box.appendChild(h('p', { class: 'small muted', style: 'margin:6px 0 0' }, 'Costs in this table are estimates made before the step ran.'));
+    return box;
+  }
+  function rawSwitch(obj) {
+    var btn = h('button', { class: 'btn', type: 'button', 'aria-expanded': String(showRaw) }, showRaw ? 'Hide details' : 'Details (raw record)');
+    var wrap = h('div', {}, btn);
+    if (showRaw) {
+      var text;
+      try { text = JSON.stringify(obj, null, 2); } catch (_) { text = String(obj); }
+      wrap.appendChild(h('pre', { class: 'raw', style: 'margin-top:8px' }, text));
+    }
+    btn.addEventListener('click', function () { showRaw = !showRaw; renderPanel(); });
+    return wrap;
+  }
+  function renderPanel() {
+    var panel = A.clear(A.$('panel'));
+    if (selected === 'plan' || selected === 'compose') {
+      var f = coreFigures(selected === 'plan' ? ['plan', 're_plan'] : ['compose']);
+      panel.appendChild(h('div', {}, [h('h3', {}, 'Step'), h('h2', {}, selected === 'plan' ? 'Plan' : 'Compose answer')]));
+      panel.appendChild(h('p', { class: 'small muted', style: 'margin:0' }, selected === 'plan'
+        ? 'The planner splits the job into steps and, after they run, may add more.'
+        : 'The planner model writes the final answer from the steps’ results.'));
+      panel.appendChild(kv([
+        ['Model', f.model ? where(f.model) : 'No call recorded yet'],
+        ['Calls', String(f.calls), 'num'],
+        ['Cost, time', B.money(f.dollars) + ' · ' + B.duration(f.ms / 1000) + ' · ' + f.tokens.toLocaleString() + ' tokens', 'num']
+      ]));
+      panel.appendChild(rawSwitch(f.events));
       return;
     }
-
-    const es = new EventSource(`/runs/${runId}/stream`);
-    setLiveBar(true, 'live');
-
-    es.onmessage = (e) => {
-      let msg;
-      try { msg = JSON.parse(e.data); } catch { return; }
-
-      if (msg.type === 'envelope_update') {
-        upsertEnvelopeRow(msg.envelope);
-      } else if (msg.type === 'run_terminal') {
-        document.getElementById('run-status').innerHTML = badge(msg.status);
-        setLiveBar(false, msg.status);
-        es.close();
-      } else if (msg.type === 'error') {
-        setLiveBar(false, 'error');
-        es.close();
+    var step = W.stepsFromRun(data).filter(function (s) { return 'step:' + s.id === selected; })[0];
+    if (!step) { selected = 'plan'; return renderPanel(); }
+    panel.appendChild(h('div', {}, [h('h3', {}, 'Step ' + step.id), h('h2', {}, W.shortText(step.instruction || step.label, 120))]));
+    var r = step.routing || {};
+    var f2 = step.failure ? W.failureWords(step.failure) : null;
+    var child = step.childRunId ? h('a', { href: 'run.html?id=' + encodeURIComponent(step.childRunId) }, 'Open its run') : null;
+    panel.appendChild(kv([
+      ['Model', step.type === 'state_op' ? 'No model needed' : r.served_by === 'child_run' ? h('span', {}, ['This step ran as its own run, which chose its own models. ', child]) : where(step.model)],
+      ['Kind of work', [step.task_type, step.tier].filter(Boolean).join(', ') || '-'],
+      r.floor !== undefined && r.floor !== null ? ['Needed score', r.floor + ' or more', 'num'] : null,
+      step.items ? ['Items', step.items + ' (one call each)', 'num'] : null,
+      ['Cost, time', B.money(step.dollars) + ' · ' + (step.latency_ms === null ? '-' : B.duration(step.latency_ms / 1000)) +
+        ' · ' + (step.tokens === null ? '-' : step.tokens.toLocaleString() + ' tokens'), 'num'],
+      ['Input left this machine', leftFor(step)],
+      step.dataScope === 'raw' ? ['Reads', 'Raw documents'] : null,
+      ['Status', step.status === 'resolved' ? 'Done' : step.status === 'failed' ? 'Failed' : step.status === 'in_flight' ? 'Running' : String(step.status || '-')],
+      f2 ? ['Why it failed', f2.words + (f2.code ? ' (' + f2.code + ')' : '') + (f2.detail ? ' ' + f2.detail : '')] : null
+    ]));
+    if (r.served_by === 'child_run') {
+      var kids = (data.child_envelopes || []).filter(function (e) { return e.run_id === step.childRunId; });
+      if (kids.length) {
+        panel.appendChild(h('div', {}, [h('h3', { style: 'margin-bottom:6px' }, 'Its steps'),
+          A.table(['Model', 'Status'], kids.map(function (e) { return h('tr', {}, [A.td(where(e.model_id)), A.td(e.status || '-')]); })),
+          h('p', { class: 'small muted', style: 'margin:6px 0 0' }, 'Their cost is already inside this run’s total.')]));
       }
-    };
-
-    es.onerror = () => {
-      setLiveBar(false, 'disconnected');
-      es.close();
-    };
+    } else if (step.routing) {
+      panel.appendChild(whyTable(step.routing));
+    }
+    panel.appendChild(rawSwitch(step.envelope));
   }
 
-  function upsertEnvelopeRow(env) {
-    const tbody = document.getElementById('envelope-body');
-    const placeholder = tbody.querySelector('td[colspan]');
-    if (placeholder) placeholder.parentElement.remove();
-
-    let childRunId = null;
-    if (env.type === 'orchestrate' && env.inbound_payload) {
-      try {
-        const inbound = JSON.parse(env.inbound_payload);
-        childRunId = inbound.output?.child_run_id || null;
-      } catch(e) {}
-    }
-    const childCell = childRunId
-      ? `<a href="/ui/run.html?id=${childRunId}" style="font-family:monospace;font-size:0.78em;color:#88aaff;">${childRunId.slice(0,8)}…</a>`
-      : '—';
-
-    const cells = [
-      `<td>${env.level_path || '—'}</td>`,
-      `<td>${env.type || '—'}</td>`,
-      `<td>${env.skill_id || '—'}</td>`,
-      `<td>${env.trigger_reason || '—'}</td>`,
-      `<td>${env.model_id || '—'}</td>`,
-      `<td>${env.tokens_input ?? '—'}</td>`,
-      `<td>${env.tokens_output ?? '—'}</td>`,
-      `<td class="status-cell">${badge(env.status)}</td>`,
-      `<td>${childCell}</td>`,
-    ].join('');
-
-    const eid = env.envelope_id;
-    if (envRows[eid]) {
-      envRows[eid].innerHTML = cells;
-    } else {
-      const tr = document.createElement('tr');
-      tr.innerHTML = cells;
-      tbody.appendChild(tr);
-      envRows[eid] = tr;
-      // Update counters
-      document.getElementById('env-count').textContent = Object.keys(envRows).length;
-      if (env.type === 'apply_to_each') {
-        ateCount++;
-        document.getElementById('ate-count').textContent = ateCount;
+  // ---------- timeline and what left ----------
+  function renderTimeline() {
+    var ol = A.clear(A.$('timeline'));
+    var items = W.eventSentences(data);
+    if (!items.length) ol.appendChild(h('li', {}, [h('span', { class: 'at' }, '-'), h('span', {}, 'Nothing recorded yet.')]));
+    items.forEach(function (it) { ol.appendChild(h('li', {}, [h('span', { class: 'at' }, it.at), h('span', {}, it.text)])); });
+  }
+  var PURPOSE = { 'orchestrator:plan': 'Your request (and the file list, if any), for the planner', 'orchestrator:re_plan': 'Step results, for the planner',
+    'orchestrator:compose': 'Step results, for the final answer', 'orchestrator:rule_zero_shortcut': 'Your request, answered in one call',
+    answerer: 'A step’s request', bypass: 'A direct question', relay: 'A direct question', tool: 'A tool call (such as a web search)' };
+  function renderLeft() {
+    var card = A.$('left-card');
+    card.classList.toggle('hidden', !laneOn());
+    if (!laneOn()) return;
+    var box = A.clear(A.$('left-list'));
+    var rows = data.outbound || [];
+    if (!rows.length) { box.appendChild(h('p', { class: 'small muted', style: 'margin:0' }, 'Nothing left this machine for this run.')); return; }
+    var hasBodies = rows.some(function (o) { return typeof o.body === 'string'; });
+    box.appendChild(A.table(['To', 'What was sent', 'Size', 'Status'], rows.map(function (o) {
+      var what = h('div', {}, PURPOSE[o.purpose] || String(o.purpose || 'A request'));
+      if (typeof o.body === 'string') {
+        var det = h('details', {}, [h('summary', { class: 'small' }, 'Read exactly what was sent'), h('pre', { class: 'raw' }, o.body)]);
+        what.appendChild(det);
       }
-    }
+      var size = typeof o.body === 'string' ? o.body.length.toLocaleString() + ' chars' : '-';
+      var st = o.status === 'sent' ? 'Sent' + (o.http_status ? ' (' + o.http_status + ')' : '') : o.status === 'failed' ? 'Failed' : 'Not finished';
+      return h('tr', {}, [A.td(W.shortModel(o.destination) || o.url || '-'), A.td(what), A.td(size, 'num'), A.td(st)]);
+    })));
+    box.appendChild(h('p', { class: 'small muted', style: 'margin:10px 0 0' }, hasBodies
+      ? 'Open any row to read exactly what was sent.'
+      : 'The text of each request is shown to the admin only. Enter the admin token on an Admin page, then reload.'));
   }
 
-  function buildEventDiv(ev) {
-    const div = document.createElement('div');
-    div.className = 'event-row ' + (ev.event_type || '');
-    let decision = '';
-    if (ev.decision_json) {
-      try { decision = JSON.stringify(JSON.parse(ev.decision_json), null, 2); }
-      catch { decision = ev.decision_json; }
-    }
-    div.innerHTML = `
-      <strong>${ev.event_type || '—'}</strong>
-      <span class="event-time"> ${ev.created_at || ''}</span>
-      ${ev.model_id ? `<span style="color:#555"> · ${ev.model_id}</span>` : ''}
-      ${decision ? `<div class="decision">${htmlEscape(decision)}</div>` : ''}
-    `;
-    return div;
+  function renderAll() {
+    A.$('loading').classList.add('hidden');
+    A.$('content').classList.remove('hidden');
+    renderHeader(); renderPlan(); renderPanel(); renderTimeline(); renderLeft();
   }
 
-  function setLiveBar(isLive, label) {
-    const dot = document.getElementById('live-dot');
-    dot.className = isLive ? 'live' : '';
-    document.getElementById('live-label').textContent =
-      isLive ? 'Live' : (label === 'completed' ? 'Completed' : label === 'failed' ? 'Failed' : label || 'Stopped');
+  // ---------- loading and live updates ----------
+  function fetchRun() {
+    return B.api('/runs/' + encodeURIComponent(runId), { quiet: true }).then(function (d) {
+      data = d; renderAll(); return d;
+    }, function (err) {
+      if (!data) A.$('loading').textContent = err && err.status === 404 ? 'No run with this id.' : 'Could not load the run: ' + A.errorMessage(err);
+      return null;
+    });
+  }
+  function scheduleRefresh() {
+    if (refreshTimer) return;
+    refreshTimer = setTimeout(function () { refreshTimer = null; fetchRun(); }, 400);
+  }
+  function stopLive() {
+    if (source) { source.close(); source = null; }
+    if (tickTimer) { clearInterval(tickTimer); tickTimer = null; }
+    A.$('live').classList.add('hidden');
+  }
+  function startLive() {
+    if (!data || data.run.status === 'completed' || data.run.status === 'failed' || source || !window.EventSource) return;
+    A.$('live').classList.remove('hidden');
+    source = new EventSource('/runs/' + encodeURIComponent(runId) + '/stream');
+    source.onmessage = function (e) {
+      var msg;
+      try { msg = JSON.parse(e.data); } catch (_) { return; }
+      if (msg.type === 'envelope_update') scheduleRefresh();
+      else if (msg.type === 'run_terminal' || msg.type === 'error') { stopLive(); fetchRun(); }
+    };
+    // The stream closes itself after 90 s: reconnect while the run is still going.
+    source.onerror = function () {
+      stopLive();
+      fetchRun().then(function (d) { if (d) setTimeout(startLive, 1500); });
+    };
+    tickTimer = setInterval(function () { if (data) renderHeader(); }, 1000);
   }
 
-  function badge(status) {
-    if (!status) return '—';
-    return `<span class="badge ${status}">${status}</span>`;
-  }
-
-  function htmlEscape(str) {
-    return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-  }
+  Promise.all([
+    B.api('/config/effective', { quiet: true }).catch(function () { return null; }),
+    B.api('/models/matrix', { quiet: true }).catch(function () { return null; })
+  ]).then(function (r) {
+    var lane = r[0] && (r[0].settings || []).filter(function (s) { return s.key === 'lane_mode'; })[0];
+    laneMode = lane ? String(lane.value) : null;
+    (r[1] || []).forEach(function (m) { modelLocal[m.model_id] = A.isLocalModel(m); });
+    return fetchRun();
+  }).then(function (d) { if (d) startLive(); });
+});
 </script>
 </body>
 </html>

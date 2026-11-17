@@ -162,3 +162,20 @@ textarea.wide, input.wide { width: 100%; border: 1px solid var(--line); border-r
 .clip { max-width: 360px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .score { text-align: right; } .score.dim { color: var(--ink-3); }
 @media (max-width: 860px) { .setting { grid-template-columns: 1fr; } }
+
+/* ---------- Workspace pages (4.2) ---------- */
+.plan.fixed { width: auto; min-width: 0; max-width: none; }
+.plan .node { cursor: pointer; }
+.plan .node.failed rect { stroke: var(--bad); }
+.plan .node.live rect { stroke-dasharray: 4 3; }
+.plan .bad { fill: var(--bad); }
+.legend .dot { display: inline-block; vertical-align: middle; }
+.prompt { white-space: pre-wrap; overflow-wrap: anywhere; margin: var(--s1) 0 0; }
+.bubble { white-space: pre-wrap; overflow-wrap: anywhere; }
+.answer.md { overflow-wrap: anywhere; }
+pre.raw { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 420px; overflow: auto; background: var(--surface-2); padding: var(--s3); border-radius: var(--radius-sm); font-family: var(--mono); font-size: 12px; margin: 0; }
+.thumbs .btn[aria-pressed="true"] { border-color: var(--brand); background: var(--brand-soft); }
+.composer .docs { display: flex; gap: var(--s2); align-items: center; flex-wrap: wrap; margin-top: var(--s2); }
+.composer .docs input { border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface); padding: 6px var(--s3); min-width: 0; flex: 1 1 200px; }
+.btn:disabled { opacity: .55; cursor: not-allowed; }
+.failure { border-left: 3px solid var(--bad); }

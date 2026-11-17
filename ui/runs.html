@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Runs - BORG_ROUTE</title>
+<link rel="stylesheet" href="assets/app.css">
+</head>
+<body>
+<main id="page" data-page="runs" class="stack">
+  <div class="row"><h1>Runs</h1><span class="muted small" id="counts"></span></div>
+  <div class="card">
+    <div class="row" style="margin-bottom:8px">
+      <label class="small muted"><input type="checkbox" id="bypass"> Include direct-to-model questions (no plan, one model)</label>
+      <span style="flex:1"></span>
+      <button class="btn" type="button" id="reload">Reload</button>
+    </div>
+    <div id="list"><p class="muted small">Loading...</p></div>
+  </div>
+</main>
+<script src="assets/app.js"></script>
+<script src="assets/admin.js"></script>
+<script>
+Borg.ready(function () {
+  'use strict';
+  var B = window.Borg, A = window.BorgAdmin, h = A.h;
+  var WORDS = { completed: 'Completed', failed: 'Failed', running: 'Running', pending: 'Waiting' };
+
+  function load() {
+    var withBypass = A.$('bypass').checked;
+    B.api('/runs?limit=200' + (withBypass ? '&include_bypass=true' : ''), { quiet: true }).then(function (res) {
+      var runs = (res && res.runs) || [], c = (res && res.counts) || {};
+      A.$('counts').textContent = (c.total || 0) + ' runs · ' + (c.completed || 0) + ' completed · ' + (c.failed || 0) + ' failed' +
+        ((c.thumbs_up || c.thumbs_down) ? ' · ' + (c.thumbs_up || 0) + ' 👍 ' + (c.thumbs_down || 0) + ' 👎' : '');
+      var box = A.clear(A.$('list'));
+      if (!runs.length) { box.appendChild(h('p', { class: 'muted small' }, 'No runs yet. Ask a question on the Ask page.')); return; }
+      box.appendChild(A.table(['When', 'Question', 'Status', 'Rating', ''], runs.map(function (r) {
+        var kind = r.kind === 'bypass' ? A.chip('direct', '') : null;
+        var st = A.statusChip(r.status);
+        st.textContent = WORDS[r.status] || r.status || '-';
+        var rating = r.user_rating === 1 ? '👍' : r.user_rating === -1 ? '👎' : '';
+        return h('tr', {}, [
+          A.td(B.dateTime(r.created_at), 'num'),
+          A.td(h('div', { class: 'clip', title: r.user_instruction || '' }, [kind, kind ? ' ' : null, A.short(r.user_instruction, 100)])),
+          A.td(st), A.td(rating),
+          A.td(h('a', { href: 'run.html?id=' + encodeURIComponent(r.run_id) }, 'Open'))
+        ]);
+      })));
+    }, function (err) {
+      A.clear(A.$('list')).appendChild(h('p', { class: 'muted small' }, 'Could not load the runs: ' + A.errorMessage(err)));
+    });
+  }
+  A.$('bypass').addEventListener('change', load);
+  A.$('reload').addEventListener('click', load);
+  load();
+});
+</script>
+</body>
+</html>

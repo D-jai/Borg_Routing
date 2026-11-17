@@ -64,7 +64,11 @@ function load(opts) {
     vm.runInContext(fs.readFileSync(path.join(ROOT, 'vendor', f), 'utf8'), ctx, { filename: f });
   }
   vm.runInContext(fs.readFileSync(path.join(ROOT, 'app.js'), 'utf8'), ctx, { filename: 'app.js' });
-  return { Borg: sandbox.Borg, window: sandbox, doc };
+  // opts.extra: more files from ui/assets/ loaded after app.js (e.g. 'workspace.js').
+  for (const f of opts.extra || []) {
+    vm.runInContext(fs.readFileSync(path.join(ROOT, f), 'utf8'), ctx, { filename: f });
+  }
+  return { Borg: sandbox.Borg, BorgWork: sandbox.BorgWork, window: sandbox, doc };
 }
 
 module.exports = { load, FakeEl };
