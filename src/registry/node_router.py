@@ -132,6 +132,12 @@ def _estimate_input_tokens(node: dict, extra_input_tokens: int = 0) -> int:
     return max(_MIN_EST_INPUT_TOKENS, len(text) // 4 + int(extra_input_tokens or 0))
 
 
+def tokens_needed(node: dict, extra_input_tokens: int = 0) -> int:
+    """The context window a step needs: its input estimate (the same one
+    ``select_model_for_node`` makes) plus the output estimate."""
+    return _estimate_input_tokens(node, extra_input_tokens) + _EST_OUTPUT_TOKENS
+
+
 def local_view(matrix: CapabilityMatrix, keep: Callable[[ModelInfo], bool]) -> CapabilityMatrix:
     """A throw-away matrix holding only the rows ``keep`` accepts.
 

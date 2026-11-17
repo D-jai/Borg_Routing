@@ -381,24 +381,34 @@ def _skl_008(skill_id: str, why: str) -> RuntimeError:
 def _coerce_arg(skill_id: str, name: str, hint: object, value: object) -> object:
     """An arg in the shape its hint names.
 
-    A ``list[...]`` arg given as a string is a JSON list or a comma list
-    ("billing, sales"); a ``dict`` arg given as a string is parsed as JSON.
+    A ``list[...]`` arg given as a string is JSON when it looks like JSON
+    (starts with ``[`` or ``{``), else a comma list ("billing, sales"). A
+    JSON object is kept for a ``list[dict]`` arg (``fields``, ``criteria``:
+    name -> type or spec), never split on its commas. A ``dict`` arg given
+    as a string is parsed as JSON.
 
     Raises:
-        RuntimeError: BRT-SKL-008 on an empty comma entry or invalid JSON.
+        RuntimeError: BRT-SKL-008 on an empty comma entry, invalid JSON in an
+            arg that looks like JSON, or a JSON value of a shape the hint
+            cannot take.
     """
     hint_s = str(hint).replace(" ", "").lower()
     if not isinstance(value, str):
         return value
     text = value.strip()
     if hint_s.startswith("list"):
-        if text.startswith("["):
+        if text[:1] in ("[", "{"):
             try:
                 parsed = json.loads(text)
-            except ValueError:
-                parsed = None
+            except ValueError as exc:
+                raise _skl_008(skill_id, f"arg '{name}' looks like JSON but is not "
+                                         f"valid JSON: {exc}") from exc
             if isinstance(parsed, list):
                 return parsed
+            if isinstance(parsed, dict) and "dict" in hint_s:
+                return parsed
+            raise _skl_008(skill_id, f"arg '{name}' ({hint}) must be a JSON list, "
+                                     f"got {value!r}")
         if not text:
             return []
         parts = [p.strip() for p in text.split(",")]
@@ -521,9 +531,17 @@ def _concurrency_limit(skill_id: str, raw: object, values: dict) -> int:
     try:
         if isinstance(value, bool):
             raise ValueError
-        limit = int(str(value).strip()) if not isinstance(value, int) else value
-    except (ValueError, TypeError):
-        raise _skl_008(skill_id, f"concurrency_limit {value!r} is not an integer") from None
+        if isinstance(value, int):
+            limit = value
+        else:
+            # A whole-number float (12.0, "12.0") is 12; 2.5, "nan" or
+            # "inf" is not a whole number.
+            number = float(str(value).strip())
+            if not number.is_integer():
+                raise ValueError
+            limit = int(number)
+    except (ValueError, TypeError, OverflowError):
+        raise _skl_008(skill_id, f"concurrency_limit {value!r} is not a whole number") from None
     if limit < 1:
         raise _skl_008(skill_id, f"concurrency_limit {limit} must be at least 1")
     return limit

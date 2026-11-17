@@ -108,6 +108,7 @@ from src.registry.node_router import (
     fallback_decision,
     local_view,
     select_model_for_node,
+    tokens_needed,
 )
 from src.registry.router import select_model
 from src.skills.library import SkillLibrary
@@ -1187,16 +1188,19 @@ def _node_reads_documents(node: dict) -> bool:
     """True when a plan node names the run's documents (by id or as a set).
 
     ``"inputs_ref": "documents"`` is a reserved word for the document set,
-    never a step id; a skill names it through ``items_ref``. A ``data_scope``
-    key written on the node is ignored: the runtime decides (design note 5.2).
+    never a step id; a skill names it through any ``*_ref`` arg
+    (``items_ref``, ``evidence_ref``, ``failed_items_ref`` ...) or
+    ``inputs_ref``. A ``data_scope`` key written on the node is ignored: the
+    runtime decides (design note 5.2).
     """
     if node.get("documents"):
         return True
     if node.get("inputs_ref") == _DOCUMENTS_REF:
         return True
     skill_args = node.get("skill_args") or {}
-    return isinstance(skill_args, dict) and _DOCUMENTS_REF in (
-        skill_args.get("items_ref"), skill_args.get("inputs_ref")
+    return isinstance(skill_args, dict) and any(
+        (str(key).endswith("_ref") or key == "inputs_ref") and value == _DOCUMENTS_REF
+        for key, value in skill_args.items()
     )
 
 
@@ -1339,6 +1343,47 @@ def _answerer_skill_data(
             return [], f"{label} for this step: none (step '{ref}' produced no entries)."
         return [], _numbered(label, entries)
     raise _fail(f"no data: give the items inline or set {ref_key} to a step id")
+
+
+def _skill_data_size(
+    node: dict,
+    skill: Optional[dict],
+    results: dict,
+    lane: Optional[LaneContext],
+) -> tuple[bool, int]:
+    """(reads data, extra input tokens) for an answerer skill step whose data
+    the engine writes into its context (compare_and_rank, verify_claim).
+
+    The extra tokens are the context text built from an earlier step's output
+    (``len // 4``, the router's own estimate); inline items are already in
+    the step's ``skill_args``, which the router counts, so they add nothing
+    here. Documents are counted by ``_doc_tokens``. A step whose data cannot
+    be built adds nothing: the build fails it loudly (BRT-SKL-008).
+    """
+    if skill is None or not node.get("skill_id") or not _skill_reads_data(skill):
+        return False, 0
+    inline = _inline_items(node)
+    try:
+        docs, text = _answerer_skill_data(
+            node, skill, node.get("skill_args") or {}, inline, results, lane
+        )
+    except Exception:
+        return False, 0
+    if inline is not None:
+        return True, 0
+    return bool(docs or text), len(text) // 4
+
+
+def data_too_big_message(need: int, largest: int) -> str:
+    """BRT-REG-020 failure text for a step whose data fits no checked model.
+
+    Guidance first, so all of it fits the 200 characters re_plan is shown.
+    """
+    return (
+        f"BRT-REG-020: this step's data needs ~{need} tokens with its answer; no "
+        f"checked model's context holds it (largest {largest}). No model call was "
+        f"made. Send fewer or shorter entries."
+    )
 
 
 def _failed_step(ref: object, results: dict) -> bool:
@@ -1497,12 +1542,25 @@ def _node_document_ids(node: dict, lane: LaneContext) -> list[str]:
     return lane.all_part_ids()
 
 
-def _doc_tokens(node: dict, part_ids: list[str], lane: Optional[LaneContext]) -> int:
+def _doc_tokens(
+    node: dict,
+    part_ids: list[str],
+    lane: Optional[LaneContext],
+    skill: Optional[dict] = None,
+) -> int:
     """Token estimate of the document text a raw step reads: the largest part
-    for a per-item step, all of them for a step that reads them together."""
+    for a per-item step, all of them for a step that reads them together (a
+    node naming ``documents``, or an answerer skill such as verify_claim
+    whose ``*_ref`` is ``documents``: one call sees every part)."""
     if lane is None or not part_ids:
         return 0
-    per_item = node.get("type") == "apply_to_each" or not node.get("documents")
+    if skill is not None:
+        per_item = (
+            skill.get("envelope_type") == "apply_to_each"
+            or node.get("type") == "apply_to_each"
+        )
+    else:
+        per_item = node.get("type") == "apply_to_each" or not node.get("documents")
     if per_item:
         return max(lane.chars_of([p]) for p in part_ids) // 4
     return lane.chars_of(part_ids) // 4
@@ -1538,6 +1596,46 @@ async def _lane_refuse_node(
             "error",
             run_id=run_id,
             decision={"code": code, "msg": message, "node_id": node_id, "doc": failure["doc"]},
+            db_path=db_path,
+        )
+    except Exception:
+        pass
+
+
+async def _fail_step_before_call(
+    results: dict,
+    raw_unstamped: Optional[set],
+    run_id: UUID,
+    node_id: str,
+    code: str,
+    message: str,
+    part_ids: list[str],
+    db_path: str,
+    raw: bool,
+) -> None:
+    """Fail one step before routing or any model call.
+
+    A raw step fails the lane's way (a code plus document ids upward, the
+    message in the local trace); any other step carries the message, which
+    re_plan sees.
+    """
+    if raw:
+        await _lane_refuse_node(
+            results, raw_unstamped, run_id, node_id, code, message, part_ids, db_path,
+        )
+        return
+    results[node_id] = InboundEnvelope(
+        envelope_id=uuid4(),
+        subtask_id=uuid4(),
+        status="failed",
+        output={},
+        failure_reason=message,
+    )
+    try:
+        await write_event(
+            "error",
+            run_id=run_id,
+            decision={"code": code, "msg": message, "node_id": node_id},
             db_path=db_path,
         )
     except Exception:
@@ -2328,17 +2426,42 @@ async def _orchestrate_run(
             if node.get("type", "answerer") != "state_op":
                 node_skill = await _skill_for_node(node, run_id, node_id, db_path)
                 lane_kwargs: dict = {}
+                extra_tokens = 0
                 if local_only:
                     lane_kwargs["local_filter"] = local_filter
                 if local_only or raw:
                     # The document text the step reads counts toward its size
                     # (by_reference too, where any checked model may serve it).
-                    lane_kwargs["extra_input_tokens"] = _doc_tokens(node, node_docs, lane)
+                    extra_tokens += _doc_tokens(node, node_docs, lane, node_skill)
+                # An answerer skill's data (compare_and_rank, verify_claim)
+                # goes into its context: its size counts before routing, and
+                # a step no checked model can hold fails here, before any
+                # call (BRT-REG-020); it is never truncated.
+                reads_data, data_tokens = _skill_data_size(node, node_skill, results, lane)
+                extra_tokens += data_tokens
+                if extra_tokens:
+                    lane_kwargs["extra_input_tokens"] = extra_tokens
+                route_matrix = matrix
+                need: Optional[int] = None
+                if reads_data:
+                    need = tokens_needed(node, extra_tokens)
+                    checked = [m for m in matrix.all() if m.checked]
+                    if not any((m.context_length or 0) >= need for m in checked):
+                        largest = max((m.context_length or 0 for m in checked), default=0)
+                        await _fail_step_before_call(
+                            results, raw_unstamped if raw else None, run_id, node_id,
+                            "BRT-REG-020", data_too_big_message(need, largest),
+                            node_docs, db_path, raw,
+                        )
+                        continue
+                    route_matrix = local_view(
+                        matrix, lambda m, need=need: (m.context_length or 0) >= need
+                    )
                 try:
                     step_model, route_decision = select_model_for_node(
                         node=node,
                         skill=node_skill,
-                        matrix=matrix,
+                        matrix=route_matrix,
                         floors=leaf_floors,
                         time_cost_per_sec=time_cost,
                         default_model=default_model,
@@ -2369,6 +2492,17 @@ async def _orchestrate_run(
                         error=f"routing failed: {exc}",
                         run_options=_route_options.get(),
                     )
+                if need is not None and (step_model.context_length or 0) < need:
+                    # The run's default model (no fitting model cleared the
+                    # floor) cannot hold the data either: fail, never truncate.
+                    largest = max((m.context_length or 0 for m in matrix.all() if m.checked),
+                                  default=0)
+                    await _fail_step_before_call(
+                        results, raw_unstamped if raw else None, run_id, node_id,
+                        "BRT-REG-020", data_too_big_message(need, largest),
+                        node_docs, db_path, raw,
+                    )
+                    continue
 
             try:
                 task = _build_task_from_node(
