@@ -47,6 +47,7 @@ Error codes:
 - BRT-ORC-030: compose gave no final text twice; the answer is the finished
                steps' results with a note, runs.answer_kind = "salvaged"
                (warning; the run completes)
+- BRT-ORC-031: compose returned action=fail; its rationale is the answer (answer_kind "declined").
 
 On-premise lane (docs/design/on_premise_lane.md; on only when the run has a
 lane context, see src/lane/context.py):
@@ -3199,7 +3200,7 @@ async def _handle_compose_result(
                 "orchestrator_decision",
                 run_id=run_id,
                 decision={
-                    "code": "BUG-020-COMPOSE-DECLINED",
+                    "code": "BRT-ORC-031",
                     "msg": "compose returned action=fail; surfacing rationale to user",
                     "rationale": rationale,
                 },

@@ -328,3 +328,28 @@ def test_the_left_card_shows_whenever_the_ledger_has_rows(tmp_path):
     assert card("raw_local", 0)["show"] is True        # the lane ran: an empty list is a real answer
     assert card(None, 0)["show"] is False
     assert card(None, 0, docs="[1]")["show"] is True
+
+
+# ---------- stage and decision codes in plain words (5.3 review) ----------
+
+def test_every_known_stage_has_plain_words_and_an_unknown_one_reads_working(tmp_path):
+    out = raw(tmp_path, """
+    const known = ['plan', 're_plan', 'compose', 'route', 'rule_zero_shortcut', 'bypass', 'orchestrator',
+      'BRT-ORC-018', 'BRT-ORC-028', 'BRT-ORC-029', 'BRT-ORC-030', 'BRT-ORC-031', 'BRT-ZERO-01-ESCALATED',
+      'BRT-APE-CAPPED', 'BRT-ORC-NO-FRONTIER'];
+    return {known: known.map(k => W.stageWords(k)),
+            odd: ['BUG-020-COMPOSE-DECLINED', 'something_new', '', null, undefined, 'toString'].map(k => W.stageWords(k))};
+    """)
+    assert all(w and "BRT" not in w and "_" not in w for w in out["known"])
+    assert out["odd"] == ["Working"] * 6
+
+
+def test_the_timeline_shows_words_for_a_decision_code_and_an_unknown_mode(tmp_path):
+    out = raw(tmp_path, """
+    const ev = (d) => ({event_type: 'orchestrator_decision', created_at: '2026-01-01T00:00:00Z', model_id: 'm/x',
+                        decision_json: JSON.stringify(d)});
+    const data = {run: {created_at: '2026-01-01T00:00:00Z'}, events: [
+      ev({code: 'BRT-ORC-031', msg: 'compose returned action=fail'}), ev({mode: 'weird_new_mode'}), ev({code: 'BUG-X'})]};
+    return W.eventSentences(data).map(s => s.text);
+    """)
+    assert out == ["The planner declined to answer.", "The planner recorded a decision.", "Working."]

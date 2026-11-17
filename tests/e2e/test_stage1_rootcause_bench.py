@@ -829,6 +829,7 @@ async def test_answer_kind_declined(env):
     assert result["status"] == "completed"
     assert result["response"] == "Cannot do that."
     assert await _answer_kind(db_path, result["run_id"]) == "declined"
+    assert "BRT-ORC-031" in await _codes(db_path, result["run_id"])
 
 
 @pytest.mark.asyncio

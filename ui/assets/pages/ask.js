@@ -135,8 +135,6 @@ Borg.ready(function () {
   }
 
   // ---------- stage progress ----------
-  var STAGE_WORDS = { plan: 'Planning the steps', re_plan: 'Reading the results', compose: 'Writing the answer',
-    route: 'Choosing a model for a step', rule_zero_shortcut: 'Answering in one call' };
   function stageLine() {
     var label = h('span', {}, 'Starting...');
     var clock = h('span', { class: 'num' }, '0:00');
@@ -146,7 +144,7 @@ Borg.ready(function () {
     return {
       node: node,
       set: function (stage, detail) {
-        var words = STAGE_WORDS[stage] || String(stage || 'Working').replace(/_/g, ' ');
+        var words = W.stageWords(stage);
         label.textContent = words + (detail && stage === 'route' ? ': ' + W.shortText(detail, 80) : '');
       },
       stop: function () { clearInterval(tick); }

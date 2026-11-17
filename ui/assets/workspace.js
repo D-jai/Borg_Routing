@@ -498,6 +498,22 @@
     return { code: code, words: (code && FAILURES[code]) || 'It failed.', detail: detail };
   }
 
+  /* Plain words for a stage or decision code, as the live Ask line and the Run timeline show it. A
+   * code with no entry reads "Working": never the raw code. */
+  var STAGE_WORDS = {
+    plan: 'Planning the steps', re_plan: 'Reading the results', compose: 'Writing the answer',
+    route: 'Choosing a model for a step', rule_zero_shortcut: 'Answering in one call', bypass: 'Answering directly',
+    orchestrator: 'Working',
+    'BRT-ORC-018': 'Retrying a reply that was cut off', 'BRT-ORC-028': 'Writing the answer',
+    'BRT-ORC-029': 'Asking for the answer once more', 'BRT-ORC-030': 'Putting the finished steps together',
+    'BRT-ORC-031': 'The planner declined to answer', 'BRT-ZERO-01-ESCALATED': 'Moving from one call to a plan',
+    'BRT-APE-CAPPED': 'Limiting a long list', 'BRT-ORC-NO-FRONTIER': 'Choosing a model for a step'
+  };
+  function stageWords(stage) {
+    var key = stage === null || stage === undefined ? '' : String(stage);
+    return Object.prototype.hasOwnProperty.call(STAGE_WORDS, key) ? STAGE_WORDS[key] : 'Working';
+  }
+
   function plural(n, word) { return n + ' ' + word + (n === 1 ? '' : 's'); }
   function clock(sec) {
     sec = Math.max(0, Math.round(sec || 0));
@@ -558,7 +574,8 @@
           return push(ev, (step ? name : 'Step ' + (d.node_id || '')) + ' went to ' + shortModel(d.chosen) + ' (' + why + ').');
         }
         if (mode === 'rule_zero_shortcut') return push(ev, 'The question was answered in one call, without a plan.');
-        return push(ev, 'The planner recorded a ' + String(mode || 'decision').replace(/_/g, ' ') + ' step.');
+        if (!mode && d.code) return push(ev, stageWords(d.code) + '.');
+        return push(ev, mode && Object.prototype.hasOwnProperty.call(STAGE_WORDS, mode) ? stageWords(mode) + '.' : 'The planner recorded a decision.');
       }
       if (ev.event_type === 'error') {
         if (!d) return push(ev, 'A problem was recorded (details hidden while the lane is on).');
@@ -593,7 +610,7 @@
     readLaneMode: readLaneMode, prepareSend: prepareSend, runLaneMode: runLaneMode, runLaneWords: runLaneWords, leftCard: leftCard,
     headerTiles: headerTiles, receiptFrom: receiptFrom, receiptStats: receiptStats, leftChipText: leftChipText,
     stripBaseline: stripBaseline, whyRows: whyRows, makeRefresher: makeRefresher, makeLiveStream: makeLiveStream,
-    parseJSON: parseJSON, decisionOf: decisionOf, shortModel: shortModel, shortText: shortText,
+    parseJSON: parseJSON, decisionOf: decisionOf, stageWords: stageWords, shortModel: shortModel, shortText: shortText,
     planNodesById: planNodesById, stepsFromRun: stepsFromRun, planLayout: planLayout,
     callsByModel: callsByModel, runTotals: runTotals, baselineEstimate: baselineEstimate,
     failureWords: failureWords, eventSentences: eventSentences, clock: clock, REASONS: REASONS,
