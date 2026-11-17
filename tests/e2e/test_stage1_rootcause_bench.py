@@ -706,3 +706,64 @@ async def test_r4_defer_and_collect_with_a_node_schema_still_defers(env):
         assert "Also return" not in req.system
     compose = stub.of_kind("compose")[-1].system
     assert '"success_count": 3' in compose and "BRT-ENV-011" not in compose
+
+
+@pytest.mark.asyncio
+async def test_r1_remap_that_would_close_a_cycle_keeps_the_earlier_result(env):
+    """TC-ORC-026-E: plan [a]; re_plan [{a, depends_on [b]}, {b, inputs_ref a}].
+    b runs once on the finished a; a_2 runs after b; no cycle failure."""
+    db_path, mp = env
+    stub = StubModels(
+        plan_nodes=[_ans("Step A1 MARK-A1.", id="a")],
+        replan_for=_replans([
+            _ans("Step A2 MARK-A2.", id="a", depends_on=["b"]),
+            _ans("Step B MARK-B.", id="b", inputs_ref="a"),
+        ]),
+        answer_for=_answer_by_marker({"MARK-B": "OUT-B", "MARK-A2": "NEW-A",
+                                      "MARK-A1": "OLD-A"}),
+    ).install(mp)
+    result = await run_pipeline("Do it.", db_path=db_path)
+    await drain_log_writes()
+    assert result["status"] == "completed", result.get("error")
+    b = stub.step_request("MARK-B")
+    a2 = stub.step_request("MARK-A2")
+    assert "NEW-A" not in b.system                 # b never waited for a_2
+    assert "OUT-B" in a2.system                    # a_2 ran on b's result
+    order = stub.of_kind("answerer")
+    assert order.index(b) < order.index(a2)
+    codes = await _codes(db_path, result["run_id"])
+    assert "BRT-ORC-024" not in codes and "BRT-ORC-025" not in codes
+
+
+def test_r1_cycle_guard_unit():
+    """TC-ORC-026-F: the remap is kept where it closes no cycle."""
+    nodes, renames = engine._rename_reused_ids(
+        [{"id": "a", "depends_on": ["b"]}, {"id": "b", "inputs_ref": "a"},
+         {"id": "c", "depends_on": ["a"]}], {"a"}, {"a"})
+    assert renames == [{"from": "a", "to": "a_2"}]
+    assert nodes[0]["id"] == "a_2" and nodes[0]["depends_on"] == ["b"]
+    assert nodes[1]["inputs_ref"] == "a"          # would close a_2 -> b -> a_2
+    assert nodes[2]["depends_on"] == ["a_2"]      # no cycle: follows the new step
+
+
+@pytest.mark.asyncio
+async def test_r1_numeric_ids_are_compared_like_strings(env):
+    """TC-ORC-026-G: a re_plan step reusing numeric id 1 is renamed and runs;
+    a numeric depends_on waits for its step."""
+    db_path, mp = env
+    stub = StubModels(
+        plan_nodes=[_ans("Try one MARK-1.", id=1),
+                    _ans("After one MARK-W.", id=2, depends_on=[1])],
+        replan_for=_replans([_ans("Try two MARK-2.", id=1)]),
+        answer_for=_answer_by_marker({"MARK-1": "OUT-1", "MARK-2": "OUT-2",
+                                      "MARK-W": "OUT-W"}),
+    ).install(mp)
+    result = await run_pipeline("Do it.", db_path=db_path)
+    await drain_log_writes()
+    assert result["status"] == "completed", result.get("error")
+    for marker in ("MARK-1", "MARK-2", "MARK-W"):
+        assert len(_calls_with(stub, marker)) == 1, marker
+    assert "OUT-1" in stub.step_request("MARK-W").system
+    renames = [d for d in await _decisions(db_path, result["run_id"])
+               if d.get("code") == "BRT-ORC-026"]
+    assert renames and renames[0]["renamed"] == [{"from": "1", "to": "1_2"}]

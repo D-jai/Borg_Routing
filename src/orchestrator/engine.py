@@ -1478,7 +1478,7 @@ def _with_ids(nodes: list, taken: set) -> list:
     every id given earlier in the run), never an id already in this plan.
     ``taken`` is updated with every id of this plan.
     """
-    nodes = list(nodes or [])
+    nodes = _normalised_ids(nodes)
     for n in nodes:
         if isinstance(n, dict) and n.get("id"):
             taken.add(str(n["id"]))
@@ -1497,6 +1497,52 @@ def _with_ids(nodes: list, taken: set) -> list:
 _REF_KEYS = ("inputs_ref", "source", "source_ref")
 
 
+def _id_key(value: object) -> object:
+    """A step id in its one compared form (R1-R4 review): a number (not a
+    bool) becomes its string, so ``1`` and ``"1"`` name the same step."""
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return str(value)
+    return value
+
+
+def _normalised_ids(nodes: object) -> list:
+    """The nodes with every ``id`` and ``depends_on`` entry in the compared
+    form (``_id_key``), so results are keyed, and ids compared, the same way
+    whatever type the planner wrote. Non-object entries pass through."""
+    out = []
+    for n in list(nodes or []):
+        if isinstance(n, dict):
+            node = dict(n)
+            if "id" in node:
+                node["id"] = _id_key(node["id"])
+            deps = node.get("depends_on")
+            if isinstance(deps, list):
+                node["depends_on"] = [_id_key(d) for d in deps]
+            elif deps is not None:
+                node["depends_on"] = _id_key(deps)
+            n = node
+        out.append(n)
+    return out
+
+
+def _node_ref_values(node: dict) -> list:
+    """Every string a node names another step by (depends_on, the
+    ``_REF_KEYS``, skill ``*_ref`` args), as written."""
+    refs: list = []
+    deps = node.get("depends_on")
+    if isinstance(deps, list):
+        refs.extend(d for d in deps if isinstance(d, str))
+    elif isinstance(deps, str):
+        refs.append(deps)
+    for key in _REF_KEYS:
+        if isinstance(node.get(key), str):
+            refs.append(node[key])
+    args = node.get("skill_args")
+    if isinstance(args, dict):
+        refs.extend(v for k, v in args.items() if str(k).endswith("_ref") and isinstance(v, str))
+    return refs
+
+
 def _rename_reused_ids(nodes: list, done: set, taken: set) -> tuple[list, list[dict]]:
     """A re_plan batch whose steps reuse the id of a step that already ran,
     each such step given a fresh id (planner ruling 20, R1).
@@ -1510,10 +1556,17 @@ def _rename_reused_ids(nodes: list, done: set, taken: set) -> tuple[list, list[d
     its old id, and every ref to an id not redefined in the batch, keep
     naming the earlier result, which stays under its original id.
 
+    A remap that would close a cycle inside the batch (the renamed step
+    waits, directly or through others, on the step whose ref would follow
+    it) is not made: that ref keeps naming the earlier result (R1-R4
+    review). Remaps are decided in batch order; refs that need no remap
+    are counted first. Ids are compared in one form (``_id_key``).
+
     Returns (nodes, renames), ``renames`` being ``[{"from", "to"}]`` in
     batch order. Non-object entries are passed through untouched.
     """
-    nodes = list(nodes or [])
+    nodes = _normalised_ids(nodes)
+    done = {str(_id_key(d)) for d in done}
     batch_ids = {str(n["id"]) for n in nodes if isinstance(n, dict) and n.get("id")}
     renamed_from: dict[int, str] = {}
     renamed_to: dict[int, str] = {}
@@ -1539,12 +1592,55 @@ def _rename_reused_ids(nodes: list, done: set, taken: set) -> tuple[list, list[d
     def _remap(value: object, table: dict) -> object:
         return table.get(value, value) if isinstance(value, str) else value
 
+    # Batch-local wait graph: index -> indexes it waits on. Refs that need
+    # no remap first (a ref naming a batch id as written, not a reused one).
+    index_of: dict[str, int] = {}
+    for i, n in enumerate(nodes):
+        if isinstance(n, dict) and n.get("id"):
+            index_of.setdefault(renamed_to.get(i, str(n["id"])), i)
+    waits: dict[int, set[int]] = {i: set() for i in range(len(nodes))}
+    tables: dict[int, dict] = {}
+    for i, n in enumerate(nodes):
+        if not isinstance(n, dict):
+            continue
+        tables[i] = {o: t for o, t in mapping.items() if o != renamed_from.get(i)}
+        for ref in _node_ref_values(n):
+            if ref not in tables[i] and ref in index_of and index_of[ref] != i:
+                waits[i].add(index_of[ref])
+
+    def _reaches(start: int, goal: int) -> bool:
+        seen, stack = set(), [start]
+        while stack:
+            k = stack.pop()
+            if k == goal:
+                return True
+            if k in seen:
+                continue
+            seen.add(k)
+            stack.extend(waits[k])
+        return False
+
+    for i, n in enumerate(nodes):
+        if i not in tables:
+            continue
+        refs = set(_node_ref_values(n))
+        for old in list(tables[i]):
+            if old not in refs:
+                continue
+            target = index_of.get(tables[i][old])
+            if target is None:
+                continue
+            if _reaches(target, i):
+                del tables[i][old]   # would close a cycle: keep the earlier result
+            else:
+                waits[i].add(target)
+
     out = []
     for i, n in enumerate(nodes):
         if not isinstance(n, dict):
             out.append(n)
             continue
-        table = {o: t for o, t in mapping.items() if o != renamed_from.get(i)}
+        table = tables[i]
         node = dict(n)
         if i in renamed_to:
             node["id"] = renamed_to[i]
