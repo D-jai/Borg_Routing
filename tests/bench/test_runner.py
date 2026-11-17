@@ -116,6 +116,9 @@ async def test_runner_writes_one_result_file_per_run(bench):
     assert borg["answer"] == FINAL
     assert borg["quality"]["accuracy"] == 1.0
     assert borg["canaries_sent_to_cloud"] == 0
+    # the run's database is kept under results/<date>/dbs/ and named in the result file
+    assert borg["db_path"] == str(cfg.day_dir / "dbs" / "T_borg_cloud_1.db") and Path(borg["db_path"]).exists()
+    assert run_bench.budget.logged_dollars(borg["db_path"]) == pytest.approx(borg["cost_dollars"])
     # the documents went by reference: the instruction carries no note text, the planner got a manifest
     plan_req = stub.of_kind("plan")[0]
     assert "a.txt" in plan_req.system and "Two payments are 60 days overdue" not in plan_req.system
@@ -169,11 +172,11 @@ def test_ledger_guard_math(tmp_path):
     assert led.spent() == 0.0
     led.set_prior(5.0)
     led.record("T_direct_1", 1.25)
-    led.record("T_direct_1", 1.5)  # same key replaces, never doubles
-    assert led.spent() == pytest.approx(6.5)
-    led.check(13.5)  # exactly at the cap is allowed
+    led.record("T_direct_1", 1.5)  # a rerun of the same key adds: both spends are real (append-only)
+    assert led.spent() == pytest.approx(7.75)
+    led.check(12.25)  # exactly at the cap is allowed
     with pytest.raises(budget.BudgetRefused):
-        led.check(13.51)
+        led.check(12.26)
 
 
 async def test_over_budget_run_is_refused_and_nothing_is_sent(bench):

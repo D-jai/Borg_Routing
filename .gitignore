@@ -34,3 +34,6 @@ data/borg_route.db-journal
 data/borg_route.db-wal
 data/borg_route.db-shm
 /tmp/borg_route_uvicorn.log
+
+# Bench run databases and calls logs (kept for audit and crash recovery, never committed)
+bench/results/*/dbs/

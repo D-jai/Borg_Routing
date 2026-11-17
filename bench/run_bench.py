@@ -30,7 +30,6 @@ import math
 import os
 import sqlite3
 import sys
-import tempfile
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -588,8 +587,46 @@ class _Env:
                 os.environ[k] = old
 
 
-async def run_borg(job: dict, spec: RunSpec, cfg: Config, matrix) -> dict:
-    """One BORG_ROUTE run through ``run_pipeline`` on a fresh temp database."""
+def new_db_path(cfg: Config, spec: RunSpec) -> Path:
+    """``<results>/<date>/dbs/<job>_<arm>_<n>.db``; a rerun of the same key gets ``..__2.db`` and so on,
+    so an earlier run's database (and its ledger entry) is never overwritten."""
+    folder = cfg.day_dir / "dbs"
+    path = folder / f"{spec.key}.db"
+    k = 2
+    while path.exists():
+        path = folder / f"{spec.key}__{k}.db"
+        k += 1
+    return path
+
+
+def new_calls_log(cfg: Config, key: str) -> Path:
+    """The calls log of a run outside BORG_ROUTE's database (direct arm, judge), next to the databases."""
+    folder = cfg.day_dir / "dbs"
+    path = folder / f"{key}.calls.jsonl"
+    k = 2
+    while path.exists():
+        path = folder / f"{key}__{k}.calls.jsonl"
+        k += 1
+    return path
+
+
+def logging_chat(chat, calls_log: Path):
+    """Wrap a chat callable so every paid call (and the dollars of a failed one) is appended to ``calls_log``."""
+    async def wrapped(model, system, user, max_tokens, *a, **kw):
+        try:
+            r = await chat(model, system, user, max_tokens, *a, **kw)
+        except llm.ChatError as exc:
+            if exc.dollars:
+                budget.append_call(calls_log, exc.dollars, model=model.model_id, error=str(exc)[:200])
+            raise
+        budget.append_call(calls_log, r.get("dollars") or 0.0, model=model.model_id,
+                           finish_reason=r.get("finish_reason"), max_tokens=max_tokens)
+        return r
+    return wrapped
+
+
+async def run_borg(job: dict, spec: RunSpec, cfg: Config, matrix, db_path=None) -> dict:
+    """One BORG_ROUTE run through ``run_pipeline`` on a fresh database at ``db_path`` (kept, git-ignored)."""
     from src.db.schema import create_all
     from src.orchestrator import engine
     from src.pipeline.runner import run_pipeline
@@ -599,8 +636,8 @@ async def run_borg(job: dict, spec: RunSpec, cfg: Config, matrix) -> dict:
     folder = job.get("data_folder")
     if folder and mode == "off":
         raise ValueError(f"job {spec.job} hands over documents; arm {spec.arm} needs a lane mode")
-    db_dir = tempfile.mkdtemp(prefix="borg_bench_")
-    db_path = str(Path(db_dir) / "run.db")
+    db_path = str(db_path or new_db_path(cfg, spec))
+    Path(db_path).parent.mkdir(parents=True, exist_ok=True)
     await create_all(db_path)
     engine._shared_matrix = matrix
     instruction = instruction_of(job, cfg)
@@ -758,17 +795,27 @@ async def execute_run(
         rec["path"] = str(write_result(cfg, spec, {k: v for k, v in rec.items()}))
         return rec
 
+    db_path = calls_log = None
+    if spec.arm == "direct":
+        calls_log = new_calls_log(cfg, spec.key)
+    else:
+        db_path = new_db_path(cfg, spec)
+    entry = cfg.ledger.start(spec.key, db_path=db_path, calls_log=calls_log, date=cfg.date)
     try:
         if spec.arm == "direct":
-            rec = await run_direct(job, spec, cfg, baseline, chat=chat)
+            rec = await run_direct(job, spec, cfg, baseline, chat=logging_chat(chat, calls_log))
         else:
-            rec = await run_borg(job, spec, cfg, matrix)
-    except Exception as exc:  # a run must never take the matrix down
-        rec = {"status": "failed", "error": f"{type(exc).__name__}: {str(exc)[:300]}", "cost_dollars": 0.0,
+            rec = await run_borg(job, spec, cfg, matrix, db_path)
+    except Exception as exc:  # a run must never take the matrix down; its spend is still counted
+        rec = {"status": "failed", "error": f"{type(exc).__name__}: {str(exc)[:300]}",
+               "cost_dollars": budget.logged_dollars(db_path) + budget.calls_log_dollars(calls_log),
                "answer": "", "models": [], "models_per_step": []}
+    rec["db_path"] = str(db_path) if db_path else None
+    rec["calls_log"] = str(calls_log) if calls_log else None
     rec["estimate_dollars"] = estimate
     rec["quality"] = score_answer(job, rec.get("answer") or "", cfg, runner=docker_runner)
-    cfg.ledger.record(spec.key, rec.get("cost_dollars") or 0.0)
+    logged = budget.logged_dollars(db_path) + budget.calls_log_dollars(calls_log)
+    cfg.ledger.finish(entry, max(float(rec.get("cost_dollars") or 0.0), logged))
     rec["path"] = str(write_result(cfg, spec, {k: v for k, v in rec.items()}))
     return rec
 
@@ -776,6 +823,8 @@ async def execute_run(
 async def run_matrix(runs: list[RunSpec], jobs: dict, cfg: Config, matrix, baseline, chat=llm.chat,
                      docker_runner=None, log=print) -> list[dict]:
     out = []
+    for e in cfg.ledger.recover():
+        log(f"ledger: recovered unfinished entry {e['key']} (US${e['dollars']:.4f} from its database)")
     for spec in runs:
         if _is_done(cfg, spec):
             log(f"skip {spec.key}: result file exists (use --force to redo)")
@@ -821,10 +870,13 @@ async def run_judge(jobs: dict, cfg: Config, matrix, baseline, chat=llm.chat, lo
         cfg.ledger.check(estimate, cfg.phase_cap)
         key = load_answers(job, cfg)
         spent = {"dollars": 0.0}
+        calls_log = new_calls_log(cfg, f"judge_{name}")
+        entry = cfg.ledger.start(f"judge_{name}", kind="judge", calls_log=calls_log, date=cfg.date)
+        logged = logging_chat(chat, calls_log)
 
         def make_ask(jm):
             async def ask(system: str, user: str) -> dict:
-                r = await chat(jm, system, user, JUDGE_MAX_TOKENS)
+                r = await logged(jm, system, user, JUDGE_MAX_TOKENS)
                 spent["dollars"] += r["dollars"]
                 return r
             return ask
@@ -834,9 +886,13 @@ async def run_judge(jobs: dict, cfg: Config, matrix, baseline, chat=llm.chat, lo
             results["status"] = "completed"
         except judge.JudgeRefused as exc:
             results = {"status": "refused", "reason": str(exc)}
+        except Exception as exc:  # spend is still counted
+            results = {"status": "failed", "reason": f"{type(exc).__name__}: {str(exc)[:300]}"}
+        spent["dollars"] = max(spent["dollars"], budget.calls_log_dollars(calls_log))
         results.update({"job": name, "judge_models": [jm.model_id for jm in jms], "estimate_dollars": estimate,
                         "cost_dollars": spent["dollars"], "incomplete_repeats": incomplete})
-        cfg.ledger.record(f"judge_{name}", spent["dollars"], kind="judge")
+        results["calls_log"] = str(calls_log)
+        cfg.ledger.finish(entry, spent["dollars"])
         cfg.day_dir.mkdir(parents=True, exist_ok=True)
         (cfg.day_dir / f"judge_{name}.json").write_text(json.dumps(results, indent=1) + "\n", encoding="utf-8")
         log(f"judge {name}: {results['status']}"
@@ -978,6 +1034,9 @@ def main(argv: Optional[list[str]] = None) -> int:
         print("preflight: no checked model in the matrix. Nothing was spent.")
         return 2
 
+    for e in cfg.ledger.recover():  # a crash in an earlier invocation: count what its database logged
+        print(f"ledger: recovered unfinished entry {e['key']} (US${e['dollars']:.4f} from its database)")
+    print(f"results folder: {cfg.day_dir}  (a resume must pass the same --date {cfg.date})")
     runs = build_matrix(jobs, only, arms, repeats, job_repeats)
     rc = 0
     if not args.judge_only:

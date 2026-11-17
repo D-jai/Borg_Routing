@@ -9,7 +9,10 @@ from __future__ import annotations
 
 import json
 import os
+import sqlite3
 import tempfile
+import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -17,25 +20,79 @@ PHASE_CAP_DOLLARS = 20.0
 ESTIMATE_LIMIT_DOLLARS = 14.0
 
 
+LOGGED_EVENTS = ("model_call", "orchestrator_decision")  # the rows that carry dollars (as run_bench.read_run_tree)
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def logged_dollars(db_path) -> float:
+    """Every dollar logged in a run's database (0.0 if it does not exist or has no log table)."""
+    if not db_path or not Path(db_path).exists():
+        return 0.0
+    try:
+        with sqlite3.connect(str(db_path)) as conn:
+            marks = ",".join("?" for _ in LOGGED_EVENTS)
+            row = conn.execute(f"SELECT COALESCE(SUM(dollars),0) FROM logs WHERE event_type IN ({marks})",
+                               LOGGED_EVENTS).fetchone()
+    except sqlite3.Error:
+        return 0.0
+    return float(row[0] or 0.0)
+
+
+def append_call(calls_log, dollars: float, **info) -> None:
+    """One line per paid call outside BORG_ROUTE's database (direct arm, judge)."""
+    path = Path(calls_log)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8", newline="\n") as fh:
+        fh.write(json.dumps({"dollars": float(dollars), **info}) + "\n")
+
+
+def calls_log_dollars(calls_log) -> float:
+    if not calls_log or not Path(calls_log).exists():
+        return 0.0
+    total = 0.0
+    for line in Path(calls_log).read_text(encoding="utf-8").splitlines():
+        try:
+            total += float(json.loads(line).get("dollars") or 0.0)
+        except (ValueError, AttributeError):
+            continue
+    return total
+
+
 class BudgetRefused(Exception):
     """The run would take the phase past its cap; nothing was started."""
 
 
 class Ledger:
+    """Append-only: every run adds an entry (a rerun of the same key adds another, never replaces).
+
+    An entry is written when a run starts (``status: "started"``, with the run's
+    database or calls log) and completed when it ends (``"ended"``, with its
+    logged dollars). An entry still "started" when the runner starts again (a
+    crash) is recovered by summing the dollars logged in its database and calls
+    log (``"recovered"``). ``prior_dollars`` holds spend logged elsewhere in the
+    phase (3.1's scoring).
+    """
+
     def __init__(self, path: Path):
         self.path = Path(path)
 
     def _read(self) -> dict:
         if not self.path.exists():
-            return {"prior_dollars": 0.0, "runs": []}
+            return {"prior_dollars": 0.0, "entries": []}
         data = json.loads(self.path.read_text(encoding="utf-8"))
         data.setdefault("prior_dollars", 0.0)
-        data.setdefault("runs", [])
+        entries = data.setdefault("entries", [])
+        for r in data.pop("runs", []) or []:  # the first format: one row per key, already ended
+            entries.append({"id": uuid.uuid4().hex[:12], "key": r.get("key"), "kind": r.get("kind", "run"),
+                            "status": "ended", "dollars": float(r.get("dollars", 0.0))})
         return data
 
     def spent(self) -> float:
         d = self._read()
-        return float(d["prior_dollars"]) + sum(float(r.get("dollars", 0.0)) for r in d["runs"])
+        return float(d["prior_dollars"]) + sum(float(e.get("dollars", 0.0)) for e in d["entries"])
 
     def set_prior(self, dollars: float) -> None:
         """Dollars already spent earlier in the phase (for example 3.1's scoring), logged elsewhere."""
@@ -43,17 +100,53 @@ class Ledger:
         d["prior_dollars"] = float(dollars)
         self._write(d)
 
-    def record(self, key: str, dollars: float, kind: str = "run") -> float:
-        """Add one run's logged dollars; returns the new total. Replaces an earlier entry with the same key."""
+    def start(self, key: str, kind: str = "run", db_path: Optional[str] = None,
+              calls_log: Optional[str] = None, date: Optional[str] = None) -> str:
+        """Append a "started" entry before the run spends anything; returns its id."""
         d = self._read()
-        d["runs"] = [r for r in d["runs"] if r.get("key") != key]
-        d["runs"].append({"key": key, "kind": kind, "dollars": round(float(dollars), 8)})
-        d["total_dollars"] = round(float(d["prior_dollars"]) + sum(r["dollars"] for r in d["runs"]), 8)
+        eid = uuid.uuid4().hex[:12]
+        d["entries"].append({"id": eid, "key": key, "kind": kind, "date": date,
+                             "db_path": str(db_path) if db_path else None,
+                             "calls_log": str(calls_log) if calls_log else None,
+                             "status": "started", "started_at": _now(), "dollars": 0.0})
+        self._write(d)
+        return eid
+
+    def finish(self, entry_id: str, dollars: float, status: str = "ended", note: Optional[str] = None) -> float:
+        """Complete a started entry with the run's logged dollars; returns the new total."""
+        d = self._read()
+        for e in d["entries"]:
+            if e.get("id") == entry_id:
+                e.update({"status": status, "dollars": round(float(dollars), 8), "ended_at": _now()})
+                if note:
+                    e["note"] = note
+                break
+        else:
+            raise KeyError(f"no ledger entry {entry_id}")
         self._write(d)
         return d["total_dollars"]
 
+    def record(self, key: str, dollars: float, kind: str = "run") -> float:
+        """Add one finished entry (start and finish at once); returns the new total."""
+        return self.finish(self.start(key, kind), dollars)
+
+    def recover(self) -> list[dict]:
+        """Close every entry still "started" with the dollars its database and calls log hold."""
+        d = self._read()
+        out = []
+        for e in d["entries"]:
+            if e.get("status") != "started":
+                continue
+            dollars = logged_dollars(e.get("db_path")) + calls_log_dollars(e.get("calls_log"))
+            e.update({"status": "recovered", "dollars": round(dollars, 8), "ended_at": _now(),
+                      "note": "run did not finish; dollars summed from its database and calls log"})
+            out.append(dict(e))
+        if out:
+            self._write(d)
+        return out
+
     def _write(self, d: dict) -> None:
-        d["total_dollars"] = round(float(d["prior_dollars"]) + sum(float(r.get("dollars", 0.0)) for r in d["runs"]), 8)
+        d["total_dollars"] = round(float(d["prior_dollars"]) + sum(float(e.get("dollars", 0.0)) for e in d["entries"]), 8)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         fd, tmp = tempfile.mkstemp(dir=str(self.path.parent), suffix=".tmp")
         try:
