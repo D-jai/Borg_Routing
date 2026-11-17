@@ -171,7 +171,8 @@ async def _tool_submit_task(args: dict) -> dict:
     # row exists, so all_local holds for this run too. A refusal (a bad lane
     # setting) raises LaneError (a ValueError) and creates nothing.
     lane = await prepare_lane(None, DB_PATH)
-    run_id = await create_run(instruction, db_path=DB_PATH)
+    from src.db.state import lane_mode_of
+    run_id = await create_run(instruction, db_path=DB_PATH, lane_mode=lane_mode_of(lane))
 
     # R9: create_run only writes the row; start the run the way POST /v1/task
     # does (same background driver: wall-clock cap, failure reason, digest).

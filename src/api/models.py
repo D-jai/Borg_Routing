@@ -91,16 +91,31 @@ class KeyResponse(BaseModel):
 # Endpoints
 # ---------------------------------------------------------------------------
 
-@router.get("/models", response_model=list[ModelInfo])
+class ModelRow(ModelInfo):
+    """A matrix row as the pages read it: the stored fields plus ``is_local``,
+    worked out by the server (src/registry/locality.py), never by the page."""
+    is_local: bool = False
+
+
+async def _rows(matrix: CapabilityMatrix) -> list[dict]:
+    from src.api.locality_view import locality_rules, model_row  # noqa: PLC0415
+    from src.db import schema  # noqa: PLC0415
+    rules = await locality_rules(schema.DB_PATH)
+    return [model_row(m, rules) for m in matrix.all()]
+
+
+@router.get("/models", response_model=list[ModelRow])
 async def list_models(matrix: CapabilityMatrix = Depends(get_matrix)):
-    """Return all models currently in the capability matrix."""
-    return matrix.all()
+    """Return all models currently in the capability matrix, each with a
+    computed ``is_local``."""
+    return await _rows(matrix)
 
 
 @router.get("/models/matrix")
 async def get_matrix_json(matrix: CapabilityMatrix = Depends(get_matrix)):
-    """Return the full capability matrix as a JSON array."""
-    return [m.model_dump() for m in matrix.all()]
+    """Return the full capability matrix as a JSON array, each row with a
+    computed ``is_local``."""
+    return await _rows(matrix)
 
 
 async def _refuse_in_all_local(action: str) -> None:

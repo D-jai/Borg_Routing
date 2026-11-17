@@ -382,8 +382,10 @@ async def _record_bypass_call(
         from src.db.state import (  # noqa: PLC0415
             compute_and_save_digest,
             create_run,
+            lane_mode_of,
             update_run_status,
         )
+        from src.lane.context import current_lane  # noqa: PLC0415
         from src.logging.writer import flush_pending, write_event  # noqa: PLC0415
         from src.registry.cost import price_with_baseline  # noqa: PLC0415
 
@@ -392,7 +394,8 @@ async def _record_bypass_call(
         run_uuid = uuid.UUID(run_id)
         last_user = next((m.content for m in reversed(messages) if m.role == "user"), "")
         await create_run(
-            last_user or "(bypass)", db_path=db_path, run_id=run_uuid, kind="bypass"
+            last_user or "(bypass)", db_path=db_path, run_id=run_uuid, kind="bypass",
+            lane_mode=lane_mode_of(current_lane()),
         )
         await update_run_status(run_uuid, "completed", db_path=db_path)
 

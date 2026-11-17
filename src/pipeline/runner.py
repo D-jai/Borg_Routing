@@ -30,6 +30,7 @@ from src.db.state import (
     get_config,
     get_envelopes,
     get_run,
+    lane_mode_of,
     update_run_status,
 )
 from src.logging.writer import write_event
@@ -138,6 +139,7 @@ async def run_pipeline(
             db_path=db_path,
             run_id=run_id,
             route_options=route_options,
+            lane_mode=lane_mode_of(lane),
             **({"documents": lane.manifest()} if lane is not None and lane.has_documents else {}),
         )
     except Exception as exc:

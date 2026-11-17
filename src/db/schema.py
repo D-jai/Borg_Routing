@@ -55,6 +55,9 @@ _MIGRATIONS = [
     # "salvaged" (compose failed; finished step results returned). NULL for
     # a direct answer, a failed run, or a run from before this column.
     "ALTER TABLE runs ADD COLUMN answer_kind TEXT",
+    # 4.2 review: the lane mode the run ran under (off, raw_local, all_local,
+    # by_reference). NULL when not recorded (a run from before this column).
+    "ALTER TABLE runs ADD COLUMN lane_mode TEXT",
 ]
 
 _SCHEMA_SQL = """
@@ -74,7 +77,8 @@ CREATE TABLE IF NOT EXISTS runs (
     kind TEXT DEFAULT 'orchestrated',
     route_options TEXT,
     documents TEXT,
-    answer_kind TEXT
+    answer_kind TEXT,
+    lane_mode TEXT
 );
 
 CREATE TABLE IF NOT EXISTS subtasks (

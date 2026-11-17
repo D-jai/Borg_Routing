@@ -45,7 +45,7 @@ from uuid import UUID
 import httpx
 
 from src.db.scratch import apply_cleanup_directives
-from src.db.state import create_run, get_config, sum_run_tree, update_run_status
+from src.db.state import create_run, get_config, lane_mode_of, sum_run_tree, update_run_status
 from src.envelopes.schema import InboundEnvelope, WrappedTask
 from src.envelopes.validator import validate_inbound
 from src.lane.context import (
@@ -754,6 +754,7 @@ async def execute(task: WrappedTask, db_path: str = "data/borg_route.db") -> Inb
                 task.instruction,
                 parent_run_id=task.run_id,
                 db_path=db_path,
+                lane_mode=lane_mode_of(current_lane()),
             )
         except Exception as exc:
             raise ValueError(f"BRT-ORC-021: child run creation failed: {exc}") from exc

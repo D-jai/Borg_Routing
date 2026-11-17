@@ -27,12 +27,15 @@ async def create_run(
     kind: str = "orchestrated",
     route_options: Optional[dict] = None,
     documents: Optional[list] = None,
+    lane_mode: Optional[str] = None,
 ) -> UUID:
     """Insert a new run record with status=pending. Returns the new run_id.
 
     ``run_id`` is for a caller that already issued the id (a bypass request);
     omit it to get a fresh one. ``documents`` is the manifest of a run that
     reads documents (on-premise lane); such a run is never resumed.
+    ``lane_mode`` is the lane mode the run runs under (``off`` when no lane);
+    None leaves it unrecorded.
 
     BRT-LOG-DB-COMPAT — also stamps instance_id so The_Borg_DB can tell
     apart runs from different devices when aggregated via hive-collective.
@@ -76,8 +79,24 @@ async def create_run(
                     json.dumps(route_options) if route_options else None,
                 ),
             )
+        if lane_mode is not None:
+            await db.execute(
+                "UPDATE runs SET lane_mode=? WHERE run_id=?", (lane_mode, str(run_id))
+            )
         await db.commit()
     return run_id
+
+
+def lane_mode_of(lane) -> str:
+    """The mode string recorded on a run: the lane's mode, ``off`` with no lane."""
+    return lane.settings.mode if lane is not None else "off"
+
+
+async def set_run_lane_mode(run_id: UUID, lane_mode: str, db_path: str = DB_PATH) -> None:
+    """Record the lane mode a run (re)starts under."""
+    async with connect(db_path) as db:
+        await db.execute("UPDATE runs SET lane_mode=? WHERE run_id=?", (lane_mode, str(run_id)))
+        await db.commit()
 
 
 async def update_run_status(

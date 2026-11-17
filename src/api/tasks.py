@@ -209,11 +209,12 @@ async def submit_task(
         )
 
     # Create run record synchronously so the caller gets a valid run_id
-    from src.db.state import create_run
+    from src.db.state import create_run, lane_mode_of
     try:
         run_id = await create_run(
             task_req.instruction,
             db_path=DB_PATH,
+            lane_mode=lane_mode_of(lane),
             **({"documents": lane.manifest()} if lane is not None and lane.has_documents else {}),
         )
     except Exception as exc:
@@ -312,6 +313,10 @@ async def get_run_state(run_id: str, request: Request = None) -> JSONResponse:
                      runs sent off this machine, oldest first, each with its
                      run_id, url, destination, attempt, status and the exact
                      body sent; empty when the lane was off... ],
+        "calls_left_machine": {count, source}: computed here; the ledger's
+                     count (source "ledger") or the locality of each logged
+                     call, child runs included (source "locality"); count
+                     null and source null when it cannot be known (never 0),
     }
     """
     import uuid as _uuid
@@ -364,6 +369,7 @@ async def get_run_state(run_id: str, request: Request = None) -> JSONResponse:
     # Child runs (orchestrate nodes) choose their own models; show their steps
     # too, each envelope tagged with its own run_id.
     child_envelopes: list[dict] = []
+    tree_events: list[dict] = list(events)
     try:
         child_ids = await get_descendant_run_ids(run_uuid, db_path=DB_PATH)
         for child_id in child_ids:
@@ -378,6 +384,7 @@ async def get_run_state(run_id: str, request: Request = None) -> JSONResponse:
                     child_events = [dict(r) for r in await cur.fetchall()]
             _attach_routing(child_envs, child_events)
             child_envelopes.extend(child_envs)
+            tree_events.extend(child_events)
     except Exception:
         pass
 
@@ -394,6 +401,21 @@ async def get_run_state(run_id: str, request: Request = None) -> JSONResponse:
     if not lane_admin_allowed(request):
         outbound = [dict(r, body=None) for r in outbound]
 
+    # Computed here, never by the page: the ledger count when there is one,
+    # else the locality of each logged call (child runs included); unknown is null.
+    from src.api.locality_view import calls_left_machine, locality_rules  # noqa: PLC0415
+    from src.api.models import get_matrix  # noqa: PLC0415
+    try:
+        left = calls_left_machine(
+            lane_mode=run.get("lane_mode"),
+            outbound=outbound,
+            events=tree_events,
+            matrix=get_matrix(request) if request is not None else None,
+            rules=await locality_rules(DB_PATH),
+        )
+    except Exception:
+        left = {"count": None, "source": None}
+
     return JSONResponse(content={
         "run": run,
         "envelopes": envelopes,
@@ -401,6 +423,7 @@ async def get_run_state(run_id: str, request: Request = None) -> JSONResponse:
         "events": events,
         "digest": digest,
         "outbound": outbound,
+        "calls_left_machine": left,
     })
 
 
@@ -613,6 +636,8 @@ async def resume_run_endpoint(
             status_code=400,
             detail={"error": exc.code, "message": str(exc)},
         )
+    from src.db.state import lane_mode_of, set_run_lane_mode
+    await set_run_lane_mode(run_uuid, lane_mode_of(lane), db_path=DB_PATH)
 
     try:
         tasks_to_retry = await resume_run(run_uuid, db_path=DB_PATH)
