@@ -120,9 +120,9 @@ async def test_orchestrate_below_cap_spawns_child_run(db):
 
     original_create_run = create_run
 
-    async def mock_create_run(instruction, parent_run_id=None, thread_id=None, db_path=db):
+    async def mock_create_run(instruction, parent_run_id=None, thread_id=None, db_path=db, **kwargs):
         child_id = await original_create_run(
-            instruction, parent_run_id=parent_run_id, thread_id=thread_id, db_path=db_path
+            instruction, parent_run_id=parent_run_id, thread_id=thread_id, db_path=db_path, **kwargs
         )
         created_runs.append((child_id, parent_run_id))
         return child_id
@@ -156,7 +156,7 @@ async def test_orchestrate_child_run_id_in_output(db):
 
     child_uuid = uuid.uuid4()
 
-    async def mock_create_run(instruction, parent_run_id=None, thread_id=None, db_path=db):
+    async def mock_create_run(instruction, parent_run_id=None, thread_id=None, db_path=db, **kwargs):
         return child_uuid
 
     async def mock_orchestrate_run(**kwargs):
