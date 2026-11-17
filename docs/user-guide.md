@@ -90,9 +90,10 @@ the operator opts models into the pool explicitly.
 
 ### Tuning the quality bar and time-cost knobs (BRT-RT-01)
 The router only picks models whose `task_scores` for the current task meet
-the **quality bar**, then among those picks the cheapest. Cost combines the
-row's pricing with a **time cost per second** so faster models are preferred
-when latency matters.
+the **quality bar**, then among those picks the one with the lowest **effective
+cost**: the row's estimated dollars plus a **time cost per second** for the
+waiting, so faster models are preferred when latency matters. (A chat alias
+such as `borg_route:local` can change the order; the step's route notes say so.)
 
 Fresh installs ship with developer-friendly defaults:
 
@@ -144,14 +145,7 @@ a price today, so tool calls log `0.0`.
   `?include_bypass=true` to list them too. `GET /runs/{id}` still returns a
   bypass run by its id. A digest saved before the token and baseline columns
   existed reads those fields as unknown (null), not 0.
-- **Baseline (an estimate):** each call also stores `baseline_dollars`, the same
-  tokens priced as if the baseline model had done the work; the run digest
-  stores the run's total. Both are stored now; the interface receipt that will
-  show the comparison is not built yet. It is an estimate: the baseline model
-  might have needed more or fewer tokens, so treat the gap as indicative. The
-  baseline is the checked model with the highest `reasoning` score (ties go to
-  the smaller model id); set `baseline_model_id` (Admin config) or
-  `BASELINE_MODEL_ID` in `.env` to pick another.
+- **No baseline comparison is shown.** The stored `baseline_dollars` (the same tokens priced at a reference model) is not what one model would have cost, so no page shows it: not the receipt, not the Run page, and not the raw Details view (those strip every baseline field). The figures stay in the database and in the API until the planner rules on a replacement. The baseline model is the checked model with the highest `reasoning` score (ties go to the smaller model id); set `baseline_model_id` (Admin config) or `BASELINE_MODEL_ID` in `.env` to pick another.
 
 ### How each step gets its model
 The planner and the final answer use the orchestrator model (the quality
@@ -168,8 +162,8 @@ its own:
    that model is ticked in the pool, the step uses it.
 2. Otherwise the step's **kind of work** (`task_type`: reasoning, coding,
    summarize, writing, roleplay, agentic, extraction) and **size** (`tier`:
-   light, mid, heavy) decide. The step goes to the cheapest ticked model
-   whose score for that kind of work is at or above the tier's floor. A
+   light, mid, heavy) decide. The step goes to the ticked model with the lowest effective cost (dollars plus
+   time) whose score for that kind of work is at or above the tier's floor. A
    step that invokes a skill takes the skill's own tier and specialty when
    the planner gave none. A step with no labels is `reasoning`, `mid`.
    Near-synonyms are accepted (`creative` is read as writing, `code` as
@@ -193,8 +187,8 @@ its own:
 A config key (set through `POST /config`) wins over the `.env` value and
 takes effect on the next run. The run trace records, for every step, why
 its model was chosen: a `route` entry with the kind of work, tier, floor,
-the chosen model and the other models that cleared the floor, cheapest
-first.
+the chosen model and the other models that cleared the floor, lowest
+effective cost first.
 
 ---
 
@@ -472,7 +466,7 @@ A step's `recommended_model` still comes first. The alias also reaches the child
 
 ## Reading why each step used its model
 
-`GET /runs/{run_id}` returns `run`, `envelopes`, `child_envelopes`, `events` and `digest`. `child_envelopes` holds the envelopes (with their `routing`) of every child run the run started, each tagged with its own `run_id`. Do not add these dollars to the parent's: the `dollars` of an `orchestrate` envelope already include everything its child run spent, and a child run's `orchestrate` envelope already includes its own grandchildren. The run total is `digest`. Each envelope (one per step) now carries:
+`GET /runs/{run_id}` returns `run`, `envelopes`, `child_envelopes`, `events`, `digest`, `outbound` and `calls_left_machine`. `run.lane_mode` is the lane mode the run started under (`off`, `raw_local`, `all_local` or `by_reference`; null for a run from before it was recorded), not today's setting. `calls_left_machine` is `{count, source}`: the outbound ledger's count (`source` "ledger") when the run used the lane, otherwise the number of logged calls to models that are not on this machine, child runs included (`source` "locality"). When it cannot be worked out (a model no longer in the matrix, or no call logged) both are null and the pages say "Not recorded"; it is never turned into 0. Each envelope's `outbound_payload` carries `node_id`, the plan node it ran, so a step with no route event (a `state_op`) still maps to the plan. Every model row from `GET /models` and `GET /models/matrix` carries `is_local`, worked out from the endpoint's host (loopback or `BORG_LOCAL_HOSTS`), `-cloud` tags and the allow-list, never from the `source` label. `child_envelopes` holds the envelopes (with their `routing`) of every child run the run started, each tagged with its own `run_id`. Do not add these dollars to the parent's: the `dollars` of an `orchestrate` envelope already include everything its child run spent, and a child run's `orchestrate` envelope already includes its own grandchildren. The run total is `digest`. Each envelope (one per step) now carries:
 
 - `routing`: why the step went to its model. It holds `chosen`, `reason` (`routed`, `planner_pick` or `fallback_default`), `task_type`, `tier`, `floor`, `est_input_tokens`, `est_output_tokens`, `candidates` (the models that cleared the floor, cheapest first, at most 8, each with a score, `est_cost` and `est_dollars`), `baseline` (the model the run is compared against: the best-reasoning checked model, or the one set by the `baseline_model_id` config key / `BASELINE_MODEL_ID`) and `baseline_est_cost`. If a configured baseline is not in the matrix, `baseline_note` says which model was used instead.
   - Every figure under `routing` is an estimate, never a measured cost. The token counts are guessed from the step's text length, and `dollars` on the envelope is the only real cost.
@@ -774,6 +768,8 @@ The Logs page at `http://localhost:8000/ui/logs.html` has three tabs: **Events**
 
 Open `http://localhost:8000/` (or `/ui/`); it goes to the Ask page. The old chat page address, `/ui/chat.html`, goes there too.
 
+**Nothing loads from another site.** Every response carries a Content-Security-Policy: pages, scripts, images and requests come from this server only (images may also be `data:`), no inline script runs, and the page cannot be put in a frame. An answer that contains an image from another site shows no image, and a link to another site is shown as plain text.
+
 ### Ask (`/ui/ask.html`)
 
 - Type the job and press Enter (Shift+Enter makes a new line). While it runs, a progress line says what is happening (planning, choosing a model for a step, writing the answer) with a clock.
@@ -781,13 +777,13 @@ Open `http://localhost:8000/` (or `/ui/`); it goes to the Ask page. The old chat
 - **See how it was done** opens the run. The thumbs record a rating (`POST /runs/{id}/rating`).
 - **Add documents (folder)** sends a folder, relative to `BORG_DOCS_ROOT`, by reference (`"documents": {"folder": "..."}`). A line beside it says which lane mode is on. With the lane off, documents cannot be added.
 - **Routing** picks a chat alias (see "Chat model aliases").
-- The conversation is kept in this browser (`localStorage`); **Clear chat** empties it. Each turn remembers the lane mode it ran under. The server stores no chat history: the page resends earlier turns with each question, **except turns asked under `all_local`, which are resent only while the mode is still `all_local`**. Under any other mode they stay on screen and are never sent again. If the page cannot read the lane mode, it treats the turn as `all_local`. Other clients of `POST /v1/chat/completions` send their own history and must apply this rule themselves.
+- The conversation is kept in this browser (`localStorage`); **Clear chat** empties it. Each turn remembers the lane mode it ran under. The server stores no chat history: the page resends earlier turns with each question, **except turns asked under `all_local`, which are resent only while the mode is still `all_local`**. Under any other mode they stay on screen and are never sent again. The page reads the lane mode again just before every send; if it cannot read it, or the value is not one of the four modes, it treats the new turn as `all_local` and resends no `all_local` turn. Other clients of `POST /v1/chat/completions` send their own history and must apply this rule themselves.
 
 ### Run (`/ui/run.html?id=<run_id>`)
 
-- **Header:** what was asked, status, and four totals: cost (the run's digest; before it exists, "cost so far" from this run's logged calls), time, steps (and model calls), and calls that left this machine (from the lane's record when there is one, otherwise the calls to cloud models in this run). A failed run shows its `failure_reason` in plain words with its code.
-- **Plan:** a diagram drawn from the run's steps: Plan, then the steps in columns by what they depend on (`depends_on`, `inputs_ref`, `source`, a skill's `*_ref`), then Compose. An `apply_to_each` step is one node with its item count. A step that ran as its own run links to that run; its cost is already inside this run's total. While the run is going, the page follows `/runs/{id}/stream` and redraws as steps finish.
-- **Select a step** to see its model (this machine or cloud), kind of work and tier, the score it needed, cost, time and tokens, whether its input left this machine, why it failed (plain words), and **Why this model**: the candidates that cleared the bar, cheapest first, with their estimated cost (estimates made before the step ran). The raw record is behind **Details**.
+- **Header:** what was asked, status, the lane mode the run recorded, and four totals: cost of this run (the run's digest; before it exists, "cost so far" from this run's logged calls), time, steps (and model calls), and calls that left this machine (the server's figure; "Not recorded" when it cannot be known). No baseline or "one top model" figure is shown. A failed run shows its `failure_reason` in plain words with its code.
+- **Plan:** a diagram drawn from the run's steps: Plan, then the steps in columns by what they depend on (`depends_on`, `inputs_ref`, `source`, a skill's `*_ref`), then Compose. An `apply_to_each` step is one node with its item count. A step that ran as its own run links to that run; its cost is already inside this run's total. While the run is going, the page follows `/runs/{id}/stream` and redraws as steps finish: one request at a time, an old response never overwrites a newer one, and a dropped stream reconnects with a growing wait (1 s up to 15 s) until the run ends.
+- **Select a step** to see its model (this machine or cloud), kind of work and tier, the score it needed, cost, time and tokens, whether its input left this machine, why it failed (plain words), and **Why this model**: the candidates that cleared the bar, lowest effective cost first. The row the router chose says why (lowest effective cost, the planner's pick, or a routing alias or strategy). Two estimated columns: effective cost (dollars plus time cost, what the router ranks by) and dollars alone; both are made before the step ran. The raw record is behind **Details**.
 - **What happened:** the run's events as sentences, with the time since the start.
 - **What left this machine** (when the lane is on or the run has a record of requests): every request sent off this machine, where it went and what it was. The exact text of each request is shown to the admin only.
 
