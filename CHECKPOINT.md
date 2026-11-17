@@ -2,28 +2,26 @@
 
 Where we left off. Updated by whoever worked last. Dates are Toronto time.
 
-## Status (16-Nov-2026)
+## Status (17-Nov-2026)
 
-Build under way, run by the lead session (`borg-route-f1`, Opus 5.5) since 02:20 on 16-Nov-2026. The Fable sitting ended cleanly; all its commits were reviewed by fresh agents, their defects fixed, and re-reviewed with no objection.
+Lead session `borg-route-f1` (Opus 5.5) since 02:20 on 16-Nov-2026. Every work order below went through fresh review rounds; the build log (`BUILD.md` section 9) has each row.
 
 | Work order | State |
 |---|---|
-| 0.1, 0.2, 0.3 | Done and reviewed (0.1 fixed in `3c62112`) |
-| 1.1, 1.2, 1.3, 1.4 | Done and reviewed (fixes `917cba3`, `30a3071`, `e1861e2`) |
-| 1.5, 1.6, 1.7 (+R14), 1.8, 1.9 | Done and reviewed (see build log) |
-| 1.10 Check 1 | **Passed on attempt 3** (after planner rulings 1-3 and ruling 9). Skill placeholder bug found in the trace; fix in progress |
-| 1.11 failure reasons to re_plan; ruling 1a inline items and refs | Done and reviewed |
-| 4.4 Admin lock | Done and reviewed |
-| 2.1 on-premise lane design | Done: attacked by a fresh reviewer (24 findings), revised `8dee12c`, `13a1799` |
-| 2.2, 2.3 lane build and privacy test | **Done** after two review rounds (Check 2). Full suite **919 passed** at `99bba7d` |
-| 4.1 shared interface assets | Done and reviewed |
+| Phase 0, Phase 1 (1.1-1.12), Check 1 | Done and reviewed. Check 1 passed on attempt 3 |
+| Phase 2 (2.1-2.4, incl. by_reference) | Done and reviewed (Check 2) |
+| 3.1 pool, 3.2 bench | Done and reviewed; local model llama3.2:3b in Docker (`borg_ollama`) |
+| **3.3 bench round 1 (Check 3)** | **Failed: BORG_ROUTE won no job** (5 of 6 BORG runs failed on product defects; B at 92% of direct cost). Published as it fell: `bench/results/2026_11_17/summary.md`; stage 2 skipped by ruling 19. Spend US$2.56 of US$20 |
+| Stage-1 crash fixes R1-R4 (ruling 20) | Done and reviewed; replayed stage-1 replies now end "salvaged" |
+| 4.1, 4.2, 4.3, 4.4 interface | Done and reviewed. Receipt baseline estimate switched off (ruling 18) |
 | 5.7 MCP | Done and reviewed |
-| 4.3 Admin pages | Done after two review rounds |
-| Everything else | Open |
+| 4.5 replay, 4.6 interface check, 5.1-5.6, 5.8, 6.1 | Open. 4.5, 5.1 numbers and 6.1 numbers depend on the round-2 decision |
 
-If this session stopped abruptly: `git log` and `git status` show what landed; any uncommitted changes in `src/` or `ui/` belong to the in-progress builders above: read the diff, finish or stash it, record which in the build log.
+If this session stopped abruptly: `git log` and `git status` show what landed; any uncommitted changes belong to an in-progress builder: read the diff, finish or stash it, record which in the build log.
 
-**Next action for the lead:** skill placeholder fix (in progress), then the Phase 1 phase-end full run and push, then 2.4 (by_reference documents), then 3.1 (Ollama in Docker, pool), 3.2, 3.3. Waiting on Deej via the planner: one protected-line change to the apply_to_each shape example (`inputs_ref` comment). Work that needs proof results (3.x, 4.2 receipt numbers, 4.5 replay, 5.1 README numbers, 6.1 deck numbers) waits for Check 1, which waits for the planner's answer. A 5-hour usage limit stopped agents at about 07:00 on 16-Nov-2026; it reset at 07:10.
+**Waiting on Deej (via the planner):** whether there is a bench round 2 (after the R1-R4 fixes and a planner design for token overhead and code-assembled row lists). Also on the after-build list below.
+
+**Next action for the lead:** work that presents no numbers: 5.3 clean tree, 5.6 CI (pytest, static check; claims check once 5.5 exists), 5.2 install (replay default needs 4.5). Do not start a round 2, batching, or floor/pool/prompt changes for the bench until the planner's design (ruling 15-20).
 
 ## Start the build (Deej)
 
