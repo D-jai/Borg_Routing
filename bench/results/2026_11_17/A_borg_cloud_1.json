@@ -1,0 +1,109 @@
+{
+ "job": "A",
+ "arm": "borg_cloud",
+ "repeat": 1,
+ "date": "2026_11_17",
+ "status": "failed",
+ "error": "BRT-PIP-002: orchestration failed: BRT-ORC-009: compose mode returned no response",
+ "lane_mode": "by_reference",
+ "routing_config": {
+  "leaf_floors": {
+   "light": 6.0,
+   "mid": 7.5,
+   "heavy": 9.0
+  },
+  "time_cost_per_sec": 0.0001,
+  "pool": [
+   "ollama/llama3.2:3b",
+   "openrouter/anthropic/claude-opus-4.7",
+   "openrouter/anthropic/claude-sonnet-4.6",
+   "openrouter/deepseek/deepseek-v3.2",
+   "openrouter/google/gemini-3.1-flash-lite-preview",
+   "openrouter/google/gemini-3.1-pro-preview",
+   "openrouter/moonshotai/kimi-k2-thinking",
+   "openrouter/openai/gpt-5.3-codex",
+   "openrouter/openai/gpt-5.4-nano",
+   "openrouter/x-ai/grok-4.20"
+  ],
+  "lane_mode": "by_reference",
+  "max_run_seconds": 7200,
+  "direct_timeout_seconds": 7200.0,
+  "answerer_call_timeout_seconds": 7200.0,
+  "orchestrator_call_timeout_seconds": 7200.0,
+  "tools_enabled": false,
+  "env": {
+   "ANSWERER_MAX_TOKENS": "6000",
+   "ORCHESTRATOR_MAX_TOKENS": "6000",
+   "ORCHESTRATOR_QUALITY_REQUIREMENT": "9.0",
+   "BORG_RULE_ZERO_SHORTCUT": "true",
+   "LEAF_QUALITY_LIGHT": "6.0",
+   "LEAF_QUALITY_MID": "7.5",
+   "LEAF_QUALITY_HEAVY": "9.0",
+   "TIME_COST_PER_SEC": "0.0001",
+   "BORG_LANE_MAX_OUTPUT_CHARS": "1500",
+   "BORG_LANE_MAX_VERBATIM_CHARS": "120",
+   "BORG_LANE_MAX_NGRAM_SHARE": "0.10",
+   "BORG_LANE_MANIFEST": "names",
+   "BORG_LANE_PART_CHARS": "8000",
+   "BORG_LANE_LOCAL_ALLOWLIST": null,
+   "BORG_LOCAL_HOSTS": null,
+   "BORG_ANSWERER_CALL_TIMEOUT": "7200",
+   "BORG_ORCHESTRATOR_CALL_TIMEOUT": "7200",
+   "BORG_LANE_MODE": "by_reference",
+   "BORG_MAX_RUN_SECONDS": "7200",
+   "BASELINE_MODEL_ID": "openrouter/anthropic/claude-opus-5.5"
+  },
+  "baseline_model_id": "openrouter/anthropic/claude-opus-5.5",
+  "baseline_resolved_by_engine": true,
+  "baseline_note": "the bench baseline; the engine resolves it from the matrix it is given"
+ },
+ "run_id": "0ef867a2-d97b-4a78-9972-7f65c1918429",
+ "cost_dollars": 0.36231575,
+ "digest_cost_dollars": 0.36231575,
+ "baseline_dollars": 3.51862,
+ "wall_seconds": 41.706,
+ "tokens": {
+  "prompt_tokens": 755735,
+  "completion_tokens": 24784,
+  "total_tokens": 780519
+ },
+ "models": [
+  "openrouter/google/gemini-3.1-flash-lite-preview"
+ ],
+ "models_per_step": [
+  {
+   "step": "classify_emails",
+   "task_type": "reasoning",
+   "tier": "light",
+   "chosen": "openrouter/google/gemini-3.1-flash-lite-preview",
+   "reason": "planner_pick",
+   "dollars": 0.0
+  },
+  {
+   "step": "extract_urgency",
+   "task_type": "reasoning",
+   "tier": "light",
+   "chosen": "openrouter/google/gemini-3.1-flash-lite-preview",
+   "reason": "planner_pick",
+   "dollars": 0.0
+  }
+ ],
+ "model_calls": 400,
+ "answer": "I was unable to complete this request. (Run: 0ef867a2-d97b-4a78-9972-7f65c1918429)",
+ "db_path": "C:\\Stage\\BORG_ROUTE\\bench\\results\\2026_11_17\\dbs\\A_borg_cloud_1.db",
+ "calls_log": null,
+ "attempt": 1,
+ "ledger_dollars": 0.36231575,
+ "failure_kind": "other",
+ "aborted_attempts": [],
+ "estimate_dollars": 2.768067315531316,
+ "quality": {
+  "accuracy": 0.0,
+  "per_field_accuracy": {
+   "category": 0.0,
+   "urgency": 0.0
+  },
+  "items_expected": 200,
+  "items_answered": 0
+ }
+}
