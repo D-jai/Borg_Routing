@@ -323,6 +323,12 @@ async def expand_and_run(
             f"envelope {task.envelope_id}"
         )
 
+    # Decision 17-Nov-2026: the fan-out is capped at the connection pool's
+    # design size (MAX_CONCURRENCY, a quarter of the pool), so one step can
+    # never exhaust the shared pool (BRT-ANS-011).
+    from src.lane.outbound import MAX_CONCURRENCY  # noqa: PLC0415
+
+    concurrency_limit = min(concurrency_limit, MAX_CONCURRENCY)
     semaphore = asyncio.Semaphore(concurrency_limit)
     results = []
     failures = []

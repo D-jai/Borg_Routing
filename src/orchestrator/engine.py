@@ -820,6 +820,11 @@ async def _invoke_orchestrator_model(
                     attempt=attempts[0],
                 )
             resp.raise_for_status()
+        except httpx.PoolTimeout as exc:
+            raise ValueError(
+                "BRT-ANS-011: local connection pool exhausted calling the "
+                "orchestrator; too many calls at once, not a model timeout"
+            ) from exc
         except httpx.TimeoutException as exc:
             raise ValueError(f"BRT-ORC-001: orchestrator call timed out") from exc
         except httpx.HTTPStatusError as exc:

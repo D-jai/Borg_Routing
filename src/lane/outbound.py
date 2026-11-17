@@ -42,6 +42,7 @@ from __future__ import annotations
 
 import asyncio
 import contextvars
+import http.cookiejar
 import json
 import os
 import sqlite3
@@ -306,6 +307,31 @@ async def record_end(
 
 _LOOP_CLIENTS_ATTR = "_borg_http_clients"
 
+# Connection pool of every shared client. Sized well above the most one run
+# may ask for at once: ``apply_to_each`` caps its fan-out at
+# ``MAX_CONCURRENCY`` (decision of 17-Nov-2026: cap the fan-out, keep the
+# pool a plain constant), and the pool allows 4x that for parallel runs.
+# Running out is reported as BRT-ANS-011 (``httpx.PoolTimeout``), never as a
+# model timeout.
+MAX_CONCURRENCY = 256
+POOL_MAX_CONNECTIONS = 1024
+POOL_MAX_KEEPALIVE = 64
+
+
+def _no_cookies() -> http.cookiejar.CookieJar:
+    """A jar that rejects every cookie: a Set-Cookie from one provider is
+    never sent to another through a shared client."""
+    return http.cookiejar.CookieJar(
+        http.cookiejar.DefaultCookiePolicy(allowed_domains=[])
+    )
+
+
+def _limits() -> httpx.Limits:
+    return httpx.Limits(
+        max_connections=POOL_MAX_CONNECTIONS,
+        max_keepalive_connections=POOL_MAX_KEEPALIVE,
+    )
+
 
 async def _aclose_all(clients: dict) -> None:
     for client in list(clients.values()):
@@ -349,7 +375,10 @@ async def shared_client(trust_env: bool, timeout: float) -> httpx.AsyncClient:
     key = (cls, bool(trust_env), float(timeout))
     client = clients.get(key)
     if client is None or getattr(client, "is_closed", False) is True:
-        client = cls(timeout=timeout) if trust_env else cls(timeout=timeout, trust_env=False)
+        kwargs = {"timeout": timeout, "limits": _limits(), "cookies": _no_cookies()}
+        if not trust_env:
+            kwargs["trust_env"] = False
+        client = cls(**kwargs)
         clients[key] = client
     return client
 

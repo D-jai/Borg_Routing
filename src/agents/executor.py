@@ -19,6 +19,7 @@ Error codes:
                already at or above the 16000 ceiling — caller must raise
                ANSWERER_MAX_TOKENS / envelope.max_output_tokens or split
                the task.
+- BRT-ANS-011: connection pool exhausted (too many calls at once; not a model timeout)
 - BRT-ANS-010: the model declined or reported failure (shown to the planner
                in place of the code its own failure_reason text may start
                with; set where the planner's stage_results are built)
@@ -170,6 +171,11 @@ async def _post_chat_completion(
             attempt=attempt,
         )
         resp.raise_for_status()
+    except httpx.PoolTimeout as exc:
+        raise ValueError(
+            f"BRT-ANS-011: local connection pool exhausted ({url}); "
+            "too many calls at once, not a model timeout"
+        ) from exc
     except httpx.TimeoutException as exc:
         raise ValueError(f"BRT-ANS-006: model call timed out ({url})") from exc
     except httpx.HTTPStatusError as exc:

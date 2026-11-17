@@ -547,42 +547,45 @@ async def _stream_bypass_relay(
         async with client.stream(
             "POST", url, json=payload, headers=headers
         ) as resp:
-            if resp.status_code != 200:
-                # Fallback to non-stream
-                t_fb = time.monotonic()
-                text, fb_usage = await _bypass_to_model(matrix, model_id, messages)
-                recorded = True   # the fallback row below is this run's one record
-                await _record_bypass_call(
-                    matrix, model_id, run_id, messages, text, fb_usage,
-                    int((time.monotonic() - t_fb) * 1000),
-                )
-                async for chunk in _stream_response(text, model_alias, run_id):
-                    yield chunk
-                return
-            async for line in resp.aiter_lines():
-                if not line:
-                    continue
-                if line.startswith("data:"):
-                    payload_str = line[5:].strip()
-                    if payload_str == "[DONE]":
-                        await _record_relay()
-                        yield "data: [DONE]\n\n"
-                        return
-                    # Re-emit with our model alias substituted
-                    try:
-                        chunk = json.loads(payload_str)
-                        # Providers that report usage send it on the last
-                        # chunk; if none does, usage stays absent.
-                        if isinstance(chunk.get("usage"), dict):
-                            relay_usage = chunk["usage"]
-                        for choice in chunk.get("choices") or []:
-                            piece = (choice.get("delta") or {}).get("content")
-                            if piece:
-                                relay_text.append(piece)
-                        chunk["model"] = model_alias
-                        yield f"data: {json.dumps(chunk)}\n\n"
-                    except json.JSONDecodeError:
-                        yield f"data: {payload_str}\n\n"
+            use_fallback = resp.status_code != 200
+            if not use_fallback:
+                async for line in resp.aiter_lines():
+                    if not line:
+                        continue
+                    if line.startswith("data:"):
+                        payload_str = line[5:].strip()
+                        if payload_str == "[DONE]":
+                            await _record_relay()
+                            yield "data: [DONE]\n\n"
+                            return
+                        # Re-emit with our model alias substituted
+                        try:
+                            chunk = json.loads(payload_str)
+                            # Providers that report usage send it on the last
+                            # chunk; if none does, usage stays absent.
+                            if isinstance(chunk.get("usage"), dict):
+                                relay_usage = chunk["usage"]
+                            for choice in chunk.get("choices") or []:
+                                piece = (choice.get("delta") or {}).get("content")
+                                if piece:
+                                    relay_text.append(piece)
+                            chunk["model"] = model_alias
+                            yield f"data: {json.dumps(chunk)}\n\n"
+                        except json.JSONDecodeError:
+                            yield f"data: {payload_str}\n\n"
+        if use_fallback:
+            # The stream response is closed (its pooled connection freed)
+            # before the fallback asks the same pool for another one.
+            t_fb = time.monotonic()
+            text, fb_usage = await _bypass_to_model(matrix, model_id, messages)
+            recorded = True   # the fallback row below is this run's one record
+            await _record_bypass_call(
+                matrix, model_id, run_id, messages, text, fb_usage,
+                int((time.monotonic() - t_fb) * 1000),
+            )
+            async for chunk in _stream_response(text, model_alias, run_id):
+                yield chunk
+            return
     except Exception as exc:
         err_chunk = {
             "id": f"chatcmpl-{run_id}", "object": "chat.completion.chunk",
