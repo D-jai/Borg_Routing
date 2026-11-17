@@ -374,6 +374,7 @@ async def _record_bypass_call(
     text: str,
     usage: Optional[dict],
     latency_ms: int,
+    lane_mode: Optional[str] = None,
 ) -> None:
     """Log a direct-to-model call as a ``model_call`` row under its run id,
     priced like any other call, and save the run's digest. Never raises: the
@@ -395,7 +396,7 @@ async def _record_bypass_call(
         last_user = next((m.content for m in reversed(messages) if m.role == "user"), "")
         await create_run(
             last_user or "(bypass)", db_path=db_path, run_id=run_uuid, kind="bypass",
-            lane_mode=lane_mode_of(current_lane()),
+            lane_mode=lane_mode if lane_mode is not None else lane_mode_of(current_lane()),
         )
         await update_run_status(run_uuid, "completed", db_path=db_path)
 
@@ -473,6 +474,7 @@ async def _stream_bypass_relay(
     model_alias: str,
     messages: list[ChatMessage],
     run_id: str,
+    lane_mode: Optional[str] = None,
 ) -> AsyncIterator[str]:
     """Relay actual SSE chunks from an underlying model endpoint.
 
@@ -539,7 +541,7 @@ async def _stream_bypass_relay(
         recorded = True
         await _record_bypass_call(
             matrix, model_id, run_id, messages, "".join(relay_text), relay_usage,
-            int((time.monotonic() - t_stream) * 1000),
+            int((time.monotonic() - t_stream) * 1000), lane_mode,
         )
 
     try:
@@ -584,7 +586,7 @@ async def _stream_bypass_relay(
             recorded = True   # the fallback row below is this run's one record
             await _record_bypass_call(
                 matrix, model_id, run_id, messages, text, fb_usage,
-                int((time.monotonic() - t_fb) * 1000),
+                int((time.monotonic() - t_fb) * 1000), lane_mode,
             )
             async for chunk in _stream_response(text, model_alias, run_id):
                 yield chunk
@@ -687,6 +689,9 @@ async def chat_completions(request: Request):
                 },
             )
         run_id = str(uuid.uuid4())
+        from src.db.state import lane_mode_of as _mode_of  # noqa: PLC0415
+
+        run_lane_mode = _mode_of(lane)   # taken while the lane is known, not from a scope
         if lane is not None:
             # raw_local: the bypass call goes through the ledger; its rows are
             # filed with the bypass run in this endpoint's database.
@@ -697,7 +702,7 @@ async def chat_completions(request: Request):
         if chat_req.stream:
             return StreamingResponse(
                 _lane_wrapped(lane, run_id, _stream_bypass_relay(
-                    app_matrix, base_model, model_alias, chat_req.messages, run_id)),
+                    app_matrix, base_model, model_alias, chat_req.messages, run_id, run_lane_mode)),
                 media_type="text/event-stream",
             )
         t_bypass = time.monotonic()
@@ -715,7 +720,7 @@ async def chat_completions(request: Request):
             )
         await _record_bypass_call(
             app_matrix, base_model, run_id, chat_req.messages, response_text,
-            bypass_usage, int((time.monotonic() - t_bypass) * 1000),
+            bypass_usage, int((time.monotonic() - t_bypass) * 1000), run_lane_mode,
         )
         tokens = _usage_tokens(bypass_usage)
         if tokens is None:

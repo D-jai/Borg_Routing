@@ -410,6 +410,7 @@ async def get_run_state(run_id: str, request: Request = None) -> JSONResponse:
             lane_mode=run.get("lane_mode"),
             outbound=outbound,
             events=tree_events,
+            envelopes=list(envelopes) + child_envelopes,
             matrix=get_matrix(request) if request is not None else None,
             rules=await locality_rules(DB_PATH),
         )
@@ -636,8 +637,8 @@ async def resume_run_endpoint(
             status_code=400,
             detail={"error": exc.code, "message": str(exc)},
         )
-    from src.db.state import lane_mode_of, set_run_lane_mode
-    await set_run_lane_mode(run_uuid, lane_mode_of(lane), db_path=DB_PATH)
+    # The run keeps the lane mode it first ran under (runs.lane_mode is never
+    # rewritten here), so its page keeps saying what that run really did.
 
     try:
         tasks_to_retry = await resume_run(run_uuid, db_path=DB_PATH)
