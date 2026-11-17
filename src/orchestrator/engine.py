@@ -1263,6 +1263,80 @@ def _bad_ref_arg(skill_args: object) -> Optional[tuple[str, object]]:
     return None
 
 
+def _skill_reads_data(skill_def: dict) -> bool:
+    """True for an answerer skill whose template names its data in a
+    ``state_query`` (compare_and_rank, verify_claim). The query is never
+    executed; the engine writes the data into the step's context instead."""
+    template = skill_def.get("outbound_template") or {}
+    return skill_def.get("envelope_type") == "answerer" and bool(template.get("state_query"))
+
+
+def _numbered(label: str, entries: list) -> str:
+    """Entries as a numbered list under a one-line heading."""
+    lines = [f"{label} for this step ({len(entries)}; cite an entry by its number):"]
+    for i, entry in enumerate(entries, start=1):
+        text = entry if isinstance(entry, str) else json.dumps(entry, ensure_ascii=False)
+        lines.append(f"{i}. {text}")
+    return "\n".join(lines)
+
+
+def _answerer_skill_data(
+    node: dict,
+    skill_def: dict,
+    skill_args: object,
+    inline_items: Optional[list],
+    results: dict,
+    lane: Optional[LaneContext],
+) -> tuple[list[str], str]:
+    """The data an answerer skill step reads: (document ids, context text).
+
+    Inline items (``items`` or a ``*_ref`` given as a list) win; otherwise the
+    ``*_ref`` names an earlier step of this run and its output is used (the
+    taint check already reads that ref, so a raw step makes this step raw),
+    or, with the lane on, ``documents`` names the run's documents by id.
+
+    Raises:
+        RuntimeError: BRT-SKL-008 when there is no data to give the step.
+    """
+    sid = skill_def.get("skill_id", "?")
+    args = skill_args if isinstance(skill_args, dict) else {}
+    refs = [str(a) for a in (skill_def.get("required_args") or {}) if str(a).endswith("_ref")]
+    ref_key = refs[0] if refs else "items_ref"
+    label = ref_key[: -len("_ref")].replace("_", " ").capitalize() or "Items"
+
+    def _fail(why: str) -> RuntimeError:
+        return RuntimeError(f"BRT-SKL-008: render failed — skill '{sid}': {why}")
+
+    if inline_items is not None:
+        if not inline_items:
+            raise _fail(f"{ref_key} is an empty list; the step has no data")
+        return [], _numbered(label, inline_items)
+    ref = args.get(ref_key)
+    if lane is not None and ref == _DOCUMENTS_REF:
+        if not lane.has_documents:
+            raise _fail(f"{ref_key} names the run's documents, but this run has none")
+        return lane.all_part_ids(), ""
+    if isinstance(ref, str) and ref:
+        if ref not in results:
+            raise _fail(f"{ref_key} '{ref}' names no finished step of this run and the "
+                        f"step carries no items; no model call was made")
+        if _failed_step(ref, results):
+            raise _fail(f"{ref_key} '{ref}' names a step that failed; no model call was made")
+        entries = _upstream_list(ref, results)
+        if entries is None:
+            out = getattr(results[ref], "output", {}) or {}
+            if len(out) == 1 and isinstance(next(iter(out.values())), (str, int, float)):
+                entries = [str(next(iter(out.values())))]
+            else:
+                entries = [out] if out else []
+        if not entries:
+            # The step ran and found nothing: that is the data (a claim with
+            # no evidence is "insufficient"), not a planning error.
+            return [], f"{label} for this step: none (step '{ref}' produced no entries)."
+        return [], _numbered(label, entries)
+    raise _fail(f"no data: give the items inline or set {ref_key} to a step id")
+
+
 def _failed_step(ref: object, results: dict) -> bool:
     """True when ``ref`` names a finished step of this run that failed."""
     return (
@@ -1535,16 +1609,19 @@ def _build_task_from_node(
         try:
             lib = _get_skill_lib()
             skill_def = lib.get(node["skill_id"], node.get("skill_version", 1))
+            needs_data = _skill_reads_data(skill_def)
             if (
-                skill_def.get("envelope_type") == "apply_to_each"
+                (skill_def.get("envelope_type") == "apply_to_each" or needs_data)
                 and isinstance(skill_args, dict)
             ):
                 # Ruling 1a — inline items stand in for the skill's ref arg.
                 # A *_ref arg given as a list renders as "" (the items travel
                 # in dependency_input); a required *_ref arg left out is
                 # filled with "" when the step carries items. Only for an
-                # apply_to_each skill: any other skill still needs its ref and
-                # fails loudly (BRT-SKL-005). The template is never changed.
+                # apply_to_each skill, or an answerer skill whose data the
+                # engine writes into its context (skill render review): any
+                # other skill still needs its ref and fails loudly
+                # (BRT-SKL-005). The template is never changed.
                 fill = {
                     k: "" for k, v in skill_args.items()
                     if str(k).endswith("_ref") and isinstance(v, list)
@@ -1613,6 +1690,18 @@ def _build_task_from_node(
                         # Names no step: the expander fails it (BRT-APE-006).
                         dep["unresolved_ref"] = ref
                         update["dependency_input"] = dep
+            elif needs_data:
+                # Skill render review: the template's state_query is never
+                # executed, so the step's data goes into its context.
+                docs, data_text = _answerer_skill_data(
+                    node, skill_def, skill_args, inline_items, results, lane
+                )
+                if named_docs or docs:
+                    update["documents"] = named_docs or docs
+                if data_text:
+                    update["context"] = "\n\n".join(
+                        t for t in (rendered.context, data_text) if t
+                    )
             elif named_docs:
                 update["documents"] = named_docs
             return rendered.model_copy(update=update)

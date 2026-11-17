@@ -132,7 +132,8 @@ async def test_a_grandchild_runs_step_is_governed_by_the_operators_instruction(d
 @pytest.mark.asyncio
 async def test_a_skill_step_is_governed_by_the_operators_instruction(db, env):
     plan = [{"type": "answerer", "id": "n1", "skill_id": "verify_claim", "skill_version": 1,
-             "skill_args": {"claim": "Alpha's contract ends Friday.", "evidence_ref": "notes"}}]
+             "skill_args": {"claim": "Alpha's contract ends Friday.",
+                            "evidence_ref": ["Alpha's contract: term ends Friday."]}}]
     stub = await _run(StubModels(plan_nodes=plan), env, db)
 
     steps = stub.of_kind("answerer")

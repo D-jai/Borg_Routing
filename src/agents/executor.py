@@ -60,6 +60,8 @@ from src.registry.model_call import resolve_model_call
 from src.registry.models import ModelInfo
 
 _MODEL_CALL_TIMEOUT_SEC = 120
+# A "{slot}" in the answerer stage prompt (JSON examples there never match).
+_STAGE_SLOT = re.compile(r"\{(\w+)\}")
 
 # BRT-ANS-009 — absolute ceiling for the doubled-cap retry. Bounds runaway
 # token spend if a model is genuinely producing a much larger answer than
@@ -420,9 +422,11 @@ async def _execute_answerer(task: WrappedTask, db_path: str) -> InboundEnvelope:
         "output_schema": json.dumps(task.output_schema, indent=2),
         "side_effects_list": ", ".join(task.side_effects) if task.side_effects else "(none)",
     }
-    stage_prompt = ANSWERER_SYSTEM_PROMPT
-    for placeholder, value in substitutions.items():
-        stage_prompt = stage_prompt.replace("{" + placeholder + "}", value)
+    # One pass over the template: a "{output_schema}" inside an item, the
+    # instruction or the context is data, never a slot filled by a later step.
+    stage_prompt = _STAGE_SLOT.sub(
+        lambda m: substitutions.get(m.group(1), m.group(0)), ANSWERER_SYSTEM_PROMPT
+    )
     system_prompt = build_system_prompt(
         stage_prompt=stage_prompt,
         global_rules=governance["global_rules"],

@@ -118,14 +118,18 @@ def test_placeholder_nothing_can_fill_raises_skl_008(lib):
 @pytest.mark.parametrize("empty", [[], None], ids=["empty_list", "none"])
 def test_derived_arg_from_empty_source_raises_skl_008(lib, empty):
     """TC-SKL-015."""
-    with pytest.raises(RuntimeError, match=r"BRT-SKL-008.*fields_formatted"):
+    with pytest.raises(RuntimeError, match=r"BRT-SKL-008.*fields"):
         lib.render("extract_fields", 1,
                    {"items_ref": "n0", "fields": empty, "concurrency_limit": 3})
 
 
 def test_braces_inside_an_arg_value_are_not_a_placeholder(lib):
-    """A value that itself contains {word} is data, not an unfilled placeholder."""
+    """A value naming another arg's placeholder stays data: one pass only.
+
+    criterion is substituted before concurrency_limit, so a second pass (the
+    pre-e8fe3a3 loop of str.replace calls) would turn it into "mentions 3".
+    """
     task = lib.render("filter_by_criterion", 1,
-                      {"items_ref": "n0", "criterion": "mentions {price}",
+                      {"items_ref": "n0", "criterion": "mentions {concurrency_limit}",
                        "concurrency_limit": 3})
-    assert "mentions {price}" in task.instruction
+    assert "CRITERION: mentions {concurrency_limit}" in task.instruction

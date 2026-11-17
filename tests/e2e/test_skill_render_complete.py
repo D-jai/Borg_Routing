@@ -8,6 +8,7 @@ template fails with BRT-SKL-008 and makes no step model call.
 
 The real engine, executor and router run against the scripted stand-in.
 """
+import json
 import sqlite3
 
 import pytest
@@ -102,7 +103,29 @@ async def test_live_extract_fields_node_renders_complete_and_runs_once_per_item(
         assert "{fields_formatted}" not in call.system
         assert "product" in call.system and "sentiment" in call.system
         assert "positive, negative, neutral" in call.system
-    assert [r[0] for r in _rows(db_path)] == ["resolved"]
+    rows = _rows(db_path)
+    assert [r[0] for r in rows] == ["resolved"]
+    # Every item's answer passes the per-item schema built from fields.
+    output = json.loads(rows[0][1])["output"]
+    assert output["failures"] == [], output["failures"][:2]
+    assert len(output["results"]) == len(REVIEWS)
+
+
+@pytest.mark.asyncio
+async def test_an_item_answer_missing_a_field_fails_that_item_with_env_011(env):
+    """The schema built from fields is enforced: no "sentiment", no result."""
+    db_path, mp = env
+    StubModels(plan_nodes=[LIVE_NODE],
+               answer_for=lambda req: {"product": "x"}).install(mp)
+    await run_pipeline("Extract product and sentiment from each review.", db_path=db_path)
+    await drain_log_writes()
+    rows = _rows(db_path)
+    assert len(rows) == 1
+    output = json.loads(rows[0][1])["output"]
+    assert output["results"] == [] or all(r is None for r in output["results"]), output
+    assert len(output["failures"]) == len(REVIEWS)
+    for failure in output["failures"]:
+        assert "BRT-ENV-011" in failure["reason"] and "sentiment" in failure["reason"]
 
 
 @pytest.mark.asyncio

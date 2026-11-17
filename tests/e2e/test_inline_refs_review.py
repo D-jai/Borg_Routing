@@ -155,14 +155,31 @@ async def test_ref_to_a_failed_step_fails_with_ape_005_and_no_model_call(env, pa
     assert _replan_block(stub)["n1"]["failure"]["code"] == "BRT-APE-005"
 
 
-# --- 3. items_ref "" only for apply_to_each skills ---------------------------
+# --- 3. items_ref "" for apply_to_each skills and data-reading answerers ----
+# Skill render review (16-Nov-2026): an answerer skill that reads data
+# (compare_and_rank, verify_claim) takes inline items in its context, so its
+# ref may be left out when the step carries items. With neither, SKL-005.
 
 @pytest.mark.asyncio
-async def test_answerer_skill_with_inline_items_and_no_items_ref_keeps_skl_005(env):
+async def test_answerer_skill_with_inline_items_and_no_items_ref_runs_on_them(env):
     db_path, mp = env
     step = {"type": "answerer", "id": "n1", "skill_id": "compare_and_rank",
             "skill_args": {"items": REVIEWS,
                            "criteria": [{"name": "q", "weight": 1.0, "description": "quality"}]}}
+    stub = StubModels(plan_nodes=[step]).install(mp)
+    await run_pipeline("Rank these.", db_path=db_path)
+    await drain_log_writes()
+    calls = stub.of_kind("answerer")
+    assert len(calls) == 1
+    for review in REVIEWS:
+        assert review in calls[0].system
+
+
+@pytest.mark.asyncio
+async def test_answerer_skill_with_no_items_and_no_items_ref_keeps_skl_005(env):
+    db_path, mp = env
+    step = {"type": "answerer", "id": "n1", "skill_id": "compare_and_rank",
+            "skill_args": {"criteria": [{"name": "q", "weight": 1.0, "description": "quality"}]}}
     stub = StubModels(plan_nodes=[step]).install(mp)
     await run_pipeline("Rank these.", db_path=db_path)
     await drain_log_writes()

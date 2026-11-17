@@ -99,7 +99,12 @@ class SkillLibrary:
 
             when_str = "\n".join(f"  - {w}" for w in when)
             not_when_str = "\n".join(f"  - {w}" for w in not_when) if not_when else "  (none listed)"
-            args_str = ", ".join(req_args.keys()) if req_args else "(none)"
+            # An arg whose hint includes "| null" may be left out (treated as null).
+            needed = [str(a) for a, h in (req_args or {}).items() if not _is_optional(h)]
+            optional = [str(a) for a, h in (req_args or {}).items() if _is_optional(h)]
+            args_str = ", ".join(needed) if needed else "(none)"
+            if optional:
+                args_str += "; optional: " + ", ".join(optional)
 
             lines.append(
                 f"### skill: {sid} (v{ver}) — tier: {tier}, type: {env_type}\n"
@@ -129,17 +134,34 @@ class SkillLibrary:
             RuntimeError: BRT-SKL-003/004 if skill not found.
             RuntimeError: BRT-SKL-005 if a required arg is missing.
             RuntimeError: BRT-SKL-006 if the envelope_type is not valid.
-            RuntimeError: BRT-SKL-008 if a placeholder in the instruction,
-                output_schema, state_query or inputs_ref cannot be filled.
+            RuntimeError: BRT-SKL-008 if a placeholder in any templated field
+                cannot be filled, a schema cannot be built from the args, a
+                null is given for an arg whose hint has no "| null", or an
+                arg is in a shape its hint cannot take.
         """
         skill = self.get(skill_id, version)
-        required_args = skill.get("required_args", {})
-        for arg_name in required_args:
+        required_args = skill.get("required_args", {}) or {}
+        given_args = args
+        args = dict(args or {})
+        for arg_name, hint in required_args.items():
+            optional = _is_optional(hint)
             if arg_name not in args:
+                if optional:
+                    # An omitted "| null" arg is null.
+                    args[arg_name] = None
+                    continue
                 raise RuntimeError(
                     f"BRT-SKL-005: render failed — required arg '{arg_name}' "
                     f"missing for skill '{skill_id}' v{version}"
                 )
+            if args[arg_name] is None:
+                if not optional:
+                    raise RuntimeError(
+                        f"BRT-SKL-008: render failed — arg '{arg_name}' of skill "
+                        f"'{skill_id}' is null, but its type ({hint}) does not allow null"
+                    )
+                continue
+            args[arg_name] = _coerce_arg(skill_id, arg_name, hint, args[arg_name])
 
         env_type = skill.get("envelope_type", "answerer")
         if env_type not in VALID_ENVELOPE_TYPES:
@@ -147,35 +169,34 @@ class SkillLibrary:
                 f"BRT-SKL-006: invalid envelope_type '{env_type}' for skill '{skill_id}'"
             )
 
-        template = skill.get("outbound_template", {})
+        template = skill.get("outbound_template", {}) or {}
 
         # Every placeholder the model will see must be filled: from an arg, or
         # from a derived arg (``fields_formatted`` from ``fields`` ...). One
         # that nothing fills fails here, before any model call (BRT-SKL-008).
+        # Every templated field is rendered: instruction, context, state_query,
+        # inputs_ref, output_schema, concurrency_limit, trigger_reason.
         raw_instruction = template.get("instruction", skill.get("description", ""))
         output_schema_raw = template.get("output_schema", {})
         state_query_raw = template.get("state_query")
+        context_raw = template.get("context")
+        trigger_raw = template.get("trigger_reason")
         inputs_ref_raw = (
             template.get("inputs_ref", args.get("items_ref", ""))
             if env_type == "apply_to_each" else ""
         )
         values = _fill_values(
             skill_id,
-            [raw_instruction, output_schema_raw, state_query_raw, inputs_ref_raw],
+            [raw_instruction, output_schema_raw, state_query_raw, inputs_ref_raw,
+             context_raw, trigger_raw, template.get("concurrency_limit")],
             args,
         )
 
         instruction = _safe_substitute(raw_instruction, values)
 
-        # Build output_schema
+        # Build output_schema: always a real per-item schema, never a note.
         if isinstance(output_schema_raw, str):
-            whole = _PLACEHOLDER.fullmatch(output_schema_raw.strip())
-            if whole and isinstance(values.get(whole.group(1)), dict):
-                # "{expected_return_schema}" given as a dict: use the dict.
-                output_schema = values[whole.group(1)]
-            else:
-                # String schema (e.g. "derived from fields") — pass as a note
-                output_schema = {"schema_note": _safe_substitute(output_schema_raw, values)}
+            output_schema = _string_schema(skill_id, output_schema_raw, values)
         else:
             output_schema = _substitute_tree(output_schema_raw, values)
 
@@ -186,18 +207,19 @@ class SkillLibrary:
         else:
             side_effects = []
 
-        # state_query
+        # state_query (rendered for the record; never executed)
         state_query = _safe_substitute(state_query_raw, values) if state_query_raw else None
+        context = _safe_substitute(str(context_raw), values) if context_raw else ""
+        if trigger_raw:
+            trigger_reason = _safe_substitute(str(trigger_raw), values)
 
         # dependency_input — include inputs_ref if apply_to_each
         dependency_input = {}
         if env_type == "apply_to_each":
             dependency_input["inputs_ref"] = _safe_substitute(str(inputs_ref_raw), values)
-            cl_raw = template.get("concurrency_limit", args.get("concurrency_limit", 20))
-            try:
-                dependency_input["concurrency_limit"] = int(str(cl_raw).strip("{} "))
-            except (ValueError, TypeError):
-                dependency_input["concurrency_limit"] = 20
+            dependency_input["concurrency_limit"] = _concurrency_limit(
+                skill_id, template.get("concurrency_limit"), values
+            )
 
         if run_id is None:
             run_id = uuid4()
@@ -212,6 +234,7 @@ class SkillLibrary:
             max_depth=max_depth,
             level_path=level_path,
             instruction=instruction.strip() or skill.get("description", "Execute skill."),
+            context=context,
             state_query=state_query,
             side_effects=side_effects,
             dependency_input=dependency_input,
@@ -219,7 +242,7 @@ class SkillLibrary:
             trigger_reason=trigger_reason,
             skill_id=skill_id,
             skill_version=version,
-            skill_args=args,
+            skill_args=given_args,
         )
 
 
@@ -280,8 +303,13 @@ def _derive(skill_id: str, name: str, args: dict) -> str:
             if suffix == "_instruction":
                 if value in (None, "", [], {}):
                     return ""
-                if isinstance(value, (list, dict)):
+                if isinstance(value, list):
+                    value = ", ".join(str(v) for v in value)
+                elif isinstance(value, dict):
                     value = json.dumps(value)
+                elif source == "max_length" and isinstance(value, str):
+                    # "100 words" -> "100": the wording already says "words".
+                    value = re.sub(r"\s*words?\s*\.?\s*$", "", value, flags=re.I)
                 wording = _INSTRUCTION_WORDING.get(
                     source, source.replace("_", " ").capitalize() + ": {value}."
                 )
@@ -311,9 +339,16 @@ def _fill_values(skill_id: str, parts: list, args: dict) -> dict:
     return values
 
 
-def _value_text(value: object) -> str:
+def _value_text(value: object, sep: str = ", ") -> str:
+    """Text for a value in a template string.
+
+    A list of plain values is joined with ``sep`` (", " in prose, "|" right
+    after "enum:"); a dict, or a list holding dicts or lists, is JSON.
+    """
     if value is None:
         return ""
+    if isinstance(value, list) and not any(isinstance(v, (list, dict)) for v in value):
+        return sep.join(str(v) for v in value)
     if isinstance(value, (list, dict)):
         return json.dumps(value)
     return str(value)
@@ -325,10 +360,173 @@ def _safe_substitute(template: str, args: dict) -> str:
     One pass, so braces inside a substituted value are never read as a
     placeholder. A null value renders as "".
     """
-    return _PLACEHOLDER.sub(
-        lambda m: _value_text(args[m.group(1)]) if m.group(1) in args else m.group(0),
-        template,
-    )
+    def _one(m: re.Match) -> str:
+        if m.group(1) not in args:
+            return m.group(0)
+        sep = "|" if m.string[: m.start()].endswith("enum:") else ", "
+        return _value_text(args[m.group(1)], sep)
+
+    return _PLACEHOLDER.sub(_one, template)
+
+
+def _is_optional(hint: object) -> bool:
+    """True when a required_args type hint allows null (``int | null``)."""
+    return "null" in str(hint).lower()
+
+
+def _skl_008(skill_id: str, why: str) -> RuntimeError:
+    return RuntimeError(f"BRT-SKL-008: render failed — skill '{skill_id}': {why}")
+
+
+def _coerce_arg(skill_id: str, name: str, hint: object, value: object) -> object:
+    """An arg in the shape its hint names.
+
+    A ``list[...]`` arg given as a string is a JSON list or a comma list
+    ("billing, sales"); a ``dict`` arg given as a string is parsed as JSON.
+
+    Raises:
+        RuntimeError: BRT-SKL-008 on an empty comma entry or invalid JSON.
+    """
+    hint_s = str(hint).replace(" ", "").lower()
+    if not isinstance(value, str):
+        return value
+    text = value.strip()
+    if hint_s.startswith("list"):
+        if text.startswith("["):
+            try:
+                parsed = json.loads(text)
+            except ValueError:
+                parsed = None
+            if isinstance(parsed, list):
+                return parsed
+        if not text:
+            return []
+        parts = [p.strip() for p in text.split(",")]
+        if any(not p for p in parts):
+            raise _skl_008(skill_id, f"arg '{name}' has an empty entry: {value!r}")
+        return parts
+    if hint_s.startswith("dict"):
+        try:
+            parsed = json.loads(text)
+        except ValueError as exc:
+            raise _skl_008(skill_id, f"arg '{name}' is not valid JSON: {exc}") from exc
+        if not isinstance(parsed, dict):
+            raise _skl_008(skill_id, f"arg '{name}' must be a JSON object, got {value!r}")
+        return parsed
+    return value
+
+
+_DERIVED_SCHEMA = re.compile(r"derived\s+from\s+(\w+)", re.I)
+
+
+def _string_schema(skill_id: str, raw: str, values: dict) -> dict:
+    """The output_schema for a template that gives it as a string.
+
+    "derived from <arg>" builds a flat schema from that arg; "{<arg>}" uses
+    that arg's dict (a JSON string is parsed before this). Anything else is
+    BRT-SKL-008: a schema the model and validator can use is never faked.
+    """
+    derived = _DERIVED_SCHEMA.fullmatch(raw.strip())
+    if derived:
+        source = derived.group(1)
+        if source not in values:
+            raise _skl_008(skill_id, f"output_schema is derived from '{source}', "
+                                     f"which no arg supplies")
+        return _schema_from_fields(skill_id, source, values[source])
+    whole = _PLACEHOLDER.fullmatch(raw.strip())
+    if whole and isinstance(values.get(whole.group(1)), dict) and values[whole.group(1)]:
+        return values[whole.group(1)]
+    raise _skl_008(skill_id, f"output_schema {raw!r} does not resolve to a schema dict "
+                             f"(got {values.get(whole.group(1)) if whole else raw!r})")
+
+
+def _normalise_fields(skill_id: str, name: str, value: object) -> list[dict]:
+    """Fields as ``[{name, type?, enum_values?, description?}]``.
+
+    Accepts a list of dicts, a list of names, a dict name -> type or spec,
+    or a comma string (split by ``_coerce_arg``).
+
+    Raises:
+        RuntimeError: BRT-SKL-008 on an empty, nameless or duplicate field.
+    """
+    if isinstance(value, dict):
+        entries = [{"name": k, **(v if isinstance(v, dict) else
+                                  ({"type": v} if v not in (None, "") else {}))}
+                   for k, v in value.items()]
+    elif isinstance(value, list):
+        entries = []
+        for e in value:
+            if isinstance(e, str):
+                entries.append({"name": e})
+            elif isinstance(e, dict):
+                entries.append(dict(e))
+            else:
+                raise _skl_008(skill_id, f"arg '{name}' has an entry that is not a "
+                                         f"name or a dict: {e!r}")
+    else:
+        entries = []
+    if not entries:
+        raise _skl_008(skill_id, f"arg '{name}' is empty; the output schema needs "
+                                 f"at least one field")
+    seen: set[str] = set()
+    for e in entries:
+        fname = e.get("name")
+        if not isinstance(fname, str) or not fname.strip():
+            raise _skl_008(skill_id, f"arg '{name}' has an entry with no name: {e!r}")
+        e["name"] = fname.strip()
+        if e["name"] in seen:
+            raise _skl_008(skill_id, f"arg '{name}' names field '{e['name']}' twice")
+        seen.add(e["name"])
+    return entries
+
+
+def _schema_from_fields(skill_id: str, name: str, value: object) -> dict:
+    """A flat per-item schema: one required key per field.
+
+    Hint: ``"<type> | null"`` (type defaults to string), or
+    ``"enum:a|b|c|null"`` when enum_values are given; " — <description>"
+    is added when the field has one.
+    """
+    schema: dict = {}
+    for f in _normalise_fields(skill_id, name, value):
+        enum_values = f.get("enum_values")
+        if isinstance(enum_values, str):
+            enum_values = [v.strip() for v in enum_values.split(",") if v.strip()]
+        if enum_values:
+            hint = "enum:" + "|".join(str(v) for v in enum_values) + "|null"
+        else:
+            ftype = str(f.get("type") or "string").strip()
+            hint = ftype if "null" in ftype.lower() else f"{ftype} | null"
+        if f.get("description"):
+            hint += f" — {f['description']}"
+        schema[f["name"]] = hint
+    return schema
+
+
+def _concurrency_limit(skill_id: str, raw: object, values: dict) -> int:
+    """The rendered concurrency_limit: the arg's int, or 20 when null/omitted.
+
+    Raises:
+        RuntimeError: BRT-SKL-008 if the value is not a positive integer.
+    """
+    if isinstance(raw, str):
+        whole = _PLACEHOLDER.fullmatch(raw.strip())
+        value = values.get(whole.group(1)) if whole else _safe_substitute(raw, values)
+    elif raw is None:
+        value = values.get("concurrency_limit")
+    else:
+        value = raw
+    if value in (None, ""):
+        return 20
+    try:
+        if isinstance(value, bool):
+            raise ValueError
+        limit = int(str(value).strip()) if not isinstance(value, int) else value
+    except (ValueError, TypeError):
+        raise _skl_008(skill_id, f"concurrency_limit {value!r} is not an integer") from None
+    if limit < 1:
+        raise _skl_008(skill_id, f"concurrency_limit {limit} must be at least 1")
+    return limit
 
 
 def _substitute_tree(part: object, args: dict) -> object:
