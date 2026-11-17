@@ -81,6 +81,11 @@ async def stub_run(db_path, monkeypatch) -> dict:
     monkeypatch.setattr(engine_mod, "_invoke_orchestrator_model", fake_invoke)
     run_id = await create_run("hi", db_path=db_path)
     await engine_mod.orchestrate_run(run_id, "hi", db_path=db_path)
+    # The run's log writes are fire-and-forget tasks on this loop. The caller
+    # next makes a blocking TestClient call, which freezes this loop: a write
+    # caught between its INSERT and its commit would hold the database lock
+    # for good and the config write would fail "database is locked".
+    await drain_log_writes()
     return seen
 
 
@@ -120,6 +125,7 @@ async def read_rule_zero_taken(db_path, matrix, monkeypatch):
     monkeypatch.setattr(engine_mod, "_invoke_orchestrator_model", fake_invoke)
     run_id = await create_run("hi", db_path=db_path)
     await engine_mod.orchestrate_run(run_id, "hi", db_path=db_path)
+    await drain_log_writes()  # see stub_run
     assert modes
     return modes[0] == "compose"
 
