@@ -92,8 +92,15 @@ async def test_tavily_failure_falls_back_to_perplexity(monkeypatch, caplog):
     }
     perplexity_client = _mock_httpx_post(perplexity_body)
 
+    # Clients are shared per event loop (work order 1.12), so both providers
+    # are called on one client: its post answers Tavily, then Perplexity.
+    shared = _mock_httpx_post({})
+    shared.post = AsyncMock(side_effect=[
+        await tavily_client.post(), await perplexity_client.post(),
+    ])
+
     tool = WebSearchTool()
-    with patch("httpx.AsyncClient", side_effect=[tavily_client, perplexity_client]):
+    with patch("httpx.AsyncClient", return_value=shared):
         with caplog.at_level("WARNING"):
             res = await tool.run({"query": "hello"})
 
