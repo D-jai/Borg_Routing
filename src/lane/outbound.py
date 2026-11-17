@@ -16,6 +16,9 @@ before. With the lane on, before anything is sent:
    body. The row is written and the write awaited before the POST; a failed
    write blocks the request (BRT-LANE-007). After the POST the row gets its
    status, HTTP status and error. A retry is its own row (``attempt``).
+   Ledger writes for one database go through one serialised writer, each
+   connection waits for the lock (busy timeout), and a "database is locked"
+   is retried with backoff (5 tries) before the send is blocked.
    Secret fields (``api_key``) are redacted in the stored copy only.
 4. Local calls are built with ``trust_env=False``, so a proxy variable cannot
    carry them off the machine.
@@ -35,15 +38,19 @@ Error codes:
 """
 from __future__ import annotations
 
+import asyncio
 import contextvars
 import json
+import os
+import sqlite3
+import weakref
 from contextlib import contextmanager
 from typing import Iterator, Optional
 from uuid import UUID, uuid4
 
-import aiosqlite
 import httpx
 
+from src.db.connect import connect
 from src.registry.models import ModelInfo
 
 from .backstop import find_leak
@@ -99,8 +106,48 @@ def _redacted(body: object) -> object:
     return body
 
 
-async def _insert_row(db_path: str, row: dict) -> None:
-    async with aiosqlite.connect(db_path) as db:
+# One serialised writer per database: concurrent sends (an apply_to_each of
+# many parts) queue here instead of racing for SQLite's write lock. The lock
+# is per event loop (an asyncio.Lock belongs to one loop) and per path.
+_LOCKS: "weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, dict[str, asyncio.Lock]]" = (
+    weakref.WeakKeyDictionary()
+)
+_RETRY_TRIES = 5            # attempts on "database is locked" before giving up
+_RETRY_BASE_SECONDS = 0.05  # backoff: 0.05, 0.1, 0.2, 0.4 s between attempts
+
+
+def _writer_lock(db_path: str) -> asyncio.Lock:
+    per_loop = _LOCKS.setdefault(asyncio.get_running_loop(), {})
+    key = os.path.normcase(os.path.abspath(db_path))
+    lock = per_loop.get(key)
+    if lock is None:
+        lock = per_loop[key] = asyncio.Lock()
+    return lock
+
+
+def _is_locked(exc: BaseException) -> bool:
+    return isinstance(exc, sqlite3.OperationalError) and (
+        "locked" in str(exc).lower() or "busy" in str(exc).lower()
+    )
+
+
+async def _serialised(db_path: str, write) -> None:
+    """Run ``write()`` under the database's writer lock, retrying a
+    "database is locked" up to ``_RETRY_TRIES`` times with backoff. The last
+    failure is raised."""
+    async with _writer_lock(db_path):
+        for attempt in range(1, _RETRY_TRIES + 1):
+            try:
+                await write()
+                return
+            except Exception as exc:
+                if not _is_locked(exc) or attempt == _RETRY_TRIES:
+                    raise
+                await asyncio.sleep(_RETRY_BASE_SECONDS * (2 ** (attempt - 1)))
+
+
+async def _insert_once(db_path: str, row: dict) -> None:
+    async with connect(db_path) as db:
         await db.execute(
             """INSERT INTO outbound_requests(
                 request_id, run_id, envelope_id, attempt, purpose, destination,
@@ -115,18 +162,32 @@ async def _insert_row(db_path: str, row: dict) -> None:
         await db.commit()
 
 
+async def _insert_row(db_path: str, row: dict) -> None:
+    """Write the ledger row; raises when it still cannot be written."""
+    await _serialised(db_path, lambda: _insert_once(db_path, row))
+
+
+async def _finish_once(
+    db_path: str, request_id: str, status: str,
+    http_status: Optional[int], error: Optional[str],
+) -> None:
+    async with connect(db_path) as db:
+        await db.execute(
+            """UPDATE outbound_requests SET status=?, http_status=?, error=?,
+               finished_at=CURRENT_TIMESTAMP WHERE request_id=?""",
+            (status, http_status, error, request_id),
+        )
+        await db.commit()
+
+
 async def _finish_row(
     db_path: str, request_id: str, status: str,
     http_status: Optional[int], error: Optional[str],
 ) -> None:
     try:
-        async with aiosqlite.connect(db_path) as db:
-            await db.execute(
-                """UPDATE outbound_requests SET status=?, http_status=?, error=?,
-                   finished_at=CURRENT_TIMESTAMP WHERE request_id=?""",
-                (status, http_status, error, request_id),
-            )
-            await db.commit()
+        await _serialised(
+            db_path, lambda: _finish_once(db_path, request_id, status, http_status, error)
+        )
     except Exception:
         pass  # the row already exists; only its outcome is missing
 

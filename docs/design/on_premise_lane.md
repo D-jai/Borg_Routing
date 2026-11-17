@@ -6,6 +6,8 @@ Work order 2.1. Written 15-Nov-2026 by the planner (Fable). Attacked by a fresh 
 
 > Raw document text is sent only to models on your own machines. Everything sent to a cloud model is listed, and you can read it.
 
+This is the promise of `raw_local` and `all_local`. `by_reference` (section 2) makes no privacy promise.
+
 Three precise statements stand behind it. The README, the deck and the interface may claim these and nothing stronger.
 
 | | Statement | Kind | Held by |
@@ -38,6 +40,8 @@ Config key `lane_mode` (env `BORG_LANE_MODE`), default `off`.
 With `off`, behaviour is byte-for-byte Phase 1: no new field is read, no guard, backstop or ledger runs.
 
 `by_reference` (work order 2.4, added 16-Nov-2026) makes no privacy promise and is outside sections 1 and 5 to 8. Documents are handed over exactly as in `raw_local` (section 4, raw marking of 5.2, ids only, text loaded in the child, parts), but `local_only` is not set for raw steps, the call guard does not apply to them, and the output guard (8) and content backstop (7) do not run. The ledger (9) records every request; resume stays refused (5.7); an `orchestrate` step with documents stays refused (5.8). `raw_local` and `all_local` decide exactly as before.
+
+In `by_reference` (2.4 review, 16-Nov-2026): a raw step's failure goes up by the non-raw rules (code plus the first 200 characters of the message; `BRT-ANS-010` when the model reported the failure), never a lane code from a guard that did not run; a lane refusal the runtime built keeps code plus id. Model-written failure text is never parsed for a code in any mode. The document's size still counts toward routing (the model's context must fit it).
 
 ## 3. What "local" means
 
@@ -72,7 +76,7 @@ Every local model, tool and bypass call (the calls made through `send_outbound()
 1. **Content lives only in the child.** The engine passes document and part ids, never text. Text is loaded inside the executing child task from its id, right before that task builds its own (local) request. Items, `instruction`, `dependency_input`, stage outputs, `failures[]` and `envelopes.outbound_payload` hold ids only.
 2. **Marking, by the runtime.** A task is `data_scope: "raw"` (new `WrappedTask` field, default `"derived"`) when its plan node has `documents`, an `inputs_ref` to documents, or a `depends_on`/`inputs_ref` that reaches a raw step whose output has not passed the output guard. The guard stamps each output it passes; unstamped raw output keeps the reader raw. A `data_scope` key on a plan node is ignored. `_make_child_task` copies `data_scope` and the document id to every child; skill nodes go through the same path.
 3. **Aggregates.** The `apply_to_each` result of a raw step lists each item by its document or part id, not by `item` content.
-4. **Failures go upward as code plus id.** A raw step's failure reason, as seen by re_plan, compose or any parent, is `{"code": "BRT-...", "doc": "doc_003#2"}`. Exception text, partial model output and file paths stay in the local log.
+4. **Failures go upward as code plus id** (`raw_local`, `all_local`; see section 2 for `by_reference`). A raw step's failure reason, as seen by re_plan, compose or any parent, is `{"code": "BRT-...", "doc": "doc_003#2"}`. Exception text, partial model output and file paths stay in the local log.
 5. **No path skips the plan.** A request with documents turns off the trivial-conversation shortcut, and a planner `direct_answer` is rejected as a plan error: an answer about documents must come from steps that read them.
 6. **History carries its lane.** Each stored thread message is tagged with the lane mode of the run that made it. Messages and rolling summaries tagged `all_local` are stripped from the thread window and from compressor input of any run whose planner is not local.
 7. **No resume.** `POST /runs/{id}/resume` is refused for a run that read documents (code chosen in 2.2). Start a new run.
@@ -116,6 +120,7 @@ Applied to every raw envelope **whatever its status** (success, partial or faile
 
 - **One ledger row per HTTP request** that leaves the machine, in a new `outbound_requests` table: run id, envelope id, attempt number, destination (model or tool, real URL), `left_machine`, the **exact JSON body** as sent, status, times, error. Written by `send_outbound()`.
 - The row is written, and the write awaited, **before** the POST, then updated after. Under the lane, a failed write blocks the request (`BRT-LANE-007`). A call that fails or times out still has its row.
+- Concurrent sends (2.4 review): ledger writes for one database go through one serialised writer (an `asyncio.Lock` per event loop and database path), every connection the lane, the log writer, envelope saves and scratch writes open sets `PRAGMA busy_timeout` = 30000 ms (`src/db/connect.py`), and "database is locked" is retried 5 times with backoff. A write that still fails blocks the send (`BRT-LANE-007`, fail closed).
 - Retries (truncation, JSON-only, provider fallback in `web_search`) are separate rows. Tools record the provider URL and body they really sent.
 - `GET /runs/{id}` returns "What left this machine" for the run and every child run, found through `parent_run_id`.
 - **Local copies of document-derived text:** `logs` (`payload_in`, error text), `log_entities` and `log_relations` (the NER worker), `envelopes.outbound_payload`, and this ledger. All are local SQLite. With the lane on, `GET /logs/entities`, `GET /logs/export` and the outbound payloads in run detail go behind the admin token (work order 4.4); `scripts/export_run.py` refuses a run whose export would contain document text (work order 4.5).

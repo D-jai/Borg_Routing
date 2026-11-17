@@ -85,7 +85,7 @@ from src.db.state import (
 from src.envelopes.schema import InboundEnvelope, ToolRequest, WrappedTask
 from src.lane.context import (
     RAW_FAILURE_DEFAULT, LaneContext, current_lane, doc_label, failure_of, prompt_json,
-    raw_failure_code,
+    raw_failure_code, raw_failures_hidden,
 )
 from src.lane.errors import LaneError
 from src.lane.outbound import call_scope, send_outbound
@@ -615,14 +615,18 @@ def _stage_output_for_prompt(env: InboundEnvelope, mode: str = "re_plan") -> dic
 
     A raw step (decided by the ``data_scope`` of the task that produced the
     envelope, not by ``lane_guarded``) shows only ``{"code", "doc"}``: never
-    its output or any message text.
+    its output or any message text. In ``by_reference`` (no output guard ran)
+    only a failure the runtime built that way keeps that shape; any other raw
+    failure is shown by the non-raw rules above.
     """
     if env.status != "failed":
         return env.output
     if env._data_scope == "raw":
         shown = (env.output or {}).get("failure")
         if env.lane_guarded is False and isinstance(shown, dict) and shown.get("code"):
+            # A failure the runtime built (a lane refusal): code + doc ids.
             return {"failure": {"code": shown["code"], "doc": shown.get("doc")}}
+    if env._data_scope == "raw" and raw_failures_hidden():
         code = (
             RAW_FAILURE_DEFAULT if env._reason_from_model
             else raw_failure_code(env.failure_reason)
@@ -2460,9 +2464,10 @@ async def _orchestrate_run(
             try:
                 env = await execute(task, db_path=db_path)
             except Exception as exc:
-                if task.data_scope == "raw":
+                if task.data_scope == "raw" and raw_failures_hidden():
                     # Upward a raw failure is a code plus document ids; the
                     # full error stays in the local trace (design note 5.4).
+                    # by_reference: shown by the non-raw rules below.
                     from src.lane.context import failed_envelope  # noqa: PLC0415
 
                     code = raw_failure_code(exc, "BRT-ORC-004")

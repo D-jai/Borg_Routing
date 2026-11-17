@@ -13,6 +13,7 @@ from uuid import UUID, uuid4
 
 import aiosqlite
 
+from src.db.connect import connect
 from src.db.schema import DB_PATH
 from src.envelopes.schema import InboundEnvelope, WrappedTask
 
@@ -41,7 +42,7 @@ async def create_run(
     from src.logging.provenance import resolve_instance_id  # noqa: PLC0415
 
     run_id = run_id or uuid4()
-    async with aiosqlite.connect(db_path) as db:
+    async with connect(db_path) as db:
         if documents:
             await db.execute(
                 """INSERT INTO runs(
@@ -100,7 +101,7 @@ async def update_run_status(
     if status not in valid:
         raise ValueError(f"BRT-DB-012: invalid run status '{status}'. Must be one of {sorted(valid)}")
 
-    async with aiosqlite.connect(db_path) as db:
+    async with connect(db_path) as db:
         sql = "UPDATE runs SET status=?"
         params: list = [status]
         if status in ("completed", "failed"):
@@ -118,7 +119,7 @@ async def update_run_status(
 
 async def save_envelope(task: WrappedTask, db_path: str = DB_PATH) -> None:
     """Insert an outbound envelope record with status=in_flight."""
-    async with aiosqlite.connect(db_path) as db:
+    async with connect(db_path) as db:
         await db.execute(
             """INSERT INTO envelopes(
                 envelope_id, run_id, subtask_id, type, level_path,
@@ -153,7 +154,7 @@ async def update_envelope_inbound(
     baseline_dollars: Optional[float] = None,
 ) -> None:
     """Store the inbound envelope payload and mark the envelope completed."""
-    async with aiosqlite.connect(db_path) as db:
+    async with connect(db_path) as db:
         cur = await db.execute(
             """UPDATE envelopes SET
                 status=?,
@@ -187,7 +188,7 @@ async def get_run(run_id: UUID, db_path: str = DB_PATH) -> dict:
     Raises:
         ValueError: BRT-DB-010 if not found.
     """
-    async with aiosqlite.connect(db_path) as db:
+    async with connect(db_path) as db:
         db.row_factory = aiosqlite.Row
         async with db.execute(
             "SELECT * FROM runs WHERE run_id=?", (str(run_id),)
@@ -206,7 +207,7 @@ async def get_runs_list(
     Direct-to-model (bypass) runs are left out unless ``include_bypass``.
     """
     where = "" if include_bypass else "WHERE COALESCE(kind, 'orchestrated') != 'bypass' "
-    async with aiosqlite.connect(db_path) as db:
+    async with connect(db_path) as db:
         db.row_factory = aiosqlite.Row
         async with db.execute(
             f"SELECT * FROM runs {where}ORDER BY created_at DESC LIMIT ?",
@@ -224,7 +225,7 @@ async def get_run_counts(db_path: str = DB_PATH, include_bypass: bool = False) -
     where = "" if include_bypass else "WHERE COALESCE(kind, 'orchestrated') != 'bypass' "
     counts = {"total": 0, "completed": 0, "failed": 0, "running": 0, "pending": 0,
               "thumbs_up": 0, "thumbs_down": 0}
-    async with aiosqlite.connect(db_path) as db:
+    async with connect(db_path) as db:
         async with db.execute(
             f"SELECT status, COUNT(*), "
             f"SUM(CASE WHEN user_rating = 1 THEN 1 ELSE 0 END), "
@@ -242,7 +243,7 @@ async def get_run_counts(db_path: str = DB_PATH, include_bypass: bool = False) -
 
 async def get_envelopes(run_id: UUID, db_path: str = DB_PATH) -> list[dict]:
     """Return all envelope records for a run, ordered by created_at."""
-    async with aiosqlite.connect(db_path) as db:
+    async with connect(db_path) as db:
         db.row_factory = aiosqlite.Row
         async with db.execute(
             "SELECT * FROM envelopes WHERE run_id=? ORDER BY created_at",
@@ -266,7 +267,7 @@ async def resume_run(run_id: UUID, db_path: str = DB_PATH) -> list:
             f"BRT-DB-020: run '{run_id}' is already completed and cannot be resumed"
         )
 
-    async with aiosqlite.connect(db_path) as db:
+    async with connect(db_path) as db:
         db.row_factory = aiosqlite.Row
         async with db.execute(
             """SELECT outbound_payload FROM envelopes
@@ -311,7 +312,7 @@ async def _sum_run_tree(db, run_id: UUID):
 async def get_descendant_run_ids(run_id: UUID, db_path: str = DB_PATH) -> list[str]:
     """Run ids of every descendant of a run (child runs spawned by orchestrate
     nodes, via parent_run_id), oldest first. The run itself is not included."""
-    async with aiosqlite.connect(db_path) as db:
+    async with connect(db_path) as db:
         async with db.execute(
             """WITH RECURSIVE tree(run_id) AS (
                    SELECT ?
@@ -334,7 +335,7 @@ async def get_outbound_requests(
     descendant run (via parent_run_id), oldest first. Each row holds the exact
     body that was sent. ``left_machine_only=False`` adds the local calls."""
     where = "AND left_machine = 1" if left_machine_only else ""
-    async with aiosqlite.connect(db_path) as db:
+    async with connect(db_path) as db:
         db.row_factory = aiosqlite.Row
         async with db.execute(
             f"""WITH RECURSIVE tree(run_id) AS (
@@ -356,7 +357,7 @@ async def get_run_documents(run_id, db_path: str = DB_PATH) -> Optional[list]:
     A run that read documents is never resumed (on-premise lane)."""
     current = str(run_id)
     for _ in range(33):
-        async with aiosqlite.connect(db_path) as db:
+        async with connect(db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute("SELECT * FROM runs WHERE run_id=?", (current,)) as cur:
                 row = await cur.fetchone()
@@ -376,7 +377,7 @@ async def get_run_documents(run_id, db_path: str = DB_PATH) -> Optional[list]:
 
 async def sum_run_tree(run_id: UUID, db_path: str = DB_PATH) -> dict:
     """Logged tokens and dollars for a run plus all its descendant runs."""
-    async with aiosqlite.connect(db_path) as db:
+    async with connect(db_path) as db:
         db.row_factory = aiosqlite.Row
         row = await _sum_run_tree(db, run_id)
     return {
@@ -389,7 +390,7 @@ async def sum_run_tree(run_id: UUID, db_path: str = DB_PATH) -> dict:
 
 async def get_run_digest(run_id: UUID, db_path: str = DB_PATH) -> Optional[dict]:
     """The stored digest row for a run, or None if no digest was saved."""
-    async with aiosqlite.connect(db_path) as db:
+    async with connect(db_path) as db:
         db.row_factory = aiosqlite.Row
         async with db.execute(
             """SELECT summary, cost_dollars, baseline_dollars, tokens_input,
@@ -412,7 +413,7 @@ async def compute_and_save_digest(run_id: UUID, db_path: str = DB_PATH) -> dict:
     tokens_input, tokens_output, baseline_dollars}.
     Safe to call multiple times — upserts on conflict.
     """
-    async with aiosqlite.connect(db_path) as db:
+    async with connect(db_path) as db:
         db.row_factory = aiosqlite.Row
         async with db.execute(
             "SELECT COUNT(*) AS cnt FROM envelopes WHERE run_id=?",
@@ -434,7 +435,7 @@ async def compute_and_save_digest(run_id: UUID, db_path: str = DB_PATH) -> dict:
         f"${cost_dollars:.4f} cost."
     )
 
-    async with aiosqlite.connect(db_path) as db:
+    async with connect(db_path) as db:
         await db.execute(
             """INSERT INTO run_digests(run_id, summary, cost_dollars, token_count,
                                        baseline_dollars, tokens_input, tokens_output)
@@ -471,7 +472,7 @@ async def set_run_rating(run_id: UUID, rating: int, db_path: str = DB_PATH) -> N
     """
     if rating not in (1, -1):
         raise ValueError(f"Invalid rating '{rating}': must be 1 (up) or -1 (down)")
-    async with aiosqlite.connect(db_path) as db:
+    async with connect(db_path) as db:
         cur = await db.execute(
             "UPDATE runs SET user_rating=? WHERE run_id=?",
             (rating, str(run_id)),
@@ -483,7 +484,7 @@ async def set_run_rating(run_id: UUID, rating: int, db_path: str = DB_PATH) -> N
 
 async def get_config(key: str, db_path: str = DB_PATH) -> Optional[str]:
     """Return config value for key, or None if not set."""
-    async with aiosqlite.connect(db_path) as db:
+    async with connect(db_path) as db:
         async with db.execute(
             "SELECT value FROM config WHERE key=?", (key,)
         ) as cur:
@@ -499,7 +500,7 @@ async def get_config(key: str, db_path: str = DB_PATH) -> Optional[str]:
 
 async def delete_config(key: str, db_path: str = DB_PATH) -> bool:
     """Delete a saved config key so env/default applies again. True if it existed."""
-    async with aiosqlite.connect(db_path) as db:
+    async with connect(db_path) as db:
         cur = await db.execute("DELETE FROM config WHERE key=?", (key,))
         await db.commit()
         return cur.rowcount > 0
@@ -508,7 +509,7 @@ async def delete_config(key: str, db_path: str = DB_PATH) -> bool:
 async def set_config(key: str, value, db_path: str = DB_PATH) -> None:
     """Upsert a config value. Value is JSON-serialised if not a string."""
     stored = json.dumps(value) if not isinstance(value, str) else value
-    async with aiosqlite.connect(db_path) as db:
+    async with connect(db_path) as db:
         await db.execute(
             """INSERT INTO config(key, value) VALUES (?,?)
                ON CONFLICT(key) DO UPDATE SET value=excluded.value,

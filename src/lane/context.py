@@ -192,6 +192,16 @@ def current_lane() -> Optional[LaneContext]:
     return _current.get()
 
 
+def raw_failures_hidden() -> bool:
+    """Whether a raw step's failure is shown upward as code + document ids
+    only. True in ``raw_local``/``all_local`` (and, to stay safe, when no
+    lane is in scope); False in ``by_reference``, where the output guard does
+    not run and a raw step's failure is shown by the non-raw rules (code +
+    first 200 characters, BRT-ANS-010 for a failure the model reported)."""
+    lane = current_lane()
+    return lane is None or lane.keeps_raw_local
+
+
 @contextmanager
 def lane_scope(ctx: Optional[LaneContext]) -> Iterator[None]:
     """Make ``ctx`` the lane of everything run inside the block."""

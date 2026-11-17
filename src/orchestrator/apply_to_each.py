@@ -187,17 +187,35 @@ def _make_child_task(
 
 def _failure_reason(child: WrappedTask, reason: object,
                     env: Optional[InboundEnvelope] = None) -> object:
-    """A raw child's failure as seen upward: code plus document id only."""
+    """A raw child's failure as seen upward: code plus document id only.
+
+    Model-written text is never parsed for a code, in any mode: a failure
+    the model reported is BRT-LANE-004 (raw_local/all_local) or BRT-ANS-010
+    (by_reference). In ``by_reference`` (no output guard ran) a raw child's
+    failure is shown by the non-raw rules: ``{"code", "message"}`` with the
+    first 200 characters, unless the runtime built a code + doc failure.
+    """
     if child.data_scope != "raw":
         return reason
-    from src.lane.context import failure_of, lane_failure_code, raw_failure_code  # noqa: PLC0415
+    from src.lane.context import (  # noqa: PLC0415
+        RAW_FAILURE_DEFAULT, failure_of, lane_failure_code, raw_failure_code,
+        raw_failures_hidden,
+    )
 
-    # A raw child's failed envelope comes from the output guard, which built
-    # it with a runtime code (a model-reported failure is BRT-LANE-004 there).
-    # Otherwise the reason is a runtime exception: its leading code or a
-    # fixed one, never parsed model text.
+    # A failure the runtime built (output guard or lane refusal) keeps its
+    # code and document ids in every mode.
     code = lane_failure_code(env) if env is not None else None
-    return failure_of(code or raw_failure_code(reason), list(child.documents))
+    if code:
+        return failure_of(code, list(child.documents))
+    from_model = env is not None and env._reason_from_model
+    if raw_failures_hidden():
+        # Otherwise the reason is a runtime exception: its leading code or a
+        # fixed one. A model-written reason is never parsed.
+        code = RAW_FAILURE_DEFAULT if from_model else raw_failure_code(reason)
+        return failure_of(code, list(child.documents))
+    text = str(reason or "")
+    code = "BRT-ANS-010" if from_model else raw_failure_code(text, "BRT-ORC-004")
+    return {"code": code, "message": text[:200]}
 
 
 async def _dispatch_child(

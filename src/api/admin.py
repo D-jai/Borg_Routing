@@ -174,8 +174,10 @@ _EFFECTIVE_SETTINGS: list[dict[str, Any]] = [
         "default": "off",
         "cast": str,
         "label": "Lane Mode",
-        "help_text": "off | raw_local (document text only to local models) | "
-                     "all_local (nothing sent to any cloud model).",
+        "help_text": "off (documents refused) | raw_local (document text only to local "
+                     "models) | all_local (nothing sent to any cloud model) | by_reference "
+                     "(documents by reference, read by any ticked model, cloud included: "
+                     "no privacy promise).",
     },
     {
         "key": "lane_max_output_chars",

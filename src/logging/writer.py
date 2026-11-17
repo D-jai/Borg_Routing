@@ -16,8 +16,7 @@ import sys
 from typing import Optional
 from uuid import UUID
 
-import aiosqlite
-
+from src.db.connect import connect
 from src.db.schema import DB_PATH
 from src.logging.provenance import (
     resolve_domain_profile,
@@ -62,7 +61,7 @@ async def _write_event_task(
     domain produced them.
     """
     try:
-        async with aiosqlite.connect(db_path) as db:
+        async with connect(db_path) as db:
             cur = await db.execute(
                 """INSERT INTO logs(
                     run_id, envelope_id, event_type, model_id,

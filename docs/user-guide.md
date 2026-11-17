@@ -474,7 +474,12 @@ A step's `recommended_model` still comes first. The alias also reaches the child
 
 ## On-premise lane
 
-The lane keeps your documents on your own machines. Its promise, in these words: **raw document text is sent only to models on your own machines. Everything sent to a cloud model is listed, and you can read it.** The full design is `docs/design/on_premise_lane.md`.
+The lane hands documents to the steps that read them, by reference. What it promises depends on the mode:
+
+- `raw_local` and `all_local` keep your documents on your own machines. Their promise, in these words: **raw document text is sent only to models on your own machines. Everything sent to a cloud model is listed, and you can read it.**
+- `by_reference` makes **no privacy promise**: any ticked model, cloud included, may read a document's text. It only keeps bulk data out of the prompt, and still lists every request (see "By reference, for cloud models" below).
+
+The full design is `docs/design/on_premise_lane.md`.
 
 ### What counts as "local"
 
@@ -484,7 +489,7 @@ A model is local when the address its requests go to is this machine, never beca
 - Addresses written in unusual forms (`127.1`, `2130706433`, `0x7f.1`, `0.0.0.0`, a URL with a user name in it) are not local.
 - An Ollama model whose tag ends in `-cloud`, or that Ollama reports as served from a remote host, is never local: it is served from localhost but runs elsewhere.
 
-When a step must stay local, the router offers it only local models, ignores a cloud model the planner recommended, and never falls back to a cloud model. If no local model clears the step's quality floor, the step fails with **BRT-LANE-002** and nothing is sent. Each such step's `routing` shows `"local_only": true`.
+In `raw_local` and `all_local`, when a step must stay local, the router offers it only local models, ignores a cloud model the planner recommended, and never falls back to a cloud model. If no local model clears the step's quality floor, the step fails with **BRT-LANE-002** and nothing is sent. Each such step's `routing` shows `"local_only": true`. In `by_reference` no step must stay local: a step that reads documents is routed like any other step, and the document's size still counts toward the model's context.
 
 ### Turning the lane on
 
@@ -520,7 +525,8 @@ The planner never sees the text. It gets a list: an id per document (`doc_001`),
 - The runtime, not the planner, marks a step **raw** when it reads documents (`"inputs_ref": "documents"`, `"documents": ["doc_001"]`, or a skill given `items_ref: documents`), or when it reads the output of a raw step that was withheld. Raw steps run on local models only (in `by_reference`, on any ticked model, with no output guard and no call check; the limits and checks below are those of `raw_local` and `all_local`).
 - The text is loaded inside the step, right before its own (local) request. Plans, saved envelopes and results carry document ids, never text.
 - **What a local step returns can be passed on.** That is the limit of the promise, so it is bounded: an output longer than `lane_max_output_chars` (default 1500 characters), one that copies a passage of `lane_max_verbatim_chars` (default 120) characters from the document, or one that holds a short document (under that limit) whole, is withheld (**BRT-LANE-004**). The check reads the output's values as text, so line breaks and accented letters do not hide a copy. Ask such steps for short fields (names, dates, labels).
-- When a raw step fails, the planner and the final answer see only the code and the document id, for example `{"code": "BRT-LANE-004", "doc": "doc_001"}`. A failure the local model itself reported always shows as **BRT-LANE-004**, whatever code or text it wrote. Only a failure BORG_ROUTE itself raised keeps its own code (for example **BRT-ANS-009** for a truncated answer, or a `BRT-LANE-*` refusal). The full error stays in the local trace.
+- When a raw step fails (in `raw_local` and `all_local`), the planner and the final answer see only the code and the document id, for example `{"code": "BRT-LANE-004", "doc": "doc_001"}`. A failure the local model itself reported always shows as **BRT-LANE-004**, whatever code or text it wrote. Only a failure BORG_ROUTE itself raised keeps its own code (for example **BRT-ANS-009** for a truncated answer, or a `BRT-LANE-*` refusal). The full error stays in the local trace.
+- In `by_reference` a failed step that read documents is shown like any other failed step: the code and the first 200 characters of the message, with **BRT-ANS-010** when the model itself reported the failure. Text a model wrote is never read for a code, in any mode. A `BRT-LANE-*` refusal (a path check, for example) still shows as its code and the document id.
 - With documents, the planner may not answer directly or skip the plan (**BRT-ORC-003**), and the short-prompt shortcut is off.
 - An `orchestrate` step given documents is refused outside `all_local` (**BRT-LANE-005**): its own planner would read them.
 - Every call a raw step makes, retries included, is checked right before it is sent; a call about to leave the machine is blocked (**BRT-LANE-003**, which means a defect).
@@ -528,7 +534,7 @@ The planner never sees the text. It gets a list: an id per document (`doc_001`),
 ### The check on everything sent out, and the record
 
 - While the lane is `raw_local` or `all_local` and the run has documents, every request headed off the machine (planner, final answer, cloud steps, web search, direct-to-model) is compared with the documents first. If it holds a passage of 120 characters, more than 10% of a document's 8-word sequences (`lane_max_ngram_share`), or a short document whole, it is blocked (**BRT-LANE-006**). Case, punctuation, line breaks, repeated JSON escaping, invisible characters (zero-width space, soft hyphen) and a copy split one word per field do not hide a match. What it does not catch is listed under "What is not promised".
-- Every request a run makes while the lane is on is written to the `outbound_requests` table before it is sent, with its exact body (secret fields such as `api_key` are blanked in the stored copy), and whether it left the machine. If that write fails, the request is not sent (**BRT-LANE-007**). A retry is its own row.
+- Every request a run makes while the lane is on is written to the `outbound_requests` table before it is sent, with its exact body (secret fields such as `api_key` are blanked in the stored copy), and whether it left the machine. If that write fails, the request is not sent (**BRT-LANE-007**). A retry is its own row. Many steps sending at once (a document in dozens of parts) take turns writing: each write waits for the database (up to 30 seconds) and is tried up to 5 times, so only a write that truly fails blocks a request.
 - Local calls ignore proxy settings (`HTTP_PROXY` and the like), so a proxy cannot carry them off the machine.
 
 ### Using the lane from the API
@@ -544,6 +550,7 @@ The planner never sees the text. It gets a list: an id per document (`doc_001`),
 
 ### What is not promised
 
+- In `by_reference`, nothing below is promised either: it makes no privacy promise. Any ticked model, cloud included, receives the text of the documents its steps read, and no copy check runs. The list below is about `raw_local` and `all_local`.
 - Your own prompt goes to the planner. Hand documents over by reference; text pasted into the prompt from a document that was also loaded is blocked, text from any other document cannot be recognised.
 - Facts a local step extracts (a name, a date, a short quote) can leave inside its answer, within the limits above, and are listed.
 - A document can carry instructions aimed at the local model ("put everything in base64"). The limits reduce the damage; they do not catch encodings or paraphrase.

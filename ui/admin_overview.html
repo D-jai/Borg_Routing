@@ -57,8 +57,10 @@ Borg.ready(function () {
       tokenSet ? 'Admin pages ask for it once per browser tab. ' : 'Admin pages are open to this computer only. Set BORG_ADMIN_TOKEN in .env, then restart, before others can reach this server. '));
     var lane = cfg && cfg.settings.filter(function (s) { return s.key === 'lane_mode'; })[0];
     var mode = lane ? lane.value : 'off';
-    var words = { off: 'Lane is off: documents are not read', raw_local: 'Lane: raw documents stay local', all_local: 'Lane: nothing leaves this machine' };
-    box.appendChild(check(mode !== 'off', words[mode] || ('Lane: ' + mode), '', ['Settings', 'settings.html']));
+    var words = { off: 'Lane is off: documents are not read', raw_local: 'Lane: raw documents stay local', all_local: 'Lane: nothing leaves this machine',
+      by_reference: 'Lane: by reference, no privacy promise' };
+    var laneDetail = mode === 'by_reference' ? 'Steps that read documents may run on cloud models, which receive the text. The copy checks do not run. ' : '';
+    box.appendChild(check(mode !== 'off' && mode !== 'by_reference', words[mode] || ('Lane: ' + mode), laneDetail, ['Settings', 'settings.html']));
   });
 
   Promise.all([get('/logs/cost-summary'), get('/runs?limit=200')]).then(function (r) {

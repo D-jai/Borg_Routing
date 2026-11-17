@@ -668,6 +668,10 @@ async def _execute_raw_answerer(task: WrappedTask, db_path: str, lane) -> Inboun
     except LaneError:
         raise
     except Exception as exc:
+        if not lane.keeps_raw_local:
+            # by_reference: no privacy promise; the failure goes up by the
+            # non-raw rules (code + message), as for any other step.
+            raise
         code = raw_failure_code(exc, "BRT-ANS-008")
         failure = failure_of(code, list(task.documents))
         try:
