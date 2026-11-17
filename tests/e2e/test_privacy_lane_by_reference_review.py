@@ -338,7 +338,7 @@ async def test_effective_config_serves_the_lane_mode_help_text(tmp_path, monkeyp
 
 
 def test_overview_shows_by_reference_as_a_warning_not_a_tick():
-    html = (ROOT / "ui" / "admin_overview.html").read_text(encoding="utf-8")
+    html = (ROOT / "ui" / "assets" / "pages" / "admin_overview.js").read_text(encoding="utf-8")
     assert "by_reference:" in html and "no privacy promise" in html
     # The tick is given only to raw_local and all_local.
     assert "mode !== 'off' && mode !== 'by_reference'" in html
