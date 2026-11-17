@@ -932,6 +932,7 @@ def dry_run(jobs, cfg, matrix, baseline, only_jobs, arms_filter, repeats, job_re
     checked = [m.model_id for m in matrix.all() if m.checked]
     out(f"checked models ({len(checked)}): {', '.join(checked)}")
     out(f"local arms           : {'NOT RUN in this build (--skip-local); no cost, no numbers' if cfg.skip_local else 'will run if a local model is checked'}")
+    out(f"job B                : needs Docker and the '{checks.BENCH_IMAGE}' image for every run, else all of job B is void")
     out("")
     out(f"{'job':<4}{'arm':<20}{'lane_mode':<14}{'repeats':<9}{'est $/run':>10}{'est $ total':>13}")
     n_run = n_skip = 0
