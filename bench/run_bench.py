@@ -977,7 +977,7 @@ def load_measured(cfg: Config, jobs: dict) -> dict[tuple[str, str], list[float]]
                 except ValueError:
                     continue
                 if rec.get("status") in FINISHED or rec.get("status") == "not run":
-                    out.setdefault((name, arm), []).append(float(rec.get("cost_dollars") or 0.0))
+                    out.setdefault((name, arm), []).append(run_spend(rec))
     return out
 
 
@@ -986,26 +986,82 @@ def arm_names_all(job: dict) -> list[str]:
 
 
 def reestimate(remaining: list[RunSpec], conservative: dict[str, float],
-               measured: dict[tuple[str, str], list[float]]) -> dict[str, float]:
+               measured: dict[tuple[str, str], list[float]], worst_ratio: float = 1.0) -> dict[str, float]:
     """Tripwire re-estimate: each remaining run is the dearest observed run of its own cell, rounded up to
-    the next cent (a run that logged US$0 counts as US$0); a cell not yet measured keeps its conservative estimate."""
+    the next cent (a run that logged US$0 counts as US$0); a cell not yet measured is its conservative estimate
+    times ``max(1, worst_ratio)`` (the worst real-to-estimate ratio observed so far: an estimate that was beaten
+    4x once is not trusted again at face value; round-2 review (4))."""
+    scale = max(1.0, float(worst_ratio or 0.0))
     out = {}
     for r in remaining:
         seen = measured.get((r.job, r.arm))
-        out[r.key] = ceil_cent(max(seen)) if seen else conservative[r.key]
+        out[r.key] = ceil_cent(max(seen)) if seen else conservative[r.key] * scale
     return out
 
 
+def worst_ratio(cfg: Config, jobs: dict) -> float:
+    """The worst real-to-estimate ratio over every finished result file of the date (cost fields only):
+    ``spend_dollars`` (the run plus any aborted transport attempts) over ``estimate_dollars``. At least 1."""
+    worst = 1.0
+    for name, job in jobs.items():
+        for arm in arm_names_all(job):
+            for p in cfg.day_dir.glob(f"{name}_{arm}_*.json"):
+                if not p.stem[len(f"{name}_{arm}_"):].isdigit():
+                    continue
+                try:
+                    rec = json.loads(p.read_text(encoding="utf-8"))
+                except ValueError:
+                    continue
+                est = float(rec.get("estimate_dollars") or 0.0)
+                if rec.get("status") in FINISHED and est > 0:
+                    worst = max(worst, run_spend(rec) / est)
+    return worst
+
+
+def run_spend(rec: dict) -> float:
+    """Everything a run's record says was spent: its own cost plus its aborted transport attempts."""
+    return float(rec.get("cost_dollars") or 0.0) + sum(
+        float(a.get("cost_dollars") or 0.0) for a in rec.get("aborted_attempts") or [])
+
+
+def repeat1_status(cfg: Config, jobs: dict, arms=None) -> dict[tuple[str, str], str]:
+    """``{(job, arm): status}`` of every repeat-1 cell ("missing" when there is no readable result file).
+    Reads the status field only: never a quality field."""
+    out = {}
+    for name, job in jobs.items():
+        for arm in arms_of(job, arms):
+            p = cfg.day_dir / f"{name}_{arm}_1.json"
+            try:
+                out[(name, arm)] = str(json.loads(p.read_text(encoding="utf-8")).get("status") or "missing")
+            except (OSError, ValueError):
+                out[(name, arm)] = "missing"
+    return out
+
+
+def _fixed_cost(extra_fixed: dict, name: str, n_extra: int) -> float:
+    """``extra_fixed[name]``: a float (the same whatever the count) or a callable of the number of extra repeats."""
+    v = extra_fixed.get(name, 0.0)
+    return float(v(n_extra) if callable(v) else v)
+
+
 def plan_stage2(jobs: dict, measured: dict, conservative_cells: dict, spent: float, cap: float,
-                extra_fixed: Optional[dict] = None, only=None, arms=None) -> dict:
-    """Stage 2: repeats 2..N by WHOLE JOB, order A, D, B, C. Cost only: nothing here reads a quality field.
+                extra_fixed: Optional[dict] = None, only=None, arms=None,
+                rep1: Optional[dict] = None, not_run_ok: Optional[set] = None) -> dict:
+    """Stage 2: extra repeats by WHOLE JOB, order A, D, B, C. Cost only: nothing here reads a quality field.
+
+    Eligibility (round-2 review (3)): with ``rep1`` (``{(job, arm): status}`` of repeat 1), a job gets extra
+    repeats only when every repeat-1 cell finished (completed or failed); a cell missing, refused, started or
+    "not run" makes the job ineligible, except a local cell in ``not_run_ok`` (written "not run" by design).
 
     A job's extra repeats cost, per cell, the dearest observed run rounded up to the cent (the conservative
     estimate for a cell never measured), summed over every arm and every extra repeat, plus ``extra_fixed[job]``
-    (the judge, for job C). A job is added only while ``spent`` + what is already added + its extra <= ``cap``;
-    one that does not fit is skipped and the later jobs are still tried. Every arm of an added job gets the same repeats.
+    (the judge, for job C; a callable of the number of extra repeats). The job tries every extra repeat it has
+    left (repeats 2 and 3), else one fewer, down to one (ruling 14 adjustment); it is added at the first count
+    where ``spent`` + what is already added + its extra <= ``cap``; one that fits at no count is skipped and the
+    later jobs are still tried. Every arm of an added job gets the same repeats.
     """
     extra_fixed = extra_fixed or {}
+    not_run_ok = not_run_ok or set()
     names = [n for n in STAGE_JOB_ORDER if n in jobs] + [n for n in jobs if n not in STAGE_JOB_ORDER]
     chosen, skipped, runs, estimates = [], [], [], {}
     committed = 0.0
@@ -1014,24 +1070,40 @@ def plan_stage2(jobs: dict, measured: dict, conservative_cells: dict, spent: flo
             continue
         job = jobs[name]
         target = int((job.get("repeats", 3)))
-        extra_n = list(range(2, target + 1))
         job_arms = arms_of(job, arms)
         per_cell = {}
         for arm in job_arms:
             seen = measured.get((name, arm))
             per_cell[arm] = ceil_cent(max(seen)) if seen else conservative_cells[(name, arm)]
-        extra = sum(per_cell.values()) * len(extra_n) + float(extra_fixed.get(name, 0.0))
-        entry = {"job": name, "extra_estimate": extra, "repeats": extra_n, "per_cell": per_cell}
-        if spent + committed + extra <= cap + 1e-9:
-            committed += extra
-            chosen.append(entry)
-            for n in extra_n:
-                for arm in job_arms:
-                    r = RunSpec(name, arm, n)
-                    runs.append(r)
-                    estimates[r.key] = per_cell[arm]
+        if rep1 is not None:
+            unfinished = [f"{name}/{arm} ({rep1.get((name, arm), 'missing')})" for arm in job_arms
+                          if rep1.get((name, arm), "missing") not in FINISHED
+                          and not (rep1.get((name, arm)) == "not run" and (name, arm) in not_run_ok)]
+            if unfinished:
+                skipped.append({"job": name, "extra_estimate": 0.0, "repeats": [], "per_cell": per_cell,
+                                "reason": "repeat 1 not finished: " + ", ".join(unfinished)})
+                continue
+        entry = None
+        for k in range(target - 1, 0, -1):          # both extra repeats, else one
+            extra_n = list(range(2, 2 + k))
+            judge_part = _fixed_cost(extra_fixed, name, k)
+            extra = sum(per_cell.values()) * k + judge_part
+            entry = {"job": name, "extra_estimate": extra, "repeats": extra_n, "per_cell": per_cell,
+                     "judge_estimate": judge_part}
+            if spent + committed + extra <= cap + 1e-9:
+                break
         else:
-            skipped.append(entry)
+            if entry is not None:
+                entry = dict(entry, reason="does not fit under the cap, even with one extra repeat")
+                skipped.append(entry)
+            continue
+        committed += entry["extra_estimate"]
+        chosen.append(entry)
+        for n in entry["repeats"]:
+            for arm in job_arms:
+                r = RunSpec(name, arm, n)
+                runs.append(r)
+                estimates[r.key] = per_cell[arm]
     return {"jobs": chosen, "skipped": skipped, "runs": runs, "estimates": estimates,
             "committed": committed, "spent": spent, "cap": cap}
 
@@ -1047,11 +1119,14 @@ def stage_inputs(stage: int, jobs, cfg, matrix, baseline, only=None, arms=None, 
     rep1 = build_matrix(jobs, only, arms, repeats=1)
     cons = conservative_estimates(rep1, jobs, cfg, matrix, baseline)
     cells = {(r.job, r.arm): cons[r.key] for r in rep1}
-    extra_fixed = {n: estimate_judge(jobs[n], int(jobs[n].get("repeats", 3)), jms) for n in judged} if jms else {}
+    # the judge is paid only for the new pairs (repeat 1's verdicts are reused), plus a fresh sanity case
+    extra_fixed = ({n: (lambda k, _j=jobs[n]: estimate_judge(_j, k, jms)) for n in judged} if jms else {})
+    rep1_cells = repeat1_status(cfg, jobs, arms)
+    not_run_ok = {(r.job, r.arm) for r in rep1 if local_skipped(jobs[r.job], r.arm, cfg, matrix)}
     plan = plan_stage2(jobs, load_measured(cfg, jobs), cells, cfg.ledger.spent(), cfg.phase_cap,
-                       extra_fixed, only, arms)
+                       extra_fixed, only, arms, rep1=rep1_cells, not_run_ok=not_run_ok)
     seq = [(r, plan["estimates"][r.key]) for r in plan["runs"]]
-    tail = sum(extra_fixed.get(j["job"], 0.0) for j in plan["jobs"])
+    tail = sum(j.get("judge_estimate", 0.0) for j in plan["jobs"])
     return {"sequence": seq, "tail": tail, "plan": plan, "judge_jobs": [j["job"] for j in plan["jobs"] if j["job"] in judged]}
 
 
@@ -1073,7 +1148,7 @@ async def run_stage(stage: int, jobs, cfg, matrix, baseline, chat=llm.chat, dock
         for j in inp["plan"]["jobs"]:
             log(f"stage 2: job {j['job']} gets repeats {j['repeats']} (extra estimate US${j['extra_estimate']:.4f})")
         for j in inp["plan"]["skipped"]:
-            log(f"stage 2: job {j['job']} skipped (extra estimate US${j['extra_estimate']:.4f} does not fit under the cap)")
+            log(f"stage 2: job {j['job']} skipped ({j.get('reason') or 'does not fit under the cap'})")
     out = {"rc": 0, "stopped": None, "done": [], "judge_jobs": inp["judge_jobs"], "tail": inp["tail"]}
     trips = 0
     i = 0
@@ -1087,21 +1162,25 @@ async def run_stage(stage: int, jobs, cfg, matrix, baseline, chat=llm.chat, dock
                                 estimate=est)
         out["done"].append({"spec": spec, **rec})
         cost = float(rec.get("cost_dollars") or 0.0)
+        spend = run_spend(rec)   # the run plus any aborted transport attempts: what the estimate had to cover
         log(f"{spec.key}: {rec['status']} cost=${cost:.4f} estimate=${est:.4f}"
+            + (f" aborted attempts=${spend - cost:.4f}" if spend > cost else "")
             + (f" ({rec.get('reason')})" if rec["status"] in ("refused", "not run") else ""))
         if rec["status"] == "refused":
             log("budget guard refused a run; stopping the stage (a guard failure is a stop, not a warning)")
             out.update(rc=3, stopped="guard")
             return out
-        measured.setdefault((spec.job, spec.arm), []).append(cost)
-        if rec["status"] != "not run" and cost > est + 1e-12:
+        measured.setdefault((spec.job, spec.arm), []).append(spend)
+        if rec["status"] != "not run" and spend > est + 1e-12:
             trips += 1
             rest = [(r, e) for r, e in seq[i:] if not _is_done(cfg, r)]
-            new = reestimate([r for r, _ in rest], {r.key: e for r, e in rest}, measured)
+            ratio = max(worst_ratio(cfg, jobs), spend / est if est > 0 else 1.0)
+            new = reestimate([r for r, _ in rest], {r.key: e for r, e in rest}, measured, worst_ratio=ratio)
             spent = cfg.ledger.spent()
-            total = spent + sum(new.values()) + inp["tail"]
+            total = spent + sum(new.values()) + inp["tail"]   # the judge's estimate already prices every cap
             fits = total <= cfg.phase_cap + 1e-9
-            note = {"stage": stage, "tripped_by": spec.key, "cost": cost, "estimate": est, "remaining": new,
+            note = {"stage": stage, "tripped_by": spec.key, "cost": cost, "spend_with_aborted_attempts": spend,
+                    "estimate": est, "worst_ratio": ratio, "remaining": new,
                     "ledger_spent": spent, "judge_tail": inp["tail"], "total_if_all_run": total,
                     "cap": cfg.phase_cap, "decision": "continue" if fits else "stop"}
             cfg.day_dir.mkdir(parents=True, exist_ok=True)
@@ -1344,9 +1423,10 @@ def dry_run_stage(stage, jobs, cfg, matrix, baseline, only_jobs, arms_filter, ou
         return 2
     inp = stage_inputs(2, jobs, cfg, matrix, baseline, only_jobs, arms_filter, jms)
     plan = inp["plan"]
-    out("stage 2: repeats 2 and 3 estimated per cell from stage 1's measured cost (dearest observed run, "
+    out("stage 2: extra repeats estimated per cell from stage 1's measured cost (dearest observed run, "
         "rounded up to the cent); repeats are added by whole job, order A, D, B, C,")
-    out("only while ledger spend + that job's extra estimate <= the cap. The decision looks at cost only.")
+    out("both extra repeats, else one, only while ledger spend + that job's extra estimate <= the cap, and only for "
+        "a job whose every repeat-1 cell finished. The decision looks at cost only.")
     out(f"spent so far (ledger) : US${spent:.4f}   phase cap US${cfg.phase_cap:.2f}")
     out(f"{'job':<5}{'decision':<10}{'repeats':<10}{'extra est $':>12}   per cell")
     decided = {j["job"]: ("add", j) for j in plan["jobs"]}
@@ -1354,7 +1434,8 @@ def dry_run_stage(stage, jobs, cfg, matrix, baseline, only_jobs, arms_filter, ou
     for name in [n for n in STAGE_JOB_ORDER if n in decided] + [n for n in decided if n not in STAGE_JOB_ORDER]:
         d, j = decided[name]
         cells = ", ".join(f"{a} US${v:.2f}" for a, v in j["per_cell"].items())
-        out(f"{name:<5}{d:<10}{','.join(map(str, j['repeats'])):<10}{j['extra_estimate']:>12.4f}   {cells}")
+        out(f"{name:<5}{d:<10}{','.join(map(str, j['repeats'])) or '-':<10}{j['extra_estimate']:>12.4f}   {cells}"
+            + (f"   [{j['reason']}]" if d == "skip" and j.get("reason") else ""))
     out(f"runs to add: {len(plan['runs'])}   committed estimate US${plan['committed']:.4f}   "
         f"spend + committed US${spent + plan['committed']:.4f} of US${cfg.phase_cap:.2f}")
     return 0
