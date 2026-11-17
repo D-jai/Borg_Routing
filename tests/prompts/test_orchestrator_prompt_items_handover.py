@@ -26,6 +26,20 @@ def test_the_apply_to_each_shape_offers_inline_items_right_after_inputs_ref():
     assert shape.index('"inputs_ref"') < shape.index(ITEMS_LINE)
 
 
+INPUTS_REF_LINE = (
+    '"inputs_ref": "id of the earlier step that produces the list '
+    '(omit when you give items)",'
+)
+
+
+def test_the_shape_example_names_a_step_id_not_a_made_up_list():
+    """Ruling 10: the example agrees with ruling 9's paragraph."""
+    shape = _shape(ORCHESTRATOR_SYSTEM_PROMPT, "apply_to_each")
+    assert INPUTS_REF_LINE in shape
+    assert '"input_list"' not in ORCHESTRATOR_SYSTEM_PROMPT
+    assert "the runtime resolves this from run state" not in ORCHESTRATOR_SYSTEM_PROMPT
+
+
 def test_the_items_line_is_only_in_the_apply_to_each_shape():
     assert ORCHESTRATOR_SYSTEM_PROMPT.count(ITEMS_LINE) == 1
     assert ITEMS_LINE not in _shape(ORCHESTRATOR_SYSTEM_PROMPT, "answerer")
@@ -42,5 +56,6 @@ def test_the_hand_over_paragraph_follows_the_failure_note():
 async def test_the_rendered_planner_prompt_carries_both_additions(planner_prompt):  # noqa: F811
     """What the model reads, after brace un-doubling and substitution."""
     assert ITEMS_LINE in _shape(planner_prompt, "apply_to_each")
+    assert INPUTS_REF_LINE in _shape(planner_prompt, "apply_to_each")
     assert PARAGRAPH in planner_prompt
     assert planner_prompt.count("{") == planner_prompt.count("}")

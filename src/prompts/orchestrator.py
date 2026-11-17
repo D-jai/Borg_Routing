@@ -208,7 +208,7 @@ Use this instead of emitting N identical answerers.
 {{"type": "apply_to_each",
   "id": "n1",
   "instruction": "Do this to ONE item: ...",
-  "inputs_ref": "input_list",  // the runtime resolves this from run state
+  "inputs_ref": "id of the earlier step that produces the list (omit when you give items)",
   "items": ["only when the list is in the user's message: the items themselves, one string each"],
   "output_schema": {{ ... per-item shape ... }},
   "concurrency_limit": 20,
