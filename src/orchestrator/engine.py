@@ -1928,8 +1928,6 @@ def _build_task_from_node(
                 max_depth=max_depth,
                 level_path=level_path,
                 trigger_reason=node.get("trigger_reason", "initial_plan"),
-                # R4: the node's own output_schema keys join the skill's.
-                step_output_schema=node.get("output_schema"),
             )
             # The skill template carries no model; the step's routed model
             # is stamped here, or the executor fails it with BRT-ANS-001.

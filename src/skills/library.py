@@ -127,20 +127,21 @@ class SkillLibrary:
         max_depth: int = 5,
         level_path: str = "1a",
         trigger_reason: str = "initial_plan",
-        step_output_schema: Optional[dict] = None,
     ) -> WrappedTask:
         """Substitute args into the skill template and return a WrappedTask.
 
         The step's own fields are honoured without changing the skill
-        (planner ruling 20, R4): an ``extra_fields`` arg (a name -> type or
-        description map, a list of names or ``{name, type, description}``
-        entries, a comma string, or that as a JSON string) and the keys of
-        ``step_output_schema`` (the plan node's own ``output_schema``) that
-        the skill's schema lacks are added to the per-item schema, where the
-        inbound check requires them, and listed in one "Also return" line
-        of the instruction. The skill's own keys always win; a key whose
-        hint is a list or object (an aggregate shape, not a per-item field)
-        is not taken from the node's schema.
+        (planner ruling 20, R4, narrowed by the R1-R4 review): only an
+        explicit ``extra_fields`` arg (a name -> type or description map, a
+        list of names or ``{name, type, description}`` entries, a comma
+        string, that as a JSON string, or a JSON-Schema object/array whose
+        ``properties`` are the fields) adds fields the skill's schema lacks
+        to the per-item schema, where the inbound check requires them, and
+        lists them in one "Also return" line of the instruction. The skill's
+        own keys always win. The plan node's ``output_schema`` is never read
+        here: it describes the final answer's rows, not each item. A
+        JSON-Schema keyword (type, items, properties, required ...) is never
+        a field.
 
         Raises:
             RuntimeError: BRT-SKL-003/004 if skill not found.
@@ -212,10 +213,9 @@ class SkillLibrary:
         else:
             output_schema = _substitute_tree(output_schema_raw, values)
 
-        # R4: the step's own extra fields (never the skill's template).
-        added = _step_fields(
-            skill_id, args.get("extra_fields"), step_output_schema, output_schema
-        )
+        # R4: the step's own extra_fields only (never the skill's template,
+        # never the node's output_schema).
+        added = _step_fields(skill_id, args.get("extra_fields"), output_schema)
         if added:
             output_schema = _with_fields(output_schema, added)
             instruction = instruction.rstrip() + "\n" + _also_return_line(added)
@@ -542,11 +542,49 @@ def _schema_keys(schema: object) -> set[str]:
     return set(schema)
 
 
-def _step_fields(
-    skill_id: str, extra_fields: object, step_schema: object, skill_schema: object,
-) -> dict:
+# JSON-Schema keywords: never a field name in a step's extra_fields.
+_JSON_SCHEMA_KEYWORDS = frozenset({
+    "type", "items", "properties", "required", "additionalProperties",
+    "$schema", "$id", "$ref", "$defs", "definitions", "title",
+    "minItems", "maxItems", "uniqueItems", "patternProperties",
+    "allOf", "anyOf", "oneOf", "not",
+})
+# Keywords of a typed schema that are only names elsewhere (a field may be
+# called "description"), so they are dropped only from a typed schema.
+_SCHEMA_ANNOTATIONS = frozenset({
+    "description", "enum", "format", "default", "minimum", "maximum", "pattern",
+    "examples", "const",
+})
+
+
+def _unwrap_json_schema(value: object) -> object:
+    """A JSON-Schema-shaped ``extra_fields`` reduced to its field map: an
+    array's ``items`` is followed, an object's ``properties`` are the fields;
+    a schema with no properties gives ``{}``. Anything else is returned as is.
+    """
+    for _ in range(4):
+        if not isinstance(value, dict):
+            return value
+        if isinstance(value.get("properties"), dict):
+            return value["properties"]
+        if value.get("type") == "array" or "items" in value:
+            if isinstance(value.get("items"), dict):
+                value = value["items"]
+                continue
+            return {}
+        if value.get("type") in ("object", "string", "integer", "number", "boolean"):
+            # A typed schema with no properties: its keywords (description,
+            # enum ... included) are not fields; any other key is.
+            return {k: v for k, v in value.items()
+                    if k not in _JSON_SCHEMA_KEYWORDS and k not in _SCHEMA_ANNOTATIONS}
+        return value
+    return value
+
+
+def _step_fields(skill_id: str, extra_fields: object, skill_schema: object) -> dict:
     """The fields a skill step asks for beyond its skill's schema, name ->
-    hint, in order: ``extra_fields`` first, then the node's own schema.
+    hint, from the step's explicit ``extra_fields`` arg only (R1-R4 review:
+    never the node's ``output_schema``). JSON-Schema keywords are skipped.
 
     Raises:
         RuntimeError: BRT-SKL-008 when ``extra_fields`` is given but holds a
@@ -554,39 +592,31 @@ def _step_fields(
     """
     have = _schema_keys(skill_schema)
     added: dict = {}
-    if extra_fields not in (None, "", [], {}):
-        value = extra_fields
-        if isinstance(value, str):
-            text = value.strip()
-            if text.startswith(("[", "{")):
-                try:
-                    value = json.loads(text)
-                except ValueError as exc:
-                    raise _skl_008(skill_id, f"arg 'extra_fields' is not valid JSON: {exc}")
-            else:
-                value = [v.strip() for v in text.split(",")]
-        for f in _normalise_fields(skill_id, "extra_fields", value):
-            hint = str(f.get("type") or "string").strip()
-            if f.get("description"):
-                hint += f" — {f['description']}"
-            if f["name"] not in have:
-                added[f["name"]] = hint
-    if isinstance(step_schema, dict):
-        props = step_schema.get("properties")
-        entries = props if isinstance(props, dict) else step_schema
-        for name, hint in entries.items():
-            name = str(name).strip()
-            if not name or name in have or name in added:
-                continue
-            if isinstance(hint, dict) and isinstance(props, dict):
-                text = str(hint.get("type") or "string")
-                if hint.get("description"):
-                    text += f" — {hint['description']}"
-                added[name] = text
-            elif isinstance(hint, (dict, list)):
-                continue   # an aggregate shape, not a per-item field
-            else:
-                added[name] = str(hint) if hint not in (None, "") else "string"
+    if extra_fields in (None, "", [], {}):
+        return added
+    value = extra_fields
+    if isinstance(value, str):
+        text = value.strip()
+        if text.startswith(("[", "{")):
+            try:
+                value = json.loads(text)
+            except ValueError as exc:
+                raise _skl_008(skill_id, f"arg 'extra_fields' is not valid JSON: {exc}")
+        else:
+            value = [v.strip() for v in text.split(",")]
+    value = _unwrap_json_schema(value)
+    if isinstance(value, dict):
+        value = {k: v for k, v in value.items() if str(k).strip() not in _JSON_SCHEMA_KEYWORDS}
+        if not value:
+            return added
+    for f in _normalise_fields(skill_id, "extra_fields", value):
+        if f["name"] in _JSON_SCHEMA_KEYWORDS:
+            continue
+        hint = str(f.get("type") or "string").strip()
+        if f.get("description"):
+            hint += f" — {f['description']}"
+        if f["name"] not in have:
+            added[f["name"]] = hint
     return added
 
 

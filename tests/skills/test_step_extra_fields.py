@@ -8,8 +8,11 @@ defer_reason, so re_plan ran a second full pass for urgency. The skill
 
 TC-SKL-032 — extra_fields (map, names, comma string, JSON string) join the
              per-item schema and one "Also return" instruction line
-TC-SKL-033 — the node's own output_schema keys the skill lacks are added;
-             the skill's keys win; aggregate-shaped hints are not taken
+TC-SKL-033 — added fields go into a JSON-Schema skill schema's properties
+             and required
+TC-SKL-037 — R1-R4 review (6): the node's output_schema is never read (it
+             describes the final answer's rows, not each item); render takes
+             no node schema; JSON-Schema keywords are never fields
 TC-SKL-034 — no extra fields: the render is exactly the skill's
 TC-SKL-035 — a nameless, duplicate or invalid-JSON extra_fields raises
              BRT-SKL-008
@@ -30,10 +33,9 @@ def lib() -> SkillLibrary:
     return sl
 
 
-def _classify(lib, step_output_schema=None, **extra):
+def _classify(lib, **extra):
     return lib.render("classify_into_buckets", 1,
-                      {"buckets": BUCKETS, "items_ref": "n1", **extra},
-                      step_output_schema=step_output_schema)
+                      {"buckets": BUCKETS, "items_ref": "n1", **extra})
 
 
 def test_extra_fields_map_is_asked_for_and_required(lib):
@@ -58,32 +60,6 @@ def test_extra_fields_other_shapes(lib, extra):
     assert "Also return these fields: urgency (string); region (string)." in task.instruction
 
 
-def test_node_schema_keys_join_and_skill_keys_win(lib):
-    """TC-SKL-033: job A's node schema {file, category, urgency}."""
-    plain = _classify(lib)
-    task = _classify(lib, step_output_schema={
-        "file": "string", "category": "string", "urgency": "integer",
-        "bucket": "string",                     # the skill's key: not replaced
-        "rows": [{"x": 1}], "summary_obj": {"a": "b"},   # aggregate shapes: skipped
-    }, extra_fields={"urgency": URGENCY})
-    assert task.output_schema["bucket"] == plain.output_schema["bucket"]
-    assert task.output_schema["urgency"] == URGENCY   # extra_fields first
-    assert task.output_schema["file"] == "string"
-    assert task.output_schema["category"] == "string"
-    assert "rows" not in task.output_schema and "summary_obj" not in task.output_schema
-    assert list(task.output_schema)[-3:] == ["urgency", "file", "category"]
-
-
-def test_node_json_schema_properties_are_read(lib):
-    """TC-SKL-033: a JSON-Schema-shaped node schema gives its properties."""
-    task = _classify(lib, step_output_schema={
-        "type": "object",
-        "properties": {"urgency": {"type": "integer", "description": "1-5"}},
-    })
-    assert task.output_schema["urgency"] == "integer — 1-5"
-    assert "type" not in task.output_schema
-
-
 def test_json_schema_skill_schema_gets_properties_and_required():
     """TC-SKL-033: added fields go into properties and required."""
     out = _with_fields({"type": "object", "properties": {"a": {"type": "string"}},
@@ -91,11 +67,11 @@ def test_json_schema_skill_schema_gets_properties_and_required():
     assert set(out["properties"]) == {"a", "u"} and out["required"] == ["a", "u"]
 
 
-@pytest.mark.parametrize("schema", [None, {}, {"bucket": "string", "confidence": "x"}])
-def test_no_extra_fields_render_is_the_skills_own(lib, schema):
+@pytest.mark.parametrize("extra", [None, {}, [], "", {"bucket": "string", "confidence": "x"}])
+def test_no_extra_fields_render_is_the_skills_own(lib, extra):
     """TC-SKL-034 (failure direction): nothing new asked, nothing changed."""
     plain = _classify(lib)
-    task = _classify(lib, step_output_schema=schema)
+    task = _classify(lib, extra_fields=extra)
     assert task.output_schema == plain.output_schema
     assert task.instruction == plain.instruction
     assert "Also return" not in task.instruction
@@ -108,3 +84,36 @@ def test_bad_extra_fields_fail_loudly(lib, extra):
     """TC-SKL-035."""
     with pytest.raises(RuntimeError, match="BRT-SKL-008"):
         _classify(lib, extra_fields=extra)
+
+
+def test_render_takes_no_node_output_schema(lib):
+    """TC-SKL-037: job A's node (output_schema {file, category, urgency},
+    extra_fields {urgency}) asks for the skill's keys plus urgency only."""
+    import inspect
+    assert "step_output_schema" not in inspect.signature(SkillLibrary.render).parameters
+    task = _classify(lib, extra_fields={"urgency": URGENCY})
+    assert list(task.output_schema) == ["bucket", "confidence", "defer_reason", "urgency"]
+    assert "file" not in task.instruction.split("Also return")[-1]
+    assert "category" not in task.instruction.split("Also return")[-1]
+
+
+@pytest.mark.parametrize("extra, expected", [
+    ({"type": "object", "properties": {"urgency": {"type": "integer"}},
+      "required": ["urgency"]}, {"urgency": "integer"}),
+    ({"type": "array", "items": {"type": "object", "properties": {
+        "urgency": {"type": "integer", "description": "1-5"}}}}, {"urgency": "integer — 1-5"}),
+    ({"type": "array", "items": {"type": "string"}}, {}),
+    ({"urgency": "integer", "type": "object"}, {"urgency": "integer"}),
+    ('{"type": "object", "properties": {"risk": {"type": "string"}}}', {"risk": "string"}),
+])
+def test_json_schema_keywords_are_never_fields(lib, extra, expected):
+    """TC-SKL-037: a JSON-Schema-shaped extra_fields gives its properties;
+    type, items, properties, required ... are never added as fields."""
+    plain = _classify(lib)
+    task = _classify(lib, extra_fields=extra)
+    added = {k: v for k, v in task.output_schema.items() if k not in plain.output_schema}
+    assert added == expected
+    for kw in ("type", "items", "properties", "required"):
+        assert kw not in task.output_schema
+    if not expected:
+        assert task.instruction == plain.instruction

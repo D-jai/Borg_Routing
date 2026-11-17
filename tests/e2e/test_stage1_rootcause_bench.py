@@ -610,9 +610,10 @@ def _classify_step():
 ])
 @pytest.mark.asyncio
 async def test_r4_classify_step_asks_for_its_extra_fields_and_checks_them(env, answer, resolved):
-    """TC-SKL-036: every item prompt asks for urgency (and the node's
-    category); an item answer without urgency fails the inbound check
-    (BRT-ENV-011) instead of passing without it."""
+    """TC-SKL-036: every item prompt asks for urgency (its extra_fields; the
+    node's output_schema is not read, R1-R4 review 6); an item answer
+    without urgency fails the inbound check (BRT-ENV-011) instead of passing
+    without it."""
     db_path, mp = env
     stub = StubModels(plan_nodes=[_classify_step()], answer_for=lambda r: answer).install(mp)
     result = await run_pipeline("Classify each review with its urgency.", db_path=db_path)
@@ -620,10 +621,88 @@ async def test_r4_classify_step_asks_for_its_extra_fields_and_checks_them(env, a
     items = stub.of_kind("answerer")
     assert len(items) == len(REVIEWS)
     for req in items:
-        assert "Also return these fields: urgency (integer from 1 to 5); category (string)." \
-            in req.system
+        assert "Also return these fields: urgency (integer from 1 to 5)." in req.system
+        assert "category (string)" not in req.system
         assert '"urgency": "integer from 1 to 5"' in req.system
     compose = stub.of_kind("compose")[-1].system
     assert f'"success_count": {resolved}' in compose
     if not resolved:
         assert "BRT-ENV-011" in compose
+
+
+# --- R1-R4 review (6): the lead's final focused fix -------------------------
+
+def _job_a_step(**args):
+    # Job A's real node: output_schema {file, category, urgency} describes the
+    # final answer's rows; extra_fields {urgency} is the step's own ask.
+    return {"type": "apply_to_each", "id": "classify_emails",
+            "skill_id": "classify_into_buckets", "skill_version": 1,
+            "task_type": "extraction", "tier": "light",
+            "skill_args": {"buckets": ["good", "bad"], "items_ref": REVIEWS, **args},
+            "output_schema": {"file": "string", "category": "string", "urgency": "integer"}}
+
+
+@pytest.mark.asyncio
+async def test_r4_job_a_node_asks_for_skill_keys_and_urgency_only(env):
+    """TC-SKL-038: the recorded worker outputs (bucket, confidence,
+    defer_reason, plus urgency) resolve without file or category; an item
+    missing defer_reason still fails, as 11 of 200 did in job A."""
+    db_path, mp = env
+
+    def answer(req):
+        out = {"bucket": "good", "confidence": 1.0, "urgency": 3}
+        if "Toaster" not in req.system:
+            out["defer_reason"] = ""
+        return out
+
+    stub = StubModels(plan_nodes=[_job_a_step(extra_fields={
+        "urgency": "integer from 1 (lowest) to 5 (highest)"})],
+        answer_for=answer).install(mp)
+    result = await run_pipeline("Classify each review.", db_path=db_path)
+    await drain_log_writes()
+    assert result["status"] == "completed", result.get("error")
+    for req in stub.of_kind("answerer"):
+        line = req.system.split("Also return these fields:")[-1].split("\n")[0]
+        assert line == " urgency (integer from 1 (lowest) to 5 (highest))."
+        assert '"file"' not in req.system and '"category"' not in req.system
+    compose = stub.of_kind("compose")[-1].system
+    assert '"success_count": 2' in compose
+
+
+@pytest.mark.asyncio
+async def test_r4_node_json_schema_array_adds_nothing(env):
+    """TC-SKL-039 (failure direction): a JSON-Schema array output_schema on
+    the node and no extra_fields: nothing is added, the skill's keys resolve."""
+    db_path, mp = env
+    node = _job_a_step()
+    node["output_schema"] = {"type": "array", "items": {"type": "object", "properties": {
+        "file": {"type": "string"}, "risk": {"type": "string"}}}}
+    stub = StubModels(plan_nodes=[node], answer_for=lambda r: {
+        "bucket": "good", "confidence": 0.9, "defer_reason": ""}).install(mp)
+    result = await run_pipeline("Classify each review.", db_path=db_path)
+    await drain_log_writes()
+    for req in stub.of_kind("answerer"):
+        assert "Also return" not in req.system
+        assert '"risk"' not in req.system and '"file"' not in req.system
+    assert '"success_count": 3' in stub.of_kind("compose")[-1].system
+
+
+@pytest.mark.asyncio
+async def test_r4_defer_and_collect_with_a_node_schema_still_defers(env):
+    """TC-SKL-040: defer_and_collect's node output_schema {label, category}
+    is not required of each item, so a 'defer' answer passes the check."""
+    db_path, mp = env
+    node = {"type": "apply_to_each", "id": "first_pass", "skill_id": "defer_and_collect",
+            "skill_version": 1, "task_type": "extraction", "tier": "light",
+            "skill_args": {"items_ref": REVIEWS, "instruction": "Label the review.",
+                           "output_schema": {"label": "string"}, "confidence_threshold": 0.7},
+            "output_schema": {"label": "string", "category": "string"}}
+    stub = StubModels(plan_nodes=[node], answer_for=lambda r: {
+        "result_or_defer": "defer", "confidence": 0.2, "defer_reason": "unclear"}).install(mp)
+    result = await run_pipeline("Label each review.", db_path=db_path)
+    await drain_log_writes()
+    assert result["status"] == "completed", result.get("error")
+    for req in stub.of_kind("answerer"):
+        assert "Also return" not in req.system
+    compose = stub.of_kind("compose")[-1].system
+    assert '"success_count": 3' in compose and "BRT-ENV-011" not in compose
