@@ -1,4 +1,17 @@
-# Bench round 1: measurements for the planner (rulings 17 and 18)
+# Bench round 1: root causes and measurements for the planner (rulings 16-18)
+
+## Ruling 16: root causes of the five failed BORG runs (diagnosis only; nothing fixed)
+
+Reproducing tests (failing, not committed): `tests/e2e/test_stage1_rootcause_bench.py`, 6 tests.
+
+- **R1: a re_plan step that reuses a step id already in the results is skipped** (A cloud, A local, D local). `_with_ids` (src/orchestrator/engine.py, about line 1440) keeps an explicit planner id even when it is already in `results`; the wave loop (about lines 2325-2356) treats the re-sent step as done, nothing is ready, and the run goes straight to compose with nothing run. A cloud's re_plan re-sent `fix_classify_failures`, `retry_classify`, `merge_all_classifications`; A local's re_plan re-sent `classify_emails` (after BRT-LANE-002, with `task_type: extraction` added); D local's re-sent `retry_classify`. The lead had earlier left "an explicit id equal to a finished id means that step" as is; the live runs show it is harmful. Direct fix: in the re_plan `continue` branch, rename a `next_nodes` id already in `results` (for example `classify_emails_2`) and log it.
+- **R2: a compose reply in the re_plan shape has no recovery** (all four BRT-ORC-009 runs). Every compose call (grok-4.20, max_tokens 6,000, json_object) came back parsed but as `{"action": "compose" | "continue", ...}`. `_handle_compose_result` accepts only `response` or `direct_answer`; its salvage reads only string keys, so per-item apply_to_each results are discarded. The three modes share one template listing all three output shapes, and re_plan and compose send the same user message, "continue". Direct fix: when a compose reply has `action` and no `response`, re-ask compose once with a line "You are in compose mode: reply with {\"response\": ...} only" (code side, like the existing JSON-only retry); optionally let salvage serialise apply_to_each `results`.
+- **R3: a non-object entry in plan or re_plan `next_nodes` crashes the run** (job C). The re_plan returned valid JSON whose `next_nodes` ended with the string `"rationale: "`; `_with_ids` passes it through and the wave loop calls `.get` on it. Direct fix: drop non-object nodes (logged) so valid siblings run; an empty list after filtering means no next nodes.
+- **A local's 0 worker calls:** the plan's step had no `task_type`, so it defaulted to `reasoning` (the skill's `recommended_specialty` is null); llama3.2:3b scores 4.6 there, below the light floor, so BRT-LANE-002 refused it (correct). The planner's corrected retry hit R1. A separate decision (protected `data/skills.yaml`): tag `classify_into_buckets` and `extract_fields` with `recommended_specialty: extraction`.
+- **Compose cap after R1/R2 are fixed:** 200 rows need about 7,085 output tokens plus JSON-string escaping; at 6,000 the first compose would likely stop at the cap and the BRT-ORC-018 retry would double it (the cut call is paid). Options: pin ORCHESTRATOR_MAX_TOKENS at 12,000 or more for list-writing jobs, or have compose build lists from apply_to_each results in code.
+- **Side findings:** the planner asked for state_ops that do not exist (`join`) or with wrong params (`filter` without `key`); the orchestrator logs `finish_reason` only on a length retry (logging it always would settle truncation questions from the database).
+
+# Measurements (rulings 17 and 18)
 
 Measured on 17-Nov-2026 from the stage-1 run databases (`bench/results/2026_11_17/dbs/`, git-ignored) and result files. Measurement only: nothing was changed or tuned. Token estimates use chars/4 where no logged count exists; logged counts are used wherever they exist.
 
