@@ -36,6 +36,11 @@ Error codes:
 - BRT-ORC-025: a step's depends_on step failed (cycle-failed included); the
                step fails before any model call and the message names the
                failed step (an item ref to it keeps BRT-APE-005)
+- BRT-ORC-026: a re_plan step reused the id of a step that already ran; it
+               was renamed <id>_2 (_3 ...) and the batch's refs to it follow
+               (warning; the step runs)
+- BRT-ORC-027: non-object entries dropped from a plan / re_plan step list
+               (warning; nothing valid left = no steps, never an empty plan)
 
 On-premise lane (docs/design/on_premise_lane.md; on only when the run has a
 lane context, see src/lane/context.py):
@@ -1429,7 +1434,9 @@ def _with_ids(nodes: list, taken: set) -> list:
     """The plan's nodes, each with an ``id``, so a step that ran is never
     taken for one still waiting.
 
-    An explicit planner id is kept unchanged. A node with none gets
+    An explicit planner id is kept unchanged (a re_plan id that reuses a
+    finished step's id was already renamed by ``_rename_reused_ids``). A
+    node with none gets
     ``n<index>``, or ``n<index>_<k>`` when that is taken, so a generated id
     is unique across the whole run: never in ``taken`` (the run's results and
     every id given earlier in the run), never an id already in this plan.
@@ -1449,6 +1456,118 @@ def _with_ids(nodes: list, taken: set) -> list:
             n = {**n, "id": new_id}
         out.append(n)
     return out
+
+
+_REF_KEYS = ("inputs_ref", "source", "source_ref")
+
+
+def _rename_reused_ids(nodes: list, done: set, taken: set) -> tuple[list, list[dict]]:
+    """A re_plan batch whose steps reuse the id of a step that already ran,
+    each such step given a fresh id (planner ruling 20, R1).
+
+    A step whose ``id`` is in ``done`` (the run's results) is renamed
+    ``<id>_2``, ``<id>_3`` ... (the first not in ``taken``, which holds every
+    id the run has used, nor in this batch); ``taken`` is updated. References
+    to a renamed id from OTHER steps of the same batch (``depends_on``,
+    ``inputs_ref``, ``source``, ``source_ref``, any skill ``*_ref`` arg given
+    as a string) are remapped to the new id; the renamed step's own refs to
+    its old id, and every ref to an id not redefined in the batch, keep
+    naming the earlier result, which stays under its original id.
+
+    Returns (nodes, renames), ``renames`` being ``[{"from", "to"}]`` in
+    batch order. Non-object entries are passed through untouched.
+    """
+    nodes = list(nodes or [])
+    batch_ids = {str(n["id"]) for n in nodes if isinstance(n, dict) and n.get("id")}
+    renamed_from: dict[int, str] = {}
+    renamed_to: dict[int, str] = {}
+    mapping: dict[str, str] = {}
+    renames: list[dict] = []
+    for i, n in enumerate(nodes):
+        if not (isinstance(n, dict) and n.get("id") and str(n["id"]) in done):
+            continue
+        old = str(n["id"])
+        k = 2
+        while f"{old}_{k}" in taken or f"{old}_{k}" in batch_ids:
+            k += 1
+        new = f"{old}_{k}"
+        taken.add(new)
+        batch_ids.add(new)
+        renamed_from[i] = old
+        renamed_to[i] = new
+        mapping.setdefault(old, new)
+        renames.append({"from": old, "to": new})
+    if not renames:
+        return nodes, []
+
+    def _remap(value: object, table: dict) -> object:
+        return table.get(value, value) if isinstance(value, str) else value
+
+    out = []
+    for i, n in enumerate(nodes):
+        if not isinstance(n, dict):
+            out.append(n)
+            continue
+        table = {o: t for o, t in mapping.items() if o != renamed_from.get(i)}
+        node = dict(n)
+        if i in renamed_to:
+            node["id"] = renamed_to[i]
+        if table:
+            deps = node.get("depends_on")
+            if isinstance(deps, list):
+                node["depends_on"] = [_remap(d, table) for d in deps]
+            elif isinstance(deps, str):
+                node["depends_on"] = _remap(deps, table)
+            for key in _REF_KEYS:
+                if key in node:
+                    node[key] = _remap(node[key], table)
+            args = node.get("skill_args")
+            if isinstance(args, dict):
+                node["skill_args"] = {
+                    k: (_remap(v, table) if str(k).endswith("_ref") else v)
+                    for k, v in args.items()
+                }
+        out.append(node)
+    return out, renames
+
+
+async def _object_nodes(
+    nodes: object, mode: str, run_id: UUID, db_path: str,
+) -> list[dict]:
+    """The plan's (or re_plan's) node list with every non-object entry
+    dropped and logged (planner ruling 20, R3; BRT-ORC-027).
+
+    Job C's re_plan ended ``next_nodes`` with the string ``"rationale: "``;
+    the valid siblings still run. A ``nodes`` value that is not a list is
+    dropped whole. An empty result is handled by the caller's existing path
+    for a reply with no steps (never run as an empty plan).
+    """
+    if nodes is None or nodes == []:
+        return []
+    if isinstance(nodes, list):
+        kept = [n for n in nodes if isinstance(n, dict)]
+        dropped = [n for n in nodes if not isinstance(n, dict)]
+    else:
+        kept, dropped = [], [nodes]
+    if dropped:
+        try:
+            await write_event(
+                "error",
+                run_id=run_id,
+                decision={
+                    "code": "BRT-ORC-027",
+                    "severity": "warning",
+                    "msg": "non-object entries dropped from the step list",
+                    "mode": mode,
+                    "dropped": [repr(d)[:80] for d in dropped[:10]],
+                    "dropped_count": len(dropped),
+                    "kept_count": len(kept),
+                },
+                db_path=db_path,
+            )
+        except Exception:
+            pass
+    return kept
 
 
 def failed_dependency_message(name: object) -> str:
@@ -2222,6 +2341,12 @@ async def _orchestrate_run(
     )
 
     plan = plan_result.get("plan")
+    if not isinstance(plan, dict):
+        plan = None
+    else:
+        # R3: a non-object node is dropped (BRT-ORC-027); a plan left with
+        # none takes the no-plan path below, never runs empty.
+        plan = {**plan, "nodes": await _object_nodes(plan.get("nodes"), "plan", run_id, db_path)}
     if has_documents and (plan_result.get("direct_answer") or not plan or not plan.get("nodes")):
         # Design note 5.5: no path skips the plan when documents are present.
         raise ValueError(
@@ -2370,12 +2495,35 @@ async def _orchestrate_run(
             if action == "compose":
                 break
             elif action in ("continue", "cascade"):
-                next_nodes = replan_result.get("next_nodes", [])
+                # R3: non-object entries are dropped (BRT-ORC-027); nothing
+                # valid left means no next steps, so the run composes.
+                next_nodes = await _object_nodes(
+                    replan_result.get("next_nodes"), "re_plan", run_id, db_path
+                )
                 if not next_nodes:
                     break
                 # Nothing is held at this point (every step either ran or
                 # failed), so the next wave is re_plan's steps.
                 run_ids.update(results)
+                # R1: a step reusing a finished step's id is renamed (and
+                # the batch's refs to it follow), so it runs (BRT-ORC-026).
+                next_nodes, renames = _rename_reused_ids(next_nodes, set(results), run_ids)
+                if renames:
+                    try:
+                        await write_event(
+                            "error",
+                            run_id=run_id,
+                            decision={
+                                "code": "BRT-ORC-026",
+                                "severity": "warning",
+                                "msg": "re_plan reused the id of a step that already "
+                                       "ran; the new step was renamed",
+                                "renamed": renames,
+                            },
+                            db_path=db_path,
+                        )
+                    except Exception:
+                        pass
                 current_nodes = _with_ids(next_nodes, run_ids)
                 continue
             elif action == "fail":
