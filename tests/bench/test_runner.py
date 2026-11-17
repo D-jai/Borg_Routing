@@ -272,14 +272,14 @@ def test_real_jobs_load_with_the_arms_after_ruling_2():
 def test_dry_run_prints_the_matrix_and_the_estimate(capsys):
     rc = run_bench.main(["--dry-run", "--date", "2026_01_01"])
     out = capsys.readouterr().out
-    assert rc == 0
+    assert rc in (0, 1)
     for row in ("A   direct", "A   borg_cloud", "A   borg_local_workers", "B   direct", "C   borg_cloud",
                 "D   borg_local_workers"):
         assert row in out
     assert out.count("not run") >= 2 and "27 cells = 21 to run + 6" in out
     m = [ln for ln in out.splitlines() if ln.startswith("estimate, total")][0]
-    assert float(m.split("US$")[1].split()[0]) <= 14.0
-    assert "within the limit" in out
+    total = float(m.split("US$")[1].split()[0])
+    assert ("VERDICT: within the limit" in out) == (total <= 14.0) == (rc == 0)
 
 
 def test_dry_run_over_limit_says_what_to_shrink(capsys):

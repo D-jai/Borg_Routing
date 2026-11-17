@@ -55,7 +55,8 @@ LOCAL_NOT_RUN_REASON = (
 
 # Rough conversion used only for estimates.
 CHARS_PER_TOKEN = 3.5   # conservative: filler text with many numbers tokenises densely
-# Upper-bound model of what BORG_ROUTE spends: every call priced as if it ran on the baseline model.
+# Upper-bound model of what BORG_ROUTE spends: every call priced at the dearest checked pool prices
+# (input and output each at their maximum), plus the answerer system prompt re-sent once per item.
 BORG_INPUT_FACTOR = 1.3          # parts, planner manifest, re-sent instruction, retries
 BORG_INPUT_OVERHEAD_TOKENS = 40_000
 BORG_OUTPUT_FACTOR = 3.0         # reasoning models spend output tokens thinking
@@ -65,6 +66,7 @@ DIRECT_OUTPUT_FACTOR = 3.0       # same reason, for the direct arm's priced outp
 JUDGE_CALL_INPUT_TOKENS = 5_000
 JUDGE_CALL_OUTPUT_TOKENS = 300
 JUDGE_MAX_TOKENS = 4000      # room for a reasoning judge's private thinking before the one-line verdict
+JUDGE_REASK_ALLOWANCE = 1.25  # the estimate allows one re-ask for every four judge calls
 
 LOCAL_ARMS = ("borg_local_workers",)
 FINISHED = ("completed", "failed")   # statuses a comparison can use; "refused" and "not run" cannot
@@ -323,8 +325,35 @@ def direct_calls(job: dict, cfg: Config, model) -> int:
     return max(1, math.ceil(total / room))
 
 
-def estimate_run(job: dict, arm: str, cfg: Config, baseline) -> float:
-    """Upper-bound dollars for one run. Local arms cost 0. BORG arms are priced as if every call ran on the baseline."""
+def borg_price_model(matrix, baseline):
+    """A price-only row for estimating BORG arms: the highest input price and the highest output price among
+    the checked, priced pool models (each taken separately). The baseline when no checked row has a price."""
+    from src.registry.models import ModelInfo, Pricing
+
+    priced = [m for m in matrix.all() if m.checked and m.pricing is not None]
+    if not priced:
+        return baseline
+    return ModelInfo(
+        model_id="(dearest checked pool prices)", source="openrouter",
+        context_length=max(m.context_length for m in priced),
+        pricing=Pricing(input_per_token=max(m.pricing.input_per_token for m in priced),
+                        output_per_token=max(m.pricing.output_per_token for m in priced)),
+    )
+
+
+def prompt_overhead_tokens(job: dict, cfg: Config) -> int:
+    """Tokens of the system prompt every BORG answerer call carries: governance header + answerer prompt +
+    the verbatim instruction, measured from src/prompts at run time (read only)."""
+    from src.prompts.answerer import ANSWERER_SYSTEM_PROMPT
+    from src.prompts.base import build_system_prompt
+
+    return tokens_of(build_system_prompt(ANSWERER_SYSTEM_PROMPT, None, None, instruction_of(job, cfg)))
+
+
+def estimate_run(job: dict, arm: str, cfg: Config, baseline, borg_model=None) -> float:
+    """Upper-bound dollars for one run. Local arms cost 0. The direct arm is priced on the baseline.
+    BORG arms are priced at ``borg_model`` (``borg_price_model``: the dearest checked pool prices; the
+    baseline if not given) and pay the answerer system prompt once per item (one item for job B)."""
     if arm_conf(job, arm).get("local") or arm in LOCAL_ARMS:
         return 0.0
     if baseline is None:
@@ -341,25 +370,29 @@ def estimate_run(job: dict, arm: str, cfg: Config, baseline) -> float:
             tin += out * calls
             tout += out * DIRECT_OUTPUT_FACTOR
         return _price(baseline, tin, tout)
-    tin = (data + instr) * BORG_INPUT_FACTOR + BORG_INPUT_OVERHEAD_TOKENS
+    items = max(1, len(units))
+    tin = ((data + instr) * BORG_INPUT_FACTOR + BORG_INPUT_OVERHEAD_TOKENS
+           + items * prompt_overhead_tokens(job, cfg))
     tout = out * BORG_OUTPUT_FACTOR + BORG_OUTPUT_OVERHEAD_TOKENS
-    return _price(baseline, tin, tout)
+    return _price(borg_model or baseline, tin, tout)
 
 
 def estimate_judge(job: dict, repeats: int, judge_model) -> float:
-    """Per judge: two calls per pair plus two for the sanity case. ``judge_model`` may be a list (two judges)."""
+    """Per judge: two calls per pair plus two for the sanity case, plus one re-ask in four; every call priced
+    at the full ``JUDGE_MAX_TOKENS`` of output (a reasoning judge may think up to its cap).
+    ``judge_model`` may be a list (two judges)."""
     models = judge_model if isinstance(judge_model, (list, tuple)) else [judge_model]
     total = 0.0
     for jm in models:
         if jm is None:
             continue
-        calls = 2 * repeats + 2
-        total += _price(jm, calls * JUDGE_CALL_INPUT_TOKENS, calls * JUDGE_CALL_OUTPUT_TOKENS)
+        calls = math.ceil((2 * repeats + 2) * JUDGE_REASK_ALLOWANCE)
+        total += _price(jm, calls * JUDGE_CALL_INPUT_TOKENS, calls * JUDGE_MAX_TOKENS)
     return total
 
 
-def estimate_matrix(runs: list[RunSpec], jobs: dict, cfg: Config, baseline, judge_model) -> dict:
-    per_run = {r.key: estimate_run(jobs[r.job], r.arm, cfg, baseline) for r in runs}
+def estimate_matrix(runs: list[RunSpec], jobs: dict, cfg: Config, baseline, judge_model, borg_model=None) -> dict:
+    per_run = {r.key: estimate_run(jobs[r.job], r.arm, cfg, baseline, borg_model) for r in runs}
     total = sum(per_run.values())
     judge_cost = 0.0
     for name, job in jobs.items():
@@ -716,7 +749,7 @@ async def execute_run(
         rec["path"] = str(write_result(cfg, spec, {k: v for k, v in rec.items()}))
         return rec
 
-    estimate = estimate_run(job, spec.arm, cfg, baseline)
+    estimate = estimate_run(job, spec.arm, cfg, baseline, borg_price_model(matrix, baseline))
     try:
         cfg.ledger.check(estimate, cfg.phase_cap)
     except budget.BudgetRefused as exc:
@@ -833,7 +866,8 @@ def dry_run(jobs, cfg, matrix, baseline, only_jobs, arms_filter, repeats, job_re
         return 2
     limit = float(rules.get("estimate_limit_dollars", budget.ESTIMATE_LIMIT_DOLLARS))
     runs = build_matrix(jobs, only_jobs, arms_filter, repeats, job_repeats)
-    est = estimate_matrix(runs, jobs, cfg, baseline, jms)
+    pool = borg_price_model(matrix, baseline)
+    est = estimate_matrix(runs, jobs, cfg, baseline, jms, pool)
 
     out(f"BORG_ROUTE bench: dry run (date {cfg.date}; nothing is sent, nothing is spent)")
     out(f"baseline, direct arm : {baseline.model_id}  ({_per_mtok(baseline)})")
@@ -862,7 +896,9 @@ def dry_run(jobs, cfg, matrix, baseline, only_jobs, arms_filter, repeats, job_re
             out(f"{name:<4}{arm:<20}{lane:<14}{len(rs):<9}{e:>10.4f}{e * len(rs):>13.4f}{tag}")
     out("")
     out(f"runs: {n_run + n_skip} cells = {n_run} to run + {n_skip} written as 'not run'")
-    out(f"estimate, runs ({n_run})  : US${est['runs_total']:.2f}   (BORG arms priced as if every call ran on the baseline: an upper bound)")
+    out(f"BORG arms priced at   : {_per_mtok(pool)} (dearest checked pool input and output prices) "
+        "+ the answerer system prompt once per item")
+    out(f"estimate, runs ({n_run})  : US${est['runs_total']:.2f}   (an upper bound)")
     out(f"estimate, judge       : US${est['judge']:.2f}")
     out(f"estimate, total       : US${est['total']:.2f}   limit US${limit:.2f}   phase cap US${cfg.phase_cap:.2f}")
     out(f"spent so far (ledger) : US${cfg.ledger.spent():.4f}")
@@ -874,7 +910,7 @@ def dry_run(jobs, cfg, matrix, baseline, only_jobs, arms_filter, repeats, job_re
         o = budget.apply_shrink(rules, i)
         r2 = build_matrix(jobs, only_jobs, arms_filter, o["repeats"] if o["repeats"] is not None else repeats,
                           {**(job_repeats or {}), **o["job_repeats"]})
-        e2 = estimate_matrix(r2, jobs, cfg, baseline, jms)["total"]
+        e2 = estimate_matrix(r2, jobs, cfg, baseline, jms, pool)["total"]
         out(f"  {i}. {rules['steps'][i - 1].get('name')}: estimate US${e2:.2f} "
             f"({'within' if e2 <= limit else 'still over'} the limit)")
     return 1
