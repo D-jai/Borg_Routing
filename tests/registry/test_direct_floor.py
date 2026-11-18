@@ -58,6 +58,9 @@ def test_the_published_ratio_range_is_the_range_of_the_three_round_1_jobs():
     lo, hi = DIRECT_FLOOR_RATIO_RANGE
     assert round(min(ratios), 1) == lo and round(max(ratios), 1) == hi
     assert (lo, hi) == (1.3, 4.4)
+    guide = (pathlib.Path(__file__).resolve().parents[2] / "docs" / "user-guide.md").read_text(encoding="utf-8")
+    assert str(lo) in guide and str(hi) in guide
+    assert "retry that was thrown away" in guide
 
 
 def test_a_floor_is_below_the_real_direct_cost_on_every_round_1_job():

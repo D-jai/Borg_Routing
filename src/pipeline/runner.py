@@ -257,7 +257,7 @@ async def run_pipeline(
         from src.logging.writer import flush_pending  # noqa: PLC0415
 
         await flush_pending()
-        digest = await compute_and_save_digest(run_id, db_path=db_path, answer_text=response or "")
+        digest = await compute_and_save_digest(run_id, db_path=db_path, answer_text=(response or "") if status == "completed" else None)
         usage = {
             "prompt_tokens": digest["tokens_input"],
             "completion_tokens": digest["tokens_output"],

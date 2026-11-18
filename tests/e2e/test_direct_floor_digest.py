@@ -83,6 +83,47 @@ async def test_a_pipeline_run_stores_the_floor_from_the_answer_it_returns(db):
 
 
 @pytest.mark.asyncio
+async def test_a_failed_pipeline_run_stores_no_floor(db, monkeypatch):
+    from src.pipeline import runner
+
+    async def boom(*a, **k):
+        raise RuntimeError("the planner is down")
+
+    monkeypatch.setattr(runner, "orchestrate_run", boom)
+    result = await run_pipeline(ROOT, db_path=db)
+    assert result["status"] == "failed" and result["direct_floor_dollars"] is None
+    (row,) = _q(db, "SELECT direct_floor_dollars, direct_floor_model FROM run_digests WHERE run_id=?", result["run_id"])
+    assert row == (None, None)
+
+
+@pytest.mark.asyncio
+async def test_a_timed_out_pipeline_run_stores_no_floor(db, monkeypatch):
+    import asyncio
+    from src.pipeline import runner
+
+    async def slow(*a, **k):
+        await asyncio.sleep(30)
+
+    async def tiny_budget(db_path=None):
+        return 0.05
+
+    monkeypatch.setattr(runner, "orchestrate_run", slow)
+    monkeypatch.setattr(runner, "resolve_max_run_seconds", tiny_budget)
+    result = await run_pipeline(ROOT, db_path=db)
+    assert result["status"] == "failed" and result["direct_floor_dollars"] is None
+
+
+@pytest.mark.asyncio
+async def test_a_child_run_stores_no_floor(db):
+    parent = await create_run(ROOT, db_path=db)
+    child = await create_run("a step's own text", db_path=db, parent_run_id=parent)
+    digest = await compute_and_save_digest(child, db_path=db, answer_text="y" * 80)
+    assert digest["direct_floor_dollars"] is None and digest["direct_floor_model"] is None
+    top = await compute_and_save_digest(parent, db_path=db, answer_text="y" * 80)
+    assert top["direct_floor_dollars"] is not None
+
+
+@pytest.mark.asyncio
 async def test_get_run_returns_the_floor_and_the_published_ratio_range(db, monkeypatch):
     from src.api import tasks as tasks_api
     from src.registry.cost import DIRECT_FLOOR_RATIO_RANGE

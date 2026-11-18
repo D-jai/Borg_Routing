@@ -316,11 +316,22 @@
     var ratio = Array.isArray(d.direct_floor_ratio) && d.direct_floor_ratio.length === 2 ? d.direct_floor_ratio : null;
     return { value: v, model: model, ratio: ratio, label: 'One pass on ' + model + ': at least' };
   }
+  /* The floor's amount, rounded DOWN to three significant figures (B.money rounds half-up, which could
+   * show a figure above the stored floor). Used only for the floor line. */
+  function floorMoney(v) {
+    var n = Number(v);
+    if (!isFinite(n) || n < 0) return '-';
+    if (n === 0) return '$0.00';
+    if (n >= 1) return '$' + (Math.floor(n * 100) / 100).toFixed(2);
+    var digits = 2 - Math.floor(Math.log10(n));
+    var f = Math.pow(10, digits);
+    return '$' + (Math.floor(n * f) / f).toFixed(digits);
+  }
   /* What the floor leaves out, as one short note under the receipt. */
   function floorNote(est) {
     if (!est) return '';
     var s = 'This is a floor, not a price. It leaves out retries, and structured output such as JSON costs more tokens than the estimate assumes.';
-    if (est.ratio) s += ' On the round-1 benchmark, the real direct cost was between ' + est.ratio[0] + ' and ' + est.ratio[1] + ' times this floor.';
+    if (est.ratio) s += ' On the round-1 benchmark, the real direct cost was between ' + est.ratio[0] + ' and ' + est.ratio[1] + ' times this floor (the top of the range includes a retry that was thrown away).';
     return s;
   }
 
@@ -362,7 +373,7 @@
     var est = baselineEstimate(data);
     return [
       { k: t.cost !== null ? 'Cost of this run' : 'Cost so far', v: B.money(t.cost !== null ? t.cost : t.costSoFar),
-        sub: est ? est.label + ' US' + B.money(est.value) : (t.cost !== null ? 'Whole run, steps’ own runs included' : 'This run’s logged calls') },
+        sub: est ? est.label + ' US' + floorMoney(est.value) : (t.cost !== null ? 'Whole run, steps’ own runs included' : 'This run’s logged calls') },
       { k: 'Time', v: B.duration(t.seconds), sub: longest ? 'Longest step: ' + B.duration(longest / 1000) : null },
       { k: 'Steps', v: String(t.steps), sub: t.calls + (t.calls === 1 ? ' model call' : ' model calls') },
       { k: 'Calls that left this machine', v: t.left === null ? 'Not recorded' : String(t.left),
@@ -387,7 +398,7 @@
     var B = window.Borg;
     var out = [['Steps', String(r.steps)], ['Models used', String(r.models.length)], ['Time', B.duration(r.seconds)],
       r.cost !== null && r.cost !== undefined ? ['Cost of this run', B.money(r.cost)] : ['Cost so far', B.money(r.costSoFar)]];
-    if (r.estimate) out.push([r.estimate.label, 'US' + B.money(r.estimate.value)]);
+    if (r.estimate) out.push([r.estimate.label, 'US' + floorMoney(r.estimate.value)]);
     return out;
   }
   function leftChipText(left) {
@@ -623,7 +634,7 @@
     stripBaseline: stripBaseline, whyRows: whyRows, makeRefresher: makeRefresher, makeLiveStream: makeLiveStream,
     parseJSON: parseJSON, decisionOf: decisionOf, stageWords: stageWords, shortModel: shortModel, shortText: shortText,
     planNodesById: planNodesById, stepsFromRun: stepsFromRun, planLayout: planLayout,
-    callsByModel: callsByModel, runTotals: runTotals, baselineEstimate: baselineEstimate, floorNote: floorNote,
+    callsByModel: callsByModel, runTotals: runTotals, baselineEstimate: baselineEstimate, floorNote: floorNote, floorMoney: floorMoney,
     failureWords: failureWords, eventSentences: eventSentences, clock: clock, REASONS: REASONS,
     svgEl: svgEl, whereDot: whereDot
   };

@@ -461,9 +461,11 @@ async def _direct_floor_for_run(run_id: UUID, answer_text: str, db_path: str, ma
         baseline = await resolve_baseline_model(matrix, db_path)
         async with connect(db_path) as db:
             db.row_factory = aiosqlite.Row
-            async with db.execute("SELECT user_instruction FROM runs WHERE run_id=?", (str(run_id),)) as cur:
+            async with db.execute("SELECT user_instruction, parent_run_id FROM runs WHERE run_id=?", (str(run_id),)) as cur:
                 row = await cur.fetchone()
-        message = row["user_instruction"] if row else ""
+        if row is None or row["parent_run_id"]:
+            return None, None       # a child run (a resumed step) is priced on its step text: no floor
+        message = row["user_instruction"]
         docs = await get_run_documents(run_id, db_path=db_path) or []
         doc_chars = sum(int(d.get("chars") or 0) for d in docs if isinstance(d, dict))
         floor = direct_floor_dollars(len(message or "") + doc_chars, len(answer_text or ""), baseline)

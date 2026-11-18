@@ -226,7 +226,16 @@ def test_calls_that_left_are_the_servers_figure_and_unknown_is_never_zero(tmp_pa
     assert totals(tmp_path, base)["left"] is None                   # an older server: not recorded
 
 
-FLOOR_DIGEST = {"cost_dollars": 0.05, "direct_floor_dollars": 0.093,
+def test_ruling_22_the_displayed_floor_never_exceeds_the_stored_value(tmp_path):
+    values = [0.092993, 0.6012, 0.09, 0.0999999, 0.0001239, 1.2399, 12.999, 0.5, 0.000001, 0.1, 0.3]
+    shown = js(tmp_path, f"return {json.dumps(values)}.map(v => W.floorMoney(v));")
+    for v, text in zip(values, shown):
+        assert text.startswith("$")
+        assert float(text[1:]) <= v, (v, text)
+    assert shown[0] == "$0.0929"
+
+
+FLOOR_DIGEST = {"cost_dollars": 0.05, "direct_floor_dollars": 0.092993,
                 "direct_floor_model": "openrouter/anthropic/claude-opus-5.5", "direct_floor_ratio": [1.3, 4.4]}
 
 
@@ -240,11 +249,12 @@ def test_ruling_22_the_receipt_line_is_one_pass_at_least_with_what_it_leaves_out
     out = js(tmp_path, f"""const d = {json.dumps(data)}; const r = W.receiptFrom(d);
         return {{stats: W.receiptStats(r), note: W.floorNote(r.estimate), tiles: W.headerTiles(d)}};""")
     line = [p for p in out["stats"] if p[0].startswith("One pass on")][0]
-    assert line[0] == "One pass on claude-opus-5.5: at least" and line[1] == "US$0.0930"
+    assert line[0] == "One pass on claude-opus-5.5: at least" and line[1] == "US$0.0929"
     assert "retries" in out["note"] and "JSON" in out["note"] and "1.3" in out["note"] and "4.4" in out["note"]
+    assert "retry that was thrown away" in out["note"]
     assert "17" not in out["note"] and "23%" not in out["note"]
     assert "would have cost" not in json.dumps(out).lower()
-    assert any("One pass on claude-opus-5.5: at least US$0.0930" in (t.get("sub") or "") for t in out["tiles"])
+    assert any("One pass on claude-opus-5.5: at least US$0.0929" in (t.get("sub") or "") for t in out["tiles"])
 
 
 # ---------- chat history lane tag ----------

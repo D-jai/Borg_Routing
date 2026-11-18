@@ -287,7 +287,7 @@ def test_the_rendered_receipt_and_run_header_show_no_baseline_or_top_model(tmp_p
 
 def test_the_floor_line_reads_one_pass_at_least_and_never_would_have_cost(tmp_path):
     data = run_body([env("n1")], [plan_event([{"id": "n1"}])],
-                    digest={"cost_dollars": 0.05, "direct_floor_dollars": 0.093,
+                    digest={"cost_dollars": 0.05, "direct_floor_dollars": 0.092993,
                             "direct_floor_model": "openrouter/anthropic/claude-opus-5.5",
                             "direct_floor_ratio": [1.3, 4.4]},
                     calls_left_machine={"count": 1, "source": "locality"})
