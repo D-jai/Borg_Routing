@@ -38,7 +38,7 @@
     - Items need rich analysis beyond categorisation
     - A single item needs classification (use 'answerer' with this schema directly)
   recommended_tier: light
-  recommended_specialty: null  # generalist fine
+  recommended_specialty: extraction  # Deej's ruling 12 (18-Nov-2026)
   envelope_type: apply_to_each
   required_args:
     buckets: list[str]            # the category options
