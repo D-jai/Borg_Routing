@@ -674,3 +674,77 @@ Planner reading (4), 18-Nov-2026 (applied by the builder before any code):
 23. **C3 kept narrow** (2.4.3): a listed long output, not placed, not present, and a pointer to a step result or a step id. The user guide states the recall limit.
 24. **Salvage with no usable marker** writes a list step's rows in the plain marker's form (2.4.5).
 25. **Section 6 answered**, including how the trial report states the D score (section 1).
+
+## 8. Replay over every stored compose reply (planner ruling 33a/(4), acceptance item 1)
+
+Run on 18-Nov-2026 against the code after review round 1 (`8d96103`), by `tests/fixtures/replay_compose_checks.py` (read-only over the git-ignored DBs; prints one JSON row per reply and writes nothing). It runs the marker checks (032, 037), C1 (038), C3 (040) and C4 (041) exactly as `_handle_compose_result` would (`_RowContext.problems`).
+
+**How the context is rebuilt.**
+- With a compose request in `outbound_requests` (lane on): the stage results and the document manifest of the run's first compose request; the lane mode from `runs.lane_mode`, or from the manifest wording when the column is missing (round 1).
+- Otherwise (lane off, no request ledger): each plan step's stored envelope. Round 1 stored no node id on envelopes; they are matched to the plan's node ids in planning order.
+- Node types and data scopes come from the plan and re_plan replies. The asked-but-not-produced list is empty (every stored run predates ruling 32c), except a second pass over round-2 job A with the list 32c would hold (the fixture's).
+
+**Sources searched.** Round 1: `bench/results/2026_11_17/dbs/*.db` (five runs with a compose reply; C had none). Round 2: `bench/results/2026_11_18/dbs/*.db` (four runs; `ruling23_live_check.db` holds no run). Demo: `demo/runs/db/demo.db` (five runs with a compose reply). Ruling-21 replay: `tests/fixtures/stage1_job_a_replay.json` (the other fixtures in `tests/fixtures/` hold no compose reply: packing items and request bodies, issues).
+
+**Grades.** The bench grader's figure for the run (`bench/results/<day>/<job>_borg_cloud_1.json`, `quality`); for demo runs, my reading of the instruction against the stored step results (said so in the row).
+
+| # | Source (DB, run) | Job | Reply | Checks that fire (hits) | Answer (grader) | Verdict |
+|---|---|---|---|---|---|---|
+| 1 | 2026_11_17 A_borg_cloud_1, 0ef867a2 | A, round 1 | `{"action": "compose"}`, no final text | none run: 029 path | BAD (run failed, BRT-ORC-009; items_answered 0) | not applicable |
+| 2 | 2026_11_17 A_borg_local_workers_1, 70d0c3b1 | A, round 1 local workers | `{"action": "continue", "next_nodes": ...}`, no final text; no list step or long output in its stage results, so no block | none run | BAD (run failed; items_answered 0) | not applicable |
+| 3 | 2026_11_17 B_borg_cloud_1, f8c9c899 | B, round 1 | the four files typed in full (long output n2, 10,929 characters) | none | RIGHT (18 checks passed, 0 failed) | no fire on a right answer. C3's "not present" condition is what keeps it quiet: n2 is retyped whole |
+| 4 | 2026_11_17 D_borg_cloud_1, 25fb0186 | D, round 1 | `{"action": "compose"}`, no final text | none run: 029 path | BAD (run failed; items_answered 0) | not applicable |
+| 5 | 2026_11_17 D_borg_local_workers_1, 2e070901 | D, round 1 local workers | `{"action": "continue", ...}`, no final text | none run: 029 path | BAD (run failed; items_answered 0) | not applicable |
+| 6 | 2026_11_18 A_borg_cloud_1, 1806143d | A, round 2 | 10 typed rows, then the marker inside the same `[` | 038 (1) | BAD (items_answered 0) | true catch |
+| 6b | same, with the 32c list | A, round 2 | same | 038 (1), 041 case 2 (9) | BAD | true catches: the 9 urgencies no step produced (email_004's typed values are exempt: the fix step pairs doc_004 with them) |
+| 7 | 2026_11_18 B_borg_cloud_1, 4d238266 | B, round 2 | a summary ending "copy each file from the stage result (n1)" | 040 (1) | BAD (0 of 6 machine checks passed; all four files missing) | true catch |
+| 8 | 2026_11_18 C_borg_cloud_1, 2fe90fe0 | C, round 2 | first reply: not logged (its `orchestrator_decision` event is missing; outbound rows 167 and 168 exist) | skipped: no reply to check | - | - |
+| 8b | same | C, round 2 | second reply (after 029): bare numbers 1 to 8, then filler contradictions | none | MIXED (facts 6 of 8, contradictions 0 of 2; the judge is informational) | no fire. The filler contradictions are a miss (known limit 1 below) |
+| 9 | 2026_11_18 D_borg_cloud_1, 372d53d3 | D, round 2 | all 60 rows typed, "medium" for the 31 notes with no result | 041 case 1 (31) | BAD (0.60 as scored, 11 of them guesses) | true catch, by C4 alone |
+| 10 | demo.db, 19f56430 | demo: 60 feedback lines, sentiment and feature table | per-line table typed | skipped: context cannot be rebuilt. Lane off (no request ledger) and the envelopes of n1 and n4 to n13 (the apply_to_each steps) are not stored; only the two failed state_ops are | - | - |
+| 11 | demo.db, e535b654 | demo: compare two remote-work policies | point-by-point comparison, risks, cost table | none run: no list step, no long output (the answerer fields are lists), so no block: the request is byte-identical to before | RIGHT by my reading (every point, risk and figure is in n1 to n3) | not applicable |
+| 12 | demo.db, e31a5330 | demo: internal notes, topic, owner, follow-up (raw_local) | one typed line per note ("Dock repairs: Mara Quill, yes"), then `@@ROWS:extract_notes@@` | none | RIGHT by my reading: all ten lines equal the stored rows; note 7 comes from the answerer retry_note_07_3 | no fire on a right answer |
+| 13 | demo.db, ece3d973 | demo: 60 feedback lines | counts and top features, then `@@ROWS_TABLE:n1@@` | none | RIGHT by my reading: the counts equal n2 and the features n3's top counts | no fire on a right answer |
+| 14 | demo.db, d04e0d8a | demo: 60 feedback lines | counts, top features "counting related variants", then `@@ROWS:n1@@` | none | RIGHT by my reading: the counts equal n2; the top features merge n3's variants, as the reply says. Its closing note calls the JSON rows "the table above" | no fire on a right answer |
+| 15 | stage1_job_a_replay.json (round-1 A, 0ef867a2) | A, ruling-21 replay | recorded `{"action": "compose"}` | none run: 029 path | BAD (as row 1) | not applicable |
+| 15b | same | A, ruling-21 replay | scripted `{"response": "@@ROWS:extract_urgency@@"}` (the ruling-21 test's reply) | none | RIGHT for this test's purpose (200 rows, all stored values) | no fire on a right answer |
+
+**False positives on a right answer: none.** All six right answers (rows 3, 11 to 14, 15b) pass every check, so no `fix:` commit was needed. Every fire (rows 6, 6b, 7 and 9) is a true catch on an answer the grader scores as bad.
+
+**Known limits (misses on bad answers):**
+1. C round 2 (row 8b): the filler contradictions, and units missing from the numbers. Compose selected and dropped values; it did not invent one next to an item, so C4 has nothing to read (2.5, "not caught").
+2. A round 2 without the 32c list (row 6): only 038 fires. The 9 invented urgencies are caught only once ruling 32c has recorded "urgency" as asked for but not produced (row 6b). The live trial runs with 32c, so this holds there.
+3. Round 1 (rows 1, 2, 4, 5): no final text. These are the 029 and 030 paths, outside the checks. They are bad, but no check is meant to catch them.
+4. Two stored replies could not be replayed: C round 2's first reply (row 8, not logged) and demo 19f56430 (row 10, step results not stored).
+
+## 9. Cost of extra compose posts (planner ruling 33a/(4), acceptance item 2)
+
+**Inputs.**
+- Round-2 stored figures (`bench/results/2026_11_18`): each run's total cost (`cost_dollars`, equal to its ledger), and its logged compose call (input and output tokens).
+- grok-4.20 prices from `data/capability_matrix.yaml`: US$1.25 per million input tokens, US$2.50 per million output tokens.
+- Non-compose cost = the run's total minus its logged compose call.
+- A compose post under 32e = the logged input plus the block's growth over the request as sent (new block characters minus old block characters, divided by 4: A +342 tokens, B +132, C +364, D +242), with the logged output.
+
+**Rows.**
+- *Zero extra* is one compose post.
+- *One extra* adds one post (a 029 re-ask or the repair re-ask).
+- *Worst case* is 9 posts. It has two forms. "Logged" gives every post the logged output size. "Cap bound" gives every invocation a first post cut at 6,000 output tokens, then a pointer retry and a JSON-only retry at up to 12,000 each. That form is an upper bound, never observed.
+
+| Job | Non-compose | Per post | Zero extra | One extra | Worst, logged outputs | Worst, cap bound | Direct (stored) | 70% win line |
+|---|---|---|---|---|---|---|---|---|
+| A | 0.1722 | 0.0304 | 0.2026 | 0.2330 | 0.4458 | 0.6624 | 0.229 | 0.1603 |
+| B | 0.2060 | 0.0140 | 0.2200 | 0.2340 | 0.3319 | 0.5508 | 0.319 | 0.2233 |
+| C | 0.2126 | 0.0356 | 0.2482 | 0.2838 | 0.5332 | 0.7544 | 0.800 | 0.5600 |
+| D | 0.0935 | 0.0252 | 0.1186 | 0.1438 | 0.3199 | 0.5179 | none | none |
+
+US dollars per run.
+
+**Reading.**
+- **A** is above its win line even with zero extra posts: its non-compose steps alone cost US$0.172 against a line of US$0.160. The compose posts do not decide A's cost verdict.
+- **B** stays under its line only with zero extra posts (0.2200 against 0.2233). One repair re-ask (0.2340) puts it over. That is the re-ask C3 asks for on round-2 B's reply; the answer then holds the four files.
+- **C** stays under its line through the worst case with logged outputs (0.5332 against 0.5600). Only the cap bound crosses it.
+- **D** has no direct arm, so it has no win line.
+
+**Caveats.**
+- The stored total for C lacks its first compose call (not logged). As stored, C made two calls, so its real round-2 cost was about the "one extra" figure.
+- Outputs are the logged sizes. Placement shortens them (2.6: about -195 tokens on A and -1,030 on D), so these figures are on the high side for a compliant reply.
