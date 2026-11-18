@@ -22,8 +22,8 @@ Detect the platform before running any shell command:
 2. **Calling `POST /models/research` before `POST /models/discover`.** Scorer runs against the matrix, which is empty on a fresh install. Order is: (1) start local model servers, (2) discover, (3) research.
 3. **Forgetting `OPENROUTER_API_KEY`.** Without it, OpenRouter discovery AND the scorer (default `perplexity/sonar-pro-search`, routed via OpenRouter) both fail. Set the key in `.env` before discover/research.
 4. **Using `copy` on Linux or `cp` in raw PowerShell.** See "Platform detection" above; prefer the Python one-liner.
-5. **Assuming every row in the matrix has real scores.** After discover, all 19 rows have `task_scores` at a flat 5.0 until `POST /models/research` is run. The router will either use that flat score or fall back with `BRT-ORC-007-DEGRADED`. This is normal; running research is what fills it in.
-6. **Skipping the checkbox step.** Every row defaults to `checked: false`. Until the operator (or you, via `PATCH /models/{id}/checked`) ticks at least one model, the router returns `BRT-REG-020 no model found`.
+5. **Assuming every row in the matrix has real scores.** After discover, every row has `task_scores` at a flat 5.0 until `POST /models/research` is run (the two cold-start rows ship with scores). The router will either use that flat score or fall back with a `BRT-ORC-NO-FRONTIER` trace event. This is normal; running research is what fills it in.
+6. **Skipping the checkbox step.** On a fresh install only the two cold-start OpenRouter rows are checked (see "Cold-start defaults"); every other row is `checked: false`. If the operator unticks them all, then until the operator (or you, via `PATCH /models/{id}/checked`) ticks at least one model, the router returns `BRT-REG-020 no model found`.
 7. **Trying to benchmark.** There is no `POST /models/benchmark` any more. It was replaced by `POST /models/research`. If you see stale docs mentioning benchmark, they are wrong.
 
 ### Skip spaCy for now
@@ -40,13 +40,13 @@ is optional.)
 The install is done when all of these pass:
 - `python -m pytest` → exits 0; all tests pass (the count grows over time)
 - `GET http://localhost:8000/health` → `{"status":"ok"}`
-- `GET http://localhost:8000/models/matrix` → returns 19 rows (7 LM Studio + 12 OpenRouter) with `checked: false` defaults
+- `GET http://localhost:8000/models/matrix` → returns the 12 curated OpenRouter rows (plus one row per local model, after Discover); only the two cold-start rows have `checked: true`
 - At least one row has been ticked with `PATCH /models/<id>/checked` (any one you plan to use, for example a model id as LM Studio shows it, like `your-org/your-model`)
 
 ---
 
 ## Prerequisites
-- Python **3.11 or newer** (3.11 / 3.12 / 3.13 all tested).
+- Python **3.11 or newer** (the CI workflow runs 3.11 and 3.13).
 - `pip` (bundled with Python).
 - Optional: **LM Studio** (Windows / macOS / Linux builds — all use ports 1234-1237).
 - Optional: **Ollama** (Linux-native, macOS + Windows builds exist — port 11434).
@@ -100,8 +100,8 @@ python -m uvicorn main:app --reload
 
 1. **Start your local model server** (LM Studio or Ollama) if you want local models.
 2. **Open the UI:** `http://localhost:8000/ui/models.html`
-3. **Click Discover Models.** Expect 7 LM Studio rows (if LM Studio is running) + 12 curated OpenRouter rows.
-4. **Click Get Model Info.** Scorer runs for 30-90 seconds; fills relative 0-10 task scores per row. Requires `OPENROUTER_API_KEY`.
+3. **Click Discover.** Expect one row per model your local server lists (if it is running) + 12 curated OpenRouter rows.
+4. **Click Get Model Info.** The scorer runs in batches and can take a minute or more; it fills relative 0-10 task scores per row. Requires `OPENROUTER_API_KEY`.
 5. **Tick the checkbox** on any row you want in today's routing pool (typical: 3-6 total).
 6. **Kick a test run** from `http://localhost:8000/ui/` (it opens the Ask page) — the orchestrator will route to one of the checked models.
 
@@ -122,9 +122,7 @@ Run under NSSM or a Windows Service wrapper of your choice. Same
 
 ### Notes on workers
 `--workers > 1` is **not supported** today because the orchestrator keeps
-an in-process run registry and SQLite DB. For multi-worker scale, wait
-for the Postgres migration slice. Use vertical scale (faster CPU) until
-then.
+an in-process run registry and SQLite DB. Scale vertically (a faster CPU) instead.
 
 ## Environment Variables
 See `.env.example` — every variable is documented inline. The ones you
@@ -175,11 +173,22 @@ Addresses must start with `http://` or `https://`; anything else is ignored with
 | `ANSWERER_MAX_TOKENS` | `2000` | Ceiling on answerer responses (both bypass and orchestrated paths). |
 | `ORCHESTRATOR_QUALITY_REQUIREMENT` | `9.0` | Minimum task_score for a row to qualify as orchestrator. Forces a frontier-or-near-frontier brain. Degrades to 5.1 with a `BRT-ORC-NO-FRONTIER` trace event if no checked model meets the bar. Six curated OpenRouter rows already qualify out of the box. |
 | `TIME_COST_PER_SEC` | `0.0001` | Dollar cost per wall-second, used by the router to penalise slow models. |
+| `LEAF_QUALITY_LIGHT` / `LEAF_QUALITY_MID` / `LEAF_QUALITY_HEAVY` | `6.0` / `7.5` / `9.0` | Quality floor of each step tier. |
+| `BASELINE_MODEL_ID` | (unset) | Reference model the router prices each step on, kept in the record; the pages show no comparison. |
+| `BORG_ANSWERER_CALL_TIMEOUT` / `BORG_ORCHESTRATOR_CALL_TIMEOUT` | `120` / `180` | Seconds one step call or one planner/compose call may take (`BRT-ANS-006` / `BRT-ORC-001`). |
 
 ### Safety caps
 | Variable | Default | Purpose |
 |---|---|---|
-| `BORG_MAX_RUN_SECONDS` | `300` | Hard wall-clock budget per run. Runs that exceed this are cancelled and marked `failed` with `BRT-PIP-008`. Protects against runaway / stuck pipelines burning real money. Raise for long research tasks. |
+| `BORG_MAX_RUN_SECONDS` | `300` in code (`.env.example` sets `500`) | Hard wall-clock budget per run. Runs that exceed this are cancelled and marked `failed` with `BRT-PIP-008`. Protects against runaway / stuck pipelines burning real money. Raise for long research tasks. |
+
+### On-premise lane
+| Variable | Default | Purpose |
+|---|---|---|
+| `BORG_LANE_MODE` | `off` | `off`, `raw_local`, `all_local` or `by_reference`. |
+| `BORG_DOCS_ROOT` | (unset) | The one folder documents may be read from. Unset: any request with documents is refused (`BRT-LANE-001`). |
+| `BORG_LOCAL_HOSTS` | (unset) | Extra hosts that count as this machine. |
+| `BORG_LANE_MAX_OUTPUT_CHARS`, `BORG_LANE_MAX_VERBATIM_CHARS`, `BORG_LANE_MAX_NGRAM_SHARE`, `BORG_LANE_MANIFEST`, `BORG_LANE_LOCAL_ALLOWLIST`, `BORG_LANE_PART_CHARS` | `1500`, `120`, `0.10`, `names`, empty, `8000` | Lane limits; see the user guide, "On-premise lane". |
 
 ### Behaviour toggles
 | Variable | Default | Purpose |
@@ -223,12 +232,12 @@ rows pre-checked** so the system can route a prompt without manual setup:
 | Model | reasoning | role |
 |---|---|---|
 | `openrouter/anthropic/claude-sonnet-4.6` | 9.0 | Strict-JSON discipline / instruction-following safety net |
-| `openrouter/moonshotai/kimi-k2-thinking` | 9.2 | ~5-6× cheaper; the cost optimiser will prefer this for most calls |
+| `openrouter/moonshotai/kimi-k2-thinking` | 9.2 | cheaper per token than Sonnet, so the cost-based router prefers it when both qualify |
 
 Both meet the default `ORCHESTRATOR_QUALITY_REQUIREMENT=9.0` bar. The router's
-cost optimiser picks the cheaper model per call (Kimi for most prompts),
-falling back to Sonnet when Kimi is unreachable, when context > 256k is
-needed, or when Kimi trips on strict JSON output. Operators can uncheck
+cost optimiser picks the cheaper model per call (Kimi for most prompts)
+and Sonnet is the other ticked row when Kimi cannot serve a step (for
+example when a step needs more context than Kimi has). Operators can uncheck
 either or both at `/ui/models.html` and check on different rows.
 
 If every row gets unchecked, the Models page shows a red banner reminding
@@ -240,102 +249,39 @@ Back up `data/borg_route.db` (the SQLite DB) and `data/capability_matrix.yaml`
 (scores + checkboxes). That is the full state. No other files carry
 user-specific configuration.
 
-## When BORG_ROUTE Pays Off — Honest Expectations
+## When BORG_ROUTE Pays Off: Honest Expectations
 
-> **TL;DR:** For single-turn conversational prompts under ~500 characters,
-> expect BORG to cost roughly 10–20× more than a direct call to the
-> orchestrator model. BORG's efficiency emerges at scale
-> (N > ~130 bulk items), for oversized corpora, or for mixed-specialty
-> tasks. Read this section before judging BORG on a single short prompt.
+BORG_ROUTE adds planning and per-step overhead: a planner call, a final
+write-up call, and a prompt wrapper on every step. A short single-shot
+prompt therefore costs more, and takes longer, than one direct call to a
+model. Do not judge BORG_ROUTE on a single short prompt.
 
-### Measured cost comparison (same prompt, two paths)
+Where it is meant to help is work that one call handles badly: long lists
+of items that can be split into cheap per-item calls, material too large
+for one model's context, and jobs that mix kinds of work. Whether it
+actually saves money on those is a measured question, not a promise.
 
-Prompt: *"Write a short technical deep-dive on three PostgreSQL features
-(MVCC, WAL, Vacuum). For each: what it is, why it exists, one practical
-gotcha."* — ~130 prompt tokens, ~370 response tokens.
+The first bench round (17-Nov-2026) did not show a saving. Its results,
+including the failures, are published in
+`bench/results/2026_11_17/summary.md`. Later results will be linked there.
+Until then, treat any saving as unproven and test your own workload with
+your own pool.
 
-| Path | Wall time | Input tokens | Output tokens | Cost (actual) |
-|---|---|---|---|---|
-| **BORG orchestrated** | 34.0s | 13,169 | 1,086 | **~$0.00370** |
-| **Direct call** (deepseek-v3.2 via OpenRouter) | 11.3s | 133 | 371 | **$0.000176** |
-| Ratio | ~3× slower | 99× | 2.9× | **~21× more expensive** |
-
-Quality of the two responses was indistinguishable. All BORG's useful
-work happened in compose mode; the fan-out phase added no content.
-
-### Cost model
-
-```
-BORG_cost  ≈  fixed_overhead  +  N × leaf_cost_per_item
-           ≈  ~$0.0035 (3 orchestrator calls on a mid-premium model)
-              +  per-item work
-Direct     ≈  (prompt_in + response_out) × orchestrator_rate
-```
-
-Savings require **both** conditions:
-1. **Price gradient in the pool.** Orchestrator must be meaningfully more
-   expensive than the leaf model. A deepseek-only pool has no gradient.
-2. **Enough leaf work to amortise overhead.** Leaf savings on a small task
-   (~400 output tokens) are ~$0.00035, well below the $0.0035 overhead.
-
-### Break-even (apply_to_each / bulk item tasks)
-
-Orchestrator = claude-opus-4.7 ($0.005 in / $0.025 out per 1K),
-leaves = deepseek-v3.2 ($0.00025 in / $0.00038 out per 1K), per-item
-workload ~100 input + ~10 output tokens:
-
-```
-Direct_cost = 0.0005 × N + 0.025  (opus bundle)
-BORG_cost   = 0.085 + 0.0000288 × N
-
-Break-even at N ≈ 130 items.
-```
-
-- **N < 100 items** — direct to opus is cheaper.
-- **N ≈ 130** — roughly even.
-- **N = 500** — BORG ~2.7× cheaper.
-- **N = 2000** — BORG ~6× cheaper.
-
-For tasks that do not fit in a single model's context, "direct" is not an
-option at all. BORG's cascading distillation becomes mandatory and the
-cost comparison is N/A for direct.
-
-### Three workloads where BORG wins
-
-1. **Large-scale classification / extraction (apply_to_each-shaped).**
-   *"Classify 200 emails, extract product name, score urgency 1-5.
-   Summarise per-topic counts and top-3 urgent overall."* Fan out to
-   cheap leaves; summary in compose. Cheaper than one bundled call to a
-   premium model at N ≳ 130.
-2. **Multi-source aggregation over oversized corpora.** *"15 articles
-   (~25K tokens each, 375K total). Extract claims, evidence, numeric
-   data. Find contradictions. Produce 500-word synthesis."* 375K exceeds
-   most single-model contexts. Direct is infeasible. BORG cost ≈
-   $0.15-0.25 depending on leaf choice.
-3. **Specialist-mixed generation.** *"URL-shortener spec: Postgres schema
-   + indexes, Go handlers, OpenAPI 3.0 YAML, docker-compose, Python
-   integration tests."* Router picks `coding` vs. `reasoning` vs.
-   `writing` per sub-part. Direct-to-opus ≈ $0.15-0.20; BORG
-   ≈ $0.04-0.08. Roughly 2-4× cheaper and potentially higher per-part
-   quality.
-
-### Pool recipes for cost efficiency
+### Pool recipes
 
 | Recipe | When | Ticked rows |
 |---|---|---|
-| **Local-only dev** | iteration, no external spend | 1 mid-tier local (e.g. `lmstudio/google/gemma-4-26b-a4b`) as both orchestrator + answerer |
-| **OpenRouter mixed** | you have a key but want to test the router | 1 premium OR row as orchestrator (e.g. `openrouter/anthropic/claude-sonnet-4`) + 2-3 cheap OR rows for leaves (`openrouter/deepseek/deepseek-v3.2`, `openrouter/x-ai/grok-4`) |
-| **Premium-orchestrator + cheap-leaves** | real bulk workload | one frontier orchestrator (opus/GPT-5) + one or two bulk leaves. This is where the break-even math pays off; pin via `orchestrator_endpoint` + `orchestrator_model_name` for determinism. |
+| **Local-only dev** | iteration, no external spend | 1 mid-tier local model (as shown on the Models page) as both planner and step model |
+| **OpenRouter mixed** | you have a key and want to try the router | 1 premium row for planning (e.g. `openrouter/anthropic/claude-sonnet-4.6`) + 2-3 cheaper rows for steps (e.g. `openrouter/deepseek/deepseek-v3.2`, `openrouter/x-ai/grok-4.1-fast`) |
+| **Premium planner, cheap steps** | a bulk workload | one frontier planner + one or two cheaper step models; pin the planner on the Admin Settings page (`orchestrator_endpoint` and `orchestrator_model_name`) for determinism |
 
 ### Rule Zero shortcut — what it fixes (BRT-ZERO-01)
 
-The orchestrator prompt already contains Rule Zero ("Direct mode is the
-default; 70-80% of conversation turns should be Direct"). A cheap,
+A cheap,
 deterministic pre-classifier now bypasses plan → re_plan entirely for
 unambiguously conversational short prompts (`< 500 chars`, no list
 markers, no "for each"/"classify these" phrases). One compose call
-instead of three — the ~$0.0035 overhead on "hi" drops to a single
-compose-mode call.
+instead of three — a greeting costs a single compose-mode call.
 
 The shortcut is on by default. To force the full plan path (useful for
 debugging), set `BORG_RULE_ZERO_SHORTCUT=false` in `.env` or write
@@ -349,4 +295,4 @@ Most common on a fresh install:
 - `BRT-REG-020` — no row checked. Tick at least one on the Models UI.
 - `BRT-REG-030` — scorer endpoint unreachable. Check `OPENROUTER_API_KEY` and network.
 - `BRT-REG-032` — `data/curated_models.yaml` missing. Restore from source tree.
-- `BRT-ORC-007-DEGRADED` — warning only; quality bar fell back to 5.1. Run Get Model Info to refresh scores.
+- `BRT-ORC-NO-FRONTIER` — warning only (trace event); no ticked model met the quality bar, so the planner fell back to quality 5.1. Run Get Model Info to refresh scores.
