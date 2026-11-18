@@ -482,22 +482,17 @@ async def _stream_bypass_relay(
     word-by-word simulation so the caller always gets a valid SSE stream.
     """
     async def _simulated() -> AsyncIterator[str]:
-        # Non-streaming fetch, then a simulated stream. A success is recorded
-        # like the non-streaming path (run, cost, lane mode); a failure records
-        # nothing, as the non-streaming path does (it answers 502, no run row).
-        t_fb = time.monotonic()
+        # Both callers got here because the model is not in the matrix or has no
+        # usable call, so _bypass_to_model repeats that lookup and raises: the
+        # client gets the BRT-API-013 chunk and nothing is recorded.
         try:
-            text, fb_usage = await _bypass_to_model(matrix, model_id, messages)
+            text, _usage = await _bypass_to_model(matrix, model_id, messages)
         except Exception as exc:
             err = {"id": f"chatcmpl-{run_id}", "object": "chat.completion.chunk",
                    "created": int(time.time()), "model": model_alias,
                    "choices": [{"index": 0, "delta": {"content": f"[BRT-API-013] {exc}"}, "finish_reason": "stop"}]}
             yield f"data: {json.dumps(err)}\n\ndata: [DONE]\n\n"
             return
-        await _record_bypass_call(
-            matrix, model_id, run_id, messages, text, fb_usage,
-            int((time.monotonic() - t_fb) * 1000), lane_mode,
-        )
         async for chunk in _stream_response(text, model_alias, run_id):
             yield chunk
 
@@ -585,8 +580,11 @@ async def _stream_bypass_relay(
             # The stream response is closed (its pooled connection freed)
             # before the fallback asks the same pool for another one.
             t_fb = time.monotonic()
+            # Set before the fetch: if it raises, nothing is recorded (the
+            # non-streaming path writes no row on a 502 either); a success
+            # records once, below.
+            recorded = True
             text, fb_usage = await _bypass_to_model(matrix, model_id, messages)
-            recorded = True   # the fallback row below is this run's one record
             await _record_bypass_call(
                 matrix, model_id, run_id, messages, text, fb_usage,
                 int((time.monotonic() - t_fb) * 1000), lane_mode,

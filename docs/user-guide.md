@@ -142,10 +142,10 @@ a price today, so tool calls log `0.0`.
   usage and logs one priced `model_call` under its run id; if the provider
   sends no usage the block is left out. Streamed replies do not report usage
   yet, but a streamed direct call is still logged once, even if the provider
-  fails mid-stream or the client disconnects (tokens blank if unknown). This
-  holds when the stream falls back to a single reply too (no usable key for
-  streaming): the run, its cost and its lane mode are recorded; a fallback
-  that fails records nothing, like a failed non-streaming call. A
+  fails mid-stream or the client disconnects (tokens blank if unknown). When
+  the provider refuses the stream, a single reply is fetched instead and
+  recorded; if that also fails, nothing is recorded (as for a non-streamed
+  call). A
   direct-to-model run is tagged `kind = 'bypass'` (all other runs are
   `orchestrated`), so `GET /runs` leaves bypass runs out by default; add
   `?include_bypass=true` to list them too. `GET /runs/{id}` still returns a

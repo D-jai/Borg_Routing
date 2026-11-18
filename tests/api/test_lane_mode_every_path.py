@@ -108,19 +108,29 @@ def test_a_non_streaming_bypass_records_raw_local(db, monkeypatch):
 
 @pytest.fixture(autouse=True)
 def no_network(monkeypatch):
-    """No test in this file may reach the network, whatever keys are in .env."""
+    """No test in this file may reach the network, whatever keys are in .env.
+
+    A refusal is recorded and asserted at teardown, so it fails the test even
+    when the code under test catches the exception the refusal raises.
+    """
     import httpx
 
+    attempts: list[str] = []
+
     def refuse(*_a, **_k):
+        attempts.append("network call")
         raise AssertionError("a test in this file tried to reach the network")
 
     # Every async HTTP call goes through send; a raw connection through the loop.
     monkeypatch.setattr(httpx.AsyncClient, "send", refuse)
     monkeypatch.setattr(asyncio.BaseEventLoop, "create_connection", refuse)
+    yield attempts
+    assert attempts == [], "a test in this file tried to reach the network"
 
 
 class _StubStream:
-    status_code = 200
+    def __init__(self, status_code=200):
+        self.status_code = status_code
 
     async def aiter_lines(self):
         for line in (
@@ -132,10 +142,15 @@ class _StubStream:
 
 
 class _StubRelayClient:
+    def __init__(self, status_code=200):
+        self.status_code = status_code
+
     def stream(self, method, url, json=None, headers=None):
+        status = self.status_code
+
         class _Ctx:
             async def __aenter__(self_inner):
-                return _StubStream()
+                return _StubStream(status)
 
             async def __aexit__(self_inner, *exc):
                 return None
@@ -148,31 +163,15 @@ def _stream_post(mid):
         "model": mid, "stream": True, "messages": [{"role": "user", "content": "q"}]})
 
 
-def _force_fallback(monkeypatch):
-    def refuse_key(_model):
-        raise ValueError("BRT-ORC-013: no key")
-
-    monkeypatch.setattr(cc, "resolve_model_call", refuse_key)
-
-
-def _force_relay(monkeypatch):
+def _force_relay(monkeypatch, status_code=200):
     async def stub_client(_local, _timeout):
-        return _StubRelayClient()
+        return _StubRelayClient(status_code)
 
     monkeypatch.setattr(cc, "resolve_model_call", lambda _m: ("http://stub/v1/chat/completions", {}, "m"))
     monkeypatch.setattr("src.lane.outbound.relay_client_for", stub_client)
 
 
 def test_a_streaming_bypass_records_raw_local(db, monkeypatch):
-    """The fallback path (no usable key): one run row with the lane mode."""
-    mid, _seen = _bypass_model(monkeypatch)
-    _force_fallback(monkeypatch)
-    resp = _stream_post(mid)
-    assert resp.status_code == 200, resp.text
-    assert modes(db) == [("bypass", "raw_local")]
-
-
-def test_a_streaming_relay_bypass_records_raw_local(db, monkeypatch):
     """The relay path, through a stubbed shared client: one run row with the lane mode."""
     from main import matrix as m
 
@@ -184,9 +183,10 @@ def test_a_streaming_relay_bypass_records_raw_local(db, monkeypatch):
     assert modes(db) == [("bypass", "raw_local")]
 
 
-def test_a_streamed_fallback_records_its_cost_and_run(db, monkeypatch):
+def test_a_refused_stream_falls_back_to_one_recorded_reply(db, monkeypatch):
+    """The provider answers the stream with 429; a single reply is fetched and recorded once."""
     mid, _seen = _bypass_model(monkeypatch)       # the fallback answers "hi", 1 + 1 tokens
-    _force_fallback(monkeypatch)
+    _force_relay(monkeypatch, status_code=429)
     resp = _stream_post(mid)
     assert resp.status_code == 200 and "hi" in resp.text
     with sqlite3.connect(db) as c:
@@ -198,13 +198,13 @@ def test_a_streamed_fallback_records_its_cost_and_run(db, monkeypatch):
     assert calls == [(mid, 1, 1)]
 
 
-def test_a_failed_streamed_fallback_records_no_run(db, monkeypatch):
+def test_a_refused_stream_whose_fallback_fails_records_no_run(db, monkeypatch):
     """Like the non-streaming path (502, no row): a failed call records nothing."""
     async def boom(matrix, model_id, messages):
         raise RuntimeError("provider down")
 
     monkeypatch.setattr(cc, "_bypass_to_model", boom)
-    _force_fallback(monkeypatch)
+    _force_relay(monkeypatch, status_code=429)
     from main import matrix as m
 
     resp = _stream_post(m.all()[0].model_id)
