@@ -554,3 +554,18 @@ def test_not_produced_line_renders_from_the_redacted_note_shape(tmp_path):
         "skill_id": "classify_into_buckets", "fields": ["urgency"]})}
     got = js(tmp_path, f"return W.notProducedLines({json.dumps({'events': [note]})});")
     assert got == ["the plan asked for urgency from classify_into_buckets, which does not return it; not produced"]
+
+
+def test_compose_check_codes_read_in_plain_words(tmp_path):
+    """Ruling 32e: the codes of the checks after compose have plain-word labels
+    (039 has none: the planner dropped C2), and 032's label is widened."""
+    codes = ["BRT-ORC-032", "BRT-ORC-037", "BRT-ORC-038", "BRT-ORC-040", "BRT-ORC-041", "BRT-ORC-039"]
+    got = js(tmp_path, f"return {json.dumps(codes)}.map(W.stageWords);")
+    assert got == [
+        "A marker named no step the code can place",
+        "A row marker asked for fields it cannot use",
+        "Rows were typed around a row marker",
+        "The answer pointed to a step result instead of placing it",
+        "The answer gave a value no step produced",
+        "Working",
+    ]
