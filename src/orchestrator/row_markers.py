@@ -237,11 +237,15 @@ def _text_hits(text: str, steps: dict, quoted: set, placeable: bool) -> list:
     bad = []
     for loose in LOOSE.finditer(text):
         pos = loose.start()
-        if placeable:
-            m = STRICT.match(text, pos)
-            if m and m.group(2).strip() in steps:
+        m = STRICT.match(text, pos)
+        if placeable and m and m.group(2).strip() in steps:
+            continue
+        if m:
+            # A whole marker is quoted data only when that exact marker was
+            # quoted; a quoted fragment ("@@ROWS") must not exempt it.
+            if m.group(0) in quoted:
                 continue
-        if any(qh and text.startswith(qh, pos) for qh in quoted):
+        elif any(qh and text.startswith(qh, pos) for qh in quoted):
             continue
         bad.append(_hit_text(text, pos))
     return bad
@@ -310,7 +314,7 @@ _FENCE_CLOSE = re.compile(r"(`{3,}|~{3,})[ \t]*$")
 def _closes(line: str, fence: tuple) -> bool:
     """True when ``line`` closes ``fence``: the same character, a run at
     least as long, and nothing else on the line."""
-    m = _FENCE_CLOSE.match(line.lstrip())
+    m = _FENCE_CLOSE.match(line.strip())
     return bool(m) and m.group(1)[0] == fence[0] and len(m.group(1)) >= fence[1]
 
 
@@ -335,18 +339,26 @@ def _table_in_fence(b: str, a: str, at_start: bool, fence: tuple) -> tuple:
     no empty fence is left."""
     char, length, opener = fence
     if at_start:
-        lines = b.split("\n")
-        last = lines[-2] if len(lines) >= 2 else ""
-        if last.strip() == opener:
-            head = "\n".join(lines[:-2])
+        lines = b.split("\n")[:-1]
+        # Blank lines (CRLF included) between the opener and the marker do
+        # not stop the opener from being dropped.
+        while lines and not lines[-1].strip():
+            lines.pop()
+        if lines and lines[-1].strip() == opener:
+            head = "\n".join(lines[:-1])
         else:
-            head = b + char * length
+            head = b.rstrip() + "\n" + char * length
     else:
         head = b + "\n" + char * length
     rest = a[1:] if a.startswith("\n") else a
-    first, _, remainder = rest.partition("\n")
-    if _closes(first, fence):
-        tail = remainder
+    after = rest.split("\n")
+    i = 0
+    while i < len(after) and not after[i].strip():
+        i += 1
+    if i == len(after):
+        tail = ""                                   # end of text closes the fence
+    elif _closes(after[i], fence):
+        tail = "\n".join(after[i + 1:])
     else:
         tail = opener + "\n" + rest
     head = head.rstrip("\n")

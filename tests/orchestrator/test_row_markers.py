@@ -235,3 +235,30 @@ def test_table_marker_in_a_longer_leaf_is_compact():
 def test_scalar_state_op_list_line():
     steps = rm.list_steps({"v": _env({"result": [3, 1, 2]}, "state_op")}, None)
     assert rm.step_lines(steps) == "- v: 3 rows, stored order; fields: (values)"
+
+
+# --- review round 2 (final fix) ----------------------------------------------------
+
+@pytest.mark.parametrize("quoted, reply", [
+    (["Rows are marked @@ROWS\nnext line"], "here: @@ROWS:bogus@@"),
+    (["@@ROW"], "see @@ROWS_TABLE:typo@@"),
+    (["@@ROWS:other@@"], "see @@ROWS:bogus@@"),
+])
+def test_a_quoted_fragment_does_not_exempt_a_whole_invalid_marker(quoted, reply):
+    assert rm.invalid_hits(reply, _steps(), quoted), "an invalid marker must not survive"
+
+
+def test_an_exactly_quoted_marker_is_still_left_as_text():
+    assert rm.invalid_hits("as you wrote, @@ROWS:x@@", _steps(), ["what does @@ROWS:x@@ do?"]) == []
+
+
+@pytest.mark.parametrize("text", [
+    "Intro\n```\n@@ROWS_TABLE:rate@@\n\n```\nEnd",
+    "Intro\n```\n\n@@ROWS_TABLE:rate@@\n```\nEnd",
+    "Intro\n```\n@@ROWS_TABLE:rate@@",
+    "Intro\r\n```\r\n@@ROWS_TABLE:rate@@\r\n```\r\nEnd",
+])
+def test_no_empty_or_stray_fence_is_left_around_a_table(text):
+    out, _ = rm.place(text, _steps())
+    assert TABLE in out
+    assert "`" not in out, repr(out)
