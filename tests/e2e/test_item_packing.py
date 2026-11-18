@@ -608,6 +608,31 @@ async def test_a_post_that_raises_records_only_an_error_code(pk):
     assert "secret body text" not in json.dumps(outcomes[0])
 
 
+@pytest.mark.parametrize("code", [{"not": "a string"}, "free text with https://provider.example", "BRT-ANS-002 trailing"])
+async def test_an_exception_code_that_is_not_a_bare_brt_code_is_never_stored(pk, monkeypatch, code):
+    import src.agents.executor as executor
+
+    real = executor._post_chat_completion
+
+    class Odd(Exception):
+        pass
+
+    async def post(url, headers, payload, **kw):
+        if "<<<item " in payload["messages"][0]["content"]:
+            exc = Odd("secret body text, no code here")
+            exc.code = code
+            raise exc
+        return await real(url, headers, payload, **kw)
+
+    monkeypatch.setattr(executor, "_post_chat_completion", post)
+    stub, env = await _run(pk, _task(_items(4)))
+    outcomes = _decisions(pk["db"], env_run_id(stub, env), "pack_outcome")
+    assert len(outcomes) == 1
+    assert outcomes[0]["error_code"] is None
+    assert "secret body text" not in json.dumps(outcomes[0])
+    assert "provider.example" not in json.dumps(outcomes[0])
+
+
 async def test_retried_singles_carry_their_packing_off_bodies(pk):
     import random
 

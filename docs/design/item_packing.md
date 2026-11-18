@@ -71,7 +71,7 @@ The fit check multiplies both the prompt estimate and the expected output by 2. 
 
 **Post one, then form (23f c).**
 1. The first pack of the step is formed by the estimate above and posted alone. Items set to run alone may start beside it.
-2. If that pack is cut, it is halved and its first half is posted alone. The second half goes back to the pool. Halving stops at two items. If a two-item first pack is cut, packing is switched off for the step, because no useful observation exists.
+2. If that pack is cut, it is halved and its first half is posted alone. The second half goes back to the pool. Halving stops at two items. If a two-item first pack is cut, packing is switched off for the step, because no useful observation exists. If the first pack raises (an error other than a timeout), its items run alone and the remaining packs are formed from the estimate and posted together: a raise is not a size signal. A pack builds its text (and loads document text) before it waits for the semaphore, because the send-time re-measure needs it; if a timeout then switches packing off, a waiting pack's text was loaded for a request that is never sent. Nothing is sent and memory stays bounded by the 4,000-token pack cap.
 3. After the first uncut packed reply, expected output per item becomes the observed value: completion tokens ÷ the pack's item count, × 2. The headroom factor is not applied again on top of that observed × 2; this is my reading of the ruling.
 4. The remaining items are then formed into packs with that figure, never above `BORG_PACK_MAX_ITEMS` or the other limits, and posted concurrently.
 
@@ -168,7 +168,7 @@ Reply with one JSON object and nothing else. It has exactly one key for each ite
 
 **Bounds.** Halving stops at one item: at most ceil(log2 n) packed levels, 5 for 20. In the worst case a pack of 20 makes 19 packed posts plus 20 single calls of at most 2 posts each, 59 posts in all, against 40 today. Accepted (23).
 
-**Outcome record (finding 5).** One `orchestrator_decision` event per packed post, with `mode: "pack_outcome"`, carries the step's envelope id and the counts: `items`, `accepted`, `declined`, `missing`, `duplicate`, `unknown_id`, `invalid`, `cut`, `timed_out`, `raised`. It has no tokens, so no counter counts it as a call. `_redact_events` keeps it (counts only). The step panel shows "k items retried alone", where k is the number of items that went to the single path after being in a pack.
+**Outcome record (finding 5).** One `orchestrator_decision` event per packed post, with `mode: "pack_outcome"`, carries the step's envelope id and the counts: `items`, `accepted`, `declined`, `missing`, `duplicate`, `unknown_id`, `invalid`, `alone`, `cut`, `timed_out`, `raised`, and on a timeout or raise an `error_code` (a `BRT-` code only; the raw error text is never stored, since it can hold a URL or a provider's reply). It has no tokens, so no counter counts it as a call. `_redact_events` keeps it (counts only). The step panel shows "k items retried alone", where k is the number of items that went to the single path after being in a pack.
 
 ## 6. Routing and cost
 

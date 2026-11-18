@@ -610,7 +610,9 @@ class StepPacker:
                 self.off = True
             # Counts and an error code only: the message can hold a URL or a
             # provider's reply, and pack outcomes are shown to every viewer.
-            code = getattr(exc, "code", None) or (_CODE.search(str(exc)) or [None])[0]
+            code = getattr(exc, "code", None)
+            if not (isinstance(code, str) and _CODE.fullmatch(code)):
+                code = (_CODE.search(str(exc)) or [None])[0]
             outcome.update({"timed_out": timed_out, "raised": not timed_out, "alone": len(pack),
                             "error_code": code})
             alone.extend(pack)
