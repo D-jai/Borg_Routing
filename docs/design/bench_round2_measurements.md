@@ -106,3 +106,78 @@ Only the exact counts (which notes fail, which urgencies compose invents, which 
 - Job C packing: why only two items per step packed (GUESS: the 400-token alone limit) not measured.
 - Job B worker output-token count (12,534) vs `max_output_tokens` 4000: cause not checked (GUESS reasoning tokens).
 - Whether packing works for job A once `side_effects` no longer blocks it: not tested (no paid calls).
+
+## Trial 32g (18-Nov-2026): job A, and job C's compose codes
+
+Covers the two job A runs of trial 32g (r2 = round-2 data, r1 = round-1 data, folders `bench/results/trial32g_r2data/` and `trial32g_r1data/`) and job C's compose codes (planner ruling 34c). Read-only, no paid calls. Dug by a Sonnet helper; the lead re-ran plan validation on r2's first plan and confirmed point 1. Full requests are read from `outbound_requests.body`; `log_payloads` is cut at 2,000 characters.
+
+### 1. The re_plan exchange after BRT-ORC-035
+
+**Correction to the trial report.** "The planner repeated the refused node instead of adding a field" is true of r1 only. In r2 the FIRST plan already carried the field: `skill_args: {"buckets": [...], "items_ref": "documents", "extra_fields": {"urgency": "integer from 1 (lowest) to 5 (highest)"}}`, `output_schema: {"file", "category", "urgency"}`. That plan would have produced urgency.
+
+**Why 035 refused it.** With extra_fields, `return_fields` gives bucket, confidence, defer_reason, urgency, item, error (src/skills/library.py:288-328), so `urgency` passes; `file` and `category` do not. 035 cannot tell a rename (`file` for `item`, `category` for `bucket`) from a missing field. Lead check: `validate_plan` on that node gives `BRT-ORC-035 ('file', 'category')`; the same node with `{item, bucket, urgency}` gives no issue.
+
+**The text the planner was shown.** r2 (200 characters): `BRT-ORC-035: 'classify_into_buckets' returns: bucket, confidence, defer_reason, ..., item, error; for other fields use apply_to_each with your own output_schema; to rename fields, do it when composing`. The "..." is `urgency`, cut by the 200-character cap (`MESSAGE_MAX`, plan_validation.py:24; field list trimmed by `_cut`). r1's text is the same at 195 characters with no cut. The names that were wrong (`file`, `category`) are not in the text; they travel only on `PlanIssue.fields`.
+
+**Where it sat.** One system message of about 39,450 characters plus a 42-character user message. The 035 failure sits in "Current State" under "Stage results so far", starting at about character 38,790 (98% of the way in); the operator instruction is at characters 646 to about 1,085, about 37,700 characters (roughly 9,400 tokens, estimated) earlier.
+
+**What the re_plan request lacked.** The failed node itself: its skill_args (including r2's extra_fields) appear nowhere, so the planner re-plans without seeing what it wrote. And any mention of `extra_fields`: the skill catalogue line reads "Required args: buckets, items_ref; optional: concurrency_limit". r2's planner used extra_fields on its own.
+
+**What the planner returned.** Both runs re-sent the same `output_schema {file, category, urgency}`, reading "schema mismatch" as "narrow my schema"; r2 dropped extra_fields ("This directly satisfies the original user instruction without extra fields"). The re-sent node (`classify_emails_2`) hit 035 again and ran as written (`ran_without_fields`), so neither run produced urgency.
+
+### 2. The wrong categories (13 of 200 in each run)
+
+| | r2 | r1 |
+|---|---|---|
+| Deferred by the worker | 0 | 0 |
+| Failed items (BRT-ANS-005, `confidence` missing) | 1 (doc_055; key feedback) | 1 (doc_179; key account_access) |
+| Plain wrong labels | 12 | 12 |
+
+All 24 wrong labels have key `feedback`: suggestion or feature-request emails labelled technical or billing by gpt-5.4-nano (light tier, packs of 20), for example doc_010 "It would help if invoices could be downloaded in bulk." as technical (confidence 0.55). Nothing retried the wrong labels (nothing flags them). The failed item was not re-run on any model in either run: r1's re_plan chose compose; r2's first cascade answerer was told to fix it but failed (point 3).
+
+### 3. The two failed cascade answerers (r2)
+
+- `add_urgency_and_fix` (gemini-3.1-pro-preview, US$0.0983): no `depends_on`; handed all 200 raw emails through `documents`, no classification. Failed: "Stage instruction contradicts governance: it asks to only assign urgency for 199 emails ... Additionally, the output schema and BORG_ROUTE envelope contradict the user instruction's requirement to return a single JSON list with no other text." The first sentence misreads the instruction (it asks for 200 objects).
+- `fix_and_complete` (same model, US$0.0286): no `depends_on`, `documents []`; it names `classify_emails_2` in prose only. Failed: "insufficient context: classify_emails_2 data is missing. Also, governance contradiction: user requires a raw JSON list with no other text, but system requires a JSON object envelope."
+
+Verdict on the second: **a plan that named no source, not a hand-over defect.** The engine injects upstream output only through `depends_on` (engine.py:2545-2569), and the planner prompt teaches it, including that an answerer without depends_on "will fail with 'insufficient context'". Whether `depends_on: [classify_emails_2]` delivers the rows under by_reference is read from code, not run.
+
+**A product friction both answerers named.** The operator instruction, carried verbatim in the governance block, says "return one JSON list ... no other text"; every answerer must return a JSON envelope. Two answerers called this a contradiction and failed. This is not fixed by code here (the answerer prompt is protected); recorded.
+
+### 4. `skill_args.extra_fields`
+
+- `render` reads `args["extra_fields"]` only (library.py:216-221), never the node's output_schema. `_step_fields` and `_with_fields` add each field to the per-item schema (required unless its hint holds "(only if"), and `_also_return_line` adds "Also return these fields: ..." to the instruction. `return_fields` counts them; plan_validation accepts the key.
+- Rendered item prompt for `extra_fields {"urgency": "integer 1-5"}` (render called read-only): the instruction gains "Also return these fields: urgency (integer 1-5)." and the output schema gains `"urgency": "integer 1-5"`. Packed requests fill "Task" and "Output schema for each item" from the same task fields (packing.py:425, 576), so each packed worker is asked for urgency. Untested live: whether gpt-5.4-nano returns sensible urgencies.
+- The operator's urgency instruction reaches the worker through the governance block in every item request today; the "Task" section did not ask for it, which is the whole reason no urgency was produced.
+- 035 with `output_schema {file, category, urgency}` and extra_fields: refused (file, category). With `{item, bucket, urgency}`: passes.
+- Such a step still packs: `packing_context` (packing.py:255-290) reads neither output_schema nor skill_args; r2 packed this skill in 10 packs of 20.
+
+### 5. Job C's codes
+
+- The first compose reply of both C runs is not stored (its `orchestrator_decision` row is missing, as in round 2), and its cost is not in the run cost (the logs' sum equals the result file's cost). GUESS: about US$0.03 to 0.04 unpriced per run.
+- r2: 029 once; the re-ask's reply was used: the eight answers (q2 "412" and q5 "2,317" without units) and a long list of filler contradictions, not the two planted ones.
+- r1: one 029 then one 032 (the report's "032 twice" is one 032 and the clean final reply). The 029 re-ask's reply placed `@@ROWS:consolidate_q1_to_q8@@ @@ROWS:consolidate_contradictions@@`, naming the two answerer steps, not the list steps offered, so 032 fired. The final reply gave the eight answers with two "(no result)" (68 of 83 q1-q8 part-rows failed in r1 against 8 of 83 in r2) and "No" for contradictions.
+
+### 6. Cost split of each A run (US$)
+
+| Part | r2 | r1 |
+|---|---|---|
+| Plan | 0.0145 | 0.0145 |
+| re_plan after 035 | 0.0144 | 0.0144 |
+| Later re_plans | 0.0885 (three) | 0.0277 (one) |
+| Item calls (packs of 20) | 0.0183 | 0.0176 |
+| Failed answerers | 0.1269 | none |
+| Compose posts | 0.0688 (with the 041 re-ask 0.0289) | 0.0286 |
+| Total | 0.3316 (145% of direct) | 0.1027 (49%) |
+
+- The planner (all orchestrator calls) is 56% of r2's cost and 83% of r1's; item calls are 5.5% and 17%.
+- r2 without the two failed answerers: 0.2047 (89%). Without also their two re_plans: 0.1445 (63%). Without also the 041 re-ask: 0.1156 (50%). What-ifs, not measured.
+- The 035 exchange cost 0.0144 per run and gained nothing in either run; in r2 it removed a correct field.
+- Aside: r1's compose prose gives category counts (billing 58, technical 55, account_access 48, shipping 28, feedback 10) that do not match the stored results (45, 42, 45, 39, 28). C4 does not check prose (a stated limit); the graded rows came from the placed marker.
+
+### Open (trial 32g)
+
+- Why the first compose reply of job C is never stored.
+- Whether `depends_on` hands an apply_to_each's rows to an answerer under by_reference (code reading only).
+- Whether a worker asked for urgency in its schema while the governance block shows `{file, category, urgency}` marks items failed as a "contradiction" (untested).
+- Why r1's re_plan chose compose while its rationale says an urgency stage is needed.

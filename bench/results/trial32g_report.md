@@ -28,7 +28,7 @@ The trial win rule is the round's rule on one run: cost at most 70% of the store
 ## Plain reading
 
 - What the fixes changed: packing (A's 200 items in 10 calls, D's 60 in 3), the optional "(only if" field (D's 31 failures gone, D 0.60 to 1.00), the plan checks 035 and 036 (they caught the bad schema and the stray key), and compose's check 041 (it caught a guessed value and the re-ask gave an honest answer). B's answer now holds its files.
-- Job A loses because no step produced urgency: the skill does not return it, the planner repeated the refused node instead of adding a field, and in the round-2-data run its two answerer attempts failed (their US$0.127 put A over direct). Category at 0.935 would also lose: the rule needs accuracy within 2 points of direct's 1.00.
+- Job A loses because no step produced urgency. Correction after the evidence (causes note, "trial 32g"): in the round-2-data run the planner's FIRST plan already added urgency through `skill_args.extra_fields`. BRT-ORC-035 refused it only because the schema also named `file` and `category`, renames of the skill's `item` and `bucket`. The 200-character message cut the word `urgency`, and the re_plan dropped the field. In the round-1-data run the planner never added it. In the round-2-data run its two later answerer attempts failed, and their US$0.127 put A over direct. Category at 0.935 would also lose: the rule needs accuracy within 2 points of direct's 1.00.
 - Job C loses on the judge: no call sees two documents together (ruling 33c's question to Deej).
 - Job B loses by one reference test.
 - The evidence on job A is in `docs/design/bench_round2_measurements.md`, section "trial 32g".
