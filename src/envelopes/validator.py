@@ -47,6 +47,18 @@ def validate_outbound(task: WrappedTask) -> None:
                 )
 
 
+ONLY_IF_MARKER = "(only if"
+
+
+def is_conditional_field(hint: object) -> bool:
+    """True when a schema hint marks its field as conditional ("(only if ...)").
+
+    Such a field may be left out of an item's reply (or be null). The one shared
+    rule for packed and unpacked items: both are checked by ``validate_inbound``.
+    """
+    return isinstance(hint, str) and ONLY_IF_MARKER in hint
+
+
 def validate_inbound(env: InboundEnvelope, task: WrappedTask) -> None:
     """Validate that an inbound envelope conforms to the outbound task contract.
 
@@ -55,6 +67,7 @@ def validate_inbound(env: InboundEnvelope, task: WrappedTask) -> None:
     - JSON-Schema ``{"type": "object", "properties": {...}, "required": [...]}``
       (the field names come from ``properties``; ``required`` restricts to a
       subset if present, otherwise all ``properties`` keys are required).
+    A field whose hint string holds "(only if" may be absent or null.
 
     Raises:
         ValueError: BRT-ENV-012 if status=failed but failure_reason is missing.
@@ -82,9 +95,14 @@ def validate_inbound(env: InboundEnvelope, task: WrappedTask) -> None:
                 else list(props.keys())
             )
         else:
+            props = schema
             expected = list(schema.keys())
 
-        missing = [k for k in expected if k not in env.output]
+        # Ruling 32b: a field whose hint holds "(only if" may be absent or null.
+        missing = [
+            k for k in expected
+            if k not in env.output and not is_conditional_field(props.get(k))
+        ]
         if missing:
             raise ValueError(
                 f"BRT-ENV-011: inbound output missing required keys "

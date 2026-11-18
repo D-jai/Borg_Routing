@@ -263,6 +263,7 @@ Every piece of work BORG_ROUTE sends to a model is wrapped in a **WrappedTask** 
 - **"BRT-ENV-001" in logs** — A model returned `status="unresolved"`. This should never happen; the schema rejects it. Check the model's raw output in the run trace.
 - **"BRT-ENV-003" in logs** — A plan exceeded the maximum recursion depth (default: 5). The task may be too complex to decompose at this depth; check the run trace and consider restructuring the request.
 - **"BRT-ENV-011" with JSON-Schema-shaped `output_schema`** — Fixed in Phase 2 (BRT-VAL-01). The validator now walks `properties` and honours `required`, so answerer outputs like `{recommendation, reason}` are no longer rejected when the schema is `{"type": "object", "properties": {...}, "required": [...]}`.
+- **A field marked "(only if ...)" in an output schema may be left out** (or be null): for example `defer_reason: "string<=50 (only if bucket='defer')"` in `classify_into_buckets`. A present value is checked as before; a field without that hint is still required (BRT-ENV-011, or BRT-ANS-005 on an answerer item). This holds for packed and unpacked items alike.
 
 ---
 
