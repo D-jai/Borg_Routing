@@ -21,7 +21,24 @@ Lead session `borg-route-f1` (Opus 5.5) since 02:20 on 16-Nov-2026. Every work o
 
 If this session stopped abruptly: `git log` and `git status` show what landed; any uncommitted changes belong to an in-progress builder: read the diff, finish or stash it, record which in the build log.
 
-## Where I left off (18-Nov-2026, 14:20, after the restart)
+## Where I left off (18-Nov-2026, about 15:40)
+
+- **Planner ruling 32 (fixes from the round-2 causes note)** is being built on `showcase`. Nothing is pushed. 32c and 32e ship in one push; CI runs once, at PR time.
+- **Done and reviewed:**
+  - 32a: deferrals-only steps pack.
+  - 32b: "(only if" fields are optional.
+  - 32c: BRT-ORC-035, through `src/orchestrator/plan_validation.py`. Only plan-validation re_plans stop after a second hit.
+  - 32d(i): `failed_items_only`.
+  - 32d(ii): BRT-ORC-036. Its round-1 fixes are in `2137f14`, and its round 2 is in review together with the stop fix `56551b0`.
+- **32e** (compose places, it does not retype): the design note `docs/design/compose_placement.md` is accepted, with check C2 dropped (planner readings 4 in BUILD.md). The code is being built.
+- **Next:**
+  - one reviewer pass on the 32e code;
+  - then replay C1, C3 and C4 over every stored compose reply, and add the cost table to the note;
+  - then STOP before the paid trial 32g (cap US$3; it needs Deej's yes; prepare the runner command);
+  - after the trial: 4.5 replay, 5.2.
+- Rulings and build rows are in BUILD.md sections 8 and 9.
+
+## Earlier waypoint (18-Nov-2026, 14:20, after the restart)
 
 - Planner ruling 30 (BUILD.md section 8): resumed the cloud-only runs after the restart. C_borg_cloud and A_borg_cloud ran at 14:10 (`demo/runs/stage1_r2_part2_cloud.ps1`). The probe measured llama3.2:3b at 7.062 tok/s. Round-2 spend is US$2.14.
 - Reported to the planner (borg-route-93): two product defects.
