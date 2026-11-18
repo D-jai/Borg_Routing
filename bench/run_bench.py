@@ -195,10 +195,12 @@ class Config:
     # Ruling 28 (f): {model_id: tok/s or "not measured, BRT-REG-016"}, measured at stage start and
     # written into every result file of the stage.
     local_speed: dict = field(default_factory=dict)
+    # Ruling 33a (--data-root): development data regenerated outside bench/data; None = bench/data.
+    data_root_override: Optional[Path] = None
 
     @property
     def data_root(self) -> Path:
-        return self.bench_dir / "data"
+        return self.data_root_override or (self.bench_dir / "data")
 
     @property
     def jobs_dir(self) -> Path:
@@ -695,6 +697,7 @@ def write_result(cfg: Config, spec: RunSpec, record: dict) -> Path:
     path = result_path(cfg, spec)
     path.parent.mkdir(parents=True, exist_ok=True)
     record = {"job": spec.job, "arm": spec.arm, "repeat": spec.n, "date": cfg.date, **record}
+    record.setdefault("data_root", str(cfg.data_root))
     if cfg.local_speed:
         record.setdefault("local_speed", dict(cfg.local_speed))
     path.write_text(json.dumps(record, indent=1) + "\n", encoding="utf-8")
@@ -1503,6 +1506,7 @@ def measure_local_speeds(matrix, log=print) -> dict:
 def _header(out, cfg, matrix, baseline, jms, title):
     out(f"BORG_ROUTE bench: {title} (date {cfg.date}; nothing is sent, nothing is spent)")
     out(f"matrix               : {matrix._path}  (read only; checks are in memory)")
+    out(f"data root            : {cfg.data_root}")
     out(f"baseline, direct arm : {baseline.model_id}  ({_per_mtok(baseline)})")
     for jm in jms:
         out(f"judge, job C         : {jm.model_id}  ({_per_mtok(jm)})  [in neither arm; vendor '{vendor_of(jm.model_id)}']")
@@ -1660,6 +1664,8 @@ def main(argv: Optional[list[str]] = None) -> int:
     ap.add_argument("--force", action="store_true", help="redo runs whose result file exists")
     ap.add_argument("--date", help="results folder date YYYY_MM_DD (default today)")
     ap.add_argument("--results-root")
+    ap.add_argument("--data-root", help="read the bench data (docs, answer keys) from this folder instead of "
+                    "bench/data; development data only, a round uses the committed data (ruling 33a)")
     ap.add_argument("--matrix", default=str(DEFAULT_MATRIX),
                     help="the bench matrix file (default bench/pool_matrix.yaml); read only, never written")
     ap.add_argument("--baseline", help="pin the direct arm's model (a row of --matrix; it need not be checked)")
@@ -1674,6 +1680,11 @@ def main(argv: Optional[list[str]] = None) -> int:
         cfg.date = args.date
     if args.results_root:
         cfg.results_root = Path(args.results_root)
+    if args.data_root:
+        cfg.data_root_override = Path(args.data_root).resolve()
+        if not (cfg.data_root / "answers").is_dir():
+            print(f"preflight: data root {cfg.data_root} has no answers/ folder. Nothing was spent.")
+            return 2
     if args.prior_spend is not None and not args.dry_run:
         cfg.ledger.set_prior(args.prior_spend)
 
@@ -1713,6 +1724,7 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     for e in cfg.ledger.recover():  # a crash in an earlier invocation: count what its database logged
         print(f"ledger: recovered unfinished entry {e['key']} (US${e['dollars']:.4f} from its database)")
+    print(f"data root: {cfg.data_root}")
     print(f"results folder: {cfg.day_dir}  (stage 2 and any resume must pass the same --date {cfg.date})")
     rc = 0
     judge_jobs = {n: j for n, j in jobs.items() if (j.get("quality") or {}).get("kind") == "pairwise_judge"}
