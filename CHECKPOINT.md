@@ -15,13 +15,17 @@ Lead session `borg-route-f1` (Opus 5.5) since 02:20 on 16-Nov-2026. Every work o
 | Stage-1 crash fixes R1-R4 (ruling 20) | Done and reviewed; replayed stage-1 replies now end "salvaged" |
 | 4.1, 4.2, 4.3, 4.4 interface | Done and reviewed. Receipt baseline estimate switched off (ruling 18) |
 | 5.7 MCP | Done and reviewed |
-| 4.5 replay, 4.6 interface check, 5.1-5.6, 5.8, 6.1 | Open. 4.5, 5.1 numbers and 6.1 numbers depend on the round-2 decision |
+| 5.3 clean tree, 5.4 docs match the code | Done and reviewed |
+| 5.6 CI | Workflow written (`fce83b9`); first run did not start (billing). CI is now paid from a small budget: see the CI rule below |
+| 4.5 replay, 4.6 interface check, 5.1, 5.2, 5.5, 5.8, 6.1 | Open. 4.5, 5.1 numbers and 6.1 numbers depend on the round-2 decision |
 
 If this session stopped abruptly: `git log` and `git status` show what landed; any uncommitted changes belong to an in-progress builder: read the diff, finish or stash it, record which in the build log.
 
 **Waiting on Deej (via the planner):** whether there is a bench round 2 (after the R1-R4 fixes and a planner design for token overhead and code-assembled row lists). Also on the after-build list below.
 
-**Next action for the lead:** work that presents no numbers: 5.3 clean tree, 5.6 CI (pytest, static check; claims check once 5.5 exists), 5.2 install (replay default needs 4.5). Do not start a round 2, batching, or floor/pool/prompt changes for the bench until the planner's design (ruling 15-20).
+**CI rule (Deej, 17-Nov-2026):** Actions minutes now cost money (US$15 shared across D-jai repos until 30-Nov-2026, 7 pm Toronto). Test locally, push only when green and once per ready batch, never re-run a failed CI run, put `[skip ci]` on docs-only pushes, no manual full CI runs without Deej's go.
+
+**Next action for the lead:** work that presents no numbers and needs no round-2 decision: 5.5 claims checker, then 5.2 install (its replay default needs 4.5). Do not start a round 2, batching, or floor/pool/prompt changes for the bench until the planner's design (ruling 15-20).
 
 ## Start the build (Deej)
 
@@ -96,7 +100,7 @@ Standing permissions: local commits on `showcase`; pushes of `showcase` to the p
 
 ## Questions for Deej after the build (not blocking)
 
-- **GitHub Actions is blocked by billing (17-Nov-2026).** The first CI run (work order 5.6, `.github/workflows/ci.yml`) did not start: "The job was not started because recent account payments have failed or your spending limit needs to be increased" (Billing & plans in the D-jai account). Until that is fixed, 5.6 cannot go green and full test runs stay local. The run: https://github.com/D-jai/Borg_Routing/actions/runs/44192378709
+- **GitHub Actions billing (17-Nov-2026): Deej added a US$15 budget, so CI can run again within the CI rule above.** The first CI run (work order 5.6, `.github/workflows/ci.yml`) did not start: "The job was not started because recent account payments have failed or your spending limit needs to be increased" (Billing & plans in the D-jai account). Until that is fixed, 5.6 cannot go green and full test runs stay local. The run: https://github.com/D-jai/Borg_Routing/actions/runs/44192378709
 
 - **Cold-start defaults after the 17-Nov rescore.** The research route now scores Kimi K2 Thinking at 8.7 reasoning, below the 9.0 floor the shipped defaults must meet (`tests/registry/test_cold_start_defaults.py`). The shipped matrix keeps the April scores for now; the rescored pool lives in `bench/pool_matrix.yaml`. Options: keep as is, or pick a new second default (e.g. Gemini 3.1 Pro 9.7 or Grok 4.20 9.4 by the new scores) and update the test.
 
