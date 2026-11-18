@@ -303,7 +303,8 @@ async def test_r1_ids_stay_unique_across_the_run(env):
         assert len(_calls_with(stub, marker)) == 1, marker
     renamed = [d["renamed"][0]["to"] for d in await _decisions(db_path, result["run_id"])
                if d.get("code") == "BRT-ORC-026"]
-    assert renamed == ["a_2", "a_3"]
+    # Log writes are fire-and-forget, so the two rename rows may land in either order.
+    assert sorted(renamed) == ["a_2", "a_3"]
 
 
 @pytest.mark.asyncio
