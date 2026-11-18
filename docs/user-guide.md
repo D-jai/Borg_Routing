@@ -116,11 +116,12 @@ value with no restart.
 Every model call (each step, and the orchestrator's plan, re-plan and compose
 calls) is logged with its token counts and its **dollars**:
 
-`dollars = input tokens x the model's input price + output tokens x its output price`
+`dollars = input tokens x the model's input price + output tokens x its output price` <!-- claim C04 -->
+
 
 The prices come from the capability-matrix row of the model that served the call.
 A model with no pricing (a local model) costs `0.0`, and so does a model the
-matrix does not know; the call is never left blank, with one exception: a
+matrix does not know <!-- claim C05 -->; the call is never left blank, with one exception: a
 direct-to-model (bypass) call whose provider sends no usage is logged with its
 tokens and dollars left blank (unknown), not zero. A call that was retried
 after being cut off counts the tokens of both attempts. The tools do not carry
@@ -128,7 +129,7 @@ a price today, so tool calls log `0.0`.
 
 - **Run total:** the run digest (`run_digests`) is the sum of the logged calls'
   dollars and tokens for the run and every child run it spawned, so it always
-  matches the log. It stores `cost_dollars`, `baseline_dollars`, `tokens_input`
+  matches the log. <!-- claim C06 --> It stores `cost_dollars`, `baseline_dollars`, `tokens_input`
   and `tokens_output`, and `GET /runs/{id}` returns it as `digest`. An
   `orchestrate` or `apply_to_each` step's envelope shows the total of the calls
   it spawned. The Logs page's Cost Summary tab sums `model_call` rows plus the
@@ -147,7 +148,7 @@ a price today, so tool calls log `0.0`.
   `?include_bypass=true` to list them too. `GET /runs/{id}` still returns a
   bypass run by its id. A digest saved before the token and baseline columns
   existed reads those fields as unknown (null), not 0.
-- **No baseline comparison is shown.** The stored `baseline_dollars` (the same tokens priced at a reference model) is not what one model would have cost, so no page shows it: not the receipt, not the Run page, and not the raw Details view (those strip every baseline field). The figures stay in the database and in the API until the planner rules on a replacement. The baseline model is the checked model with the highest `reasoning` score (ties go to the smaller model id); set `baseline_model_id` (Admin config) or `BASELINE_MODEL_ID` in `.env` to pick another.
+- **No baseline comparison is shown.** The stored `baseline_dollars` (the same tokens priced at a reference model) is not what one model would have cost, so no page shows it: not the receipt, not the Run page, and not the raw Details view (those strip every baseline field). <!-- claim C07 --> The figures stay in the database and in the API until the planner rules on a replacement. The baseline model is the checked model with the highest `reasoning` score (ties go to the smaller model id); set `baseline_model_id` (Admin config) or `BASELINE_MODEL_ID` in `.env` to pick another.
 
 ### How each step gets its model
 The planner and the final answer use the orchestrator model (the quality
@@ -165,8 +166,8 @@ its own:
 2. Otherwise the step's **kind of work** (`task_type`: reasoning, coding,
    summarize, writing, roleplay, agentic, extraction) and **size** (`tier`:
    light, mid, heavy) decide. The step goes to the ticked model with the lowest effective cost (dollars plus
-   time) whose score for that kind of work is at or above the tier's floor. A
-   step that invokes a skill takes the skill's own tier and specialty when
+   time) whose score for that kind of work is at or above the tier's floor. <!-- claim C01 -->
+   A step that invokes a skill takes the skill's own tier and specialty when
    the planner gave none. A step with no labels is `reasoning`, `mid`.
    Near-synonyms are accepted (`creative` is read as writing, `code` as
    coding, `extract` as extraction, `summary` or `summarise` as
@@ -176,7 +177,7 @@ its own:
    `BRT-ORC-023` warning and the step is routed without the skill's hints.
    An `apply_to_each` step's items all run on the step's own model.
 3. If no ticked model clears the floor, the step runs on the run's default
-   model and the trace shows a `BRT-ORC-019` warning. If routing fails for
+   model and the trace shows a `BRT-ORC-019` warning. <!-- claim C02 --> If routing fails for
    any other reason, the step also runs on the default model and its route
    entry carries the error.
 
@@ -190,7 +191,7 @@ A config key (set through `POST /config`) wins over the `.env` value and
 takes effect on the next run. The run trace records, for every step, why
 its model was chosen: a `route` entry with the kind of work, tier, floor,
 the chosen model and the other models that cleared the floor, lowest
-effective cost first.
+effective cost first. <!-- claim C03 -->
 
 ---
 
@@ -228,7 +229,7 @@ Every piece of work BORG_ROUTE sends to a model is wrapped in a **WrappedTask** 
 
 ### What a WrappedTask contains
 - **instruction** — the exact task the model must perform
-- **governance_instruction** — what the operator originally asked, word for word. Every step, every item of an `apply_to_each` and every call inside a child run shows this in its governance block, so no model is ever told that a step's own text is "the user's instruction" (Law 1). A child run also gets a short "Your Assignment In This Run" block naming its sub-task.
+- **governance_instruction** — what the operator originally asked, word for word. Every step, every item of an `apply_to_each` and every call inside a child run shows this in its governance block, so no model is ever told that a step's own text is "the user's instruction" (Law 1). <!-- claim C08 --> A child run also gets a short "Your Assignment In This Run" block naming its sub-task.
 - **output_schema** — the exact shape the model must return (this is the compression contract)
 - **type** — one of: `orchestrate`, `answerer`, `apply_to_each`, `state_op`
 - **state_op `source`** — a `state_op` step can name an earlier step (`"source": "n1"`); it then works on the list that step produced (its `items`, `results`, `list` or `result`). If the named step has produced no list at all (or does not exist), the step fails with BRT-SOP-003; a list that is empty (for example a filter that matched nothing) is valid, so a following count gives 0.
@@ -267,7 +268,7 @@ The planner, re-plan and final write-up (compose) share one prompt. The engine's
 
 1. **The answer is there, in the wrong place** (for example `{"action": "compose", "response": "..."}`, or the text under `final_answer` or `answer`, or a list where text was expected): it is used as the answer, with no extra call. The trace shows BRT-ORC-028. When the reply also carries `action` or `next_nodes` (it is shaped like a re-plan), only `response`, `direct_answer`, `final_answer` or `answer` count; a `message`, `output` or similar field there is the planner's note, not the answer, and the write-up is asked for again (step 2).
 2. **No answer in the reply:** the write-up is asked for once more (BRT-ORC-029).
-3. **Still no answer:** you get the results of the steps that finished, under a plain note saying the final write-up failed: each step's answer, or for a per-item step each item's result and how many items failed. Finished work is never thrown away. The trace shows BRT-ORC-030 as a warning, and `GET /runs/{id}` shows `"answer_kind": "salvaged"` on the run (a written-up answer shows `"composed"`). With the on-premise lane in `raw_local` or `all_local`, a step that read your documents appears only if its output passed the output check, and only document ids (never document text) are shown for its items.
+3. **Still no answer:** you get the results of the steps that finished, under a plain note saying the final write-up failed: each step's answer, or for a per-item step each item's result and how many items failed. Finished work is never thrown away. <!-- claim C10 --> The trace shows BRT-ORC-030 as a warning, and `GET /runs/{id}` shows `"answer_kind": "salvaged"` on the run (a written-up answer shows `"composed"`). With the on-premise lane in `raw_local` or `all_local`, a step that read your documents appears only if its output passed the output check, and only document ids (never document text) are shown for its items.
 
 If the write-up call itself fails (a timeout, a connection error, a reply that is not JSON), step 3 happens straight away: the finished steps' results come back with the note, BRT-ORC-030 and `"answer_kind": "salvaged"`.
 
@@ -366,7 +367,7 @@ Previously, three silent-fallback sites in `orchestrate_run` could make a broken
 
 Every call to a model carries a cap on how many tokens it may write: `ORCHESTRATOR_MAX_TOKENS` for planning and composing, `ANSWERER_MAX_TOKENS` for steps (both default to 2000 when unset). A reasoning-family model gets four times the cap, at least 8000, to leave room for its hidden thinking. A step may ask for a larger cap of its own (`max_output_tokens`, default 4000); the larger of the two is used.
 
-If the model stops because it reached the cap, BORG_ROUTE repeats the call **once** at double the cap, never above 16000. There is no second retry. If the first cap is already 16000 or more (for example a reasoning model with `ANSWERER_MAX_TOKENS=6000`, which gives 24000), no retry is made.
+If the model stops because it reached the cap, BORG_ROUTE repeats the call **once** at double the cap, never above 16000. There is no second retry. <!-- claim C22 --> If the first cap is already 16000 or more (for example a reasoning model with `ANSWERER_MAX_TOKENS=6000`, which gives 24000), no retry is made.
 
 What you see:
 
@@ -405,11 +406,11 @@ The Admin pages sit in the left menu under **Admin**, starting at `http://localh
 
 ### The admin lock
 
-Pages that change things (keys, settings, rules, models, skills) and the logs (`GET /logs`, entities and export) are locked by `BORG_ADMIN_TOKEN` in `.env`.
+Pages that change things (keys, settings, rules, models, skills) and the logs (`GET /logs`, entities and export) are locked by `BORG_ADMIN_TOKEN` in `.env`. <!-- claim C18 -->
 
 - **Token set:** the first time you save something, the page shows a box asking for the token. Type it once and press **Save token**; the call is retried and the token is kept until you close the tab. A wrong token is forgotten and asked for again. Overview shows "Admin token set".
 - **Token not set:** only the computer the server runs on can use these pages. From any other computer the page says that remote admin is off and what to set (`BRT-API-046`). Overview shows "Admin token not set".
-- Asking questions and reading a run stay open to everyone. In a run's details, the exact text sent to cloud models is shown only to an admin (the same rule), and while the lane is on the event text (error messages and other decision notes) is hidden from anyone else; type, model, tokens, cost, times and routing stay.
+- Asking questions and reading a run stay open to everyone. <!-- claim C19 --> In a run's details, the exact text sent to cloud models is shown only to an admin (the same rule), and while the lane is on the event text (error messages and other decision notes) is hidden from anyone else; type, model, tokens, cost, times and routing stay.
 - The token must be ASCII (letters, digits, punctuation; no spaces or accents). Anything else is reported as misconfigured (`BRT-API-047`, `admin_token_valid: false` in `GET /keys/status`) and the locked routes refuse everyone until it is fixed.
 - **Logs, Export JSONL** is a button: it downloads through the same token prompt and saves a file.
 - API clients send `Authorization: Bearer <token>`; a missing or wrong token gets 401 (`BRT-API-045`).
@@ -448,7 +449,7 @@ Returns 202 immediately. Poll `GET /runs/{run_id}` for updated status.
 
 The re-run works from the run's own instruction, the words you first sent,
 and every step it makes is governed by those words (Law 1), never by the
-text of a step saved in the failed run. Resuming a child run keeps its own
+text of a step saved in the failed run. <!-- claim C09 --> Resuming a child run keeps its own
 sub-task and is governed by the top-level run's instruction.
 
 ### If something goes wrong
@@ -490,7 +491,7 @@ A step's `recommended_model` still comes first. The alias also reaches the child
 
 The lane hands documents to the steps that read them, by reference. What it promises depends on the mode:
 
-- `raw_local` and `all_local` keep your documents on your own machines. Their promise, in these words: **raw document text is sent only to models on your own machines. Everything sent to a cloud model is listed, and you can read it.**
+- `raw_local` and `all_local` keep your documents on your own machines. Their promise, in these words: **raw document text is sent only to models on your own machines. Everything sent to a cloud model is listed, and you can read it.** <!-- claim C11 -->
 - `by_reference` makes **no privacy promise**: any ticked model, cloud included, may read a document's text. It only keeps bulk data out of the prompt, and still lists every request (see "By reference, for cloud models" below).
 
 The full design is `docs/design/on_premise_lane.md`.
@@ -503,7 +504,7 @@ A model is local when the address its requests go to is this machine, never beca
 - Addresses written in unusual forms (`127.1`, `2130706433`, `0x7f.1`, `0.0.0.0`, a URL with a user name in it) are not local.
 - An Ollama model whose tag ends in `-cloud`, or that Ollama reports as served from a remote host, is never local: it is served from localhost but runs elsewhere.
 
-In `raw_local` and `all_local`, when a step must stay local, the router offers it only local models, ignores a cloud model the planner recommended, and never falls back to a cloud model. If no local model clears the step's quality floor, the step fails with **BRT-LANE-002** and nothing is sent. Each such step's `routing` shows `"local_only": true`. In `by_reference` no step must stay local: a step that reads documents is routed like any other step, and the document's size still counts toward the model's context.
+In `raw_local` and `all_local`, when a step must stay local, the router offers it only local models, ignores a cloud model the planner recommended, and never falls back to a cloud model. If no local model clears the step's quality floor, the step fails with **BRT-LANE-002** and nothing is sent. <!-- claim C13 --> Each such step's `routing` shows `"local_only": true`. In `by_reference` no step must stay local: a step that reads documents is routed like any other step, and the document's size still counts toward the model's context.
 
 ### Turning the lane on
 
@@ -530,7 +531,7 @@ Use it to keep bulk data out of the prompt. Lists of more than a few dozen items
 2. Name them relative to that folder: `"documents": {"folder": "client_notes"}` (every file in it and below) or `"documents": {"files": ["client_notes/acme.txt"]}`.
 3. Only `.txt` and `.md` are read (as UTF-8). Other files are listed as "unsupported, not read".
 
-A path that leaves the folder (`..`, an absolute path, `C:x.txt`, `\x.txt`, a network path, a link or junction pointing outside) is refused with **BRT-LANE-001** before anything is read; the message names only the path you sent. A file replaced between the check and the read is refused too.
+A path that leaves the folder (`..`, an absolute path, `C:x.txt`, `\x.txt`, a network path, a link or junction pointing outside) is refused with **BRT-LANE-001** before anything is read <!-- claim C15 -->; the message names only the path you sent. A file replaced between the check and the read is refused too.
 
 The planner never sees the text. It gets a list: an id per document (`doc_001`), its name, type and size. Set `lane_manifest` to `ids` to hide the names as well. A document longer than `lane_part_chars` (default 8000 characters) is split into parts (`doc_001#2`); nothing is cut off.
 
@@ -538,7 +539,7 @@ The planner never sees the text. It gets a list: an id per document (`doc_001`),
 
 - The runtime, not the planner, marks a step **raw** when it reads documents (`"inputs_ref": "documents"`, `"documents": ["doc_001"]`, or a skill given `items_ref: documents`), or when it reads the output of a raw step that was withheld. Raw steps run on local models only (in `by_reference`, on any ticked model, with no output guard and no call check; the limits and checks below are those of `raw_local` and `all_local`).
 - The text is loaded inside the step, right before its own (local) request. Plans, saved envelopes and results carry document ids, never text.
-- **What a local step returns can be passed on.** That is the limit of the promise, so it is bounded: an output longer than `lane_max_output_chars` (default 1500 characters), one that copies a passage of `lane_max_verbatim_chars` (default 120) characters from the document, or one that holds a short document (under that limit) whole, is withheld (**BRT-LANE-004**). The check reads the output's values as text, so line breaks and accented letters do not hide a copy. Ask such steps for short fields (names, dates, labels).
+- **What a local step returns can be passed on.** That is the limit of the promise, so it is bounded: an output longer than `lane_max_output_chars` (default 1500 characters), one that copies a passage of `lane_max_verbatim_chars` (default 120) characters from the document, or one that holds a short document (under that limit) whole, is withheld (**BRT-LANE-004**). <!-- claim C17 --> The check reads the output's values as text, so line breaks and accented letters do not hide a copy. Ask such steps for short fields (names, dates, labels).
 - When a raw step fails (in `raw_local` and `all_local`), the planner and the final answer see only the code and the document id, for example `{"code": "BRT-LANE-004", "doc": "doc_001"}`. A failure the local model itself reported always shows as **BRT-LANE-004**, whatever code or text it wrote. Only a failure BORG_ROUTE itself raised keeps its own code (for example **BRT-ANS-009** for a truncated answer, or a `BRT-LANE-*` refusal). The full error stays in the local trace.
 - In `by_reference` a failed step that read documents is shown like any other failed step: the code and the first 200 characters of the message, with **BRT-ANS-010** when the model itself reported the failure. Text a model wrote is never read for a code, in any mode. A failure BORG_ROUTE itself raised while such a step ran keeps its own code and also names the document id, for example `{"code": "BRT-LANE-007", "doc": "doc_001", "message": "BRT-LANE-007: the ledger row ... could not be written ..."}` when the record of a request could not be written. (A path outside `BORG_DOCS_ROOT` never gets this far: the whole request is refused with **BRT-LANE-001** before any step runs.)
 - With documents, the planner may not answer directly or skip the plan (**BRT-ORC-003**), and the short-prompt shortcut is off.
@@ -547,15 +548,15 @@ The planner never sees the text. It gets a list: an id per document (`doc_001`),
 
 ### The check on everything sent out, and the record
 
-- While the lane is `raw_local` or `all_local` and the run has documents, every request headed off the machine (planner, final answer, cloud steps, web search, direct-to-model) is compared with the documents first. If it holds a passage of 120 characters, more than 10% of a document's 8-word sequences (`lane_max_ngram_share`), or a short document whole, it is blocked (**BRT-LANE-006**). Case, punctuation, line breaks, repeated JSON escaping, invisible characters (zero-width space, soft hyphen) and a copy split one word per field do not hide a match. What it does not catch is listed under "What is not promised".
-- Every request a run makes while the lane is on is written to the `outbound_requests` table before it is sent, with its exact body (secret fields such as `api_key` are blanked in the stored copy), and whether it left the machine. If that write fails, the request is not sent (**BRT-LANE-007**). A retry is its own row. Many steps sending at once (a document in dozens of parts) take turns writing: each write waits for the database (up to 30 seconds) and is tried up to 5 times, so only a write that truly fails blocks a request.
+- While the lane is `raw_local` or `all_local` and the run has documents, every request headed off the machine (planner, final answer, cloud steps, web search, direct-to-model) is compared with the documents first. If it holds a passage of 120 characters, more than 10% of a document's 8-word sequences (`lane_max_ngram_share`), or a short document whole, it is blocked (**BRT-LANE-006**). <!-- claim C16 --> Case, punctuation, line breaks, repeated JSON escaping, invisible characters (zero-width space, soft hyphen) and a copy split one word per field do not hide a match. What it does not catch is listed under "What is not promised".
+- Every request a run makes while the lane is on is written to the `outbound_requests` table before it is sent, with its exact body (secret fields such as `api_key` are blanked in the stored copy), and whether it left the machine. If that write fails, the request is not sent (**BRT-LANE-007**). <!-- claim C14 --> A retry is its own row. Many steps sending at once (a document in dozens of parts) take turns writing: each write waits for the database (up to 30 seconds) and is tried up to 5 times, so only a write that truly fails blocks a request.
 - Local calls ignore proxy settings (`HTTP_PROXY` and the like), so a proxy cannot carry them off the machine.
 
 ### Using the lane from the API
 
 - `POST /v1/task`: add `"documents": {"folder": "..."}` (or `"files"`) to the body. A refused path returns 400 with **BRT-LANE-001** and creates no run; documents while `lane_mode` is `off` return 400 with **BRT-LANE-005**.
 - `POST /v1/chat/completions`: the same `documents` field, at the top level next to `messages`, with a `borg_route` model. With a direct model id it is refused (**BRT-LANE-005**); in `all_local` every direct-model request is refused.
-- `GET /runs/{run_id}` returns `outbound`: every request this run and its child runs sent off the machine, oldest first, each with `run_id`, `url`, `destination`, `attempt`, `status` and the exact `body`. It is empty when the lane was off. The `body` of each entry is shown only to an admin (a valid `BORG_ADMIN_TOKEN`, or this computer when none is set); other callers get `body: null`. The hook is `lane_admin_allowed` in `src/api/tasks.py`. `GET /logs/entities` and `GET /logs/export` need the same admin access.
+- `GET /runs/{run_id}` returns `outbound`: every request this run and its child runs sent off the machine, oldest first, each with `run_id`, `url`, `destination`, `attempt`, `status` and the exact `body`. It is empty when the lane was off. The `body` of each entry is shown only to an admin (a valid `BORG_ADMIN_TOKEN`, or this computer when none is set); other callers get `body: null`. <!-- claim C20 --> The hook is `lane_admin_allowed` in `src/api/tasks.py`. `GET /logs/entities` and `GET /logs/export` need the same admin access.
 - `POST /runs/{run_id}/resume` is refused for a run that read documents, or for a child of one (409, **BRT-LANE-008**): start a new run with the same documents. If the check itself fails, the resume is refused too. A resume, and a run started with the MCP tool `borg_route.submit_task`, follow the current `lane_mode` exactly as `POST /v1/task` does.
 - **Chat history is the client's job.** The server stores no chat history for `POST /v1/chat/completions`: each request carries its own `messages`. A client must not resend answers given under `all_local` in a later request made under another mode, or those answers go to whatever model that mode allows. The Ask page tags each turn with its lane mode and leaves `all_local` turns out under another mode (see "Workspace" below); in every other client this is up to you.
 - With `lane_mode` `off`, no other lane setting is read or checked: a run is exactly as before the lane existed.
@@ -576,7 +577,7 @@ The planner never sees the text. It gets a list: an id per document (`doc_001`),
   The check is a backstop, not proof.
 - File names are visible to the planner unless `lane_manifest` is set to `ids`.
 - A local model server that itself forwards to a cloud service looks local. Restrict the lane with `lane_local_allowlist` (model ids or `host:port`) to servers you vouch for.
-- `all_local` removes these limits by sending nothing out.
+- `all_local` removes these limits by sending nothing out. <!-- claim C12 -->
 - Copies of document-derived text stay in the local database (`logs`, `log_entities`, `envelopes`, `outbound_requests`).
 
 ---
@@ -769,7 +770,7 @@ The Logs page at `http://localhost:8000/ui/logs.html` has three tabs: **Events**
 
 Open `http://localhost:8000/` (or `/ui/`); it goes to the Ask page. The old chat page address, `/ui/chat.html`, goes there too.
 
-**Nothing loads from another site.** Every response carries a Content-Security-Policy: pages, scripts, images and requests come from this server only (images may also be `data:`), no inline script runs, and the page cannot be put in a frame. An answer that contains an image from another site shows no image, and a link to another site is shown as plain text.
+**Nothing loads from another site.** Every response carries a Content-Security-Policy: pages, scripts, images and requests come from this server only (images may also be `data:`), no inline script runs, and the page cannot be put in a frame. <!-- claim C21 --> An answer that contains an image from another site shows no image, and a link to another site is shown as plain text.
 
 ### Ask (`/ui/ask.html`)
 

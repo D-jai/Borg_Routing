@@ -330,11 +330,34 @@ Make the repo public. Deploy the replay demo on the VPS with the HostingerVPS se
 
 ## 7. Claims table
 
-Filled by 5.5. No claim leaves the building without a row.
+Filled by 5.5. No claim leaves the building without a row. `python scripts/check_claims.py` checks it.
+
+Backing notation: `test:<file>::<test name>` (or `<file>::<Class>::<test name>`), or `result:<json file>#<dotted.path>=<value>`; several backings in one cell are separated by `;`. The checker only confirms the test exists; the full suite proves it passes. A marker in a document is `<!-- claim C01 -->` at the end of the claim's sentence. A results claim needs the number written on the marker's line to equal the JSON value. So far only `docs/user-guide.md` carries markers; README and deck rows come with 5.1 and 6.1.
 
 | Id | Claim | Backing |
 |---|---|---|
-| | | |
+| C01 | Each step goes to the ticked model with the lowest effective cost whose score clears the step's floor | test:tests/e2e/test_claim_routing.py::test_each_step_goes_to_the_cheapest_model_that_clears_its_floor; test:tests/registry/test_node_router.py::test_tier_picks_the_cheapest_model_that_clears_its_floor |
+| C02 | If no ticked model clears the floor, the step runs on the default model and the trace warns BRT-ORC-019 | test:tests/orchestrator/test_engine_routing.py::test_a_step_no_model_can_serve_at_its_floor_falls_back_and_says_so |
+| C03 | The trace records, for every step, why its model was chosen and which others cleared the floor | test:tests/e2e/test_routing_record.py::test_every_routed_step_has_a_decision_with_candidates_and_baseline; test:tests/registry/test_node_router.py::test_candidates_are_recorded_cheapest_first_and_all_clear_the_floor |
+| C04 | Every model call is logged with dollars equal to input tokens times input price plus output tokens times output price, planner calls included | test:tests/e2e/test_cost_recording.py::test_priced_answerer_calls_log_the_exact_product; test:tests/e2e/test_cost_recording.py::test_orchestrator_calls_plan_replan_compose_are_priced |
+| C05 | A local model's call costs 0.0 and is logged, never left blank | test:tests/e2e/test_cost_recording.py::test_local_model_call_logs_zero_dollars_not_null |
+| C06 | The run total is the sum of the logged calls | test:tests/e2e/test_cost_recording.py::test_run_digest_total_comes_from_the_logged_rows; test:tests/e2e/test_claim_routing.py::test_every_model_call_is_priced_and_the_run_total_is_their_sum |
+| C07 | No page shows a baseline or top-model cost comparison | test:tests/ui/test_review42_js.py::test_the_rendered_receipt_and_run_header_show_no_baseline_or_top_model; test:tests/ui/test_review42_js.py::test_the_raw_details_view_carries_no_baseline_at_any_depth |
+| C08 | Every step, every item and every call in a child run is governed by the operator's own words (Law 1) | test:tests/e2e/test_claim_routing.py::test_every_step_is_told_the_operators_exact_instruction; test:tests/e2e/test_law1_governance.py::test_every_item_of_an_apply_to_each_carries_the_operators_instruction; test:tests/e2e/test_law1_governance.py::test_a_child_run_is_governed_by_the_operators_instruction_not_its_step_text; test:tests/e2e/test_law1_governance.py::test_a_grandchild_runs_step_is_governed_by_the_operators_instruction; test:tests/e2e/test_law1_governance.py::test_a_skill_step_is_governed_by_the_operators_instruction |
+| C09 | A re-run of a failed run is governed by the run's own instruction, not by a saved step's text | test:tests/api/test_resume_governance.py::test_a_resumed_run_is_governed_by_the_operators_instruction; test:tests/api/test_resume_governance.py::test_a_resumed_child_run_keeps_its_task_and_the_roots_governance |
+| C10 | When the final write-up fails, the finished steps' results come back with a note and answer_kind salvaged | test:tests/e2e/test_stage1_rootcause_bench.py::test_r2_salvages_finished_results_when_compose_fails_twice; test:tests/e2e/test_stage1_rootcause_bench.py::test_first_compose_call_raising_salvages_finished_work |
+| C11 | In raw_local, raw document text goes only to models on your own machines | test:tests/e2e/test_privacy_lane.py::test_a_raw_local_no_canary_reaches_a_cloud_model; test:tests/e2e/test_privacy_lane.py::test_guard_blocks_a_raw_task_headed_off_the_machine |
+| C12 | In all_local nothing is sent off the machine | test:tests/e2e/test_privacy_lane.py::test_c_all_local_sends_nothing_off_the_machine |
+| C13 | A step that must stay local never falls back to a cloud model; with no local model clearing the floor it fails and nothing is sent | test:tests/e2e/test_privacy_lane.py::test_b_local_model_below_the_floor_never_falls_back_to_cloud; test:tests/e2e/test_privacy_lane.py::test_b_raw_local_without_a_local_model_fails_and_sends_nothing; test:tests/registry/test_node_router_lane.py::test_a_local_model_below_the_floor_raises_lane_002 |
+| C14 | With the lane on, every request is recorded before it is sent, and a failed record blocks the send | test:tests/e2e/test_privacy_lane.py::test_f_every_call_is_in_the_ledger_with_the_right_left_machine; test:tests/e2e/test_privacy_lane.py::test_a_ledger_write_failure_blocks_the_request |
+| C15 | A document path that leaves the documents folder is refused before anything is read | test:tests/e2e/test_privacy_lane.py::test_e_paths_outside_the_root_are_refused |
+| C16 | Pasted document text in an outgoing request is blocked (BRT-LANE-006) | test:tests/e2e/test_privacy_lane.py::test_backstop_refuses_a_pasted_document_in_the_prompt; test:tests/e2e/test_privacy_lane.py::test_backstop_refuses_document_text_in_a_tool_query |
+| C17 | A local step's output that copies document text is withheld (BRT-LANE-004) | test:tests/e2e/test_privacy_lane.py::test_output_guard_withholds_copied_text_and_taints_the_reader |
+| C18 | Admin routes need BORG_ADMIN_TOKEN when it is set, and without a token only the machine itself may use them | test:tests/api/test_admin_lock.py::test_missing_token_is_401; test:tests/api/test_admin_lock.py::test_wrong_token_is_401; test:tests/api/test_admin_lock.py::test_unset_token_allows_loopback; test:tests/api/test_admin_lock.py::test_unset_token_refuses_other_addresses |
+| C19 | Asking questions and reading a run stay open to everyone | test:tests/api/test_admin_lock.py::test_asking_questions_stays_open_from_a_remote_address; test:tests/api/test_admin_lock.py::test_read_routes_stay_open_from_a_remote_address |
+| C20 | The exact text sent to cloud models is shown only to an admin | test:tests/api/test_admin_lock.py::test_outbound_bodies_hidden_without_admin |
+| C21 | Every response carries a Content-Security-Policy, and no page has an inline script | test:tests/api/test_csp.py::test_every_response_carries_the_policy; test:tests/api/test_csp.py::test_a_streaming_response_carries_it_too; test:tests/api/test_csp.py::test_no_page_has_an_inline_script_or_handler |
+| C22 | A reply cut off by the token cap is retried once at double the cap, then fails with BRT-ANS-009 | test:tests/agents/test_executor.py::test_truncation_retry_succeeds; test:tests/agents/test_executor.py::test_truncation_retry_exhausted_returns_brt_ans_009 |
 
 ## 8. Rulings log
 
@@ -418,6 +441,7 @@ Filled by 5.5. No claim leaves the building without a row.
 | 16-Nov-2026 | Fable's first deck cut (`ca69806`) is kept as the starting point for 6.1, not reviewed until 6.1 | Lead |
 | 17-Nov-2026 | **Deej's CI rule (relayed by jazari-d8):** GitHub Actions now draws on a US$15 budget shared by all D-jai repos until the free minutes reset (30-Nov-2026, 7 pm Toronto). Test locally and push only when green; push once per ready batch; never re-run a failed CI run; docs-only commits carry `[skip ci]`; no manual full CI runs without Deej's go. Relayed to the planner | Deej |
 | 17-Nov-2026 | 5.4 rulings: all 16 doc findings and both UI text findings accepted; "0 disables heartbeats" is fixed in the docs, not the code. Round 2 found one overstatement: an unscored model is skipped only by score-based routing (the planner can still name it, and a request can call it by exact id). The final fix also covers two stale code texts (BRT-REG-020 message, `effective_cost` docstring). The 5.4 batch is pushed with `[skip ci]`: its code changes are message, help and comment text only, checked locally | Lead |
+| 17-Nov-2026 | 5.5 runs ahead of 5.1 (5.1 waits on the round-2 decision). The checker, the table and the claims in `docs/user-guide.md` come now; README and deck rows come with 5.1 and 6.1. "Every factual claim" in the 793-line user guide is narrowed to the promises a stranger would rely on: what the product guarantees or measures (routing per step, cost recorded, Law 1, the lane's promise, salvage, the admin lock, and similar), each with a test that would fail if it were false. Settings, defaults and how-to lines are not claims. Markers are HTML comments (`<!-- claim C01 -->`) so the rendered docs stay clean | Lead |
 
 ## 9. Build log
 
