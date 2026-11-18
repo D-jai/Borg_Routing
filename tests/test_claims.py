@@ -241,3 +241,26 @@ def test_relative_paths_resolve_against_root(tree, capsys):
     (tree / "BUILD.md").write_text(TABLE.format(rows=ROW1), encoding="utf-8")
     (tree / "guide.md").write_text("Fine. <!-- claim C01 -->\n", encoding="utf-8")
     assert cc.main(["--root", str(tree), "--build", "BUILD.md", "--doc", "guide.md"]) == 0
+
+
+# ---- review round 2 additions ----
+
+def test_a_one_line_fence_does_not_toggle_the_fence(tree, capsys):
+    doc = DOC + "```python x = 1```\n<!-- claim C77 -->\n"
+    code, out = run(tree, [ROW1, ROW2], doc, capsys)
+    assert code == 1 and "C77" in out and "no row" in out
+
+
+def test_a_file_ending_inside_a_fence_fails(tree, capsys):
+    code, out = run(tree, [ROW1, ROW2], DOC + "```\nnever closed\n", capsys)
+    assert code == 1
+    assert "open" in out and "fence" in out
+
+
+@pytest.mark.parametrize("shown", ["**42.5**", "`42.5`", "*42.5*", "(`42.5`)"])
+def test_a_number_in_bold_or_code_still_counts(tree, capsys, shown):
+    row = "| C03 | x | result:bench/res.json#a.b.1=42.5 |"
+    code, out = run(tree, [ROW1, ROW2, row], DOC + f"Costs {shown} <!-- claim C03 -->\n", capsys)
+    assert code == 0, out
+    code, out = run(tree, [ROW1, ROW2, row], DOC + f"Costs {shown.replace('42.5', '41')} <!-- claim C03 -->\n", capsys)
+    assert code == 1

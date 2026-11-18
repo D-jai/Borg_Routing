@@ -298,3 +298,14 @@ def test_router_miss_fallback_says_why_there_are_no_candidates():
     assert d["candidates"] == []
     assert "floor" in d["candidates_reason"]
     assert d["est_dollars"] is not None
+
+
+def test_candidates_are_capped_at_eight_and_include_the_chosen_model():
+    models = [_model(f"m{i:02d}", 8.5, 1e-6 * (i + 1), 2e-6 * (i + 1)) for i in range(11)]
+    chosen, decision = _route(_node(task_type="reasoning", tier="mid"), matrix=_matrix(*models))
+    ids = [c["model_id"] for c in decision["candidates"]]
+    assert len(ids) == 8
+    assert chosen.model_id in ids
+    assert ids[0] == chosen.model_id            # cheapest first
+    costs = [c["est_cost"] for c in decision["candidates"]]
+    assert costs == sorted(costs)

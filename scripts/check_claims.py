@@ -89,8 +89,11 @@ def find_markers(doc_paths: list[Path]) -> tuple[list[tuple[str, Path, int, str,
     for p in doc_paths:
         in_fence = False
         for n, line in enumerate(p.read_text(encoding="utf-8").splitlines(), 1):
-            if line.lstrip().startswith("```"):
-                in_fence = not in_fence
+            stripped = line.strip()
+            if stripped.startswith("```"):
+                # a line that opens and closes a fence by itself changes nothing
+                if not (len(stripped) > 3 and stripped.endswith("```")):
+                    in_fence = not in_fence
                 continue
             if in_fence:
                 continue
@@ -101,6 +104,8 @@ def find_markers(doc_paths: list[Path]) -> tuple[list[tuple[str, Path, int, str,
                 else:
                     errors.append(f"{p.name}:{n}: malformed claim marker (want <!-- claim C01 -->): "
                                   f"{line[m.start():m.start() + 40]!r}")
+        if in_fence:
+            errors.append(f"{p.name}: ends inside an open ``` fence")
     return found, errors
 
 
@@ -179,7 +184,7 @@ def number_before(line: str, column: int) -> Decimal | None:
     or '-' attached (BRT-ORC-019) is not a number."""
     last = None
     for tok in line[:column].split():
-        tok = tok.strip("(\"'").rstrip(".,;:)\"'")
+        tok = tok.strip("(\"'*`").rstrip(".,;:)\"'*`")
         if NUM_TOKEN.fullmatch(tok):
             last = to_decimal(tok)
     return last
