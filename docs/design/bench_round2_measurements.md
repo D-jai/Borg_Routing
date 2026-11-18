@@ -175,6 +175,27 @@ Verdict on the second: **a plan that named no source, not a hand-over defect.** 
 - The 035 exchange cost 0.0144 per run and gained nothing in either run; in r2 it removed a correct field.
 - Aside: r1's compose prose gives category counts (billing 58, technical 55, account_access 48, shipping 28, feedback 10) that do not match the stored results (45, 42, 45, 39, 28). C4 does not check prose (a stated limit); the graded rows came from the placed marker.
 
+### 7. Worker confidence on the wrong labels (planner ruling 35f, read-only)
+
+Both A runs together: 398 items with a result (each run's one failed item excluded), 374 right and 24 wrong, all 24 with key `feedback`. Confidence is the worker's own `confidence` in its item output (gpt-5.4-nano, light tier). The 24 wrong confidences: 0.55 ×3, 0.70 ×3, 0.74, 0.76, 0.78 ×3, 0.80 ×6, 0.82 ×5, 0.84, 0.90.
+
+| Threshold | Items below | Wrong among them (of 24) | Right among them (of 374) |
+|---|---|---|---|
+| < 0.50 | 5 | 0 | 5 |
+| < 0.60 | 12 | 3 | 9 |
+| < 0.70 | 22 | 3 | 19 |
+| < 0.75 | 43 | 7 | 36 |
+| < 0.80 | 59 | 11 | 48 |
+| < 0.85 | 104 | 23 | 81 |
+| < 0.90 | 205 | 23 | 182 |
+| < 0.95 | 367 | 24 | 343 |
+
+At < 0.85, 23 of the 24 wrong labels fall below, with 104 of 398 items (26%) below. Whether a stronger model would get them right is untested. The planner ordered no change (ruling 35f reading): the confidence speaks only for the bucket, and job A also needs urgency, so the A re-runs come first.
+
+### 8. The failed item inside a pack (planner ruling 35g)
+
+Ruling 23 held. In both runs one pack of 20 came back with 19 accepted, 1 missing and 1 unknown_id: the model wrote one item under a wrong id. `pack_outcome` shows `alone: 1`, and two requests name the item (the pack and a solo call). The solo reply left out `confidence` and failed BRT-ANS-005. No defect.
+
 ### Open (trial 32g)
 
 - Why the first compose reply of job C is never stored.
