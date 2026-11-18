@@ -59,11 +59,13 @@ GOLDEN_A = "\n".join([INTRO, ROWS_BULLET,
     "Items with no result (a step failed them and no other step gave them a value): 0. Never "
     "give them a value: say they have no result.",
     "Asked for but not produced (the plan asked a step for these fields and the step does not "
-    "return them):",
-    "- classify_emails (skill classify_into_buckets): file, category, urgency",
-    "Do not supply values for these fields yourself. You may show the item or a field the step "
-    "did return under one of these names in a rows marker (for example category=bucket); "
-    "otherwise leave the field out and tell the reader it was not produced."])
+    "return them under these names):",
+    "- classify_emails (skill classify_into_buckets): file, category, urgency. The step's own "
+    "fields: item (file name), bucket, confidence, defer_reason",
+    "For each of these names, choose from the step's own fields by name alone: where one of "
+    "them holds what the name asks for, place it under that name with a rows marker, for "
+    "example @@ROWS:classify_emails | file=<field>, ...@@. Where none does, leave the name out "
+    "and tell the reader it was not produced. Do not supply values for these fields yourself."])
 GOLDEN_B = "\n".join([INTRO, OUTPUT_BULLET, "Steps with a long output:",
                       "- n1: 10,435 characters (field files)"])
 _Q = ("tamarack_pilot_end_date, kessler_falls_loading_bays, group_compliance_contact, "

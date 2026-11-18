@@ -22,6 +22,7 @@ The real engine, executor and router run against the scripted stand-in model
 server and temp databases. Nothing here needs a key or the network.
 """
 import json
+import sqlite3
 from dataclasses import dataclass
 from typing import Optional
 
@@ -645,84 +646,95 @@ def _job_a_step(**args):
             "output_schema": {"file": "string", "category": "string", "urgency": "integer"}}
 
 
+def _ran_first_time(db_path, stub, run_id, step, fields):
+    """Ruling 35a: the step ran on its first hit (no BRT-ORC-035 refusal, no
+    plan-validation re_plan) and each name it does not return is listed."""
+    with sqlite3.connect(db_path) as conn:
+        rows = conn.execute("SELECT decision_json FROM logs WHERE event_type='error'").fetchall()
+    assert not [r for r in rows if r[0] and "BRT-ORC-035" in r[0]]
+    for r in stub.of_kind("re_plan"):
+        assert "BRT-ORC-035" not in r.system + r.user
+    assert [(e["step"], e["field"]) for e in engine.asked_but_not_produced(run_id)] == [
+        (step, f) for f in fields]
+
+
 @pytest.mark.asyncio
 async def test_r4_job_a_node_asks_for_skill_keys_and_urgency_only(env):
-    """TC-SKL-038 (superseded by ruling 32c): the job A node names file,
-    category and urgency; the skill returns none of file and category, so the
-    plan is refused with BRT-ORC-035 before any call, and re_plan is shown the
-    skill's fields and the hint. (R4's old reading, that a skill node's
-    output_schema describes the final answer's rows, is withdrawn.)"""
+    """TC-SKL-038 (restored by ruling 35a): the job A node runs as written,
+    first time. The recorded worker outputs (bucket, confidence,
+    defer_reason, plus urgency) resolve without file or category, which are
+    listed as asked for but not produced. An item missing defer_reason
+    resolves too: since ruling 32b a field whose hint holds "(only if" may be
+    absent (it failed 11 of 200 in job A before that)."""
     db_path, mp = env
+
+    def answer(req):
+        out = {"bucket": "good", "confidence": 1.0, "urgency": 3}
+        if "Toaster" not in req.system:
+            out["defer_reason"] = ""
+        return out
+
     stub = StubModels(plan_nodes=[_job_a_step(extra_fields={
         "urgency": "integer from 1 (lowest) to 5 (highest)"})],
-        answer_for=lambda r: {"bucket": "good", "confidence": 1.0, "urgency": 3,
-                              "defer_reason": ""}).install(mp)
-    await run_pipeline("Classify each review.", db_path=db_path)
+        answer_for=answer).install(mp)
+    result = await run_pipeline("Classify each review.", db_path=db_path)
     await drain_log_writes()
-    assert not stub.of_kind("answerer"), "the refused step made a model call"
-    replan = stub.of_kind("re_plan")[0]
-    body = replan.system + replan.user
-    assert "BRT-ORC-035" in body
-    assert "for other fields use apply_to_each with your own output_schema" in body
-    assert "to rename fields, do it when composing" in body
-
-
-HINTS = ("for other fields use apply_to_each with your own output_schema",
-         "to rename fields, do it when composing")
-
-
-async def _refused_then_repeated(env, node, field):
-    """Run ``node`` (refused with BRT-ORC-035, no model call, re_plan sees both
-    hints), then the same plan repeated: the step runs and the field is listed
-    as asked for but not produced."""
-    db_path, mp = env
-    stub = StubModels(plan_nodes=[node], answer_for=lambda r: {
-        "bucket": "good", "confidence": 0.9, "defer_reason": "",
-        "result_or_defer": "defer"}).install(mp)
-    await run_pipeline("Classify each review.", db_path=db_path)
-    await drain_log_writes()
-    assert not stub.of_kind("answerer"), "the refused step made a model call"
-    body = stub.of_kind("re_plan")[0].system + stub.of_kind("re_plan")[0].user
-    assert "BRT-ORC-035" in body and all(h in body for h in HINTS)
-
-    again = {"action": "continue", "rationale": "same again",
-             "next_nodes": [dict(node, id=node["id"] + "_2")]}
-    db2 = db_path + "_2.db"
-    await create_all(db2)
-    stub = StubModels(plan_nodes=[node], replan_for=lambda r: again, answer_for=lambda r: {
-        "bucket": "good", "confidence": 0.9, "defer_reason": "",
-        "result_or_defer": "defer"}).install(mp)
-    result = await run_pipeline("Classify each review.", db_path=db2)
-    await drain_log_writes()
-    assert stub.of_kind("answerer"), "the repeated plan's step did not run"
-    assert field in [e["field"] for e in engine.asked_but_not_produced(result["run_id"])]
+    assert result["status"] == "completed", result.get("error")
+    assert stub.of_kind("answerer"), "the step did not run"
+    for req in stub.of_kind("answerer"):
+        line = req.system.split("Also return these fields:")[-1].split("\n")[0]
+        assert line == " urgency (integer from 1 (lowest) to 5 (highest))."
+        assert '"file"' not in req.system and '"category"' not in req.system
+    compose = stub.of_kind("compose")[-1].system
+    assert '"success_count": 3' in compose
+    _ran_first_time(db_path, stub, result["run_id"], "classify_emails", ("file", "category"))
 
 
 @pytest.mark.asyncio
 async def test_r4_node_json_schema_array_adds_nothing(env):
-    """TC-SKL-039 (superseded by ruling 32c): a JSON-Schema array output_schema
-    on a skill node names its real fields (file, risk); the skill returns
-    neither, so the plan is refused with BRT-ORC-035 before any call, and a
-    repeat of the plan runs the step and lists the field as not produced."""
+    """TC-SKL-039 (failure direction; restored by ruling 35a): a JSON-Schema
+    array output_schema on the node and no extra_fields: nothing is added,
+    the skill's keys resolve, the step runs first time, and file and risk are
+    listed as asked for but not produced."""
+    db_path, mp = env
     node = _job_a_step()
     node["output_schema"] = {"type": "array", "items": {"type": "object", "properties": {
         "file": {"type": "string"}, "risk": {"type": "string"}}}}
-    await _refused_then_repeated(env, node, "risk")
+    stub = StubModels(plan_nodes=[node], answer_for=lambda r: {
+        "bucket": "good", "confidence": 0.9, "defer_reason": ""}).install(mp)
+    result = await run_pipeline("Classify each review.", db_path=db_path)
+    await drain_log_writes()
+    assert stub.of_kind("answerer"), "the step did not run"
+    for req in stub.of_kind("answerer"):
+        assert "Also return" not in req.system
+        assert '"risk"' not in req.system and '"file"' not in req.system
+    assert '"success_count": 3' in stub.of_kind("compose")[-1].system
+    _ran_first_time(db_path, stub, result["run_id"], "classify_emails", ("file", "risk"))
 
 
 @pytest.mark.asyncio
 async def test_r4_defer_and_collect_with_a_node_schema_still_defers(env):
-    """TC-SKL-040 (superseded by ruling 32c): defer_and_collect's node
-    output_schema {label, category} names category, which the skill does not
-    return (label comes from its output_schema arg), so the plan is refused
-    with BRT-ORC-035 before any call; a repeat runs the step and lists
-    category as not produced."""
+    """TC-SKL-040 (restored by ruling 35a): defer_and_collect's node
+    output_schema {label, category} is not required of each item, so a
+    'defer' answer passes the check; the step runs first time and category
+    is listed as asked for but not produced."""
+    db_path, mp = env
     node = {"type": "apply_to_each", "id": "first_pass", "skill_id": "defer_and_collect",
             "skill_version": 1, "task_type": "extraction", "tier": "light",
             "skill_args": {"items_ref": REVIEWS, "instruction": "Label the review.",
                            "output_schema": {"label": "string"}, "confidence_threshold": 0.7},
             "output_schema": {"label": "string", "category": "string"}}
-    await _refused_then_repeated(env, node, "category")
+    stub = StubModels(plan_nodes=[node], answer_for=lambda r: {
+        "result_or_defer": "defer", "confidence": 0.2, "defer_reason": "unclear"}).install(mp)
+    result = await run_pipeline("Label each review.", db_path=db_path)
+    await drain_log_writes()
+    assert result["status"] == "completed", result.get("error")
+    assert stub.of_kind("answerer"), "the step did not run"
+    for req in stub.of_kind("answerer"):
+        assert "Also return" not in req.system
+    compose = stub.of_kind("compose")[-1].system
+    assert '"success_count": 3' in compose and "BRT-ENV-011" not in compose
+    _ran_first_time(db_path, stub, result["run_id"], "first_pass", ("category",))
 
 
 @pytest.mark.asyncio

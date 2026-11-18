@@ -1,30 +1,33 @@
-"""Plan validation: errors found in a plan before any step of it has run.
+"""Plan validation: issues found in a plan before any step of it has run.
 
-Planner ruling 32c (and the lane class rule): a plan-validation message is
-built from the plan and the skill list only, so it may go to re_plan in every
-lane. This module therefore takes only the plan's nodes and a static skill
-registry. It imports nothing from the lane, the envelope store, the database
-or the engine, and it is never given step results, rows, run state or
-document content; tests pin the imports.
+The lane class rule (readings under planner ruling 32 (2)): a plan-validation
+message is built from the plan and the skill list only, so it may go to
+re_plan in every lane. This module therefore takes only the plan's nodes and
+a static skill registry. It imports nothing from the lane, the envelope
+store, the database or the engine, and it is never given step results, rows,
+run state or document content; tests pin the imports.
 
 Checks are plain functions in ``_CHECKS``; each takes ``(node, skills)`` and
 returns a ``PlanIssue`` or None. A node whose type is unknown gets that one
 issue and no other check.
 
-Error codes:
-- BRT-ORC-035: a skill step's output_schema names a field the skill does not
-               return
+Codes (planner ruling 35 reversed ruling 32c: only an unknown type refuses):
+- BRT-ORC-035: a skill step's output_schema names fields the skill does not
+               return. Not a refusal: the step runs as written and each name
+               goes on the run's "asked for but not produced" list (35a).
 - BRT-ORC-036: a plan node key, or a skill_args key, that nothing accepts for
-               that node type (or skill), or a node type that is not one of
-               the four (planner ruling 32d(ii)-(iv))
+               that node type (or skill): not a refusal, the key is left out
+               and the step runs (35b). A node type that is not one of the
+               four (ruling 32d(iv)) IS a plan error: its message names the
+               value first and never cuts it, and ``PlanIssue.node`` carries
+               the node as written for the re_plan request.
 """
+import json
 from typing import Any, NamedTuple, Optional, Protocol
 
 NAME_MAX = 40        # a name taken from the plan is cut at this many characters
-MESSAGE_MAX = 200    # what re_plan is shown of a failure
-
-HINT_OTHER_FIELDS = "for other fields use apply_to_each with your own output_schema"
-HINT_RENAME = "to rename fields, do it when composing"
+MESSAGE_MAX = 200    # the most of a message the types list may fill (never the type value)
+NODE_SHOWN_MAX = 600  # the node an unknown type was written on, as re_plan is shown it
 
 
 class SkillRegistry(Protocol):
@@ -44,33 +47,16 @@ class SkillRegistry(Protocol):
 class PlanIssue(NamedTuple):
     node_id: str
     code: str
-    message: str            # at most MESSAGE_MAX characters
+    message: str            # a plan note's text; for an unknown type, what re_plan is shown
     skill_id: str = ""
     fields: tuple = ()      # the names the plan asked for that cannot be produced
     where: str = ""         # BRT-ORC-036: "node", "skill_args" or "type"
+    node: str = ""          # unknown type only: the node as JSON, cut at NODE_SHOWN_MAX
 
 
 def _cut(text: object, limit: int) -> str:
     text = str(text)
     return text if len(text) <= limit else text[: limit - 3] + "..."
-
-
-def skill_schema_message(skill_id: str, returned: list) -> str:
-    """BRT-ORC-035 text, three things in order: the skill's field names
-    (``item`` and ``error`` always last), the other-fields hint, the rename
-    hint. At most 200 characters; the field list is trimmed, never the hints.
-    The names the plan asked for travel on the ``PlanIssue``, not in the text."""
-    own = [str(n) for n in returned if n not in ("item", "error")]
-    tail = f"; {HINT_OTHER_FIELDS}; {HINT_RENAME}"
-    always = ", item, error"
-    fixed = len("BRT-ORC-035: '' returns: ") + len(tail) + len(always)
-    sid = _cut(skill_id, NAME_MAX)
-    # The skill's name gives way before the field list does: it needs 16 characters.
-    sid = _cut(sid, max(8, len(sid) - max(0, 16 - (MESSAGE_MAX - fixed - len(sid)))))
-    room = MESSAGE_MAX - fixed - len(sid)
-    have = _cut(", ".join(own), max(8, room)) if own else ""
-    fields = (have + always) if have else always[2:]
-    return f"BRT-ORC-035: '{sid}' returns: {fields}{tail}"
 
 
 def _check_skill_output_schema(node: dict, skills: SkillRegistry) -> Optional[PlanIssue]:
@@ -90,9 +76,13 @@ def _check_skill_output_schema(node: dict, skills: SkillRegistry) -> Optional[Pl
     unknown = [str(n) for n in names if n and str(n) not in returned]
     if not unknown:
         return None
+    # Ruling 35a: a note, never sent to re_plan (names cannot tell a rename
+    # from a new field, so the step runs as written).
+    asked = _cut(", ".join(_cut(n, NAME_MAX) for n in unknown), 90)
     return PlanIssue(
         node_id=str(node.get("id", "")), code="BRT-ORC-035",
-        message=skill_schema_message(str(skill_id), returned),
+        message=f"BRT-ORC-035: '{_cut(skill_id, NAME_MAX)}' does not return {asked}; "
+                "the step ran as written",
         skill_id=str(skill_id), fields=tuple(unknown),
     )
 
@@ -185,9 +175,10 @@ def _names(names: list, room: int) -> str:
 
 
 def _unknown_message(subject: str, unknown: list, label: str, accepted: list) -> str:
-    """BRT-ORC-036 text in the BRT-SOP-006 pattern: what does not take which
-    names, then the accepted names; each plan-taken name cut at 40, the whole
-    at 200 (the accepted list gives way first)."""
+    """BRT-ORC-036 plan-note text for a key nothing takes (BRT-SOP-006
+    pattern): what does not take which names, then the accepted names; each
+    plan-taken name cut at 40, the whole at 200 (the accepted list gives way
+    first). Ruling 35b: recorded, not sent to re_plan."""
     asked = _cut(", ".join(_cut(n, NAME_MAX) for n in unknown), 90)
     head = f"BRT-ORC-036: {subject} does not take {asked}. {label}: "
     return head + _names(list(accepted), MESSAGE_MAX - len(head))
@@ -199,16 +190,30 @@ def _type(node: dict) -> object:
     return "answerer" if value is None else value
 
 
+def type_message(node_type: object) -> str:
+    """BRT-ORC-036 text for an unknown type (ruling 35b): the offending value
+    first and whole, never cut; then the four types, cut by whole names to
+    keep the message within MESSAGE_MAX where the value leaves room."""
+    head = f"BRT-ORC-036: step type '{node_type}' is not a node type. Types: "
+    return head + _names(list(NODE_TYPES), MESSAGE_MAX - len(head))
+
+
+def node_text(node: dict) -> str:
+    """The node as the plan wrote it, as JSON, cut at NODE_SHOWN_MAX (ruling
+    35b: the re_plan request shows the planner the node it wrote). Built from
+    the plan only."""
+    text = json.dumps(node, ensure_ascii=False, default=str)
+    return _cut(text, NODE_SHOWN_MAX)
+
+
 def _check_type(node: dict, skills: SkillRegistry) -> Optional[PlanIssue]:
     node_type = _type(node)
     if node_type in NODE_TYPES:
         return None
-    shown = _cut(node_type, NAME_MAX)
     return PlanIssue(
         node_id=str(node.get("id", "")), code="BRT-ORC-036",
-        message=(f"BRT-ORC-036: step type '{shown}' is not a node type. "
-                 f"Types: {', '.join(NODE_TYPES)}"),
-        fields=("type",), where="type",
+        message=type_message(node_type),
+        fields=("type",), where="type", node=node_text(node),
     )
 
 

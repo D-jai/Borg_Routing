@@ -1,31 +1,31 @@
-"""Planner ruling 32c: a skill step whose output_schema names a field the
-skill does not return is a plan error (BRT-ORC-035), sent to re_plan.
+"""BRT-ORC-035 (planner ruling 32c, reversed by ruling 35a): a skill step whose
+output_schema names fields the skill does not return RUNS as written, first
+time, with no re_plan. Each such name goes on the run's "asked for but not
+produced" list, with a plan note (``ran_without_fields``) and a receipt line.
 
-Bench round 2 job A wrote ``classify_into_buckets`` with an output_schema of
-{file, category, urgency}; the engine ignored it and no urgency ever existed.
-The engine does not rewrite the step: the planner chooses a different one.
+Why reversed: names cannot tell a rename from a new field. In trial 32g the
+first plan already asked for urgency through ``extra_fields``; 035 refused it
+for ``file`` and ``category`` (renames of ``item`` and ``bucket``), and the
+re_plan dropped the correct field (docs/design/bench_round2_measurements.md,
+"Trial 32g").
 """
 import ast
 import json
-import re
 import sqlite3
 from pathlib import Path
 
 import pytest
 
 from src.db.schema import create_all
-from src.orchestrator import engine
+from src.orchestrator import engine, plan_validation
 from src.orchestrator.plan_validation import validate_plan
 from src.pipeline.runner import run_pipeline
 from src.skills.library import SkillLibrary
 from tests.e2e.test_privacy_lane import (  # noqa: F401  (lane is a fixture)
-    CANARIES, PLAN_RAW, _run as _lane_run, lane,
+    CANARIES, _run as _lane_run, lane,
 )
 from tests.e2e.stub_model_server import StubModels, drain_log_writes, three_tier_matrix
 
-HINT = "for other fields use apply_to_each with your own output_schema"
-HINT2 = "to rename fields, do it when composing"
-ENDING = f"; {HINT}; {HINT2}"
 ARGS = {"buckets": ["billing", "bug"], "items_ref": None}
 LIB = SkillLibrary()
 LIB.load("data/skills.yaml")
@@ -51,36 +51,25 @@ def _issues(node):
     return validate_plan([node], LIB)
 
 
-def _msg(node):
-    issues = _issues(node)
-    return issues[0].message if issues else None
+# --- which names are listed (unchanged by ruling 35a) ------------------------------
+
+def test_job_a_shape_lists_the_three_names():
+    issues = _issues(_node(JOB_A))
+    assert len(issues) == 1 and issues[0].code == "BRT-ORC-035"
+    assert issues[0].fields == ("file", "category", "urgency")
+    assert issues[0].skill_id == "classify_into_buckets" and issues[0].node_id == "n1"
 
 
-def test_job_a_shape_is_a_plan_error_with_the_three_part_message():
-    msg = _msg(_node(JOB_A))
-    assert msg is not None and msg.startswith("BRT-ORC-035")
-    assert len(msg) <= 200
-    assert msg.endswith(ENDING), msg
-    head = msg[: -len(ENDING)]
-    for word in ("bucket", "confidence", "defer_reason", "item", "error"):
-        assert word in head, (word, msg)
-    assert _issues(_node(JOB_A))[0].fields == ("file", "category", "urgency")
-
-
-def test_message_names_extra_fields_and_stays_within_200():
-    msg = _msg(_node(JOB_A, extra_fields=["topic", "reason"]))
-    assert len(msg) <= 200 and msg.endswith(ENDING)
-    assert "bucket" in msg and "item, error" in msg
-    # extra fields are returned fields: they are not reported as missing
+def test_extra_fields_are_produced_and_not_listed():
     assert _issues(_node(JOB_A, extra_fields=["urgency"]))[0].fields == ("file", "category")
+    assert _issues(_node({"bucket": "string", "urgency": "string"}, extra_fields=["urgency"])) == []
 
 
-def test_long_names_trim_the_lists_never_the_hints_and_item_error_stay():
-    schema = {f"field_number_{i}_with_a_very_long_name_to_overflow_the_cut": "s" for i in range(12)}
-    msg = _msg(_node(schema, extra_fields=[f"extra_{i}_and_more_text" for i in range(12)]))
-    assert len(msg) <= 200 and msg.endswith(ENDING)
-    assert "item, error" in msg
-    assert "field_number_0_with_a_very_long_name_to_overflow_the_cut" not in msg  # cut at 40 chars
+def test_the_re_plan_message_and_its_builder_are_gone():
+    """Ruling 35a: 035 sends nothing to re_plan, so its 200-character builder
+    and both hints are removed."""
+    for name in ("skill_schema_message", "HINT_RENAME", "HINT_OTHER_FIELDS"):
+        assert not hasattr(plan_validation, name), name
 
 
 def test_no_output_schema_passes_unchanged():
@@ -103,10 +92,6 @@ def test_json_schema_object_and_array_forms_are_read_by_real_field_names():
     assert _issues(_node(ok)) == []
     assert _issues(_node(bad))[0].fields == ("urgency",)
     assert _issues(_node(arr))[0].fields == ("file",)
-
-
-def test_extra_fields_cover_the_named_field():
-    assert _issues(_node({"bucket": "string", "urgency": "string"}, extra_fields=["urgency"])) == []
 
 
 def test_plain_apply_to_each_with_its_own_schema_is_unchanged():
@@ -193,18 +178,6 @@ async def env(tmp_path, monkeypatch):
     return db_path, monkeypatch
 
 
-def _failure(stub, node_id="n1"):
-    replans = stub.of_kind("re_plan")
-    assert replans, "re_plan was not called"
-    body = replans[0].system + "\n" + replans[0].user
-    at = body.index(f'"{node_id}": {{')
-    code = re.search(r'"failure": \{[^{}]*?"code": "(BRT-[A-Z]+-\d+)"', body[at:])
-    assert code, body[-600:]
-    msg = re.search(r'"message": ("(?:[^"\\]|\\.)*")', body[at + code.start():])
-    assert msg, body[-600:]
-    return code.group(1), json.loads(msg.group(1))
-
-
 def _events(db_path, event_type):
     with sqlite3.connect(db_path) as conn:
         rows = conn.execute("SELECT decision_json FROM logs WHERE event_type=?", (event_type,)).fetchall()
@@ -226,158 +199,143 @@ def _replies(*batches):
     return reply
 
 
-@pytest.mark.asyncio
-async def test_first_hit_fails_the_step_before_any_call_and_re_plan_gets_the_message(env):
-    db_path, mp = env
-    stub = StubModels(plan_nodes=[_node(JOB_A)]).install(mp)
-    await run_pipeline("Sort these.", db_path=db_path)
-    await drain_log_writes()
-    code, message = _failure(stub)
-    assert code == "BRT-ORC-035"
-    assert message.endswith(ENDING) and len(message) <= 200
-    assert not stub.of_kind("answerer"), "the step made a model call"
+def _no_035_refusal(db_path, stub):
+    assert not [d for d in _events(db_path, "error") if d.get("code") == "BRT-ORC-035"]
+    for r in stub.of_kind("re_plan"):
+        assert "BRT-ORC-035" not in r.system + r.user
 
 
 @pytest.mark.asyncio
-async def test_second_hit_runs_the_step_and_records_it_three_ways(env):
+async def test_first_hit_runs_the_step_and_records_it_three_ways(env):
     db_path, mp = env
-    stub = StubModels(plan_nodes=[_node(JOB_A)], replan_for=_replies(_node(JOB_A, id="n2")),
-                      answer_for=_answer).install(mp)
+    stub = StubModels(plan_nodes=[_node(JOB_A)], answer_for=_answer).install(mp)
     result = await run_pipeline("Sort these.", db_path=db_path)
     await drain_log_writes()
-    assert len(stub.of_kind("re_plan")) == 2   # the refusal, then the ordinary one after the wave
-    assert stub.of_kind("answerer"), "the second-hit step did not run"
+    assert result["status"] == "completed", result.get("error")
+    assert len(stub.of_kind("answerer")) == 2, "the step did not run on its first hit"
+    # Only the ordinary re_plan after the wave; no plan-validation re_plan.
+    assert len(stub.of_kind("re_plan")) == 1
+    _no_035_refusal(db_path, stub)
     # 1. the plan note
     notes = [d for d in _events(db_path, "orchestrator_decision") if d.get("code") == "BRT-ORC-035"]
     assert len(notes) == 1
     note = notes[0]
-    assert note["node_id"] == "n2" and note["skill_id"] == "classify_into_buckets"
+    assert note["node_id"] == "n1" and note["skill_id"] == "classify_into_buckets"
     assert note["fields"] == ["file", "category", "urgency"] and note["action"] == "ran_without_fields"
-    # 3. the run-level list
+    # 3. the run-level list (2, the receipt line, is read from the note: test_workspace_js)
     assert engine.asked_but_not_produced(result["run_id"]) == [
-        {"step": "n2", "skill": "classify_into_buckets", "field": f} for f in ("file", "category", "urgency")]
+        {"step": "n1", "skill": "classify_into_buckets", "field": f} for f in ("file", "category", "urgency")]
 
 
 @pytest.mark.asyncio
-async def test_two_bad_steps_in_the_first_plan_still_get_one_re_plan(env):
+async def test_two_listed_steps_in_the_first_plan_both_run(env):
     db_path, mp = env
-    stub = StubModels(plan_nodes=[_node(JOB_A), _node(JOB_A, id="n2")]).install(mp)
-    await run_pipeline("Sort these.", db_path=db_path)
-    await drain_log_writes()
-    assert len(stub.of_kind("re_plan")) == 1
-    assert _failure(stub, "n1")[0] == "BRT-ORC-035" and _failure(stub, "n2")[0] == "BRT-ORC-035"
-    assert not stub.of_kind("answerer")
-
-
-@pytest.mark.asyncio
-async def test_a_planner_that_fixes_the_plan_runs_normally(env):
-    db_path, mp = env
-    calls: list = []
-    fixed = {"action": "continue", "rationale": "fixed",
-             "next_nodes": [_node({"bucket": "string"}, id="n2")]}
-    stub = StubModels(
-        plan_nodes=[_node(JOB_A)],
-        replan_for=lambda req: fixed if not calls.append(1) and len(calls) == 1 else
-        {"action": "compose", "rationale": "done"},
-        answer_for=_answer).install(mp)
+    stub = StubModels(plan_nodes=[_node(JOB_A), _node(JOB_A, id="n2")], answer_for=_answer).install(mp)
     result = await run_pipeline("Sort these.", db_path=db_path)
     await drain_log_writes()
-    assert stub.of_kind("answerer"), "the fixed step did not run"
-    assert len(stub.of_kind("re_plan")) == 2
-    assert engine.asked_but_not_produced(result["run_id"]) == []
+    assert len(stub.of_kind("answerer")) == 4
+    _no_035_refusal(db_path, stub)
+    assert {e["step"] for e in engine.asked_but_not_produced(result["run_id"])} == {"n1", "n2"}
 
 
 @pytest.mark.asyncio
-async def test_a_valid_skill_step_still_runs(env):
+async def test_a_valid_skill_step_still_runs_and_lists_nothing(env):
     db_path, mp = env
     stub = StubModels(plan_nodes=[_node({"bucket": "string"})], answer_for=_answer).install(mp)
     result = await run_pipeline("Sort these.", db_path=db_path)
     await drain_log_writes()
     assert result["status"] == "completed", result.get("error")
     assert stub.of_kind("answerer")
-
-
-# --- lane: plan validation reaches re_plan with its message, a running step does not ---
-
-def _raw_skill_plan():
-    return [{"type": "apply_to_each", "id": "n1", "skill_id": "classify_into_buckets",
-             "skill_version": 1, "task_type": "extraction", "tier": "light",
-             "skill_args": {"buckets": ["high", "low"], "items_ref": "documents"},
-             "output_schema": JOB_A}]
-
-
-@pytest.mark.parametrize("mode", ["raw_local", "all_local"])
-async def test_lane_plan_refusal_gives_re_plan_the_message_and_no_document_text(lane, mode):
-    from tests.e2e.stub_model_server import lane_matrix
-    stub, result = await _lane_run(lane, mode, lane_matrix(), plan=_raw_skill_plan())
-    replan = stub.of_kind("re_plan")[0]
-    body = replan.system + "\n" + replan.user
-    assert "BRT-ORC-035" in body and ENDING in body
-    assert "item, error" in body
-    text = json.dumps(replan.body)
-    for canary in CANARIES:
-        assert canary not in text
-    assert "relationship desk" not in text and "warehouse contract" not in text
-    assert stub.of_kind("answerer") == []
-
-
-async def test_lane_a_step_that_fails_while_running_still_gives_code_and_ids_only(lane):
-    from tests.e2e.stub_model_server import three_tier_matrix as no_local
-    stub, result = await _lane_run(lane, "raw_local", no_local())
-    body = stub.of_kind("re_plan")[0].system
-    assert "BRT-LANE-002" in body and "BRT-ORC-035" not in body
-    for canary in CANARIES:
-        assert canary not in body
-
-
-# --- after a second hit only plan-validation re_plans stop (ruling 32c/32d) ---------
-
-def _answerer(id_):
-    return {"type": "answerer", "id": id_, "instruction": "Say hi.", "tier": "light"}
+    assert engine.asked_but_not_produced(result["run_id"]) == []
 
 
 @pytest.mark.asyncio
-async def test_after_a_second_035_hit_an_ordinary_re_plan_still_happens_and_runs(env):
-    db_path, mp = env
-    stub = StubModels(plan_nodes=[_node(JOB_A)],
-                      replan_for=_replies(_node(JOB_A, id="n2"), _answerer("n3")),
-                      answer_for=lambda r: _answer(r) if "bucket" in r.system else {"result": "hi"}
-                      ).install(mp)
-    await run_pipeline("Sort these.", db_path=db_path)
-    await drain_log_writes()
-    assert len(stub.of_kind("re_plan")) == 3, "the ordinary re_plan after the second hit did not happen"
-    assert any("Say hi." in r.system for r in stub.of_kind("answerer")), "the new step did not run"
-
-
-@pytest.mark.asyncio
-async def test_a_third_035_fault_in_a_later_batch_runs_and_is_not_sent_back(env):
+async def test_a_listed_step_in_a_later_batch_runs_too_and_ordinary_re_plans_go_on(env):
     db_path, mp = env
     stub = StubModels(plan_nodes=[_node(JOB_A)],
                       replan_for=_replies(_node(JOB_A, id="n2"), _node(JOB_A, id="n3")),
                       answer_for=_answer).install(mp)
     result = await run_pipeline("Sort these.", db_path=db_path)
     await drain_log_writes()
-    assert len(stub.of_kind("re_plan")) == 3
-    assert len(stub.of_kind("answerer")) == 4   # n2 and n3 (2 items each) ran
-    steps = {e["step"] for e in engine.asked_but_not_produced(result["run_id"])}
-    assert steps == {"n2", "n3"}
-    # n3 was never refused: no BRT-ORC-035 error event names it, and its note says it ran.
-    refused = {d.get("node_id") for d in _events(db_path, "error") if d.get("code") == "BRT-ORC-035"}
-    assert refused == {"n1"}
+    assert len(stub.of_kind("re_plan")) == 3          # one after each wave
+    assert len(stub.of_kind("answerer")) == 6         # n1, n2 and n3, 2 items each
+    assert {e["step"] for e in engine.asked_but_not_produced(result["run_id"])} == {"n1", "n2", "n3"}
     ran = {d.get("node_id") for d in _events(db_path, "orchestrator_decision")
            if d.get("code") == "BRT-ORC-035" and d.get("action") == "ran_without_fields"}
-    assert ran == {"n2", "n3"}
+    assert ran == {"n1", "n2", "n3"}
+    _no_035_refusal(db_path, stub)
 
 
 @pytest.mark.asyncio
-async def test_a_third_036_fault_in_a_later_batch_runs_without_the_key(env):
+async def test_a_036_key_on_the_first_hit_runs_without_the_key(env):
     db_path, mp = env
     bad = {"colour": "blue"}
-    stub = StubModels(plan_nodes=[_node(**bad)],
-                      replan_for=_replies(_node(id="n2", **bad), _node(id="n3", **bad)),
-                      answer_for=_answer).install(mp)
+    stub = StubModels(plan_nodes=[_node(**bad)], answer_for=_answer).install(mp)
     result = await run_pipeline("Sort these.", db_path=db_path)
     await drain_log_writes()
-    assert len(stub.of_kind("re_plan")) == 3
-    assert len(stub.of_kind("answerer")) == 4
-    assert {e["step"] for e in engine.asked_but_not_produced(result["run_id"])} == {"n2", "n3"}
+    assert len(stub.of_kind("re_plan")) == 1
+    assert len(stub.of_kind("answerer")) == 2
+    assert engine.asked_but_not_produced(result["run_id"]) == [
+        {"step": "n1", "skill": "", "field": "colour"}]
+
+
+# --- the trial's round-2-data plan (ruling 35a) -------------------------------------
+
+TRIAL_R2_PLAN = [{
+    # Recorded: bench/results/trial32g_r2data/dbs/A_borg_cloud_1.db, the first plan.
+    "type": "apply_to_each", "id": "classify_emails", "skill_id": "classify_into_buckets",
+    "skill_version": 1,
+    "skill_args": {"buckets": ["billing", "technical", "account_access", "shipping", "feedback"],
+                   "items_ref": "documents",
+                   "extra_fields": {"urgency": "integer from 1 (lowest) to 5 (highest)"}},
+    "output_schema": {"file": "string", "category": "string", "urgency": "integer"},
+    "concurrency_limit": 30, "tier": "light",
+    "recommended_model": "openrouter/google/gemini-3.1-flash-lite-preview",
+}]
+
+# Ruling 35d: the asked-for section of compose's block for this plan, pinned.
+TRIAL_A_ASKED = "\n".join([
+    "Asked for but not produced (the plan asked a step for these fields and the step does not "
+    "return them under these names):",
+    "- classify_emails (skill classify_into_buckets): file, category. The step's own fields: "
+    "item (file name), bucket, confidence, defer_reason, urgency",
+    "For each of these names, choose from the step's own fields by name alone: where one of "
+    "them holds what the name asks for, place it under that name with a rows marker, for "
+    "example @@ROWS:classify_emails | file=<field>, ...@@. Where none does, leave the name out "
+    "and tell the reader it was not produced. Do not supply values for these fields yourself.",
+])
+
+
+def _trial_answer(req):
+    return {"bucket": "billing", "confidence": 0.9, "defer_reason": "", "urgency": 4}
+
+
+async def test_the_trial_r2_plan_runs_first_time_and_produces_urgency(lane):
+    stub, result = await _lane_run(lane, "by_reference", three_tier_matrix(), plan=TRIAL_R2_PLAN,
+                                   instruction="Classify each email and give its urgency.",
+                                   answer_for=_trial_answer)
+    db_path = lane["db"]
+    assert result["status"] == "completed", result.get("error")
+    # Runs first time: no plan-validation re_plan, no refusal.
+    _no_035_refusal(db_path, stub)
+    items = [r for r in stub.of_kind("answerer") if "EXACTLY ONE" in r.system or "Also return" in r.system]
+    assert items, "the step made no item call"
+    for req in items:
+        # The worker is asked for urgency (extra_fields), never for file or category.
+        assert "Also return these fields: urgency (integer from 1 (lowest) to 5 (highest))." in req.system
+        assert '"urgency": "integer from 1 (lowest) to 5 (highest)"' in req.system
+        assert '"file"' not in req.system and '"category"' not in req.system
+    # urgency is in the results.
+    with sqlite3.connect(db_path) as conn:
+        rows = conn.execute("SELECT inbound_payload FROM envelopes WHERE run_id=? AND type=?",
+                            (str(result["run_id"]), "apply_to_each")).fetchall()
+    outs = [json.loads(r[0])["output"] for r in rows if r[0]]
+    produced = [x["output"] for o in outs for x in o.get("results", [])]
+    assert produced and all(p.get("urgency") == 4 for p in produced)
+    # file and category are on the list; urgency is not.
+    assert engine.asked_but_not_produced(result["run_id"]) == [
+        {"step": "classify_emails", "skill": "classify_into_buckets", "field": f}
+        for f in ("file", "category")]
+    # Ruling 35d: compose is told the step's own fields beside the asked names.
+    compose = stub.of_kind("compose")[0].user
+    assert TRIAL_A_ASKED in compose, compose

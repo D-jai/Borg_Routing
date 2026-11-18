@@ -73,15 +73,32 @@ NO_VALUE_LINE = (
     "Rows with no value (a step returned the item but left the field empty): {counts}. "
     "Leave those fields empty; do not supply a value yourself."
 )
+# Planner ruling 35d. Fitting is decided from names only, and by compose, not
+# by the code: each asked name is listed beside the step's own field names
+# (as the step line shows them, without ``error``) and compose chooses which,
+# if any, holds what the name asks for. The code pairs nothing and guesses
+# nothing. A step with no rows to place gets "not produced".
 ASKED_HEAD = (
     "Asked for but not produced (the plan asked a step for these fields and the step does "
-    "not return them):"
+    "not return them under these names):"
 )
+ASKED_LINE = "- {step} (skill {skill}): {names}. The step's own fields: {own}"
+ASKED_LINE_NO_ROWS = ("- {step} (skill {skill}): {names}. The step has no rows to place, "
+                      "so these were not produced.")
 ASKED_TAIL = (
-    "Do not supply values for these fields yourself. You may show the item or a field the "
-    "step did return under one of these names in a rows marker (for example category=bucket); "
-    "otherwise leave the field out and tell the reader it was not produced."
+    "For each of these names, choose from the step's own fields by name alone: where one of "
+    "them holds what the name asks for, place it under that name with a rows marker, for "
+    "example @@ROWS:{step} | {name}=<field>, ...@@. Where none does, leave the name out and "
+    "tell the reader it was not produced. Do not supply values for these fields yourself."
 )
+ASKED_TAIL_NO_ROWS = ("Do not supply values for these fields yourself: tell the reader they "
+                      "were not produced.")
+
+
+def asked_tail(step: str, name: str) -> str:
+    """The asked section's last line; the example names the first asked step
+    that has rows and its first asked name."""
+    return ASKED_TAIL.format(step=step, name=name)
 ROWS_POINTER = (
     "Mode: compose. Your last reply was cut off at the length limit. Do not type out a "
     "step's rows or long output: put @@ROWS:<step id>@@ or @@OUTPUT:<step id>@@ where they "
@@ -732,9 +749,20 @@ def block(steps: dict, outputs: Optional[dict] = None, no_result: int = 0,
                 grouped[key].append(fld)
         if grouped:
             lines.append(ASKED_HEAD)
+            example = None
             for (step, skill), flds in grouped.items():
-                lines.append(f"- {step} (skill {skill}): {', '.join(flds)}")
-            lines.append(ASKED_TAIL)
+                names = ", ".join(flds)
+                listed = steps.get(step) if steps else None
+                if listed is None:
+                    lines.append(ASKED_LINE_NO_ROWS.format(step=step, skill=skill, names=names))
+                    continue
+                own = [f"item ({listed.item_kind})" if f == "item" and listed.item_kind else str(f)
+                       for f in listed.fields if f != "error"]
+                lines.append(ASKED_LINE.format(step=step, skill=skill, names=names,
+                                               own=", ".join(own)))
+                if example is None:
+                    example = (step, flds[0])
+            lines.append(asked_tail(*example) if example else ASKED_TAIL_NO_ROWS)
         lines.extend(keys)
     return "\n".join(lines)
 

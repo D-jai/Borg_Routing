@@ -174,3 +174,7 @@ class InboundEnvelope(BaseModel):
     # apply_to_each: the item indexes whose failure reason the model itself
     # wrote (ruling 21: shown as BRT-ANS-010). Never serialised.
     _model_reason_indexes: set = PrivateAttr(default_factory=set)
+    # Planner ruling 35b: a step refused for an unknown node type carries the
+    # node as the plan wrote it (JSON, cut; built from the plan only), shown to
+    # re_plan beside the failure, never to compose. Never serialised.
+    _plan_node: Optional[str] = PrivateAttr(default=None)

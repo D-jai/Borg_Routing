@@ -1,9 +1,11 @@
-"""Planner ruling 32d(ii)-(v) and readings under ruling 32 (3): a plan node key,
-a skill_args key or a node type that nothing accepts is a plan error,
-BRT-ORC-036, sent to re_plan once per run (shared with BRT-ORC-035). If the
-plan repeats the fault, an unknown key is dropped and the step runs, recorded
-three ways; an unknown type fails the step. Change 1: an accepted field that
-builds nothing on the node's path is recorded (``accepted_unused``), not refused.
+"""Planner ruling 32d(ii)-(v), readings under ruling 32 (3) and ruling 35b:
+BRT-ORC-036. A plan node key or a skill_args key that nothing accepts is left
+out on the FIRST hit: the step runs without it, recorded three ways, with no
+re_plan. A node type that is not one of the four stays a plan error: one
+re_plan per run (its message names the value first and never cuts it, and the
+re_plan is shown the node it wrote), then the step fails. Change 1: an accepted
+field that builds nothing on the node's path is recorded (``accepted_unused``),
+not refused.
 """
 import json
 import re
@@ -132,11 +134,35 @@ def test_an_unknown_type_is_a_plan_error_not_a_silent_answerer():
     issues = _issues({"type": "widget", "id": "n1", "instruction": "x", "colour": "blue"})
     assert len(issues) == 1
     issue = issues[0]
-    assert issue.code == "BRT-ORC-036" and issue.fields == ("type",)
+    assert issue.code == "BRT-ORC-036" and issue.fields == ("type",) and issue.where == "type"
     msg = issue.message
-    assert len(msg) <= 200 and "widget" in msg
-    for t in ("answerer", "apply_to_each", "state_op", "orchestrate"):
-        assert t in msg
+    assert msg == ("BRT-ORC-036: step type 'widget' is not a node type. "
+                   "Types: answerer, apply_to_each, state_op, orchestrate")
+    # Ruling 35b: the node it wrote travels with the issue, for the re_plan.
+    assert json.loads(issue.node) == {"type": "widget", "id": "n1", "instruction": "x",
+                                      "colour": "blue"}
+
+
+def test_an_unknown_type_value_comes_first_and_is_never_cut():
+    value = "a_made_up_type_" + "v" * 300
+    issue = _issues({"type": value, "id": "n1"})[0]
+    assert issue.message.startswith(f"BRT-ORC-036: step type '{value}' is not a node type.")
+    # the list of valid types gives way instead
+    assert issue.message.endswith("Types: ...")
+
+
+def test_a_long_types_list_is_cut_by_whole_names():
+    value = "w" * 120
+    msg = _issues({"type": value, "id": "n1"})[0].message
+    assert len(msg) <= 200 and f"'{value}'" in msg
+    assert msg.endswith("Types: answerer, ...") or msg.endswith("Types: answerer, apply_to_each, ...")
+
+
+def test_the_node_shown_to_re_plan_is_cut_sensibly():
+    node = {"type": "widget", "id": "n1", "instruction": "i" * 5000}
+    shown = _issues(node)[0].node
+    assert len(shown) <= 600 and shown.startswith('{"type": "widget", "id": "n1"')
+    assert shown.endswith("...")
 
 
 # --- message limits --------------------------------------------------------------
@@ -263,39 +289,51 @@ def _again(node):
     return reply
 
 
+def _no_036_refusal(db_path, stub):
+    assert not [d for d in _events(db_path, "error") if d.get("code") == "BRT-ORC-036"]
+    for r in stub.of_kind("re_plan"):
+        assert "BRT-ORC-036" not in r.system + r.user
+
+
 @pytest.mark.asyncio
-async def test_first_hit_goes_to_re_plan_with_the_message_and_no_call(env):
-    db_path, mp, _ = env
-    stub = StubModels(plan_nodes=[dict(BASE["answerer"], colour="blue")]).install(mp)
-    await run_pipeline("Say hi.", db_path=db_path)
+async def test_first_hit_on_a_node_key_runs_without_it_and_sends_no_re_plan(env):
+    db_path, mp, built = env
+    stub = StubModels(plan_nodes=[dict(BASE["answerer"], colour="blue")],
+                      answer_for=lambda r: {"result": "hi"}).install(mp)
+    result = await run_pipeline("Say hi.", db_path=db_path)
     await drain_log_writes()
-    code, message = _failure(stub)
-    assert code == "BRT-ORC-036" and "colour" in message and len(message) <= 200
-    assert not stub.of_kind("answerer")
+    assert result["status"] == "completed", result.get("error")
+    assert stub.of_kind("answerer"), "the step did not run on its first hit"
+    assert len(stub.of_kind("re_plan")) <= 1           # at most the ordinary one
+    _no_036_refusal(db_path, stub)
+    assert [n for n in built if n.get("id") == "n1"][0].get("colour") is None
+    assert engine.asked_but_not_produced(result["run_id"]) == [
+        {"step": "n1", "skill": "", "field": "colour"}]
 
 
 @pytest.mark.asyncio
-async def test_first_hit_on_a_skill_arg_goes_to_re_plan(env):
-    db_path, mp, _ = env
-    stub = StubModels(plan_nodes=[_skill(instruction="by urgency")]).install(mp)
+async def test_first_hit_on_a_skill_arg_runs_without_it(env):
+    db_path, mp, built = env
+    stub = StubModels(plan_nodes=[_skill(instruction="by urgency")], answer_for=_answer).install(mp)
     await run_pipeline("Sort these.", db_path=db_path)
     await drain_log_writes()
-    code, message = _failure(stub)
-    assert code == "BRT-ORC-036" and "classify_into_buckets" in message
-    assert not stub.of_kind("answerer")
+    assert len(stub.of_kind("answerer")) == 2
+    _no_036_refusal(db_path, stub)
+    ran = [n for n in built if n.get("id") == "n1"]
+    assert ran and "instruction" not in ran[0]["skill_args"]
 
 
 @pytest.mark.asyncio
-async def test_second_hit_runs_without_the_keys_and_records_them_three_ways(env):
+async def test_first_hit_runs_without_the_keys_and_records_them_three_ways(env):
     db_path, mp, built = env
     bad = dict(_skill(instruction="by urgency"), id="n2", colour="blue")
-    stub = StubModels(plan_nodes=[_skill(instruction="by urgency")], replan_for=_again(bad),
-                      answer_for=_answer).install(mp)
+    stub = StubModels(plan_nodes=[bad], answer_for=_answer).install(mp)
     result = await run_pipeline("Sort these.", db_path=db_path)
     await drain_log_writes()
-    # one plan-validation re_plan, then the ordinary one after the step ran
-    assert len(stub.of_kind("re_plan")) == 2
-    assert stub.of_kind("answerer"), "the second-hit step did not run"
+    # no plan-validation re_plan: only the ordinary one after the step ran
+    assert len(stub.of_kind("re_plan")) == 1
+    assert stub.of_kind("answerer"), "the step did not run"
+    _no_036_refusal(db_path, stub)
     ran = [n for n in built if n.get("id") == "n2"]
     assert ran and "colour" not in ran[0] and "instruction" not in ran[0]["skill_args"]
     assert ran[0]["skill_args"]["buckets"] == ["billing", "bug"]
@@ -310,15 +348,36 @@ async def test_second_hit_runs_without_the_keys_and_records_them_three_ways(env)
 
 
 @pytest.mark.asyncio
-async def test_035_and_036_share_one_re_plan(env):
+async def test_035_and_036_keys_never_use_up_the_type_re_plan(env):
+    """Ruling 35b: the once-per-run state concerns unknown types only. A 035
+    field and a 036 key run first; a later unknown type still gets its re_plan."""
     db_path, mp, _ = env
-    first = dict(_skill(), output_schema={"urgency": "string"})
-    stub = StubModels(plan_nodes=[first], replan_for=_again(dict(_skill(instruction="x"), id="n2")),
+    first = dict(_skill(instruction="x"), output_schema={"urgency": "string"})
+    widget = {"type": "widget", "id": "n2", "instruction": "x"}
+    stub = StubModels(plan_nodes=[first], replan_for=_seq(_cont(widget)),
                       answer_for=_answer).install(mp)
     await run_pipeline("Sort these.", db_path=db_path)
     await drain_log_writes()
-    assert len(stub.of_kind("re_plan")) == 2   # the shared refusal, then the ordinary one
-    assert stub.of_kind("answerer"), "the 036 fault after a 035 re_plan is a second hit"
+    assert len(stub.of_kind("answerer")) == 2
+    # re_plan 1: ordinary, after n1 ran. re_plan 2: the refusal of n2's type.
+    assert len(stub.of_kind("re_plan")) == 2
+    assert _failure_at(stub, 1, "n2")[0] == "BRT-ORC-036"
+
+
+@pytest.mark.asyncio
+async def test_first_hit_with_an_unknown_type_re_plans_with_the_node_it_wrote(env):
+    db_path, mp, built = env
+    value = "widget_" + "q" * 250           # longer than the 200-character cap
+    widget = {"type": value, "id": "n1", "instruction": "Count the widgets."}
+    stub = StubModels(plan_nodes=[widget]).install(mp)
+    await run_pipeline("Do x.", db_path=db_path)
+    await drain_log_writes()
+    assert not built and not stub.of_kind("answerer")
+    code, message = _failure(stub)
+    assert code == "BRT-ORC-036"
+    assert message.startswith(f"BRT-ORC-036: step type '{value}' is not a node type.")
+    node = _failure_field(stub, "node")
+    assert '"instruction": "Count the widgets."' in node and value[:100] in node
 
 
 @pytest.mark.asyncio
@@ -357,20 +416,47 @@ async def test_accepted_unused_is_noted_and_changes_nothing(env):
     assert task.dependency_input["concurrency_limit"] != 3
 
 
-async def test_lane_raw_local_036_reaches_re_plan_without_document_text(lane):
+@pytest.mark.parametrize("mode", ["raw_local", "all_local"])
+async def test_lane_unknown_type_reaches_re_plan_with_message_and_node_and_no_document_text(lane, mode):
+    """The lane class rule (readings under ruling 32 (2)) on the 035b message:
+    built from the plan and the registry only, it reaches re_plan in every
+    lane, with the node it wrote; no document text; BRT-LANE-006 still runs."""
     from tests.e2e.stub_model_server import lane_matrix
-    plan = [{"type": "apply_to_each", "id": "n1", "inputs_ref": "documents",
+    plan = [{"type": "extractor", "id": "n1", "inputs_ref": "documents",
              "instruction": "Extract the client.", "task_type": "extraction", "tier": "light",
-             "output_schema": {"client": "string"}, "colour": "blue"}]
-    stub, _ = await _lane_run(lane, "raw_local", lane_matrix(), plan=plan)
+             "output_schema": {"client": "string"}}]
+    stub, _ = await _lane_run(lane, mode, lane_matrix(), plan=plan)
     replan = stub.of_kind("re_plan")[0]
     body = replan.system + "\n" + replan.user
-    assert "BRT-ORC-036" in body and "colour" in body
+    assert "BRT-ORC-036: step type 'extractor' is not a node type." in body
+    assert _failure_field(stub, "node").startswith('{"type": "extractor", "id": "n1"')
     text = json.dumps(replan.body)
     for canary in CANARIES:
         assert canary not in text
     assert "relationship desk" not in text
     assert stub.of_kind("answerer") == []
+
+
+async def test_lane_raw_local_unknown_key_runs_without_it(lane):
+    from tests.e2e.stub_model_server import lane_matrix
+    plan = [{"type": "apply_to_each", "id": "n1", "inputs_ref": "documents",
+             "instruction": "Extract the client.", "task_type": "extraction", "tier": "light",
+             "output_schema": {"client": "string", "risk": "string"}, "colour": "blue"}]
+    stub, result = await _lane_run(lane, "raw_local", lane_matrix(), plan=plan)
+    assert [r for r in stub.of_kind("answerer") if r.is_local], "the step did not run"
+    for r in stub.of_kind("re_plan"):
+        assert "BRT-ORC-036" not in r.system + r.user
+    assert engine.asked_but_not_produced(result["run_id"]) == [
+        {"step": "n1", "skill": "", "field": "colour"}]
+
+
+async def test_lane_a_step_that_fails_while_running_still_gives_code_and_ids_only(lane):
+    from tests.e2e.stub_model_server import three_tier_matrix as no_local
+    stub, result = await _lane_run(lane, "raw_local", no_local())
+    body = stub.of_kind("re_plan")[0].system
+    assert "BRT-LANE-002" in body and '"node": "{' not in body
+    for canary in CANARIES:
+        assert canary not in body
 
 
 # --- redaction of the 036 note ------------------------------------------------------
@@ -432,6 +518,22 @@ def _seq(*replies):
 
 def _cont(*nodes, action="continue"):
     return {"action": action, "rationale": "next", "next_nodes": list(nodes)}
+
+
+def _failure_at(stub, k, node_id):
+    body = _replan_body(stub, k)
+    at = body.index(f'"{node_id}": {{')
+    code = re.search(r'"failure": \{[^{}]*?"code": "(BRT-[A-Z]+-\d+)"', body[at:])
+    assert code, body[-600:]
+    return code.group(1), body[at:]
+
+
+def _failure_field(stub, name, node_id="n1"):
+    body = _replan_body(stub, 0)
+    at = body.index(f'"{node_id}": {{')
+    found = re.search(rf'"{name}": ("(?:[^"\\]|\\.)*")', body[at:])
+    assert found, body[-800:]
+    return json.loads(found.group(1))
 
 
 def _replan_body(stub, k):
@@ -500,13 +602,13 @@ async def test_a_typeless_retry_in_a_re_plan_retries_only_the_failed_items(env):
 
 
 @pytest.mark.asyncio
-async def test_a_cascade_re_plan_after_a_second_hit_runs_its_new_steps(env):
+async def test_a_cascade_re_plan_after_an_unknown_type_runs_its_new_steps(env):
     db_path, mp, built = env
-    bad = dict(BASE["answerer"], id="n1", colour="blue")
+    bad = {"type": "widget", "id": "n1", "instruction": "x"}
     stub = StubModels(
         plan_nodes=[bad],
-        replan_for=_seq(_cont(dict(bad, id="n2")),
-                        _cont(dict(BASE["answerer"], id="n3", instruction="Then this."), action="cascade")),
+        replan_for=_seq(_cont(dict(BASE["answerer"], id="n3", instruction="Then this."),
+                              action="cascade")),
         answer_for=lambda r: {"result": "hi"}).install(mp)
     await run_pipeline("Say hi.", db_path=db_path)
     await drain_log_writes()

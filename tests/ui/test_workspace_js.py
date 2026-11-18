@@ -516,7 +516,7 @@ def test_a_redacted_speed_probe_warning_reads_as_a_warning_with_its_code(tmp_pat
 
 
 def test_receipt_has_one_line_per_field_a_plan_asked_for_and_the_skill_did_not_return(tmp_path):
-    """Ruling 32c: the BRT-ORC-035 plan note (second hit) becomes receipt lines."""
+    """Ruling 32c: the BRT-ORC-035 plan note (first hit, ruling 35a) becomes receipt lines."""
     note = {"event_type": "orchestrator_decision", "decision_json": json.dumps({
         "code": "BRT-ORC-035", "action": "ran_without_fields", "node_id": "n1",
         "skill_id": "classify_into_buckets", "fields": ["file", "urgency"]})}
@@ -530,7 +530,7 @@ def test_receipt_has_one_line_per_field_a_plan_asked_for_and_the_skill_did_not_r
 
 
 def test_receipt_has_one_line_per_key_the_plan_gave_that_nothing_takes(tmp_path):
-    """Ruling 32d: the BRT-ORC-036 plan note (second hit) becomes receipt lines,
+    """Ruling 32d: the BRT-ORC-036 plan note (first hit, ruling 35b) becomes receipt lines,
     from the skill for a skill_args key, from the step for a node key."""
     skill = {"event_type": "orchestrator_decision", "decision_json": json.dumps({
         "code": "BRT-ORC-036", "action": "ran_without_fields", "node_id": "n2",

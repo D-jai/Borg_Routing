@@ -4,7 +4,7 @@ Status: revised 18-Nov-2026 after a fresh adversarial review in two rounds and t
 
 **Wording.** The BUILD.md 32e row reads: "seven requirements: chosen fields and names with file names for documents; a whole-output marker; the code-side compose block wording; four post-compose checks with one re-ask then salvage; what invented values a check can catch; compose token change on A, B, D; replay tests on the four stored compose inputs". Every threshold, every definition of "usable" and every change to salvage below is my own choice and is marked as such. None of them is the ruling's.
 
-**Ships with 32c.** 32c's BRT-ORC-035 message tells the planner "to rename fields, do it when composing" (`plan_validation.HINT_RENAME`). Renaming therefore relies on section 2.1, and 32c and 32e go out in one push.
+**Ships with 32c.** 32c's BRT-ORC-035 message told the planner "to rename fields, do it when composing". Planner ruling 35a removed that message: 035 no longer refuses, the step runs as written and the names go on the asked-for list, which compose is shown beside the step's own fields (ruling 35d, below). Renaming still relies on section 2.1.
 
 **Files to change:**
 - `src/orchestrator/row_markers.py`
@@ -20,7 +20,7 @@ No change to `src/prompts/*.py`, `data/skills.yaml` or `data/capability_matrix.y
 **Assumptions:**
 - 32a to 32d are built before this.
   - On the stored data, no job A step produced an urgency, and job D's retry step re-ran the 29 successes.
-  - 32c is built (`dc97aa8`, `85c6ea5`). `engine.asked_but_not_produced(run_id)` returns `[{"step", "skill", "field"}]` after a plan repeats a BRT-ORC-035 fault. This note reads that function as it is.
+  - 32c is built (`dc97aa8`, `85c6ea5`). `engine.asked_but_not_produced(run_id)` returns `[{"step", "skill", "field"}]`; since ruling 35a it is filled on the first hit (the step runs as written, no re_plan). This note reads that function as it is.
 - Nobody knows whether grok-4.20 writes the new markers. The 32g trial measures it.
 - Token-per-row figures are estimates from logged totals (method in 2.6).
 - The compose-side checks are not plan validation: they read step results and compose's text, so the new class rule (plan-validation messages reach re_plan in every lane) does not apply to them. They follow the lane rules of 2.2.
@@ -181,26 +181,35 @@ Steps with a long output:
 - <id>: <n> characters (field <field>)
 Items with no result (a step failed them and no other step gave them a value): <m>. Never give them a value: say they have no result.
 Rows with no value (a step returned the item but left the field empty): <field> <m>, <field> <m>. Leave those fields empty; do not supply a value yourself.
-Asked for but not produced (the plan asked a step for these fields and the step does not return them):
-- <step> (skill <skill>): <field>, <field>
-Do not supply values for these fields yourself. You may show the item or a field the step did return under one of these names in a rows marker (for example category=bucket); otherwise leave the field out and tell the reader it was not produced.
+Asked for but not produced (the plan asked a step for these fields and the step does not return them under these names):
+- <step> (skill <skill>): <name>, <name>. The step's own fields: <item (file name)|item (document id)|item>, <field>, ...
+- <step> (skill <skill>): <name>. The step has no rows to place, so these were not produced.
+For each of these names, choose from the step's own fields by name alone: where one of them holds what the name asks for, place it under that name with a rows marker, for example @@ROWS:<first step with rows> | <its first name>=<field>, ...@@. Where none does, leave the name out and tell the reader it was not produced. Do not supply values for these fields yourself.
 ```
 
 Further rules:
 - The "Rows with no value" line lists only fields with a count above 0, in step order.
 - With two or more long fields in one step, the line reads `- n1: 10,435 characters (field files; write @@OUTPUT:n1 | files@@)`.
 - The asked-but-not-produced section comes from `engine.asked_but_not_produced(run_id)`, grouped by step in list order.
+- **Fitting (planner ruling 35d).** Fitting is decided from names only, and by compose, not by the code. Each asked name is listed beside the step's own field names, exactly as its "Steps with rows" line shows them, without `error`; compose chooses which of them, if any, holds what the name asks for, and places it under that name with a rows marker. The code writes no pairing (no `file=item`, no `category=bucket`), reads no values, and guesses nothing. A step that is not in "Steps with rows" (it has no rows to place) gets the "no rows to place, so these were not produced" line. The last line's example names the first asked step that has rows and its first asked name; with no such step it reads "Do not supply values for these fields yourself: tell the reader they were not produced." C4 case 2 is unchanged: a value compose types itself under an asked name, for an item of that step, with no stored source, is still caught.
 
 **Golden texts** (everything after the first line).
 
-Job A, round 2, with the 32c list as it would stand after a repeated fault. The fixture supplies that list, because the recorded run predates 32c.
+Job A, round 2, with the asked-for list the plan gives (the fixture supplies it, because the recorded run predates 32c).
 ```
 Steps with rows:
 - classify_emails: 200 rows, input order, 4 failed; fields: item (file name), bucket, confidence, defer_reason, error
 Items with no result (a step failed them and no other step gave them a value): 0. Never give them a value: say they have no result.
-Asked for but not produced (the plan asked a step for these fields and the step does not return them):
-- classify_emails (skill classify_into_buckets): file, category, urgency
-Do not supply values for these fields yourself. You may show the item or a field the step did return under one of these names in a rows marker (for example category=bucket); otherwise leave the field out and tell the reader it was not produced.
+Asked for but not produced (the plan asked a step for these fields and the step does not return them under these names):
+- classify_emails (skill classify_into_buckets): file, category, urgency. The step's own fields: item (file name), bucket, confidence, defer_reason
+For each of these names, choose from the step's own fields by name alone: where one of them holds what the name asks for, place it under that name with a rows marker, for example @@ROWS:classify_emails | file=<field>, ...@@. Where none does, leave the name out and tell the reader it was not produced. Do not supply values for these fields yourself.
+```
+
+Trial 32g, job A, round-2 data (ruling 35d; pinned in `tests/orchestrator/test_compose_placement.py` and, end to end, `tests/orchestrator/test_skill_output_schema_check.py`): the first plan asked for urgency through `extra_fields`, so urgency is produced and only `file` and `category` are listed.
+```
+Asked for but not produced (the plan asked a step for these fields and the step does not return them under these names):
+- classify_emails (skill classify_into_buckets): file, category. The step's own fields: item (file name), bucket, confidence, defer_reason, urgency
+For each of these names, choose from the step's own fields by name alone: where one of them holds what the name asks for, place it under that name with a rows marker, for example @@ROWS:classify_emails | file=<field>, ...@@. Where none does, leave the name out and tell the reader it was not produced. Do not supply values for these fields yourself.
 ```
 The three fields are what `validate_plan` reports: the plan's output_schema `{file, category, urgency}`, none of which `classify_into_buckets` returns.
 

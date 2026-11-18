@@ -37,18 +37,17 @@ Error codes:
                step fails before any model call and the message names the
                failed step (an item ref to it keeps BRT-APE-005)
 - BRT-ORC-035: a skill step's output_schema names a field the skill does not
-               return (planner ruling 32c); found by plan validation
-               (plan_validation.py) before the plan's steps run. First time
-               in a run: the step fails, re_plan is shown the message, in
-               every lane. Second time: the step runs as the skill step it
-               is; the fault is a plan note, a receipt line and an entry in
+               return; found by plan validation (plan_validation.py) before
+               the plan's steps run. Planner ruling 35a (32c reversed): the
+               step runs as written, first time, no re_plan; each name is a
+               plan note, a receipt line and an entry in
                asked_but_not_produced()
 - BRT-ORC-036: a plan node key no code reads or prompt teaches for its type,
-               a skill_args key the skill does not take, or a node type that
-               is not one of the four (planner ruling 32d); found by plan
-               validation, re_plan once per run shared with BRT-ORC-035.
-               Second time: an unknown key is dropped and the step runs,
-               recorded as for BRT-ORC-035; an unknown type fails the step
+               a skill_args key the skill does not take (ruling 32d; 35b: left
+               out, the step runs, recorded as for BRT-ORC-035, no re_plan),
+               or a node type that is not one of the four: the one plan error,
+               one re_plan per run (shown the node it wrote), then the step
+               fails
 - BRT-ORC-026: a re_plan step reused the id of a step that already ran; it
                was renamed <id>_2 (_3 ...) and the batch's refs to it follow
                (warning; the step runs)
@@ -781,7 +780,15 @@ def _stage_output_for_prompt(env: InboundEnvelope, mode: str = "re_plan") -> dic
     entry = dict(env.output or {})
     failure = {"code": code}
     if mode != "compose":
-        failure["message"] = reason[:_FAILURE_MESSAGE_MAX]
+        if env._plan_node is not None:
+            # Ruling 35b: a plan refused for its node type. Built from the
+            # plan and the skill list only (the lane class rule), so the
+            # message is shown whole (the type value is never cut) with the
+            # node the planner wrote, already cut at NODE_SHOWN_MAX.
+            failure["message"] = reason
+            failure["node"] = env._plan_node
+        else:
+            failure["message"] = reason[:_FAILURE_MESSAGE_MAX]
     entry["failure"] = failure
     return entry
 
@@ -1919,10 +1926,11 @@ _NOT_PRODUCED: dict = {}     # str(run_id) -> [{"step", "skill", "field"}], newe
 
 
 def asked_but_not_produced(run_id: object) -> list:
-    """The run's "asked for but not produced" list (ruling 32c): one entry per
-    field a plan asked of a skill step that the skill does not return, after
-    the plan repeated the fault. Entries: ``{"step", "skill", "field"}``.
-    Empty when there is none. Compose's code-side block reads it (32e)."""
+    """The run's "asked for but not produced" list (ruling 32c; 35a: filled on
+    the first hit): one entry per field a plan asked of a skill step that the
+    skill does not return, and per key nothing takes (BRT-ORC-036). Entries:
+    ``{"step", "skill", "field"}``. Empty when there is none. Compose's
+    code-side block reads it (32e, 35d)."""
     return list(_NOT_PRODUCED.get(str(run_id), []))
 
 
@@ -1946,7 +1954,7 @@ def _with_codes(run_id: object, entries: list) -> list:
 
 
 def _drop_plan_keys(nodes: list, issue: object) -> None:
-    """BRT-ORC-036 second hit: the step runs without the keys nothing takes.
+    """BRT-ORC-036 (ruling 35b, first hit): the step runs without the keys nothing takes.
     The node is replaced in the batch by a copy without them (node keys, or
     skill_args keys); the plan as logged is unchanged."""
     for i, node in enumerate(nodes):
@@ -1964,20 +1972,19 @@ async def _check_plan(
     nodes: list, results: dict, run_id: UUID, db_path: str, state: dict,
 ) -> bool:
     """Plan validation (BRT-ORC-035, BRT-ORC-036) on a plan or re_plan batch,
-    before any of its steps is dispatched. True when a step was refused
-    (re_plan is due).
+    before any of its steps is dispatched. True when re_plan is due.
 
-    The two codes share one re_plan per run ("plan-validation re_plan used",
-    ruling 32d). First time in a run: each offending step fails with the full
-    message, in every lane (it is built from the plan and the skill list
-    only), and re_plan is shown it. Second time (and every later time): no
-    plan-validation re_plan is sent for it, while ordinary re_plans go on;
-    a BRT-ORC-035 step runs as the skill step it is, a BRT-ORC-036 step runs
-    without the keys nothing takes (dropped from the batch before the build),
-    and each is recorded as a plan note (orchestrator_decision, action
-    ``ran_without_fields``), in the run's not-produced list and, by the
-    receipt, as one line per field. An unknown node type fails the step both
-    times. Accepted fields that build nothing are noted, never refused.
+    Planner ruling 35 (32c reversed). A BRT-ORC-035 skill step runs as
+    written; a BRT-ORC-036 key is left out of the batch (``_drop_plan_keys``)
+    and the step runs. Both, on the first hit and every hit: a plan note
+    (orchestrator_decision, action ``ran_without_fields``), an entry per name
+    in the run's not-produced list and, by the receipt, one line per name; no
+    re_plan. Only an unknown node type is refused: the step fails with the
+    message, carrying the node it wrote (shown to re_plan, every lane: both
+    are built from the plan and the skill list only). ``state["type_seen"]``
+    gives one such re_plan per run; later unknown types fail with none of
+    their own, while ordinary re_plans go on. Accepted fields that build
+    nothing are noted, never refused.
     """
     # Change 1 (ruling 32d): accepted fields that build nothing on the node's
     # path are recorded, one note per node; nothing is refused or changed.
@@ -1991,20 +1998,17 @@ async def _check_plan(
         except Exception:
             pass
     issues = validate_plan(nodes, _get_skill_lib())
-    if not issues:
-        return False
-    second = state["seen"]
-    state["seen"] = True
+    refused = False
     for issue in issues:
-        fails = not second or issue.where == "type"
-        if fails:
-            # First time in the run, or an unknown type (nothing sensible to
-            # run): the step fails. A node's first issue is its message.
+        if issue.where == "type":
+            refused = True
             if issue.node_id not in results:
-                results[issue.node_id] = InboundEnvelope(
+                failed = InboundEnvelope(
                     envelope_id=uuid4(), subtask_id=uuid4(), status="failed",
                     output={}, failure_reason=issue.message,
                 )
+                failed._plan_node = issue.node
+                results[issue.node_id] = failed
             event, decision = "error", {
                 "code": issue.code, "msg": issue.message, "node_id": issue.node_id,
             }
@@ -2029,7 +2033,10 @@ async def _check_plan(
             await write_event(event, run_id=run_id, decision=decision, db_path=db_path)
         except Exception:
             pass
-    return not second
+    if not refused or state["type_seen"]:
+        return False
+    state["type_seen"] = True
+    return True
 
 
 def ref_cycle_message(node_id: str, cycle: Optional[list[str]]) -> str:
@@ -2924,9 +2931,8 @@ async def _orchestrate_run(
     documents_reserved = lane is not None
     # True once a wave ran (or a step was failed) since the last re_plan.
     ran_since_replan = False
-    # Ruling 32c: BRT-ORC-035 goes to re_plan once per run; the second time
-    # the step runs as the skill step it is; no plan-validation re_plan follows.
-    plan_check = {"seen": False}
+    # Ruling 35b: only an unknown node type goes to re_plan, once per run.
+    plan_check = {"type_seen": False}
     if await _check_plan(current_nodes, results, run_id, db_path, plan_check):
         ran_since_replan = True
     # Ruling 26b: True once this run planned a step that reads the documents.

@@ -453,12 +453,13 @@ ASKED_MIXED = [
 def test_036_entries_have_their_own_key_lines():
     steps, _, model = _d_like()
     block = rm.block(steps, {}, 0, [], ASKED_MIXED)
-    assert ("- classify (skill classify_into_buckets): urgency\n" + rm.ASKED_TAIL) in block
+    assert ("- classify (skill classify_into_buckets): urgency. The step's own fields: "
+            "item (file name), bucket\n" + rm.asked_tail("classify", "urgency")) in block
     assert block.endswith(
         "The plan gave colour to classify, which does not take it; it was not used.\n"
         "The plan gave instruction to classify, which does not take it; it was not used.")
     only_036 = rm.block(steps, {}, 0, [], ASKED_MIXED[1:])
-    assert rm.ASKED_HEAD not in only_036 and rm.ASKED_TAIL not in only_036
+    assert rm.ASKED_HEAD not in only_036 and "For each of these names" not in only_036
 
 
 def test_the_engine_tells_035_from_036_entries(monkeypatch):
@@ -471,7 +472,7 @@ def test_the_engine_tells_035_from_036_entries(monkeypatch):
     assert engine.asked_but_not_produced(run_id) == entries          # three keys, as 32c reads
     steps, results, _ = _d_like()
     ctx = engine._RowContext.for_run(results, _Lane(), "", None, run_id)
-    assert "- classify (skill classify_into_buckets): urgency\n" in ctx.block
+    assert "- classify (skill classify_into_buckets): urgency. The step's own fields: " in ctx.block
     assert "The plan gave colour to classify, which does not take it; it was not used." in ctx.block
 
 
@@ -497,3 +498,52 @@ def test_long_outputs_withhold_an_unguarded_raw_step():
 def test_the_gate_gives_no_block_with_nothing_to_list():
     assert rm.block({}, {}, 0, [], []) is None
     assert rm.block({}, {}, 0, [], [{"step": "s", "skill": "k", "field": "f"}]).startswith(rm.INTRO)
+
+
+# --- ruling 35d: the asked-for list beside the step's own fields -----------------------
+
+TRIAL_A_ASKED = "\n".join([
+    "Asked for but not produced (the plan asked a step for these fields and the step does not "
+    "return them under these names):",
+    "- classify_emails (skill classify_into_buckets): file, category. The step's own fields: "
+    "item (file name), bucket, confidence, defer_reason, urgency",
+    "For each of these names, choose from the step's own fields by name alone: where one of "
+    "them holds what the name asks for, place it under that name with a rows marker, for "
+    "example @@ROWS:classify_emails | file=<field>, ...@@. Where none does, leave the name out "
+    "and tell the reader it was not produced. Do not supply values for these fields yourself.",
+])
+
+
+def test_golden_asked_section_for_the_trial_a_plan():
+    """Trial 32g, job A, round-2 data: the first plan with extra_fields
+    {urgency} and output_schema {file, category, urgency}. The code lists the
+    step's own fields beside the asked names and guesses no pairing."""
+    row = dict(bucket="billing", confidence=0.9, defer_reason="", urgency=4)
+    results = {"classify_emails": _env(_agg([_ok(0, "doc_001", **row), _ok(1, "doc_002", **row)]))}
+    steps = _steps(results, _Lane())
+    asked = [{"step": "classify_emails", "skill": "classify_into_buckets", "field": f,
+              "code": "BRT-ORC-035"} for f in ("file", "category")]
+    block = rm.block(steps, {}, 0, [], asked)
+    assert block.endswith("\n" + TRIAL_A_ASKED), block
+    # The code writes no pairing of its own: neither file=item nor category=bucket.
+    assert "file=item" not in block.split("Steps with rows:")[1]
+    assert "category=bucket" not in block
+
+
+def test_an_asked_step_with_no_rows_says_not_produced():
+    asked = [{"step": "summary", "skill": "summarise", "field": "tone"}]
+    block = rm.block({}, {}, 0, [], asked)
+    assert block.endswith(
+        "- summary (skill summarise): tone. The step has no rows to place, so these were not "
+        "produced.\n"
+        "Do not supply values for these fields yourself: tell the reader they were not produced.")
+
+
+def test_the_example_marker_names_the_first_step_with_rows():
+    steps, _, _ = _d_like()
+    asked = [{"step": "gone", "skill": "k", "field": "tone"},
+             {"step": "classify", "skill": "classify_into_buckets", "field": "category"}]
+    block = rm.block(steps, {}, 0, [], asked)
+    assert "- gone (skill k): tone. The step has no rows to place, so these were not produced." in block
+    assert block.endswith(rm.asked_tail("classify", "category"))
+    assert "@@ROWS:classify | category=<field>, ...@@" in block

@@ -656,11 +656,11 @@ async def test_replayed_stage1_job_a_completes_with_full_rows(tmp_path, monkeypa
     fourth re_plan and the marker reply): the recorded run never reached a
     fourth re_plan, and it never got a compose re-ask.
 
-    Follows ruling 32c: the recorded plan puts output_schema {file, category,
-    urgency} on its classify_into_buckets node, which the skill does not
-    return, so the first plan is refused with BRT-ORC-035 (no model call) and a
-    scripted first re_plan repeats the plan. The second hit runs the step as
-    the skill step it is, and the recorded re_plans follow."""
+    Follows ruling 35a (32c reversed): the recorded plan puts output_schema
+    {file, category, urgency} on its classify_into_buckets node; the step runs
+    as written, first time, with no re_plan, so the run follows the recording
+    again. file and category (urgency is in its extra_fields) are listed as
+    asked for but not produced."""
     rec = json.loads(FIXTURE.read_text(encoding="utf-8"))
     db_path = str(tmp_path / "replay_a.db")
     await create_all(db_path)
@@ -675,11 +675,6 @@ async def test_replayed_stage1_job_a_completes_with_full_rows(tmp_path, monkeypa
     recorded_compose = rec["orchestrator_replies"]["compose"][0]
     stub = ReplayStub(rec, _seq(recorded_compose,
                                 {"response": "@@ROWS:extract_urgency@@"})).install(monkeypatch)
-    # Ruling 32c: the first plan is refused; a scripted first re_plan repeats
-    # the recorded plan, so the second hit runs classify_emails (renamed _2)
-    # without the fields. The recording's re_plans then follow as recorded.
-    stub.replans.insert(0, {"action": "continue", "rationale": "same plan again",
-                            "next_nodes": rec["orchestrator_replies"]["plan"][0]["plan"]["nodes"]})
     result = await run_pipeline(rec["instruction"], db_path=db_path,
                                 documents={"folder": rec["folder"]})
     await drain_log_writes()
@@ -689,9 +684,9 @@ async def test_replayed_stage1_job_a_completes_with_full_rows(tmp_path, monkeypa
     stored = await _stored_envelopes(db_path, result["run_id"])
     resolved = {nid for kind, nid, inbound in stored
                 if kind == "apply_to_each" and json.loads(inbound or "{}").get("status") == "resolved"}
-    # classify_emails was refused first (BRT-ORC-035), so its repeat ran as
-    # classify_emails_2 (R1's rename of a re-sent id).
-    assert resolved == {"classify_emails_2" if n == "classify_emails" else n for n in rec["items"]}
+    assert resolved == set(rec["items"])
+    assert [(e["step"], e["field"]) for e in engine.asked_but_not_produced(result["run_id"])] == [
+        ("classify_emails", "file"), ("classify_emails", "category")]
     # Every stored step id is a recorded one, or R1's rename of a re-sent one.
     replies = rec["orchestrator_replies"]
     recorded = {n["id"] for n in replies["plan"][0]["plan"]["nodes"]}

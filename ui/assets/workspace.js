@@ -407,9 +407,9 @@
     out.steps = out.stepsFailed + Object.keys(ok).filter(function (k) { return !failed[k]; }).length;
     return out;
   }
-  /* Ruling 32c: one receipt line per field a plan asked of a skill step that the skill does not
-   * return, after the plan repeated the fault (the step ran without it). Read from the run's
-   * BRT-ORC-035 plan note (an orchestrator_decision event). */
+  /* Ruling 32c (35a: on the first hit): one receipt line per field a plan asked of a skill step
+   * that the skill does not return (the step ran as written). Read from the run's BRT-ORC-035
+   * plan note (an orchestrator_decision event). */
   function notProducedLines(data) {
     var out = [];
     (data && data.events || []).forEach(function (ev) {
