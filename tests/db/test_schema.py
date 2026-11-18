@@ -187,7 +187,8 @@ async def test_migration_adds_cost_columns_to_an_old_schema_database(tmp_path):
         await db.execute("INSERT INTO run_digests(run_id, summary, cost_dollars, token_count) VALUES ('r1','old',0.5,10)")
         for table, col in (
             ("run_digests", "baseline_dollars"), ("run_digests", "tokens_input"),
-            ("run_digests", "tokens_output"), ("logs", "baseline_dollars"),
+            ("run_digests", "tokens_output"), ("run_digests", "direct_floor_dollars"),
+            ("run_digests", "direct_floor_model"), ("logs", "baseline_dollars"),
             ("envelopes", "baseline_dollars"),
         ):
             await db.execute(f"ALTER TABLE {table} DROP COLUMN {col}")
@@ -199,7 +200,8 @@ async def test_migration_adds_cost_columns_to_an_old_schema_database(tmp_path):
 
     async with aiosqlite.connect(path) as db:
         for table, cols in (
-            ("run_digests", {"baseline_dollars", "tokens_input", "tokens_output"}),
+            ("run_digests", {"baseline_dollars", "tokens_input", "tokens_output",
+                             "direct_floor_dollars", "direct_floor_model"}),
             ("logs", {"baseline_dollars"}),
             ("envelopes", {"baseline_dollars"}),
         ):

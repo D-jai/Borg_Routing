@@ -252,26 +252,26 @@ async def run_pipeline(
     # fire-and-forget log writes first.
     usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
     cost_dollars = 0.0
-    baseline_dollars = 0.0
+    direct_floor = None
     try:
         from src.logging.writer import flush_pending  # noqa: PLC0415
 
         await flush_pending()
-        digest = await compute_and_save_digest(run_id, db_path=db_path)
+        digest = await compute_and_save_digest(run_id, db_path=db_path, answer_text=response or "")
         usage = {
             "prompt_tokens": digest["tokens_input"],
             "completion_tokens": digest["tokens_output"],
             "total_tokens": digest["token_count"],
         }
         cost_dollars = digest["cost_dollars"]
-        baseline_dollars = digest["baseline_dollars"]
+        direct_floor = digest["direct_floor_dollars"]
     except Exception:
         pass
 
     return {
         "usage": usage,
         "cost_dollars": cost_dollars,
-        "baseline_dollars": baseline_dollars,
+        "direct_floor_dollars": direct_floor,
         "run_id": str(run_id),
         "response": response,
         "status": status,

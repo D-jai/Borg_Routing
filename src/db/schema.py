@@ -46,6 +46,10 @@ _MIGRATIONS = [
     "ALTER TABLE run_digests ADD COLUMN baseline_dollars REAL",
     "ALTER TABLE run_digests ADD COLUMN tokens_input INTEGER",
     "ALTER TABLE run_digests ADD COLUMN tokens_output INTEGER",
+    # Ruling 22: the receipt's comparison figure, a floor, and the baseline model it was priced on.
+    # baseline_dollars on run_digests keeps old rows but is no longer written.
+    "ALTER TABLE run_digests ADD COLUMN direct_floor_dollars REAL",
+    "ALTER TABLE run_digests ADD COLUMN direct_floor_model TEXT",
     # Direct-to-model (bypass) runs are tagged so run lists can leave them out.
     "ALTER TABLE runs ADD COLUMN kind TEXT DEFAULT 'orchestrated'",
     # On-premise lane: the manifest (JSON) of a run that read documents. Such
@@ -195,6 +199,8 @@ CREATE TABLE IF NOT EXISTS run_digests (
     baseline_dollars REAL,
     tokens_input INTEGER,
     tokens_output INTEGER,
+    direct_floor_dollars REAL,
+    direct_floor_model TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 

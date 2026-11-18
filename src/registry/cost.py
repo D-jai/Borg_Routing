@@ -36,6 +36,34 @@ def call_dollars(
     )
 
 
+# Ruling 22: the receipt's comparison figure is a floor. chars / 4 stands in for tokens, with no
+# tokenizer and no calibration factor.
+CHARS_PER_TOKEN_FLOOR = 4
+
+# On round 1 (17-Nov-2026) the real direct cost was this many times the floor, lowest and highest
+# of jobs A, C and B (2.2, 1.3, 4.4; B includes a discarded retry). The one place the figure is kept:
+# GET /runs/{id} sends it with the digest, and the receipt and the user guide quote it.
+DIRECT_FLOOR_RATIO_RANGE = (1.3, 4.4)
+
+
+def direct_floor_dollars(
+    input_chars: int,
+    answer_chars: int,
+    baseline: Optional[ModelInfo],
+) -> Optional[float]:
+    """The floor of one direct pass on the baseline model (ruling 22):
+    ``input_chars`` (operator message plus every supplied document, each counted once) / 4 at the
+    baseline's input price, plus ``answer_chars`` (the final answer as assembled) / 4 at its
+    output price. None when there is no baseline or it has no price: unknown, never 0.
+    """
+    if baseline is None or baseline.pricing is None:
+        return None
+    return (
+        (max(0, input_chars) / CHARS_PER_TOKEN_FLOOR) * baseline.pricing.input_per_token
+        + (max(0, answer_chars) / CHARS_PER_TOKEN_FLOOR) * baseline.pricing.output_per_token
+    )
+
+
 def select_baseline_model(matrix, configured_id: Optional[str] = None) -> Optional[ModelInfo]:
     """The model a run is compared against: "what if the best model did every call".
 

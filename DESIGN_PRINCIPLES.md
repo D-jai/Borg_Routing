@@ -90,7 +90,7 @@ effective_cost =
 | `trigger_reason` on envelopes | causal graph via one WHERE clause (`initial_plan`, `escalation_from:X`, `retry:X`, ...) |
 | `orchestrator_decision` event | verbatim reasoning + plan per invocation |
 | `child_residue` event | fold-in sweep hit → misbehaviour signal per model |
-| `run_digests` | one row per finished run: `summary`, `cost_dollars`, `token_count`, `baseline_dollars`, `tokens_input`, `tokens_output` |
+| `run_digests` | one row per finished run: `summary`, `cost_dollars`, `token_count`, `direct_floor_dollars`, `direct_floor_model`, `tokens_input`, `tokens_output` (old rows keep `baseline_dollars`; it is no longer written) |
 | `user_rating` on runs (`runs.user_rating`) | ground-truth signal from thumbs-up/down |
 | NER worker (optional) | spaCy entity + SVO extraction over log_payloads — parked, enable on demand |
 

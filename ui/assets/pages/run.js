@@ -38,10 +38,14 @@ Borg.ready(function () {
 
     A.$('run-lane').textContent = W.runLaneWords(data);
     var tiles = A.clear(A.$('tiles'));
-    // Ruling 18: no baseline figure and no flagship-comparison wording (workspace.js headerTiles).
+    // Ruling 22: the comparison is a floor ("One pass on <model>: at least US$X"), never "would have cost" (workspace.js).
     W.headerTiles(data).forEach(function (t) {
       tiles.appendChild(h('div', { class: 'tile' }, [h('div', { class: 'k' }, t.k), h('div', { class: 'v num' }, t.v), t.sub ? h('div', { class: 'small muted' }, t.sub) : null]));
     });
+    var oldNote = document.getElementById('floor-note');
+    if (oldNote) oldNote.remove();
+    var floorEst = W.baselineEstimate(data);
+    if (floorEst) tiles.insertAdjacentElement('afterend', h('p', { class: 'small muted', id: 'floor-note' }, W.floorNote(floorEst)));
   }
 
   // ---------- plan diagram ----------

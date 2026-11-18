@@ -104,7 +104,7 @@ async def test_child_run_calls_are_in_the_parent_digest_and_envelope(db, env):
     )[0]
     assert digest[0] == pytest.approx(tree[0]) and digest[0] > root_only[0]
     assert digest[1] == tree[2] + tree[3]
-    assert digest[2] == pytest.approx(tree[1])          # baseline stored (defect 5)
+    assert digest[2] is None                            # ruling 22: the old per-run baseline is not written
     assert (digest[3], digest[4]) == (tree[2], tree[3])  # token split stored (defect 5)
 
     assert result["cost_dollars"] == pytest.approx(tree[0])
@@ -344,7 +344,7 @@ async def test_get_run_returns_the_digest(db, env, monkeypatch):
     body = json.loads((await tasks_api.get_run_state(result["run_id"])).body)
     d = body["digest"]
     assert d["cost_dollars"] == pytest.approx(result["cost_dollars"]) and d["cost_dollars"] > 0
-    assert d["baseline_dollars"] == pytest.approx(result["baseline_dollars"])
+    assert d["baseline_dollars"] is None and d["direct_floor_dollars"] == pytest.approx(result["direct_floor_dollars"])
     assert d["tokens_input"] + d["tokens_output"] == result["usage"]["total_tokens"]
 
 

@@ -301,16 +301,27 @@
     };
   }
 
-  /* RULING 18 (BUILD.md section 8, 17-Nov-2026): the baseline figure (baseline_dollars /
-   * baseline_est_cost: BORG's own tokens priced at the flagship) must not be shown as
-   * "what the same work would have cost on one flagship model". This is the single switch for the receipt's and
-   * the Run header's "Estimate, same steps on <baseline model>" line. It renders nothing
-   * until the planner's replacement figure exists; the replacement plugs in here and both
-   * pages pick it up (ask.html receipt grid, run.html Cost tile). */
-  var SHOW_BASELINE_ESTIMATE = false;
+  /* RULING 22 (BUILD.md section 8): the receipt's comparison figure is a floor, the server's
+   * digest.direct_floor_dollars ("One pass on <baseline model>: at least US$X"). It is never
+   * worded as what the run would have cost, and the old per-run baseline_dollars is never
+   * shown (ruling 18). null when the run stored no floor (older runs, direct-to-model runs).
+   * The ratio range in the note comes from the server (digest.direct_floor_ratio), so the page
+   * and the user guide quote the one figure kept in src/registry/cost.py. */
   function baselineEstimate(data) {
-    if (!SHOW_BASELINE_ESTIMATE) return null;
-    return null; // replacement figure goes here (ruling 18)
+    var d = data && data.digest;
+    if (!d) return null;
+    var v = d.direct_floor_dollars;
+    if (typeof v !== 'number' || !isFinite(v)) return null;
+    var model = d.direct_floor_model ? shortModel(d.direct_floor_model) : 'the baseline model';
+    var ratio = Array.isArray(d.direct_floor_ratio) && d.direct_floor_ratio.length === 2 ? d.direct_floor_ratio : null;
+    return { value: v, model: model, ratio: ratio, label: 'One pass on ' + model + ': at least' };
+  }
+  /* What the floor leaves out, as one short note under the receipt. */
+  function floorNote(est) {
+    if (!est) return '';
+    var s = 'This is a floor, not a price. It leaves out retries, and structured output such as JSON costs more tokens than the estimate assumes.';
+    if (est.ratio) s += ' On the round-1 benchmark, the real direct cost was between ' + est.ratio[0] + ' and ' + est.ratio[1] + ' times this floor.';
+    return s;
   }
 
   // ---------- what the run was run under, and what the pages show about it ----------
@@ -351,7 +362,7 @@
     var est = baselineEstimate(data);
     return [
       { k: t.cost !== null ? 'Cost of this run' : 'Cost so far', v: B.money(t.cost !== null ? t.cost : t.costSoFar),
-        sub: est ? est.label + ': ' + B.money(est.value) : (t.cost !== null ? 'Whole run, steps’ own runs included' : 'This run’s logged calls') },
+        sub: est ? est.label + ' US' + B.money(est.value) : (t.cost !== null ? 'Whole run, steps’ own runs included' : 'This run’s logged calls') },
       { k: 'Time', v: B.duration(t.seconds), sub: longest ? 'Longest step: ' + B.duration(longest / 1000) : null },
       { k: 'Steps', v: String(t.steps), sub: t.calls + (t.calls === 1 ? ' model call' : ' model calls') },
       { k: 'Calls that left this machine', v: t.left === null ? 'Not recorded' : String(t.left),
@@ -368,7 +379,7 @@
       models: callsByModel(data), left: t.left, leftSource: t.leftSource,
       laneMode: mode,
       rawStayed: !!(data.run && data.run.documents) && (mode === 'raw_local' || mode === 'all_local'),
-      estimate: baselineEstimate(data)    // ruling 18: null until its replacement exists
+      estimate: baselineEstimate(data)    // ruling 22: the floor, or null when none was stored
     };
   }
   /* The receipt's stat boxes as [k, v] pairs. */
@@ -376,7 +387,7 @@
     var B = window.Borg;
     var out = [['Steps', String(r.steps)], ['Models used', String(r.models.length)], ['Time', B.duration(r.seconds)],
       r.cost !== null && r.cost !== undefined ? ['Cost of this run', B.money(r.cost)] : ['Cost so far', B.money(r.costSoFar)]];
-    if (r.estimate) out.push([r.estimate.label, B.money(r.estimate.value)]);
+    if (r.estimate) out.push([r.estimate.label, 'US' + B.money(r.estimate.value)]);
     return out;
   }
   function leftChipText(left) {
@@ -612,7 +623,7 @@
     stripBaseline: stripBaseline, whyRows: whyRows, makeRefresher: makeRefresher, makeLiveStream: makeLiveStream,
     parseJSON: parseJSON, decisionOf: decisionOf, stageWords: stageWords, shortModel: shortModel, shortText: shortText,
     planNodesById: planNodesById, stepsFromRun: stepsFromRun, planLayout: planLayout,
-    callsByModel: callsByModel, runTotals: runTotals, baselineEstimate: baselineEstimate,
+    callsByModel: callsByModel, runTotals: runTotals, baselineEstimate: baselineEstimate, floorNote: floorNote,
     failureWords: failureWords, eventSentences: eventSentences, clock: clock, REASONS: REASONS,
     svgEl: svgEl, whereDot: whereDot
   };

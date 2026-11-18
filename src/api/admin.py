@@ -142,9 +142,9 @@ _EFFECTIVE_SETTINGS: list[dict[str, Any]] = [
         "cast": str,
         "type": "text",
         "label": "Baseline Model",
-        "help_text": "Reference model for the baseline_dollars estimate. This is a rough "
-                     "comparison figure, not a measured cost of running the job on this "
-                     "model. Empty = BASELINE_MODEL_ID from .env if "
+        "help_text": "Model the receipt's one-pass floor (direct_floor_dollars) is priced on: "
+                     "\"One pass on this model: at least US$X\". A floor, not a measured cost "
+                     "of running the job on this model. Empty = BASELINE_MODEL_ID from .env if "
                      "set, else the ticked model with the highest reasoning score.",
     },
     {

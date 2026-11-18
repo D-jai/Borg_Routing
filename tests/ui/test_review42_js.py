@@ -280,9 +280,26 @@ def test_the_rendered_receipt_and_run_header_show_no_baseline_or_top_model(tmp_p
     const receipt = W.receiptFrom(data);
     return JSON.stringify({{tiles: W.headerTiles(data), receipt: W.receiptStats(receipt), receiptObj: receipt}});""")
     low = out.lower()
-    for bad in ("baseline", "top model", "one top", "0.42", "$0.42"):
+    for bad in ("baseline", "top model", "one top", "0.42", "$0.42", "would have cost"):
         assert bad not in low, bad
-    assert "cost of this run" in low
+    assert "cost of this run" in low and "one pass on" not in low     # no floor stored: no comparison line
+
+
+def test_the_floor_line_reads_one_pass_at_least_and_never_would_have_cost(tmp_path):
+    data = run_body([env("n1")], [plan_event([{"id": "n1"}])],
+                    digest={"cost_dollars": 0.05, "direct_floor_dollars": 0.093,
+                            "direct_floor_model": "openrouter/anthropic/claude-opus-5.5",
+                            "direct_floor_ratio": [1.3, 4.4]},
+                    calls_left_machine={"count": 1, "source": "locality"})
+    data["run"]["lane_mode"] = "off"
+    out = raw(tmp_path, f"""
+    const data = {json.dumps(data)};
+    const receipt = W.receiptFrom(data);
+    return JSON.stringify({{tiles: W.headerTiles(data), receipt: W.receiptStats(receipt), note: W.floorNote(receipt.estimate)}});""")
+    low = out.lower()
+    assert "one pass on claude-opus-5.5: at least" in low
+    for bad in ("baseline", "top model", "would have cost"):
+        assert bad not in low, bad
 
 
 def test_no_page_script_or_slide_offers_a_top_model_comparison():

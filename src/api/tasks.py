@@ -111,8 +111,9 @@ async def _run_in_background(
     # Visible as running from the moment the work starts, so a second resume
     # of the same run is refused instead of racing this one.
     await update_run_status(run_id, "running", db_path=db_path)
+    final_answer = None
     try:
-        await _asyncio.wait_for(
+        final_answer = await _asyncio.wait_for(
             orchestrate_run(
                 run_id=run_id,
                 user_instruction=instruction,
@@ -176,7 +177,9 @@ async def _run_in_background(
             from src.logging.writer import flush_pending  # noqa: PLC0415
 
             await flush_pending()
-            await compute_and_save_digest(run_id, db_path=db_path)
+            await compute_and_save_digest(
+                run_id, db_path=db_path,
+                answer_text=final_answer if isinstance(final_answer, str) else None)
         except Exception:
             pass
 
@@ -307,8 +310,11 @@ async def get_run_state(run_id: str, request: Request = None) -> JSONResponse:
         "child_envelopes": [ ...envelopes of descendant (child) runs, same
                         shape, each carrying its own run_id... ],
         "events": [ ...log events... ],
-        "digest": {cost_dollars, baseline_dollars, tokens_input, tokens_output,
-                   token_count, summary} or null if no digest was saved yet,
+        "digest": {cost_dollars, tokens_input, tokens_output, token_count, summary,
+                   direct_floor_dollars (the receipt's "one pass, at least" figure),
+                   direct_floor_model, direct_floor_ratio ([low, high]: round-1 real direct
+                   cost as a multiple of the floor), baseline_dollars (old rows only; new
+                   runs store null)} or null if no digest was saved yet,
         "outbound": [ ...on-premise lane: every request this run and its child
                      runs sent off this machine, oldest first, each with its
                      run_id, url, destination, attempt, status and the exact
@@ -390,6 +396,10 @@ async def get_run_state(run_id: str, request: Request = None) -> JSONResponse:
 
     try:
         digest = await get_run_digest(run_uuid, db_path=DB_PATH)
+        if digest is not None:
+            from src.registry.cost import DIRECT_FLOOR_RATIO_RANGE  # noqa: PLC0415
+
+            digest["direct_floor_ratio"] = list(DIRECT_FLOOR_RATIO_RANGE)
     except Exception:
         digest = None
 

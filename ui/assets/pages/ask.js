@@ -72,6 +72,7 @@ Borg.ready(function () {
     }
     var grid = h('div', { class: 'receipt-grid' }, W.receiptStats(r).map(function (p) { return stat(p[0], p[1]); }));
     box.appendChild(grid);
+    if (r.estimate) box.appendChild(h('p', { class: 'small muted' }, W.floorNote(r.estimate)));
     var row = h('div', { class: 'row' }, r.models.map(function (m) { return modelChip(m.model, m.calls); }));
     if (r.rawStayed) row.appendChild(h('span', { class: 'chip' }, [h('span', { class: 'dot gold' }), 'Raw documents stayed on this machine']));
     // Worked out by the server. Unknown is "not recorded", never a zero.

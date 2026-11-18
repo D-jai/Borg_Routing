@@ -80,7 +80,8 @@ class LoadedDocuments:
         """What the planner may see: ids, types, sizes and (unless ``ids``) names."""
         rows: list[dict] = []
         for d in self.documents:
-            row = {"id": d.doc_id, "type": d.type, "size": d.size, "parts": len(d.parts)}
+            row = {"id": d.doc_id, "type": d.type, "size": d.size, "parts": len(d.parts),
+                   "chars": len(d.text)}
             if mode != "ids":
                 row["name"] = d.name
             rows.append(row)

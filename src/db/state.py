@@ -438,7 +438,7 @@ async def get_run_digest(run_id: UUID, db_path: str = DB_PATH) -> Optional[dict]
         db.row_factory = aiosqlite.Row
         async with db.execute(
             """SELECT summary, cost_dollars, baseline_dollars, tokens_input,
-                      tokens_output, token_count
+                      tokens_output, token_count, direct_floor_dollars, direct_floor_model
                FROM run_digests WHERE run_id=?""",
             (str(run_id),),
         ) as cur:
@@ -446,7 +446,35 @@ async def get_run_digest(run_id: UUID, db_path: str = DB_PATH) -> Optional[dict]
     return dict(row) if row else None
 
 
-async def compute_and_save_digest(run_id: UUID, db_path: str = DB_PATH) -> dict:
+async def _direct_floor_for_run(run_id: UUID, answer_text: str, db_path: str, matrix=None):
+    """``(direct_floor_dollars, baseline model id)`` for a run (ruling 22), or ``(None, None)``.
+
+    Input chars: the operator message (``runs.user_instruction``) plus each supplied document's
+    chars once, from the run's document manifest (``chars``). Never raises."""
+    try:
+        from src.registry.cost import direct_floor_dollars, resolve_baseline_model  # noqa: PLC0415
+
+        if matrix is None:
+            from src.orchestrator.engine import _get_matrix  # noqa: PLC0415
+
+            matrix = _get_matrix()
+        baseline = await resolve_baseline_model(matrix, db_path)
+        async with connect(db_path) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute("SELECT user_instruction FROM runs WHERE run_id=?", (str(run_id),)) as cur:
+                row = await cur.fetchone()
+        message = row["user_instruction"] if row else ""
+        docs = await get_run_documents(run_id, db_path=db_path) or []
+        doc_chars = sum(int(d.get("chars") or 0) for d in docs if isinstance(d, dict))
+        floor = direct_floor_dollars(len(message or "") + doc_chars, len(answer_text or ""), baseline)
+        return (floor, baseline.model_id) if floor is not None else (None, None)
+    except Exception:
+        return None, None
+
+
+async def compute_and_save_digest(
+    run_id: UUID, db_path: str = DB_PATH, answer_text: Optional[str] = None, matrix=None,
+) -> dict:
     """Aggregate cost/tokens for a run from its logged calls and persist to run_digests.
 
     Totals are the sums over the run's logged ``model_call`` and
@@ -454,7 +482,10 @@ async def compute_and_save_digest(run_id: UUID, db_path: str = DB_PATH) -> dict:
     The envelope count still comes from the envelopes table.
 
     Returns the digest dict: {run_id, summary, cost_dollars, token_count,
-    tokens_input, tokens_output, baseline_dollars}.
+    tokens_input, tokens_output, direct_floor_dollars, direct_floor_model}.
+    ``answer_text`` is the final answer the run returns; with it the digest stores the ruling-22
+    floor, and without it an earlier stored floor is kept. ``baseline_dollars`` on the digest is
+    no longer written (old rows keep theirs); it reads as None for a new run.
     Safe to call multiple times — upserts on conflict.
     """
     async with connect(db_path) as db:
@@ -471,7 +502,9 @@ async def compute_and_save_digest(run_id: UUID, db_path: str = DB_PATH) -> dict:
     tokens_out_total = int(row["tout"]) if row else 0
     token_count = tokens_in_total + tokens_out_total
     cost_dollars = float(row["total_cost"]) if row else 0.0
-    baseline_total = float(row["total_baseline"]) if row else 0.0
+    floor, floor_model = (None, None)
+    if answer_text is not None:
+        floor, floor_model = await _direct_floor_for_run(run_id, answer_text, db_path, matrix)
 
     summary = (
         f"{envelope_count} envelope(s) dispatched; "
@@ -482,19 +515,29 @@ async def compute_and_save_digest(run_id: UUID, db_path: str = DB_PATH) -> dict:
     async with connect(db_path) as db:
         await db.execute(
             """INSERT INTO run_digests(run_id, summary, cost_dollars, token_count,
-                                       baseline_dollars, tokens_input, tokens_output)
-               VALUES (?, ?, ?, ?, ?, ?, ?)
+                                       tokens_input, tokens_output,
+                                       direct_floor_dollars, direct_floor_model)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                ON CONFLICT(run_id) DO UPDATE SET
                  summary=excluded.summary,
                  cost_dollars=excluded.cost_dollars,
                  token_count=excluded.token_count,
-                 baseline_dollars=excluded.baseline_dollars,
                  tokens_input=excluded.tokens_input,
-                 tokens_output=excluded.tokens_output""",
+                 tokens_output=excluded.tokens_output,
+                 direct_floor_dollars=COALESCE(excluded.direct_floor_dollars,
+                                               run_digests.direct_floor_dollars),
+                 direct_floor_model=COALESCE(excluded.direct_floor_model,
+                                             run_digests.direct_floor_model)""",
             (str(run_id), summary, cost_dollars, token_count,
-             baseline_total, tokens_in_total, tokens_out_total),
+             tokens_in_total, tokens_out_total, floor, floor_model),
         )
+        async with db.execute(
+            "SELECT direct_floor_dollars, direct_floor_model FROM run_digests WHERE run_id=?",
+            (str(run_id),),
+        ) as cur:
+            kept = await cur.fetchone()
         await db.commit()
+    floor, floor_model = (kept[0], kept[1]) if kept else (floor, floor_model)
 
     return {
         "run_id": str(run_id),
@@ -503,7 +546,8 @@ async def compute_and_save_digest(run_id: UUID, db_path: str = DB_PATH) -> dict:
         "token_count": token_count,
         "tokens_input": tokens_in_total,
         "tokens_output": tokens_out_total,
-        "baseline_dollars": baseline_total,
+        "direct_floor_dollars": floor,
+        "direct_floor_model": floor_model,
     }
 
 
