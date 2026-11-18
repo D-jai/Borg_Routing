@@ -21,6 +21,28 @@ Lead session `borg-route-f1` (Opus 5.5) since 02:20 on 16-Nov-2026. Every work o
 
 If this session stopped abruptly: `git log` and `git status` show what landed; any uncommitted changes belong to an in-progress builder: read the diff, finish or stash it, record which in the build log.
 
+## Where I left off (18-Nov-2026, 14:20, after the restart)
+
+- Planner ruling 30 (BUILD.md section 8): resumed the cloud-only runs after the restart. C_borg_cloud and A_borg_cloud ran at 14:10 (`demo/runs/stage1_r2_part2_cloud.ps1`). The probe measured llama3.2:3b at 7.062 tok/s. Round-2 spend is US$2.14.
+- Reported to the planner (borg-route-93): two product defects.
+  1. A's composed answer mixes an invented list with the code-placed skill-shaped rows, and the JSON is broken, so it graded 0/200.
+  2. B's answer describes its four files but contains none of them.
+- Job B is void in both arms (Docker was not serving in part 1). C: direct won the judge. D borg_cloud scored 0.60.
+- **Planner ruling 31 (14:30):** round 2 closes at stage 1 as lost. No stage 2, no local runs, no job B rerun. The results are committed.
+- **Next:**
+  - the round-2 report (summary.md plus a side-by-side page with round 1; no sentence reads as a win);
+  - the causes note `docs/design/bench_round2_measurements.md` (read-only, seven questions), brought to the planner, who writes the fix rulings; build nothing before that;
+  - then 4.5 replay and 5.2, with focused tests only on the ThinkPad (30d).
+
+## Earlier waypoint (18-Nov-2026, 12:38, paused for a ThinkPad restart)
+
+- **Head `8a304f5`**, pushed, CI green (run 44342995355). Freeze `f655890`, data commit `2c4d12b` (seed 4132800769). Ruling 29a checks done before the freeze: both passed.
+- **Round-2 stage 1 was mid-run and was stopped on purpose by the lead at 12:37 (this pause is not a product or runner fault).** Done, with result files in `bench/results/2026_11_18/`: A_direct, B_direct, C_direct, B_borg_cloud, D_borg_cloud, reestimate_s1. D_borg_local_workers was in progress on the CPU model (since about 11:27) and was killed, so it has no result file. Its leftover DB `dbs/D_borg_local_workers_1.db` passes the integrity check. Round-2 spend so far is US$1.69 (spend.json entries 18-23, parses clean).
+- At start of stage the local speed probe failed (BRT-REG-016, Ollama stalled about 2m48s before it served the request), so llama3.2:3b was priced at the pool's slowest measured speed. This is recorded in the result files.
+- **Uncommitted:** the BUILD.md invariant row and later rows, `bench/results/spend.json`, the round-2 result files. They are committed when stage 1 ends. `demo/runs/` is untracked.
+- **Next, only when the planner says resume:** relaunch with `demo/runs/stage1_r2_launcher.ps1`, a copy of the scratchpad launcher, since the scratchpad may not survive the reboot. Its stderr log is beside it as `stage1_r2_part1.log.err`. The same command skips finished result files (run_bench.py line 1065), so it resumes at D_borg_local_workers. Move the leftover `D_borg_local_workers_1.db` aside to `C:\Stage\_archive\` first if the runner would reuse it. The watchdog base must stay at 17 ledger entries, not the count at relaunch, so the US$6 cap covers the whole round. Fix that in the launcher. Then report to the planner at the end of stage 1.
+- **Check after the restart:** Docker Desktop is up; the `borg_ollama` container is running with OLLAMA_CONTEXT_LENGTH=16384 and llama3.2:3b loads; the local speed is measured again (the relaunch's start-of-stage probe does it); no python bench processes are left; no dead "running" runs in `demo/runs/db/demo.db` (230b0186 is a known one, excluded from export).
+
 **Bench round 2: Deej said yes (his ruling 11, 18-Nov-2026); the planner's ruling 27 sets the rules (BUILD.md section 8).** Same rules as round 1. Freeze the tree, then reseed jobs A, C and D with the first 8 hex digits of the freeze hash read as a number (`bench/make_data.py --seed`). Job B is hand-written and stays. No paid rehearsal; cap US$6. Results go to the planner first.
 
 **CI rule (Deej, 17-Nov-2026):** Actions minutes now cost money (US$15 shared across D-jai repos until 30-Nov-2026, 7 pm Toronto). Test locally, push only when green and once per ready batch, never re-run a failed CI run, put `[skip ci]` on docs-only pushes, no manual full CI runs without Deej's go.

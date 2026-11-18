@@ -1,0 +1,121 @@
+{
+ "job": "C",
+ "arm": "borg_cloud",
+ "repeat": 1,
+ "date": "2026_11_18",
+ "status": "completed",
+ "error": null,
+ "lane_mode": "by_reference",
+ "routing_config": {
+  "leaf_floors": {
+   "light": 6.0,
+   "mid": 7.5,
+   "heavy": 9.0
+  },
+  "time_cost_per_sec": 0.0001,
+  "pool": [
+   "ollama/llama3.2:3b",
+   "openrouter/anthropic/claude-opus-4.7",
+   "openrouter/anthropic/claude-sonnet-4.6",
+   "openrouter/deepseek/deepseek-v3.2",
+   "openrouter/google/gemini-3.1-flash-lite-preview",
+   "openrouter/google/gemini-3.1-pro-preview",
+   "openrouter/moonshotai/kimi-k2-thinking",
+   "openrouter/openai/gpt-5.3-codex",
+   "openrouter/openai/gpt-5.4-nano",
+   "openrouter/x-ai/grok-4.20"
+  ],
+  "lane_mode": "by_reference",
+  "max_run_seconds": 7200,
+  "direct_timeout_seconds": 7200.0,
+  "answerer_call_timeout_seconds": 7200.0,
+  "orchestrator_call_timeout_seconds": 7200.0,
+  "tools_enabled": false,
+  "env": {
+   "ANSWERER_MAX_TOKENS": "6000",
+   "ORCHESTRATOR_MAX_TOKENS": "6000",
+   "ORCHESTRATOR_QUALITY_REQUIREMENT": "9.0",
+   "BORG_RULE_ZERO_SHORTCUT": "true",
+   "LEAF_QUALITY_LIGHT": "6.0",
+   "LEAF_QUALITY_MID": "7.5",
+   "LEAF_QUALITY_HEAVY": "9.0",
+   "TIME_COST_PER_SEC": "0.0001",
+   "BORG_LANE_MAX_OUTPUT_CHARS": "1500",
+   "BORG_LANE_MAX_VERBATIM_CHARS": "120",
+   "BORG_LANE_MAX_NGRAM_SHARE": "0.10",
+   "BORG_LANE_MANIFEST": "names",
+   "BORG_LANE_PART_CHARS": "8000",
+   "BORG_LANE_LOCAL_ALLOWLIST": null,
+   "BORG_LOCAL_HOSTS": null,
+   "BORG_ANSWERER_CALL_TIMEOUT": "7200",
+   "BORG_ORCHESTRATOR_CALL_TIMEOUT": "7200",
+   "BORG_LANE_MODE": "by_reference",
+   "BORG_MAX_RUN_SECONDS": "7200",
+   "BASELINE_MODEL_ID": "openrouter/anthropic/claude-opus-5.5"
+  },
+  "baseline_model_id": "openrouter/anthropic/claude-opus-5.5",
+  "baseline_resolved_by_engine": true,
+  "baseline_note": "the bench baseline; the engine resolves it from the matrix it is given"
+ },
+ "run_id": "2fe90fe0-5b4f-4aa4-a0da-d40e82b59cb6",
+ "cost_dollars": 0.2477265,
+ "digest_cost_dollars": 0.2477265,
+ "baseline_dollars": 2.8429159999999998,
+ "wall_seconds": 19.085,
+ "tokens": {
+  "prompt_tokens": 592264,
+  "completion_tokens": 23693,
+  "total_tokens": 615957
+ },
+ "models": [
+  "openrouter/google/gemini-3.1-flash-lite-preview"
+ ],
+ "models_per_step": [
+  {
+   "step": "extract_q1_to_q8",
+   "task_type": "extraction",
+   "tier": "light",
+   "chosen": "openrouter/google/gemini-3.1-flash-lite-preview",
+   "reason": "planner_pick",
+   "dollars": 0.0
+  },
+  {
+   "step": "extract_contradictions",
+   "task_type": "extraction",
+   "tier": "light",
+   "chosen": "openrouter/google/gemini-3.1-flash-lite-preview",
+   "reason": "planner_pick",
+   "dollars": 0.0
+  }
+ ],
+ "model_calls": 164,
+ "answer": "1. 14 March 2027\n2. 412\n3. Ingrid Vassallo\n4. US$3.85 million\n5. 2,317\n6. Brannock Cryogenics\n7. juniper-lantern\n8. 19 days\n9. Yes \u2014 many topics across documents (e.g. packaging waste review budget at Fenwick: \"14 units of budget\" vs \"154 units of budget\"; driver rest-break roster status at Millbrook: \"steady\" vs \"slower than hoped\"; cold chain audit outcome: \"encouraging\" vs \"mixed\"; spare parts catalogue outcome: \"better than the prior period\" vs \"uneven\"; and dozens of similar budget, status, and metric contradictions quoted in the extract_contradictions results).",
+ "db_path": "bench/results/2026_11_18/dbs/C_borg_cloud_1.db",
+ "calls_log": null,
+ "attempt": 1,
+ "ledger_dollars": 0.2477265,
+ "aborted_attempts": [],
+ "estimate_dollars": 1.8472550000000003,
+ "quality": {
+  "informational_fact_score": {
+   "facts_found": 6,
+   "facts_total": 8,
+   "contradictions_found": 0,
+   "contradictions_total": 2,
+   "facts_matched": [
+    "On what date does the Tamarack pilot end?",
+    "Who is the group compliance contact for regulatory filings?",
+    "What is the approved budget for Project Osprey?",
+    "Which vendor will supply the refrigeration units for the new cold store?",
+    "What is the code word for an emergency shutdown?",
+    "How often is the Pell Harbour crane inspected?"
+   ],
+   "contradictions_matched": []
+  },
+  "informational_only": true,
+  "note": "informational only, never quoted: the pairwise judge decides job C"
+ },
+ "local_speed": {
+  "ollama/llama3.2:3b": 7.062
+ }
+}
