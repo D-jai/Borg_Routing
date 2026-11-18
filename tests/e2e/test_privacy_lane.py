@@ -271,8 +271,10 @@ def _outside_target(lane, form: str) -> str:
     if form == "drive_relative":
         # "C:outside.txt" means "outside.txt in the current folder of drive C";
         # run from the temp folder (outside the root) so it names a real file.
+        if not win:
+            pytest.skip("drive-relative paths exist only on Windows")
         lane["mp"].chdir(tmp)
-        return f"{outside.drive}outside.txt" if win else "C:outside.txt"
+        return f"{outside.drive}outside.txt"
     if form == "root_relative_backslash":
         if not win:
             pytest.skip("'\\x' is an ordinary file name, not root-relative, off Windows")
