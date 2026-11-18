@@ -380,6 +380,21 @@
       (list ? ' Step failure codes: ' + list + '.' : '');
   }
 
+  /* Planner reading (2) under ruling 35: a re_plan failed for good and the run composed from the
+   * steps finished so far (a BRT-ORC-002 warning event, action "planning_stopped"). One plain line,
+   * or null. */
+  var STOPPED_EARLY_NOTE = 'Planning stopped early: the planner’s last reply could not be used, so ' +
+    'this answer uses only the steps finished so far and may be incomplete.';
+  function stoppedEarlyNote(data) {
+    var found = false;
+    (data && data.events || []).forEach(function (ev) {
+      if (!ev || ev.event_type !== 'error') return;
+      var d = decisionOf(ev);
+      if (d && d.code === 'BRT-ORC-002' && d.action === 'planning_stopped') found = true;
+    });
+    return found ? STOPPED_EARLY_NOTE : null;
+  }
+
   /* Ruling 26e: {steps, stepsFailed, items, itemsFailed}. A step failed when its envelope failed,
    * when (ruling 26f) it is an apply_to_each whose every item failed, or when it failed before any
    * call and so has no envelope (BRT-LANE-002, -ORC-025, -APE-005, -ORC-008, -ORC-024, -REG-020):
@@ -497,6 +512,7 @@
       rawStayed: !!(data.run && data.run.documents) && (mode === 'raw_local' || mode === 'all_local'),
       estimate: baselineEstimate(data),   // ruling 22: the floor, or null when none was stored
       noStep: noStepNote(data),           // ruling 26a: the planner wrote the answer alone, or null
+      stoppedEarly: stoppedEarlyNote(data), // reading (2) under ruling 35: planning stopped early, or null
       notProduced: notProducedLines(data), // ruling 32c: fields asked for and not produced
       failed: failedCounts(data)          // ruling 26e: failed steps, and failed items of the steps that went on
     };
@@ -761,7 +777,7 @@
   window.BorgWork = {
     LANE_MODES: LANE_MODES, laneTag: laneTag, historyForMode: historyForMode, laneLine: laneLine,
     readLaneMode: readLaneMode, prepareSend: prepareSend, runLaneMode: runLaneMode, runLaneWords: runLaneWords, leftCard: leftCard,
-    headerTiles: headerTiles, receiptFrom: receiptFrom, noStepNote: noStepNote, failedLines: failedLines, notProducedLines: notProducedLines, receiptStats: receiptStats, leftChipText: leftChipText,
+    headerTiles: headerTiles, receiptFrom: receiptFrom, noStepNote: noStepNote, stoppedEarlyNote: stoppedEarlyNote, failedLines: failedLines, notProducedLines: notProducedLines, receiptStats: receiptStats, leftChipText: leftChipText,
     stripBaseline: stripBaseline, whyRows: whyRows, makeRefresher: makeRefresher, makeLiveStream: makeLiveStream,
     parseJSON: parseJSON, decisionOf: decisionOf, stageWords: stageWords, shortModel: shortModel, shortText: shortText,
     planNodesById: planNodesById, stepsFromRun: stepsFromRun, planLayout: planLayout,

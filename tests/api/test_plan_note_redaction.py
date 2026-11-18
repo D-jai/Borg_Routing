@@ -32,3 +32,13 @@ def test_another_decision_with_the_same_code_but_no_action_is_still_dropped():
     ev = {"event_type": "orchestrator_decision",
           "decision_json": json.dumps({"code": "BRT-ORC-035", "msg": "text"})}
     assert _redact_events([ev])[0]["decision_json"] is None
+
+
+def test_the_planning_stopped_warning_keeps_code_severity_and_action_only():
+    """Reading (2) under ruling 35: the receipt line survives redaction; the
+    message and the error text do not."""
+    d = {"code": "BRT-ORC-002", "severity": "warning", "action": "planning_stopped",
+         "msg": "planning stopped early", "err": "BRT-ORC-002: ... doc text"}
+    ev = {"event_type": "error", "decision_json": json.dumps(d)}
+    kept = json.loads(_redact_events([ev])[0]["decision_json"])
+    assert kept == {"code": "BRT-ORC-002", "severity": "warning", "action": "planning_stopped"}

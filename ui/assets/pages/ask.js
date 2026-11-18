@@ -75,6 +75,8 @@ Borg.ready(function () {
     if (r.estimate) box.appendChild(h('p', { class: 'small muted' }, W.floorNote(r.estimate)));
     // Ruling 26a: an answer no step stands behind says so.
     if (r.noStep) box.appendChild(h('p', { class: 'small no-step' }, r.noStep));
+    // Reading (2) under ruling 35: planning stopped early; the answer uses the finished steps.
+    if (r.stoppedEarly) box.appendChild(h('p', { class: 'small no-step' }, r.stoppedEarly));
     // Ruling 26e: "k of N steps failed" (and "m of n items failed"), only when there are any.
     var fl = W.failedLines(r);
     if (fl.length) box.appendChild(h('p', { class: 'small muted' }, fl.join(' · ')));

@@ -6,6 +6,8 @@ re_plan → compose cycle using the orchestrator model.
 Error codes:
 - BRT-ORC-001: orchestrator model call failed
 - BRT-ORC-002: orchestrator returned unparseable JSON
+               (a re_plan one after a step resolved: a warning, and the run
+               composes from the finished steps; reading (2) under ruling 35)
 - BRT-ORC-003: plan is empty or malformed
 - BRT-ORC-004: node dispatch failed (individual; the run continues)
 - BRT-ORC-005: maximum loop count exceeded (safety ceiling)
@@ -2956,6 +2958,9 @@ async def _orchestrate_run(
         ran_since_replan = True
     # Ruling 26b: True once this run planned a step that reads the documents.
     doc_step_planned = False
+    # Planner reading (2) under ruling 35: a re_plan failed for good and the
+    # run composes from the steps finished so far.
+    planning_stopped = False
 
     while loop_count < MAX_LOOPS:
         # Within one plan, waves run until no step is ready; only then is
@@ -3000,12 +3005,41 @@ async def _orchestrate_run(
             loop_count += 1
 
             # --- RE_PLAN MODE ---
-            replan_result = await _invoke_orchestrator_model(
-                mode="re_plan",
-                stage_results=results,
-                child_scratch_digest=child_digests,
-                **base_kwargs,
-            )
+            try:
+                replan_result = await _invoke_orchestrator_model(
+                    mode="re_plan",
+                    stage_results=results,
+                    child_scratch_digest=child_digests,
+                    **base_kwargs,
+                )
+            except LaneError:
+                raise
+            except ValueError as exc:
+                # Planner reading (2) under ruling 35: a re_plan that fails
+                # for good (BRT-ORC-002 after its JSON-only retry) goes to
+                # compose with the finished steps, as MAX_LOOPS ends a run,
+                # when at least one step resolved; otherwise the run fails.
+                if not (str(exc).startswith("BRT-ORC-002")
+                        and any(_step_finished(env) for env in results.values())):
+                    raise
+                planning_stopped = True
+                try:
+                    await write_event(
+                        "error",
+                        run_id=run_id,
+                        decision={
+                            "code": "BRT-ORC-002",
+                            "severity": "warning",
+                            "action": "planning_stopped",
+                            "msg": "the re_plan reply could not be used; planning stopped "
+                                   "early and the answer uses the steps finished so far",
+                            "err": str(exc)[:300],
+                        },
+                        db_path=db_path,
+                    )
+                except Exception:
+                    pass
+                break
 
             action = replan_result.get("action", "compose")
 
@@ -3430,7 +3464,7 @@ async def _orchestrate_run(
     # Planner ruling 21: the list-holding steps compose may name with a row
     # marker. With none, every compose request is byte-identical to before.
     rows = _RowContext.for_run(results, current_lane(), user_instruction, governance_instruction,
-                               run_id)
+                               run_id, stopped_early=planning_stopped)
     try:
         compose_result = await _invoke_orchestrator_model(
             mode="compose",
@@ -3500,7 +3534,9 @@ class _RowContext:
 
     def __init__(self, steps: dict, quoted, lane: Optional[LaneContext],
                  outputs: Optional[dict] = None, asked: Optional[list] = None,
-                 model=None, step_ids=(), block: Optional[str] = None) -> None:
+                 model=None, step_ids=(), block: Optional[str] = None,
+                 stopped_early: bool = False) -> None:
+        self.stopped_early = stopped_early
         self.steps = steps
         self.quoted = quoted
         self.lane = lane
@@ -3517,7 +3553,7 @@ class _RowContext:
     @classmethod
     def for_run(cls, results: dict, lane: Optional[LaneContext],
                 user_instruction: str, governance_instruction: Optional[str],
-                run_id: object = None) -> "_RowContext":
+                run_id: object = None, stopped_early: bool = False) -> "_RowContext":
         from src.orchestrator import compose_checks, row_markers  # noqa: PLC0415
 
         steps = row_markers.list_steps(results, lane)
@@ -3536,15 +3572,20 @@ class _RowContext:
             quoted = row_markers.quoted_hits(texts)
             model = compose_checks.ItemModel.build(steps, results)
             block = row_markers.block(
-                steps, outputs, len(model.no_result()), model.no_value_counts(), asked)
+                steps, outputs, len(model.no_result()), model.no_value_counts(), asked,
+                stopped_early=stopped_early)
+        elif stopped_early:
+            block = row_markers.block({}, stopped_early=True)
         return cls(steps, quoted, lane, outputs, asked, model,
-                   [str(k) for k in (results or {})], block)
+                   [str(k) for k in (results or {})], block, stopped_early)
 
     def call_kwargs(self) -> dict:
         from src.orchestrator import row_markers  # noqa: PLC0415
 
         if not self.active:
-            return {}
+            # Reading (2) under ruling 35: the early-stop line alone; no
+            # marker, so no pointer retry and no checks.
+            return {"extra_user_lines": self.block} if self.stopped_early else {}
         return {
             "extra_user_lines": self.block,
             "pointer_lines": row_markers.pointer_lines(self.steps, self.outputs) or None,

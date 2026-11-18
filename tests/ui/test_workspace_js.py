@@ -569,3 +569,15 @@ def test_compose_check_codes_read_in_plain_words(tmp_path):
         "The answer gave a value no step produced",
         "Working",
     ]
+
+
+def test_receipt_says_planning_stopped_early_when_the_re_plan_failed_for_good(tmp_path):
+    """Reading (2) under ruling 35: one plain line from the BRT-ORC-002 warning."""
+    warn = {"event_type": "error", "decision_json": json.dumps({
+        "code": "BRT-ORC-002", "severity": "warning", "action": "planning_stopped"})}
+    plain = {"event_type": "error", "decision_json": json.dumps({"code": "BRT-ORC-002"})}
+    data = {"run": {"status": "completed"}, "events": [warn]}
+    note = js(tmp_path, f"return W.receiptFrom({json.dumps(data)}).stoppedEarly;")
+    assert note == ("Planning stopped early: the planner’s last reply could not be used, so "
+                    "this answer uses only the steps finished so far and may be incomplete.")
+    assert js(tmp_path, f"return W.stoppedEarlyNote({json.dumps({'events': [plain]})});") is None

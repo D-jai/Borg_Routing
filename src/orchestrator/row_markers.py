@@ -100,6 +100,13 @@ def asked_tail(step: str, name: str) -> str:
     """The asked section's last line; the example names the first asked step
     that has rows and its first asked name."""
     return ASKED_TAIL.format(step=step, name=name)
+# Planner reading (2) under ruling 35: the re_plan failed for good and the
+# run composes from the steps finished so far.
+STOPPED_EARLY = (
+    "Planning stopped early: the planner's last reply could not be used, so only the steps "
+    "finished so far are below. Tell the reader the answer may be incomplete; do not present "
+    "it as complete."
+)
 ROWS_POINTER = (
     "Mode: compose. Your last reply was cut off at the length limit. Do not type out a "
     "step's rows or long output: put @@ROWS:<step id>@@ or @@OUTPUT:<step id>@@ where they "
@@ -707,15 +714,18 @@ def pointer_lines(steps: dict, outputs: Optional[dict] = None) -> str:
 
 
 def block(steps: dict, outputs: Optional[dict] = None, no_result: int = 0,
-          no_value: Optional[list] = None, asked: Optional[list] = None) -> Optional[str]:
+          no_value: Optional[list] = None, asked: Optional[list] = None,
+          stopped_early: bool = False) -> Optional[str]:
     """The lines added after compose's first user-message line, or None with
-    no list step, no long output and no asked-but-not-produced entry (every
-    request then stays byte-identical)."""
+    no list step, no long output, no asked-but-not-produced entry and no
+    early stop (every request then stays byte-identical). ``stopped_early``
+    (reading (2) under ruling 35) adds ``STOPPED_EARLY`` as the first line;
+    alone, it is the whole block."""
     outputs = outputs or {}
     asked = asked or []
     if not steps and not outputs and not asked:
-        return None
-    lines = [INTRO]
+        return STOPPED_EARLY if stopped_early else None
+    lines = ([STOPPED_EARLY] if stopped_early else []) + [INTRO]
     if steps:
         lines.append(ROWS_BULLET)
     if outputs:

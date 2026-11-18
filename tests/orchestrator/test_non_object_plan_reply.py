@@ -55,7 +55,11 @@ async def test_a_plan_reply_that_is_a_json_list_recovers_on_the_retry(env):
 
 
 @pytest.mark.asyncio
-async def test_a_re_plan_reply_that_is_a_bare_string_retries_then_fails_with_002(env):
+async def test_a_re_plan_reply_that_is_a_bare_string_retries_then_composes_with_002_as_a_warning(env):
+    """After the JSON-only retry the re_plan fails with BRT-ORC-002. n1 had
+    resolved, so by reading (2) under ruling 35 the run composes from it with
+    BRT-ORC-002 as a warning (the nothing-resolved case, which fails, is in
+    test_replan_failure_keeps_work.py)."""
     db_path, mp = env
     stub = StubModels(plan_nodes=[ANSWERER], replan_for=lambda r: '"compose now"',
                       answer_for=lambda r: {"result": "hi"}).install(mp)
@@ -63,9 +67,8 @@ async def test_a_re_plan_reply_that_is_a_bare_string_retries_then_fails_with_002
     await drain_log_writes()
     assert len(stub.of_kind("re_plan")) == 2
     assert "CRITICAL: Your entire reply must be valid JSON only." in stub.of_kind("re_plan")[1].system
-    assert result["status"] == "failed"
-    assert "BRT-ORC-002" in (result.get("error") or ""), result.get("error")
-    assert "AttributeError" not in (result.get("error") or "")
+    assert result["status"] == "completed", result.get("error")
+    assert stub.of_kind("compose")
 
 
 @pytest.mark.asyncio
