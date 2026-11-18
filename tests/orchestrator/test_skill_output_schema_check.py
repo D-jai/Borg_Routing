@@ -299,7 +299,7 @@ TRIAL_A_ASKED = "\n".join([
     "return them under these names):",
     "- classify_emails (skill classify_into_buckets): file, category. The step's own fields: "
     "item (file name), bucket, confidence, defer_reason, urgency",
-    "For each of these names, choose from the step's own fields by name alone: where one of "
+    "For each of these names, choose from the step's own fields: where one of "
     "them holds what the name asks for, place it under that name with a rows marker, for "
     "example @@ROWS:classify_emails | file=<field>, ...@@. Where none does, leave the name out "
     "and tell the reader it was not produced. Do not supply values for these fields yourself.",
@@ -330,8 +330,14 @@ async def test_the_trial_r2_plan_runs_first_time_and_produces_urgency(lane):
         rows = conn.execute("SELECT inbound_payload FROM envelopes WHERE run_id=? AND type=?",
                             (str(result["run_id"]), "apply_to_each")).fetchall()
     outs = [json.loads(r[0])["output"] for r in rows if r[0]]
-    produced = [x["output"] for o in outs for x in o.get("results", [])]
-    assert produced and all(p.get("urgency") == 4 for p in produced)
+    # One result per document (acme_note.txt, birch_note.md; the PDF is not
+    # read): every item resolved, none failed, each with its urgency.
+    assert len(outs) == 1
+    agg = outs[0]
+    assert agg["failure_count"] == 0 and agg.get("failures") == []
+    assert len(agg["results"]) == agg["total"] == agg["success_count"] == 2
+    assert sorted(x["item"] for x in agg["results"]) == ["doc_001", "doc_002"]
+    assert all(x["output"].get("urgency") == 4 for x in agg["results"])
     # file and category are on the list; urgency is not.
     assert engine.asked_but_not_produced(result["run_id"]) == [
         {"step": "classify_emails", "skill": "classify_into_buckets", "field": f}

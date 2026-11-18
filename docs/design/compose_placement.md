@@ -184,14 +184,14 @@ Rows with no value (a step returned the item but left the field empty): <field> 
 Asked for but not produced (the plan asked a step for these fields and the step does not return them under these names):
 - <step> (skill <skill>): <name>, <name>. The step's own fields: <item (file name)|item (document id)|item>, <field>, ...
 - <step> (skill <skill>): <name>. The step has no rows to place, so these were not produced.
-For each of these names, choose from the step's own fields by name alone: where one of them holds what the name asks for, place it under that name with a rows marker, for example @@ROWS:<first step with rows> | <its first name>=<field>, ...@@. Where none does, leave the name out and tell the reader it was not produced. Do not supply values for these fields yourself.
+For each of these names, choose from the step's own fields: where one of them holds what the name asks for, place it under that name with a rows marker, for example @@ROWS:<first step with rows> | <its first name>=<field>, ...@@. Where none does, leave the name out and tell the reader it was not produced. Do not supply values for these fields yourself.
 ```
 
 Further rules:
 - The "Rows with no value" line lists only fields with a count above 0, in step order.
 - With two or more long fields in one step, the line reads `- n1: 10,435 characters (field files; write @@OUTPUT:n1 | files@@)`.
 - The asked-but-not-produced section comes from `engine.asked_but_not_produced(run_id)`, grouped by step in list order.
-- **Fitting (planner ruling 35d).** Fitting is decided from names only, and by compose, not by the code. Each asked name is listed beside the step's own field names, exactly as its "Steps with rows" line shows them, without `error`; compose chooses which of them, if any, holds what the name asks for, and places it under that name with a rows marker. The code writes no pairing (no `file=item`, no `category=bucket`), reads no values, and guesses nothing. A step that is not in "Steps with rows" (it has no rows to place) gets the "no rows to place, so these were not produced" line. The last line's example names the first asked step that has rows and its first asked name; with no such step it reads "Do not supply values for these fields yourself: tell the reader they were not produced." C4 case 2 is unchanged: a value compose types itself under an asked name, for an item of that step, with no stored source, is still caught.
+- **Fitting (planner ruling 35d).** The ruling: if one of the step's own fields fits the name, place it under that name with a rows marker; otherwise say it was not produced. Compose decides the fit, not the code, and may look at the rows it is shown. Each asked name is listed beside the step's own field names, exactly as its "Steps with rows" line shows them, without `error`; compose chooses which of them, if any, holds what the name asks for, and places it under that name with a rows marker. The code writes no pairing (no `file=item`, no `category=bucket`), reads no values, and guesses nothing. A step that is not in "Steps with rows" (it has no rows to place) gets the "no rows to place, so these were not produced" line. The last line's example names the first asked step that has rows and its first asked name; with no such step it reads "Do not supply values for these fields yourself: tell the reader they were not produced." C4 case 2 is unchanged: a value compose types itself under an asked name, for an item of that step, with no stored source, is still caught.
 
 **Golden texts** (everything after the first line).
 
@@ -202,14 +202,14 @@ Steps with rows:
 Items with no result (a step failed them and no other step gave them a value): 0. Never give them a value: say they have no result.
 Asked for but not produced (the plan asked a step for these fields and the step does not return them under these names):
 - classify_emails (skill classify_into_buckets): file, category, urgency. The step's own fields: item (file name), bucket, confidence, defer_reason
-For each of these names, choose from the step's own fields by name alone: where one of them holds what the name asks for, place it under that name with a rows marker, for example @@ROWS:classify_emails | file=<field>, ...@@. Where none does, leave the name out and tell the reader it was not produced. Do not supply values for these fields yourself.
+For each of these names, choose from the step's own fields: where one of them holds what the name asks for, place it under that name with a rows marker, for example @@ROWS:classify_emails | file=<field>, ...@@. Where none does, leave the name out and tell the reader it was not produced. Do not supply values for these fields yourself.
 ```
 
 Trial 32g, job A, round-2 data (ruling 35d; pinned in `tests/orchestrator/test_compose_placement.py` and, end to end, `tests/orchestrator/test_skill_output_schema_check.py`): the first plan asked for urgency through `extra_fields`, so urgency is produced and only `file` and `category` are listed.
 ```
 Asked for but not produced (the plan asked a step for these fields and the step does not return them under these names):
 - classify_emails (skill classify_into_buckets): file, category. The step's own fields: item (file name), bucket, confidence, defer_reason, urgency
-For each of these names, choose from the step's own fields by name alone: where one of them holds what the name asks for, place it under that name with a rows marker, for example @@ROWS:classify_emails | file=<field>, ...@@. Where none does, leave the name out and tell the reader it was not produced. Do not supply values for these fields yourself.
+For each of these names, choose from the step's own fields: where one of them holds what the name asks for, place it under that name with a rows marker, for example @@ROWS:classify_emails | file=<field>, ...@@. Where none does, leave the name out and tell the reader it was not produced. Do not supply values for these fields yourself.
 ```
 The three fields are what `validate_plan` reports: the plan's output_schema `{file, category, urgency}`, none of which `classify_into_buckets` returns.
 

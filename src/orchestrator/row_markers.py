@@ -73,11 +73,12 @@ NO_VALUE_LINE = (
     "Rows with no value (a step returned the item but left the field empty): {counts}. "
     "Leave those fields empty; do not supply a value yourself."
 )
-# Planner ruling 35d. Fitting is decided from names only, and by compose, not
-# by the code: each asked name is listed beside the step's own field names
-# (as the step line shows them, without ``error``) and compose chooses which,
-# if any, holds what the name asks for. The code pairs nothing and guesses
-# nothing. A step with no rows to place gets "not produced".
+# Planner ruling 35d: if one of the step's own fields fits the asked name,
+# compose places it under that name with a rows marker; otherwise it says the
+# field was not produced. Compose decides the fit (it may look at the rows it
+# is shown); the code lists each asked name beside the step's own field names
+# (as the step line shows them, without ``error``) and pairs nothing itself.
+# A step with no rows to place gets "not produced".
 ASKED_HEAD = (
     "Asked for but not produced (the plan asked a step for these fields and the step does "
     "not return them under these names):"
@@ -86,7 +87,7 @@ ASKED_LINE = "- {step} (skill {skill}): {names}. The step's own fields: {own}"
 ASKED_LINE_NO_ROWS = ("- {step} (skill {skill}): {names}. The step has no rows to place, "
                       "so these were not produced.")
 ASKED_TAIL = (
-    "For each of these names, choose from the step's own fields by name alone: where one of "
+    "For each of these names, choose from the step's own fields: where one of "
     "them holds what the name asks for, place it under that name with a rows marker, for "
     "example @@ROWS:{step} | {name}=<field>, ...@@. Where none does, leave the name out and "
     "tell the reader it was not produced. Do not supply values for these fields yourself."

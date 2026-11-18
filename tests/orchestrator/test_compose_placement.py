@@ -507,7 +507,7 @@ TRIAL_A_ASKED = "\n".join([
     "return them under these names):",
     "- classify_emails (skill classify_into_buckets): file, category. The step's own fields: "
     "item (file name), bucket, confidence, defer_reason, urgency",
-    "For each of these names, choose from the step's own fields by name alone: where one of "
+    "For each of these names, choose from the step's own fields: where one of "
     "them holds what the name asks for, place it under that name with a rows marker, for "
     "example @@ROWS:classify_emails | file=<field>, ...@@. Where none does, leave the name out "
     "and tell the reader it was not produced. Do not supply values for these fields yourself.",
@@ -517,7 +517,7 @@ TRIAL_A_ASKED = "\n".join([
 def test_golden_asked_section_for_the_trial_a_plan():
     """Trial 32g, job A, round-2 data: the first plan with extra_fields
     {urgency} and output_schema {file, category, urgency}. The code lists the
-    step's own fields beside the asked names and guesses no pairing."""
+    step's own fields beside the asked names and writes no pairing itself."""
     row = dict(bucket="billing", confidence=0.9, defer_reason="", urgency=4)
     results = {"classify_emails": _env(_agg([_ok(0, "doc_001", **row), _ok(1, "doc_002", **row)]))}
     steps = _steps(results, _Lane())

@@ -62,7 +62,7 @@ GOLDEN_A = "\n".join([INTRO, ROWS_BULLET,
     "return them under these names):",
     "- classify_emails (skill classify_into_buckets): file, category, urgency. The step's own "
     "fields: item (file name), bucket, confidence, defer_reason",
-    "For each of these names, choose from the step's own fields by name alone: where one of "
+    "For each of these names, choose from the step's own fields: where one of "
     "them holds what the name asks for, place it under that name with a rows marker, for "
     "example @@ROWS:classify_emails | file=<field>, ...@@. Where none does, leave the name out "
     "and tell the reader it was not produced. Do not supply values for these fields yourself."])
