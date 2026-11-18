@@ -215,6 +215,8 @@ async def test_finish_reason_is_logged_on_the_json_retry(monkeypatch, db):
                        _resp(json.dumps({"response": "ok"}), "")],
                   run_id=run_id, mode="compose")
     rows = await _decision_rows(db, run_id)
-    assert [(r[2].get("retry", False), r[2]["finish_reason"]) for r in rows] == [
+    # Log writes are fire-and-forget tasks, so two rows may land in either order;
+    # what is checked is that each call's event carries its own finish_reason.
+    assert sorted((r[2].get("retry", False), r[2]["finish_reason"]) for r in rows) == [
         (False, "stop"), (True, ""),
     ]
