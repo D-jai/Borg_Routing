@@ -25,7 +25,7 @@ If this session stopped abruptly: `git log` and `git status` show what landed; a
 
 **CI rule (Deej, 17-Nov-2026):** Actions minutes now cost money (US$15 shared across D-jai repos until 30-Nov-2026, 7 pm Toronto). Test locally, push only when green and once per ready batch, never re-run a failed CI run, put `[skip ci]` on docs-only pushes, no manual full CI runs without Deej's go.
 
-**Next action for the lead (18-Nov-2026):** rulings 21 (row markers) and 22 (direct floor) are done and green on CI. Ruling 23 (item packing) is built (5aefd2a, 40ee228, not pushed) and in fresh review. After review: run `scripts/live_check_packing.py` (cap US$0.10, spend.json), log in BUILD.md section 9, push once. Then ruling 24 (two or three demo runs, cap US$1), which unblocks 4.5 replay and then 5.2. Still waiting on Deej's round-2 answer: 5.1 and 6.1 numbers, bench round 2, floor/pool/prompt changes. Open: 5 tests in `tests/agents/test_http_pool.py` fail when run after the lane, cost and bench files (they also fail on the base tree, pass alone, and pass in CI order).
+**Next action for the lead (18-Nov-2026):** rulings 21 (row markers) and 22 (direct floor) are done and green on CI. Ruling 23 (item packing) is done: reviewed twice, live check PASS (40/40 both arms, 2 calls vs 40, US$0.0192 spent), logged in BUILD.md section 9, pushed. Next: ruling 24 (two or three demo runs, cap US$1), which unblocks 4.5 replay and then 5.2. Still waiting on Deej's round-2 answer: 5.1 and 6.1 numbers, bench round 2, floor/pool/prompt changes. Open: 5 tests in `tests/agents/test_http_pool.py` fail when run after the lane, cost and bench files (they also fail on the base tree, pass alone, and pass in CI order).
 
 ## Start the build (Deej)
 

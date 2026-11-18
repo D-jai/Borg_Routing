@@ -120,7 +120,19 @@
    "started_at": "2026-11-17T18:18:21+00:00",
    "dollars": 0.0,
    "ended_at": "2026-11-17T18:18:21+00:00"
+  },
+  {
+   "id": "d8387177869a",
+   "key": "ruling23_live_check",
+   "kind": "check",
+   "date": null,
+   "db_path": "bench/results/2026_11_18/dbs/ruling23_live_check.db",
+   "calls_log": null,
+   "status": "ended",
+   "started_at": "2026-11-18T09:39:06+00:00",
+   "dollars": 0.01919275,
+   "ended_at": "2026-11-18T09:39:17+00:00"
   }
  ],
- "total_dollars": 2.55952275
+ "total_dollars": 2.5787155
 }
