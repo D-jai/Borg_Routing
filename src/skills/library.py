@@ -103,6 +103,8 @@ class SkillLibrary:
             needed = [str(a) for a, h in (req_args or {}).items() if not _is_optional(h)]
             optional = [str(a) for a, h in (req_args or {}).items() if _is_optional(h)]
             args_str = ", ".join(needed) if needed else "(none)"
+            if _takes_extra_fields(skill):
+                optional.append(_EXTRA_FIELDS_TEXT)
             if optional:
                 args_str += "; optional: " + ", ".join(optional)
 
@@ -331,6 +333,31 @@ class SkillLibrary:
 
 
 _PLACEHOLDER = re.compile(r"\{(\w+)\}")
+
+# Planner ruling 35c: the catalogue line that teaches ``extra_fields``.
+_EXTRA_FIELDS_TEXT = (
+    'extra_fields (more fields per item, for example {"urgency": "integer 1-5"})'
+)
+
+
+def _takes_extra_fields(skill: dict) -> bool:
+    """True when the skill's step has a per-item output schema written in the
+    skill itself, which ``extra_fields`` can extend: an apply_to_each skill whose
+    schema is a dict that takes no field from an arg. Not shown for a schema
+    derived from an arg (extract_fields, retry_escalate, defer_and_collect:
+    the planner extends that arg), nor for an answerer or orchestrate skill.
+    """
+    if skill.get("envelope_type") != "apply_to_each":
+        return False
+    schema = (skill.get("outbound_template") or {}).get("output_schema")
+    if not isinstance(schema, dict) or not schema:
+        return False
+    args = set(skill.get("required_args") or {})
+    return not any(
+        ph in args and "schema" in ph
+        for v in schema.values() if isinstance(v, str)
+        for ph in _PLACEHOLDER.findall(v)
+    )
 
 # Wording for an optional arg's ``<arg>_instruction`` line; any other arg
 # reads "<Arg words>: <value>". A null or empty arg gives no line at all.
