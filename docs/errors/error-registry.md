@@ -1,6 +1,7 @@
 # Error Registry — BORG_ROUTE
 > Format: `BRT-[MODULE]-[NNN]`
-> Modules: AUTH, API, STG, ING, QRY, CFG, CLI — add more as needed
+> Modules: REG, ENV, DB, PIP, ORC, APE, TOOL, SKL, SOP, ANS, LOG, API, ADM, MEM, LANE
+> Every code raised or logged in `src/` has a row; a row for a code no longer in the code is marked retired.
 
 ---
 
@@ -35,6 +36,9 @@
 | BRT-ENV-003 | current_depth exceeds max_depth | `src/envelopes/schema.py::WrappedTask.validate_depth` | The orchestrator tried to dispatch a child envelope at a depth greater than the allowed recursion ceiling. Increase `max_depth` in the run config or redesign the plan to be shallower. |
 | BRT-ENV-004 | Empty instruction | `src/envelopes/schema.py::WrappedTask.validate_instruction` | `instruction` must be a non-empty string. Every envelope dispatched to a model must carry a concrete task description. |
 | BRT-ENV-005 | Invalid SideEffectAction action | `src/envelopes/schema.py::SideEffectAction.validate_action` | `action` must be `"write"` or `"delete"`. Check the `scratch_writes` or `scratch_cleanup` list in the envelope. |
+| BRT-ENV-006 | ToolRequest.tool empty | `src/envelopes/schema.py::ToolRequest` | A `tool_requests` entry has an empty or whitespace-only `tool`. Name a registered tool (currently only `web_search`). |
+| BRT-ENV-020 | Governance prompt built without the operator's instruction | `src/prompts/base.py` | The governance block needs the operator's original words; an empty instruction is refused. Internal; a plan node or call reached the builder with no instruction. |
+| BRT-ENV-021 | Governance prompt built without a stage prompt | `src/prompts/base.py` | The stage prompt is required. Internal; report it with the run trace. |
 | BRT-ENV-010 | Answerer contract violation (schema bypass) | `src/envelopes/validator.py::validate_inbound` | The inbound envelope status is not `resolved` or `failed`. This should not occur if the schema layer is enforced; check for runtime schema bypasses. |
 | BRT-ENV-011 | Inbound output missing required keys | `src/envelopes/validator.py::validate_inbound` | The model's output is missing one or more keys declared in the task's `output_schema`. Check the model's raw response in the run trace, or refine the prompt to better constrain the output shape. |
 | BRT-ENV-012 | Failed envelope missing failure_reason | `src/envelopes/validator.py::validate_inbound` | When `status=failed`, `failure_reason` must explain what went wrong. Check the model's response — it may have returned an empty body or an unparseable result. |
@@ -53,6 +57,8 @@
 | BRT-DB-016 | Scratch read failed | `src/db/scratch.py::read_scratch_for_level` | SQLite query on the scratch table failed. The database file may be corrupt — check the WAL file. |
 | BRT-DB-017 | Scratch delete failed | `src/db/scratch.py::delete_scratch_for_level` | SQLite delete on the scratch table failed. Check database file permissions. |
 
+> **Retired error codes:** `BRT-DB-013` (duplicate run_id) and `BRT-DB-014` (config key not found) are named in a comment in `src/db/state.py` but are never raised.
+
 ## BRT-PIP — Pipeline Module
 
 | Code | Description | Origin | Hints |
@@ -62,6 +68,8 @@
 | BRT-PIP-003 | Run completion update failed | `src/pipeline/runner.py::run_pipeline` | Could not update the run status after completion. Check database connectivity. |
 | BRT-PIP-004 | Empty user_instruction | `src/pipeline/runner.py::run_pipeline` | user_instruction must not be empty or whitespace-only. |
 | BRT-PIP-005 | Run already in terminal state | `src/pipeline/runner.py` | The run is already completed or failed and cannot be re-run. |
+| BRT-PIP-008 | Run exceeded the wall-clock budget | `src/pipeline/runner.py::run_pipeline`, `src/api/tasks.py` | The run was cancelled and marked `failed`. The budget is `max_run_seconds` (Admin Settings) or `BORG_MAX_RUN_SECONDS` (default 300 s). Raise it for long tasks. |
+| BRT-PIP-010 | Run failure reason recorded | `src/pipeline/runner.py::run_pipeline`, `src/api/tasks.py` | Informational: a failed run's reason is saved on the run (`failure_reason`) and written as an error event carrying this code, so it can be searched for in the trace. |
 
 ## BRT-ORC — Orchestrator Module
 
@@ -77,7 +85,7 @@
 | BRT-ORC-005 | Maximum loop count exceeded | `src/orchestrator/engine.py::orchestrate_run` | The orchestrator looped more than 10 times without composing. Check for runaway re_plan cycles. |
 | BRT-ORC-006 | Orchestrator returned action=fail | `src/orchestrator/engine.py::orchestrate_run` | The orchestrator decided the task cannot be completed. See the rationale in the run trace. |
 | BRT-ORC-007 | No orchestrator model available | `src/orchestrator/engine.py::_select_orchestrator_model` | No checked model meets any quality bar for orchestration. Check that at least one model is ticked on the Models page, or set `orchestrator_endpoint` in config. |
-| BRT-ORC-007-DEGRADED | Quality bar relaxed from 8.0 to 5.1 | `src/orchestrator/engine.py::_select_orchestrator_model` | The default 8.0 bar found no qualifying model, so the orchestrator fell back to the lowest-scored checked row just above the unresearched default (5.0). The run continues but model quality is unknown. Click "Get Model Info" on the Models page to refresh scores. |
+| BRT-ORC-NO-FRONTIER (also written `BRT-ORC-007-DEGRADED`) | Planner quality bar relaxed from the configured bar (default 9.0) to 5.1 | `src/orchestrator/engine.py::_select_orchestrator_model` | No ticked model met the bar, so the planner took the best ticked row above the unresearched default (5.0). Warning event in the trace; the run continues but model quality is unknown. Click "Get Model Info" on the Models page to refresh scores, or lower `orchestrator_quality_requirement`. |
 | BRT-ORC-008 | Node build failed | `src/orchestrator/engine.py::_build_task_from_node` | A plan node could not be converted to a WrappedTask. Check the node definition in the run trace. |
 | BRT-ORC-009 | Compose mode returned no response | `src/orchestrator/engine.py::_handle_compose_result` | Compose gave no final answer, also when asked again (BRT-ORC-029), and no step of the run finished, so there was nothing to salvage (BRT-ORC-030). Check the compose prompt and model. |
 | BRT-ORC-013 | OpenRouter API key missing | `src/registry/model_call.py::resolve_model_call` | An OpenRouter row was selected but `OPENROUTER_API_KEY` is not set. Add it to `.env` or uncheck OpenRouter rows on the Models page. |
@@ -107,6 +115,7 @@
 | BRT-APE-004 | Depth limit exceeded | `src/orchestrator/apply_to_each.py::expand_and_run` | `current_depth >= max_depth`. Increase `max_depth` or flatten the plan structure. |
 | BRT-APE-005 | No items to process | `src/orchestrator/apply_to_each.py` (marked by `src/orchestrator/engine.py::_build_task_from_node`) | Items list is empty. Also: `inputs_ref` / a skill's `*_ref` given as an empty list, or naming a step of this run that failed (the message ends with that step's name, cut to 40 characters). No model call is made. Check the upstream state_op or input reference. On a raw (on-premise lane) step re_plan sees only `{"code", "doc"}`; the message is in the local trace. |
 | BRT-APE-006 | Ref names no step | `src/orchestrator/apply_to_each.py::_resolve_items` (marked by `src/orchestrator/engine.py::_build_task_from_node`) | An apply_to_each step (plan-written, or a skill such as `extract_fields`) has `inputs_ref` / `items_ref` (any skill `*_ref`, e.g. `failed_items_ref`) set to a name that is not the id of any step in this run, and carries no items of its own. A child run does not see its parent's step ids, so a child step naming a parent step fails here too. Also: the ref is neither a step id nor a list (a number, an object): "must be a step id or a list of items". The text leads with the guidance (a list from the user's message belongs in `items`; `inputs_ref`/`items_ref` must name a step of this run, not a parent's) and ends with `Not a step id: '<name, cut to 40 characters>'`, so all of it fits the 200 characters re_plan is shown. The step fails before any model call; re_plan sees it as an ordinary step failure (code+doc only on a raw lane step). Usually the list is in the operator's message: it belongs in the step's `items` (one string per item; for a skill, `items` in `skill_args` or the `*_ref` given as a list). A ref naming a step of the same plan is not this failure: the step waits for that step. `documents` is reserved for the run's documents only while the on-premise lane is on; with the lane off it is an ordinary name, so with no step of that id it fails here, and a step with id `documents` is waited for like any other. |
+| BRT-APE-CAPPED | apply_to_each concurrency capped | `src/orchestrator/apply_to_each.py` | Warning event. A `concurrency_limit` above 256 was lowered to 256; the step's output notes it. |
 
 ## BRT-TOOL — Runtime Tool Dispatcher (BRT-WEB-01)
 
@@ -162,6 +171,7 @@
 |------|-------------|--------|-------|
 | BRT-LOG-001 | Invalid event_type value | `src/logging/writer.py::write_event` | Must be one of: `model_call`, `orchestrator_decision`, `child_residue`, `escalation`, `deferral`, `reorchestration`, `error`. |
 | BRT-LOG-002 | Log write failed | `src/logging/writer.py::_write_event_task` | Printed to stderr (never re-raised). Check disk space and database file permissions. This is non-blocking — the caller continues regardless. |
+| BRT-LOG-PROV-001 | Git probe for the source version timed out | `src/logging/provenance.py` | Written once to stderr; `source_version` falls back to `unknown`. Set `BORG_SOURCE_VERSION` to avoid the probe. |
 
 ## BRT-API — API Module
 
