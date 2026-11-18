@@ -147,3 +147,21 @@ async def test_dict_items_keep_their_original_value(db):
                    "failed_items_only": True, "instruction": "x", "output_schema": {}},
                   {"classify_notes": first})
     assert task.dependency_input["items"] == [items[2], items[3]]
+
+
+@pytest.mark.parametrize("extra", [{}, {"type": "answerer"}])
+async def test_a_retry_node_with_no_type_or_type_answerer_retries_only_failed_items(db, extra):
+    """Review of 32d(ii): failed_items_only is read for any node with a skill_id,
+    whatever its type; plan validation accepts it there, and the retry runs
+    only n1's failed items."""
+    from src.orchestrator.plan_validation import validate_plan
+    from src.skills.library import SkillLibrary
+
+    first = await _first(ITEMS, FAILING, db)
+    node = dict({"id": "n3", "skill_id": "classify_into_buckets", "failed_items_only": True,
+                 "skill_args": {"buckets": BUCKETS, "items_ref": "classify_notes"}}, **extra)
+    lib = SkillLibrary()
+    lib.load("data/skills.yaml")
+    assert validate_plan([node], lib) == []
+    task = _build(node, {"classify_notes": first})
+    assert task.dependency_input["items"] == FAILING

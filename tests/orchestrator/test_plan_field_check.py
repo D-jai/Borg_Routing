@@ -384,3 +384,41 @@ def test_the_036_note_keeps_its_five_keys_under_redaction():
     assert set(kept) == {"code", "action", "node_id", "skill_id", "fields"}
     assert kept["code"] == "BRT-ORC-036" and kept["node_id"] == "n" * 40
     assert len(kept["fields"]) == 10 and kept["fields"][0] == "colour"
+
+
+def test_failed_items_only_is_accepted_on_a_skill_node_of_any_type_and_only_there():
+    node = {"id": "n3", "skill_id": "classify_into_buckets", "failed_items_only": True,
+            "skill_args": {"buckets": ["a", "b"], "items_ref": "n1"}}
+    assert validate_plan([node], LIB) == []
+    assert validate_plan([dict(node, type="answerer")], LIB) == []
+    plain = {"id": "n4", "type": "answerer", "instruction": "x", "failed_items_only": True}
+    assert validate_plan([plain], LIB)[0].fields == ("failed_items_only",)
+
+
+def test_accepted_unused_gaps_items_skill_args_and_state_op_routing_keys():
+    ans = {"type": "answerer", "id": "n1", "instruction": "Rank these",
+           "items": ["a", "b", "c"], "output_schema": {"rank": "list"}}
+    orch = dict(ans, type="orchestrate", id="n2")
+    no_skill = {"type": "answerer", "id": "n3", "instruction": "x",
+                "skill_args": {"a": 1}, "skill_version": 1}
+    sop = {"type": "state_op", "id": "n4", "op": "count", "source": "n1", "tier": "light",
+           "task_type": "extraction", "recommended_model": "m", "instruction": "x"}
+    skill_answerer = dict(_skill(), id="n5", items=["a"])
+    assert dict(accepted_unused([ans, orch, no_skill, sop, skill_answerer])) == {
+        "n1": ("items",), "n2": ("items",), "n3": ("skill_args", "skill_version"),
+        "n4": ("instruction", "recommended_model", "task_type", "tier"),
+    }
+
+
+@pytest.mark.asyncio
+async def test_items_on_a_plain_answerer_is_noted_and_changes_nothing(env):
+    db_path, mp, built = env
+    ans = {"type": "answerer", "id": "n1", "instruction": "Rank these",
+           "items": ["a", "b", "c"], "output_schema": {"rank": "list"}}
+    stub = StubModels(plan_nodes=[ans], answer_for=lambda r: {"rank": ["a", "b", "c"]}).install(mp)
+    result = await run_pipeline("Rank these.", db_path=db_path)
+    await drain_log_writes()
+    assert result["status"] == "completed", result.get("error")
+    notes = [d for d in _events(db_path, "orchestrator_decision") if d.get("action") == "accepted_unused"]
+    assert [(n["node_id"], n["fields"]) for n in notes] == [("n1", ["items"])]
+    assert not [e for e in _events(db_path, "error") if e.get("code") == "BRT-ORC-036"]

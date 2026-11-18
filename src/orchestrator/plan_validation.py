@@ -152,13 +152,21 @@ SKILL_ARG_EXTRAS = ("extra_fields", "items", "failed_items_only")
 
 # Change 1 (readings under ruling 32 (3)): accepted fields that build nothing
 # on the node's path. A skill step is built from its template (library.render);
-# the node's own fields below are never read there. state_query is never
-# executed on any path. A state_op ignores instruction and context.
+# the node's own fields below are never read there. The node-level instruction
+# and context on a skill step are not sent to the model, but the router counts
+# them in its size estimate (node_router.py:142-147). state_query is never
+# executed on any path. A state_op ignores instruction and context, and the
+# routing fields (a state_op makes no model call). ``items`` builds nothing on a non-skill answerer or
+# orchestrate step; skill_args and skill_version build nothing without a
+# skill_id.
 _SKILL_PATH_UNUSED = ("instruction", "context", "output_schema", "concurrency_limit",
                       "side_effects", "tool_requests", "max_output_tokens",
                       "dependency_input", "state_query")
-_PATH_UNUSED = {"answerer": ("state_query",), "orchestrate": ("state_query",),
-                "apply_to_each": (), "state_op": ("instruction", "context")}
+_PATH_UNUSED = {"answerer": ("state_query", "items"), "orchestrate": ("state_query", "items"),
+                "apply_to_each": (),
+                "state_op": ("instruction", "context", "tier", "task_type",
+                             "recommended_model")}
+_NO_SKILL_UNUSED = ("skill_args", "skill_version")
 
 
 def _names(names: list, room: int) -> str:
@@ -204,6 +212,10 @@ def _check_type(node: dict, skills: SkillRegistry) -> Optional[PlanIssue]:
 def _check_node_keys(node: dict, skills: SkillRegistry) -> Optional[PlanIssue]:
     node_type = _type(node)
     accepted = NODE_FIELDS[node_type]
+    if node.get("skill_id"):
+        # The engine's skill branch reads failed_items_only on any node with a
+        # skill_id, whatever its type (or none).
+        accepted = accepted + ("failed_items_only",)
     unknown = [str(k) for k in node if k not in accepted]
     if not unknown:
         return None
@@ -269,7 +281,10 @@ def accepted_unused(nodes: Any) -> list:
         node_type = _type(node)
         if node_type not in NODE_TYPES:
             continue
-        unused = _SKILL_PATH_UNUSED if node.get("skill_id") else _PATH_UNUSED[node_type]
+        if node.get("skill_id") and node_type != "state_op":
+            unused = _SKILL_PATH_UNUSED
+        else:
+            unused = _PATH_UNUSED[node_type] + (() if node.get("skill_id") else _NO_SKILL_UNUSED)
         fields = tuple(sorted(str(k) for k in node if k in unused))
         if fields:
             out.append((str(node.get("id", "")), fields))
