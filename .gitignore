@@ -37,3 +37,6 @@ data/borg_route.db-shm
 
 # Bench run databases and calls logs (kept for audit and crash recovery, never committed)
 bench/results/*/dbs/
+
+# Demo runs (ruling 24): the recorder's own database
+demo/runs/db/

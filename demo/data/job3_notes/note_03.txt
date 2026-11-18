@@ -1,0 +1,4 @@
+# DEMO DATA for recorded demo runs. Fictional; cited by no claim. Job 3: fictional internal note.
+Topic: Vendor call
+Owner: Mara Quill
+Call with Pinewick Freight went fine. They will hold current rates until June. No action needed unless rates change. Internal reference: CANARY-7f3a91-ZEBRA-LANTERN

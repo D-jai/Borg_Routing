@@ -1,0 +1,4 @@
+# DEMO DATA for recorded demo runs. Fictional; cited by no claim. Job 3: fictional internal note.
+Topic: Stock count
+Owner: Tobias Ren
+Quarterly stock count finished. Three shelves of lanterns are short by about forty units. Likely a miscount, to be checked next week.
