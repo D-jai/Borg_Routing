@@ -274,6 +274,21 @@ def _redact_events(events: list[dict]) -> list[dict]:
                 counts = {k: decision[k] for k in _PACK_OUTCOME_KEYS if k in decision}
                 kept.append(dict(ev, decision_json=json.dumps(counts)))
                 continue
+            # Ruling 32c: the plan note for a skill field that was asked for and
+            # not produced. Built from the plan and the skill list only, so it
+            # stays: these five keys, each string cut at 40, at most 10 fields.
+            if (ev.get("event_type") == "orchestrator_decision"
+                    and decision.get("code") == "BRT-ORC-035"
+                    and decision.get("action") == "ran_without_fields"):
+                fields = decision.get("fields")
+                note = {
+                    "code": "BRT-ORC-035", "action": "ran_without_fields",
+                    "node_id": str(decision.get("node_id", ""))[:40],
+                    "skill_id": str(decision.get("skill_id", ""))[:40],
+                    "fields": [str(f)[:40] for f in (fields if isinstance(fields, list) else [])[:10]],
+                }
+                kept.append(dict(ev, decision_json=json.dumps(note)))
+                continue
             # A packed item's share (ids and numbers only) stays, so the page
             # counts each packed post once; anything else in it is dropped.
             if ev.get("event_type") == "model_call" and isinstance(decision.get("pack"), dict):

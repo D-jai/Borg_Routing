@@ -1,0 +1,34 @@
+"""Ruling 32c: the BRT-ORC-035 "ran without fields" plan note survives redaction
+for a non-admin while the lane is on, in a whitelisted shape; nothing else of
+its decision text does."""
+import json
+
+from src.api.tasks import _redact_events
+
+
+def _note(**over):
+    d = {"code": "BRT-ORC-035", "action": "ran_without_fields", "node_id": "n1",
+         "skill_id": "classify_into_buckets", "fields": ["file", "urgency"],
+         "msg": "BRT-ORC-035: 'classify_into_buckets' returns: bucket", "extra": "doc text"}
+    d.update(over)
+    return {"event_type": "orchestrator_decision", "decision_json": json.dumps(d)}
+
+
+def test_the_note_keeps_exactly_five_keys_and_drops_the_rest():
+    kept = json.loads(_redact_events([_note()])[0]["decision_json"])
+    assert kept == {"code": "BRT-ORC-035", "action": "ran_without_fields", "node_id": "n1",
+                    "skill_id": "classify_into_buckets", "fields": ["file", "urgency"]}
+
+
+def test_strings_are_cut_at_40_and_at_most_10_fields_are_kept():
+    long = "x" * 100
+    kept = json.loads(_redact_events([_note(
+        node_id=long, skill_id=long, fields=[long] + [f"f{i}" for i in range(20)])])[0]["decision_json"])
+    assert kept["node_id"] == "x" * 40 and kept["skill_id"] == "x" * 40
+    assert len(kept["fields"]) == 10 and kept["fields"][0] == "x" * 40
+
+
+def test_another_decision_with_the_same_code_but_no_action_is_still_dropped():
+    ev = {"event_type": "orchestrator_decision",
+          "decision_json": json.dumps({"code": "BRT-ORC-035", "msg": "text"})}
+    assert _redact_events([ev])[0]["decision_json"] is None

@@ -527,3 +527,12 @@ def test_receipt_has_one_line_per_field_a_plan_asked_for_and_the_skill_did_not_r
         "the plan asked for urgency from classify_into_buckets, which does not return it; not produced",
     ]
     assert js(tmp_path, f"return W.notProducedLines({json.dumps({'events': [other]})});") == []
+
+
+def test_not_produced_line_renders_from_the_redacted_note_shape(tmp_path):
+    """What a non-admin gets under a lane: only the five whitelisted keys."""
+    note = {"event_type": "orchestrator_decision", "decision_json": json.dumps({
+        "code": "BRT-ORC-035", "action": "ran_without_fields", "node_id": "n1",
+        "skill_id": "classify_into_buckets", "fields": ["urgency"]})}
+    got = js(tmp_path, f"return W.notProducedLines({json.dumps({'events': [note]})});")
+    assert got == ["the plan asked for urgency from classify_into_buckets, which does not return it; not produced"]
