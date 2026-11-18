@@ -124,6 +124,15 @@
       if (m) childCount[m[1]] = (childCount[m[1]] || 0) + 1;
       else parents.push(e);
     });
+    // Planner ruling 23: one pack_outcome event per packed post, on the step's envelope.
+    var packs = {};
+    (data.events || []).forEach(function (ev) {
+      var d = ev.event_type === 'orchestrator_decision' ? decisionOf(ev) : null;
+      if (!d || d.mode !== 'pack_outcome') return;
+      var key = ev.envelope_id || d.step;
+      var p = packs[key] || (packs[key] = { posts: 0, accepted: 0, alone: 0 });
+      p.posts += 1; p.accepted += num(d.accepted) || 0; p.alone += num(d.alone) || 0;
+    });
     var usedIds = {};
     var steps = parents.map(function (e, i) {
       var out = parseJSON(e.outbound_payload) || {};
@@ -148,11 +157,13 @@
       if (di && typeof di.source_ref === 'string' && di.source_ref) deps.push(di.source_ref);
       var items = num(routing && routing.items) || childCount[e.envelope_id] ||
         (pnode && Array.isArray(pnode.items) ? pnode.items.length : null);
+      var pk = packs[e.envelope_id] || null;
       var tin = num(e.tokens_input), tout = num(e.tokens_output);
       return {
         id: id, envelope: e, type: e.type, instruction: out.instruction || (pnode && pnode.instruction) || '',
         label: shortText(e.skill_id ? e.skill_id.replace(/_/g, ' ') + ': ' + (out.instruction || '') : (out.instruction || id), 30),
         deps: deps, items: items || null, routing: routing, status: e.status,
+        packPosts: pk ? pk.posts : 0, packAccepted: pk ? pk.accepted : 0, retriedAlone: pk ? pk.alone : 0,
         model: e.model_id || (routing && routing.chosen) || null,
         dollars: num(e.dollars), latency_ms: num(e.latency_ms),
         tokens: tin === null && tout === null ? null : (tin || 0) + (tout || 0),
@@ -257,7 +268,15 @@
   // A logged call is a log row with tokens or dollars (model_call, priced orchestrator calls).
   function isCall(ev) {
     return (ev.event_type === 'model_call' || ev.event_type === 'orchestrator_decision' || ev.event_type === 'tool_call') &&
-      (num(ev.tokens_input) !== null || num(ev.dollars) !== null) && !!ev.model_id;
+      (num(ev.tokens_input) !== null || num(ev.dollars) !== null) && !!ev.model_id && !packShare(ev);
+  }
+  /* Planner ruling 23: a packed call logs one model_call per item with its share. Only the
+   * first share of each post counts as a call; the others are packShare. */
+  function packShare(ev) {
+    if (!ev || ev.event_type !== 'model_call') return false;
+    var d = decisionOf(ev);
+    var p = d && d.pack;
+    return !!(p && typeof p === 'object' && !p.first);
   }
   function callsByModel(data) {
     var out = {}, order = [];
@@ -538,6 +557,17 @@
   }
 
   function plural(n, word) { return n + ' ' + word + (n === 1 ? '' : 's'); }
+
+  /* itemsLine(step) -> "N items in M calls" (ruling 23): M is the step's packed posts plus one
+   * call for every item not filed from a pack value; "; k retried alone" when items went to a
+   * single call after being in a pack. With packing off M equals N. */
+  function itemsLine(step) {
+    var n = step && num(step.items);
+    if (!n) return null;
+    var posts = num(step.packPosts) || 0, accepted = num(step.packAccepted) || 0, alone = num(step.retriedAlone) || 0;
+    var m = posts + Math.max(0, n - accepted);
+    return plural(n, 'item') + ' in ' + plural(m, 'call') + (alone ? '; ' + alone + ' retried alone' : '');
+  }
   function clock(sec) {
     sec = Math.max(0, Math.round(sec || 0));
     var m = Math.floor(sec / 60), s = sec - m * 60;
@@ -567,6 +597,7 @@
       var step = stepByEnv[ev.envelope_id];
       var name = step ? '“' + step.label + '”' : 'a step';
       if (ev.event_type === 'model_call') {
+        if (packShare(ev)) return;          // a packed post is told once, by its first share
         if (last && last.model === ev.model_id && last.env === (step ? step.id : null)) {
           last.count += 1;
           last.entry.text = last.count + ' calls went to ' + model + (step ? ' for ' + name : '') + '.';
@@ -579,6 +610,7 @@
       }
       if (ev.event_type === 'orchestrator_decision') {
         var mode = d && d.mode;
+        if (mode === 'pack_outcome') return;   // counts only; the calls are told by their model_call
         if (!d) return push(ev, 'The planner made a decision (details hidden while the lane is on).');
         if (mode === 'plan') {
           var nodes = d.parsed && d.parsed.plan && d.parsed.plan.nodes;
@@ -637,6 +669,7 @@
     planNodesById: planNodesById, stepsFromRun: stepsFromRun, planLayout: planLayout,
     callsByModel: callsByModel, runTotals: runTotals, baselineEstimate: baselineEstimate, floorNote: floorNote, floorMoney: floorMoney,
     failureWords: failureWords, eventSentences: eventSentences, clock: clock, REASONS: REASONS,
+    itemsLine: itemsLine, packShare: packShare,
     svgEl: svgEl, whereDot: whereDot
   };
 })();

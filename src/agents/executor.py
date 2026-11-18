@@ -73,15 +73,43 @@ _STAGE_SLOT = re.compile(r"\{(\w+)\}")
 _TRUNCATION_RETRY_CEILING = 16000
 
 
-def _extract_json(text: str) -> dict:
+def _extract_json(text: str, dup_keys: Optional[list] = None) -> dict:
     """Extract the first JSON object from a string.
+
+    ``dup_keys`` (planner ruling 23, packed replies): when a list is given,
+    every path (direct, fence, brace) parses with a hook that records keys
+    given twice, and the duplicated keys of the top-level object are added
+    to it. Plain ``json.loads`` would silently keep the last one. Without it
+    the parse is exactly as before.
 
     Raises:
         ValueError: BRT-ANS-004 if no valid JSON object found.
     """
+    if dup_keys is None:
+        loads = json.loads
+    else:
+        seen: list[list] = []
+
+        def _hook(pairs):
+            obj, dups = {}, []
+            for key, value in pairs:
+                if key in obj:
+                    dups.append(key)
+                obj[key] = value
+            seen.append(dups)
+            return obj
+
+        def loads(s):
+            seen.clear()
+            value = json.loads(s, object_pairs_hook=_hook)
+            if isinstance(value, dict) and seen:
+                # The outermost object is the last one the hook finishes.
+                dup_keys.extend(seen[-1])
+            return value
+
     # Try direct parse first
     try:
-        return json.loads(text.strip())
+        return loads(text.strip())
     except json.JSONDecodeError:
         pass
 
@@ -89,7 +117,7 @@ def _extract_json(text: str) -> dict:
     fence_match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
     if fence_match:
         try:
-            return json.loads(fence_match.group(1))
+            return loads(fence_match.group(1))
         except json.JSONDecodeError:
             pass
 
@@ -97,7 +125,7 @@ def _extract_json(text: str) -> dict:
     brace_match = re.search(r"\{.*\}", text, re.DOTALL)
     if brace_match:
         try:
-            return json.loads(brace_match.group(0))
+            return loads(brace_match.group(0))
         except json.JSONDecodeError:
             pass
 

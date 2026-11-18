@@ -576,8 +576,12 @@ def read_run_tree(db_path: str, run_id: Optional[str]) -> dict:
         out["models"] = [r[0] for r in conn.execute(
             f"SELECT DISTINCT model_id FROM logs WHERE run_id IN ({marks}) AND event_type='model_call' "
             "AND model_id IS NOT NULL AND model_id NOT LIKE 'tool:%' ORDER BY model_id", ids)]
+        # Planner ruling 23: one per post; a packed call's item shares count once.
+        from src.orchestrator.packing import COUNTS_AS_CALL_SQL  # noqa: PLC0415
+
         out["model_calls"] = conn.execute(
-            f"SELECT COUNT(*) FROM logs WHERE run_id IN ({marks}) AND event_type='model_call'", ids).fetchone()[0]
+            f"SELECT COALESCE(SUM({COUNTS_AS_CALL_SQL}), 0) FROM logs WHERE run_id IN ({marks}) "
+            "AND event_type='model_call'", ids).fetchone()[0]
         step_dollars = {e: float(d) for e, d in conn.execute(
             f"SELECT envelope_id, COALESCE(SUM(dollars),0) FROM logs WHERE run_id IN ({marks}) "
             "AND event_type='model_call' AND envelope_id IS NOT NULL GROUP BY envelope_id", ids)}

@@ -340,3 +340,55 @@ def test_timeline_sentences_group_calls_and_say_what_happened(tmp_path):
     assert texts[2] == "top wrote the final answer."
     assert "hidden" in texts[3]
     assert [o["at"] for o in out] == ["0:01", "0:03", "0:39", "0:40"]
+
+
+# ---------- planner ruling 23: packed calls ----------
+
+def _item_event(env_id, step_id, call, first, accepted=True, model="openrouter/stub/cheap"):
+    pack = {"call": call, "step": step_id, "size": 20, "position": 0, "cut": False,
+            "accepted": accepted, "first": first, "share_picodollars": 1, "share_baseline_picodollars": 2}
+    return {"event_type": "model_call", "envelope_id": env_id, "model_id": model, "dollars": 0.0001,
+            "tokens_input": 5, "tokens_output": 2, "created_at": "2026-11-17 10:00:03",
+            "decision_json": json.dumps({"pack": pack})}
+
+
+def _outcome(step_id, items, accepted, alone):
+    return {"event_type": "orchestrator_decision", "envelope_id": step_id, "model_id": "openrouter/stub/cheap",
+            "dollars": None, "tokens_input": None, "created_at": "2026-11-17 10:00:04",
+            "decision_json": json.dumps({"mode": "pack_outcome", "step": step_id, "call": "c",
+                                         "items": items, "accepted": accepted, "alone": alone})}
+
+
+def test_ruling_23_a_packed_post_counts_as_one_call(tmp_path):
+    pid = str(uuid.uuid4())
+    parent = env("n1", type_="apply_to_each", envelope_id=pid)
+    parent["routing"]["items"] = 40
+    events = [plan_event([{"id": "n1"}])]
+    for call in ("c1", "c2"):
+        events += [_item_event(str(uuid.uuid4()), pid, call, first=(k == 0)) for k in range(20)]
+    data = run_body([parent], events)
+    t = totals(tmp_path, data)
+    assert t["calls"] == 1 + 2            # the plan call and two packed posts
+    by_model = js(tmp_path, f"return W.callsByModel ? W.callsByModel({json.dumps(data)}) : null;")
+    if by_model is not None:
+        assert {m["model"]: m["calls"] for m in by_model}["openrouter/stub/cheap"] == 2
+    sentences = [o["text"] for o in js(tmp_path, f"return W.eventSentences({json.dumps(data)});")]
+    assert any(s.startswith("2 calls went to cheap") for s in sentences), sentences
+
+
+def test_ruling_23_the_items_line_says_n_items_in_m_calls(tmp_path):
+    pid = str(uuid.uuid4())
+    parent = env("n1", type_="apply_to_each", envelope_id=pid)
+    parent["routing"]["items"] = 45
+    events = [plan_event([{"id": "n1"}]),
+              _outcome(pid, 20, 20, 0), _outcome(pid, 20, 18, 2), _outcome(pid, 5, 5, 0)]
+    data = run_body([parent], events)
+    line = js(tmp_path, f"return W.itemsLine(W.stepsFromRun({json.dumps(data)})[0]);")
+    assert line == "45 items in 5 calls; 2 retried alone"     # 3 packed posts + (45 - 43) single calls
+
+
+def test_ruling_23_with_packing_off_each_item_is_its_own_call(tmp_path):
+    parent = env("n1", type_="apply_to_each")
+    parent["routing"]["items"] = 7
+    line = js(tmp_path, f"return W.itemsLine(W.stepsFromRun({json.dumps(run_body([parent]))})[0]);")
+    assert line == "7 items in 7 calls"

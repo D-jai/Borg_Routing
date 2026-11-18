@@ -62,6 +62,14 @@ def _is_call(ev: dict) -> bool:
     )
 
 
+def _is_post(ev: dict) -> bool:
+    """A logged call counted once per post: a packed call's item shares
+    count once, by the first share (planner ruling 23)."""
+    from src.orchestrator.packing import counts_as_call  # noqa: PLC0415
+
+    return _is_call(ev) and counts_as_call(ev.get("decision_json"))
+
+
 def _left_by_rules(model_id: str, matrix, rules) -> Optional[bool]:
     """True when a call to ``model_id`` left the machine, False when it did
     not, None when its locality is unknown. A ``tool:*`` id (web search) is a
@@ -93,8 +101,8 @@ def calls_left_machine(
         return {"count": len(outbound), "source": "ledger"}
     hosts, allow = rules
     rules = (hosts, allow if lane_on else [])
-    calls = [ev for ev in events if _is_call(ev)]
-    seen = {str(ev["envelope_id"]) for ev in calls if ev.get("envelope_id")}
+    calls = [ev for ev in events if _is_post(ev)]
+    seen = {str(ev["envelope_id"]) for ev in events if _is_call(ev) and ev.get("envelope_id")}
     judged = [ev["model_id"] for ev in calls]
     for env in envelopes or []:
         mid = env.get("model_id")

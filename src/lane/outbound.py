@@ -63,15 +63,34 @@ from .errors import LaneError
 _SECRET_KEYS = {"api_key", "apikey", "key", "authorization", "token", "password"}
 
 _scope: contextvars.ContextVar[dict] = contextvars.ContextVar("borg_call_scope", default={})
+# Planner ruling 23: the apply_to_each step a call belongs to (its aggregate
+# envelope id), set around the whole expansion, so every item call, packed or
+# single, is filed against its step in the ledger.
+_step: contextvars.ContextVar[Optional[UUID]] = contextvars.ContextVar("borg_step_scope", default=None)
 
 
 @contextmanager
-def call_scope(run_id: Optional[UUID] = None, envelope_id: Optional[UUID] = None) -> Iterator[None]:
-    token = _scope.set({"run_id": run_id, "envelope_id": envelope_id})
+def call_scope(
+    run_id: Optional[UUID] = None,
+    envelope_id: Optional[UUID] = None,
+    documents: Optional[list[str]] = None,
+) -> Iterator[None]:
+    """``documents``: every document id a packed call carries (ruling 23);
+    None for any other call."""
+    token = _scope.set({"run_id": run_id, "envelope_id": envelope_id, "documents": documents})
     try:
         yield
     finally:
         _scope.reset(token)
+
+
+@contextmanager
+def step_scope(step_envelope_id: Optional[UUID]) -> Iterator[None]:
+    token = _step.set(step_envelope_id)
+    try:
+        yield
+    finally:
+        _step.reset(token)
 
 
 def current_scope() -> dict:
@@ -205,12 +224,12 @@ async def _insert_once(db_path: str, row: dict) -> None:
         await db.execute(
             """INSERT INTO outbound_requests(
                 request_id, run_id, envelope_id, attempt, purpose, destination,
-                url, left_machine, body, status
-            ) VALUES (?,?,?,?,?,?,?,?,?,'pending')""",
+                url, left_machine, body, status, step_envelope_id, documents
+            ) VALUES (?,?,?,?,?,?,?,?,?,'pending',?,?)""",
             (
                 row["request_id"], row["run_id"], row["envelope_id"], row["attempt"],
                 row["purpose"], row["destination"], row["url"], row["left_machine"],
-                row["body"],
+                row["body"], row.get("step_envelope_id"), row.get("documents"),
             ),
         )
         await db.commit()
@@ -271,6 +290,10 @@ async def record_start(
         "url": url,
         "left_machine": 1 if left_machine else 0,
         "body": json.dumps(_redacted(body), ensure_ascii=False),
+        # Ruling 23: the step an apply_to_each item call belongs to, and every
+        # document id of a packed call (NULL otherwise).
+        "step_envelope_id": str(_step.get()) if _step.get() is not None else None,
+        "documents": json.dumps(scope["documents"]) if scope.get("documents") else None,
     }
     try:
         await _insert_row(lane.db_path, row)

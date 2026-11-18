@@ -124,6 +124,12 @@ def _planner_pick(node: dict, matrix: CapabilityMatrix, notes: list[str]) -> Opt
     return row
 
 
+def estimate_tokens(text: str) -> int:
+    """The router's token estimate for a text: characters // 4 (no tokenizer).
+    Planner ruling 23 measures items and packed prompts with it."""
+    return len(text) // 4
+
+
 def _estimate_input_tokens(node: dict, extra_input_tokens: int = 0) -> int:
     text = f"{node.get('instruction') or ''}{node.get('context') or ''}"
     skill_args = node.get("skill_args")

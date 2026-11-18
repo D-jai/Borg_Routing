@@ -21,6 +21,14 @@ Error codes:
                (or is neither a step id nor a list) and it has no inline
                items; failed before any model call (planner ruling 1a).
                On a raw (lane) step both are shown upward as code+doc only.
+- BRT-APE-007: BORG_PACK_MAX_ITEMS is not a whole number of 0 or more;
+               packing is off for the step (warning event, ruling 23)
+
+Packing (planner ruling 23, ``src/orchestrator/packing.py``): a step whose
+calls go to a cloud host may send several small items in one call. Each item
+still has its own child task, envelope and stored result, filed by
+``_file_env`` exactly as a single call's. With ``BORG_PACK_MAX_ITEMS`` at 0
+or 1, or for any step that may not be packed, the items run as before.
 """
 import asyncio
 import uuid
@@ -357,9 +365,35 @@ async def expand_and_run(
     guarded = [0]   # raw items whose output passed the lane's output guard
     model_reasons: set = set()   # item indexes whose failure the model wrote
 
-    async def _run_one(index: int, item: object) -> None:
-        suffix = _level_suffix(index)
-        child = _make_child_task(task, item, index, suffix)
+    def _file_env(index: int, item: object, child: WrappedTask, env: InboundEnvelope) -> None:
+        """File one item's envelope: a single call's, or one built from a
+        packed reply (ruling 23), by the same rules."""
+        if env.status == "resolved":
+            results.append({
+                "index": index,
+                "item": item,
+                "output": env.output,
+                "confidence": env.confidence,
+            })
+            if env.lane_guarded:
+                guarded[0] += 1
+        else:
+            failures.append({
+                "index": index,
+                "item": item,
+                "reason": _failure_reason(child, env.failure_reason or "status=failed", env),
+                "model_id": child.model_name,
+            })
+            # Planner ruling 21: a row marker shows a model-written
+            # reason as BRT-ANS-010, never parsed. Kept on the
+            # envelope, never in the stored output.
+            if env._reason_from_model:
+                model_reasons.add(index)
+
+    async def _run_one(index: int, item: object, child: Optional[WrappedTask] = None) -> None:
+        if child is None:
+            suffix = _level_suffix(index)
+            child = _make_child_task(task, item, index, suffix)
         async with semaphore:
             try:
                 env = await _dispatch_child(child, db_path)
@@ -367,27 +401,7 @@ async def expand_and_run(
                 totals["output"] += (env.tokens_used or {}).get("output") or 0
                 totals["dollars"] += env.dollars or 0.0
                 totals["baseline"] += env.baseline_dollars or 0.0
-                if env.status == "resolved":
-                    results.append({
-                        "index": index,
-                        "item": item,
-                        "output": env.output,
-                        "confidence": env.confidence,
-                    })
-                    if env.lane_guarded:
-                        guarded[0] += 1
-                else:
-                    failures.append({
-                        "index": index,
-                        "item": item,
-                        "reason": _failure_reason(child, env.failure_reason or "status=failed", env),
-                        "model_id": child.model_name,
-                    })
-                    # Planner ruling 21: a row marker shows a model-written
-                    # reason as BRT-ANS-010, never parsed. Kept on the
-                    # envelope, never in the stored output.
-                    if env._reason_from_model:
-                        model_reasons.add(index)
+                _file_env(index, item, child, env)
             except Exception as exc:
                 failures.append({
                     "index": index,
@@ -396,7 +410,46 @@ async def expand_and_run(
                     "model_id": child.model_name,
                 })
 
-    await asyncio.gather(*[_run_one(i, item) for i, item in enumerate(items)])
+    from src.lane.outbound import step_scope  # noqa: PLC0415
+    from src.orchestrator import packing  # noqa: PLC0415
+
+    max_items, pack_warning = packing.pack_max_items()
+    if pack_warning:
+        from src.logging.writer import write_event  # noqa: PLC0415
+
+        try:
+            await write_event(
+                "error",
+                run_id=task.run_id,
+                envelope_id=task.envelope_id,
+                decision={"code": "BRT-APE-007", "severity": "warning", "msg": pack_warning},
+                db_path=db_path,
+            )
+        except Exception:
+            pass
+    pack_ctx = await packing.packing_context(task, len(items), max_items, db_path)
+
+    with step_scope(task.envelope_id):
+        if pack_ctx is None:
+            await asyncio.gather(*[_run_one(i, item) for i, item in enumerate(items)])
+        else:
+            children = [
+                _make_child_task(task, item, i, _level_suffix(i)) for i, item in enumerate(items)
+            ]
+
+            def _add_totals(tin: int, tout: int, dollars: float, baseline) -> None:
+                totals["input"] += tin
+                totals["output"] += tout
+                totals["dollars"] += dollars
+                totals["baseline"] += baseline or 0.0
+
+            packer = packing.StepPacker(
+                task=task, items=items, children=children, ctx=pack_ctx, semaphore=semaphore,
+                run_single=lambda i: _run_one(i, items[i], children[i]),
+                file_env=lambda i, env: _file_env(i, items[i], children[i], env),
+                add_totals=_add_totals, db_path=db_path,
+            )
+            await packer.run()
 
     # Sort results by index for deterministic ordering
     results.sort(key=lambda r: r["index"])

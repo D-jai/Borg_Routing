@@ -250,13 +250,24 @@ def _redact_events(events: list[dict]) -> list[dict]:
     """
     kept = []
     for ev in events:
-        if ev.get("event_type") == "orchestrator_decision":
+        if ev.get("event_type") in ("orchestrator_decision", "model_call"):
             try:
                 decision = json.loads(ev.get("decision_json") or "null")
             except (TypeError, ValueError):
                 decision = None
-            if isinstance(decision, dict) and decision.get("mode") == "route":
+            if not isinstance(decision, dict):
+                decision = {}
+            # A route decision, and a packed post's outcome (planner ruling
+            # 23: ids and counts only), are kept whole.
+            if ev.get("event_type") == "orchestrator_decision" and decision.get("mode") in (
+                "route", "pack_outcome",
+            ):
                 kept.append(ev)
+                continue
+            # A packed item's share (ids and numbers only) stays, so the page
+            # counts each packed post once; anything else in it is dropped.
+            if ev.get("event_type") == "model_call" and isinstance(decision.get("pack"), dict):
+                kept.append(dict(ev, decision_json=json.dumps({"pack": decision["pack"]})))
                 continue
         kept.append(dict(ev, decision_json=None))
     return kept

@@ -98,6 +98,9 @@ _COST_ROWS = (
     "(event_type='model_call' OR (event_type='orchestrator_decision' "
     "AND (dollars IS NOT NULL OR tokens_input IS NOT NULL)))"
 )
+# Planner ruling 23: a packed call logs one row per item with its share; the
+# call count takes one row per post (the first share), every other row once.
+from src.orchestrator.packing import COUNTS_AS_CALL_SQL as _CALL_ROW  # noqa: E402
 
 
 @router.get("/cost-summary")
@@ -113,7 +116,7 @@ async def cost_summary() -> JSONResponse:
             async with db.execute(
                 f"""SELECT
                      model_id,
-                     COUNT(*) AS call_count,
+                     COALESCE(SUM({_CALL_ROW}), 0) AS call_count,
                      COALESCE(SUM(tokens_input), 0)  AS total_tokens_in,
                      COALESCE(SUM(tokens_output), 0) AS total_tokens_out,
                      COALESCE(SUM(dollars), 0)        AS total_cost
@@ -127,7 +130,7 @@ async def cost_summary() -> JSONResponse:
             # Overall totals
             async with db.execute(
                 f"""SELECT
-                     COUNT(*) AS total_calls,
+                     COALESCE(SUM({_CALL_ROW}), 0) AS total_calls,
                      COALESCE(SUM(tokens_input), 0)  AS total_tokens_in,
                      COALESCE(SUM(tokens_output), 0) AS total_tokens_out,
                      COALESCE(SUM(dollars), 0)        AS total_cost

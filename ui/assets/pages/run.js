@@ -128,7 +128,9 @@ Borg.ready(function () {
     return dl;
   }
   function leftFor(step) {
-    var rows = (data.outbound || []).filter(function (o) { return o.envelope_id === step.envelope.envelope_id; });
+    // An apply_to_each item call (packed or single) names its step in step_envelope_id (ruling 23).
+    var id = step.envelope.envelope_id;
+    var rows = (data.outbound || []).filter(function (o) { return o.envelope_id === id || o.step_envelope_id === id; });
     if (rows.length) return 'Yes: ' + rows.length + (rows.length === 1 ? ' request' : ' requests') + ' (listed below)';
     if ((data.outbound || []).length) return 'No';
     var l = modelLocal[step.model];
@@ -197,7 +199,7 @@ Borg.ready(function () {
       ['Model', step.type === 'state_op' ? 'No model needed' : r.served_by === 'child_run' ? h('span', {}, ['This step ran as its own run, which chose its own models. ', child]) : where(step.model)],
       ['Kind of work', [step.task_type, step.tier].filter(Boolean).join(', ') || '-'],
       r.floor !== undefined && r.floor !== null ? ['Needed score', r.floor + ' or more', 'num'] : null,
-      step.items ? ['Items', step.items + ' (one call each)', 'num'] : null,
+      step.items ? ['Items', W.itemsLine(step), 'num'] : null,
       ['Cost, time', B.money(step.dollars) + ' · ' + (step.latency_ms === null ? '-' : B.duration(step.latency_ms / 1000)) +
         ' · ' + (step.tokens === null ? '-' : step.tokens.toLocaleString() + ' tokens'), 'num'],
       ['Input left this machine', leftFor(step)],

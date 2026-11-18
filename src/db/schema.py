@@ -62,6 +62,11 @@ _MIGRATIONS = [
     # 4.2 review: the lane mode the run ran under (off, raw_local, all_local,
     # by_reference). NULL when not recorded (a run from before this column).
     "ALTER TABLE runs ADD COLUMN lane_mode TEXT",
+    # Planner ruling 23: the ledger names the apply_to_each step of an item
+    # call (packed or single), and every document id of a packed call. NULL
+    # for any other call, and for a packed call that carries no documents.
+    "ALTER TABLE outbound_requests ADD COLUMN step_envelope_id TEXT",
+    "ALTER TABLE outbound_requests ADD COLUMN documents TEXT",
 ]
 
 _SCHEMA_SQL = """

@@ -150,6 +150,8 @@ The loopback rule: with the variable unset or empty, admin routes answer only to
 | `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama address probed by Discover (Ollama in Docker works here). |
 | `LOCAL_OPENAI_BASE_URLS` | (unset) | Comma-separated addresses of any other OpenAI-compatible server, found through `/v1/models`; rows get source `custom_key`. |
 
+Set the local server's context window at least as large as the longest prompt you expect (for Ollama, `OLLAMA_CONTEXT_LENGTH`, for example `OLLAMA_CONTEXT_LENGTH=16384`). A server serving a smaller window than the prompt can silently drop the start of the prompt, which is where the operator's instruction and the rules sit; BORG_ROUTE cannot see the window the server really serves.
+
 Addresses must start with `http://` or `https://`; anything else is ignored with a log warning. An unreachable address is skipped, never an error.
 
 ### Scorer

@@ -86,6 +86,23 @@ def _isolated_data(tmp_path_factory):
 
 
 @pytest.fixture(autouse=True)
+def _packing_off_by_default():
+    """Planner ruling 23: tests written before packing keep one call per item.
+
+    ``BORG_PACK_MAX_ITEMS`` is pinned to 0 for every test; a packing test opts
+    in with its own ``monkeypatch.setenv``. ``BORG_TEST_PACK_MAX_ITEMS`` (when
+    set in the shell) pins another value instead, so the suite can be run once
+    with packing on to list what changes.
+    """
+    mp = pytest.MonkeyPatch()
+    mp.setenv("BORG_PACK_MAX_ITEMS", os.environ.get("BORG_TEST_PACK_MAX_ITEMS", "0"))
+    try:
+        yield
+    finally:
+        mp.undo()
+
+
+@pytest.fixture(autouse=True)
 def _restore_shared_matrix():
     """The engine routes on ``main.matrix`` (R2), so a test that ticks rows or
     inserts a test row there must not leak into later tests: snapshot the
