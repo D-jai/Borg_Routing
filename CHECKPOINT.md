@@ -34,7 +34,13 @@ If this session stopped abruptly: `git log` and `git status` show what landed; a
 - **Next:**
   - one reviewer pass on the 32e code;
   - then replay C1, C3 and C4 over every stored compose reply, and add the cost table to the note;
-  - then STOP before the paid trial 32g (cap US$3; it needs Deej's yes; prepare the runner command);
+  - then the paid trial 32g. It is approved: Deej's ruling 14, cap raised to US$5; planner ruling 33a. Run `& demo/runs/trial_32g.ps1`.
+    - Pre-checks: Docker serving plus the borg_bench_py image, borg_ollama running, and bench/data clean and equal to the round-2 data.
+    - Part 1 runs A, B, C, D on the cloud arm with round-2 data (`--date trial32g_r2data`).
+    - Part 2, if money is left, runs A and C on round-1 data regenerated into `C:\Stage\_scratch\borg_trial_round1_data` through `--data-root` (`--date trial32g_r1data`). bench/data is never touched.
+    - The watchdog stops at US$4.50 on the main ledger; then tell the planner.
+    - The stored direct results are copied in; there are no direct re-runs and no local runs.
+    - 33c's planner-prompt line is unanswered by Deej: if it is still unanswered, start without it and say so in the report.
   - after the trial: 4.5 replay, 5.2.
 - Rulings and build rows are in BUILD.md sections 8 and 9.
 
