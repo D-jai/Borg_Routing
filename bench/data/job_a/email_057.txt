@@ -1,7 +1,8 @@
-Hello support team,
+Good morning,
 
-The app crashes every time I open the reports tab.
-We cannot work properly until this is fixed, please act today.
+Uploads above 20 MB fail with a timeout message.
+I already searched your help pages first.
+I would appreciate a reply in the next couple of days.
 
-Best,
-Lucas
+Thanks,
+Noor

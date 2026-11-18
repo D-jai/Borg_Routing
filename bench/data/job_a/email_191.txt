@@ -1,8 +1,8 @@
-Good morning,
+Hello,
 
-Uploads above 20 MB fail with a timeout message.
-My colleague suggested I contact you directly.
+Suggestion: please add a dark mode.
+I already searched your help pages first.
 Please get back to me within two or three days.
 
-Thank you,
-Callum
+Kind regards,
+Aiko

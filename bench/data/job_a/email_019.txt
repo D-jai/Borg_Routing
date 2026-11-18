@@ -1,8 +1,7 @@
-Hello,
+Hi team,
 
-The courier left the package at a neighbour's door without telling me.
-My colleague suggested I contact you directly.
-Please reply sometime this week.
+The box for order 73368 arrived damaged.
+We cannot work properly until this is fixed, please act today.
 
-Thanks,
-Dmitri
+Best,
+Leila

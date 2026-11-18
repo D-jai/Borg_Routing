@@ -1,8 +1,8 @@
-Hello support team,
+Good morning,
 
-Uploads above 20 MB fail with a timeout message.
-I have been a customer for about two years.
-A reply within the week would be fine.
+Your API returns error 500 on the items endpoint (request 24749).
+This is the first time I have had to write to you.
+No rush at all, whenever you get a chance.
 
-Best,
-Gabriel
+Thank you,
+Marcus

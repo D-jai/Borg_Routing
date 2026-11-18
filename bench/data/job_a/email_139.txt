@@ -1,7 +1,7 @@
-Good morning,
+Hi team,
 
-Uploads above 20 MB fail with a timeout message.
-URGENT: we are losing money every hour until this is fixed.
+The onboarding guide was confusing in the third step.
+Nothing time critical, reply when convenient.
 
-Thank you,
-Callum
+Kind regards,
+Lucas

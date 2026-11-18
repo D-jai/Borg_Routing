@@ -23,7 +23,7 @@ import random
 import sys
 from pathlib import Path
 
-SEED = 20261117
+SEED = 4132800769  # round 2: int(freeze f655890[:8], 16), planner rulings 27 and 29
 DATA_DIR = Path(__file__).resolve().parent / "data"
 
 # --------------------------------------------------------------------------

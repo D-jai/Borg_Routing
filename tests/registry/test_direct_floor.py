@@ -75,14 +75,19 @@ def test_no_baseline_or_no_price_is_unknown_not_zero():
     assert direct_floor_dollars(100, 100, local) is None
 
 
-def test_the_fixture_char_counts_match_the_committed_round_1_data():
-    """Guards the fixture: the char counts are what bench/data and the stored answers really hold."""
+ROUND_1_SEED = 20261117  # bench/data was generated from this seed for round 1
+
+
+def test_the_fixture_char_counts_match_the_committed_round_1_data(tmp_path):
+    """Guards the fixture: the char counts are what round 1's data and the stored answers
+    really hold. Round 2 regenerated bench/data from a new seed (planner rulings 27, 29), so
+    round 1's data is rebuilt here from its own seed by the same generator."""
     root = pathlib.Path(__file__).resolve().parents[2]
-    if not (root / "bench" / "data" / "job_a").is_dir():
-        pytest.skip("bench data not on disk")
     import yaml
+    from bench import make_data
     from bench import run_bench as rb
-    cfg = SimpleNamespace(data_root=root / "bench" / "data", bench_dir=root / "bench")
+    make_data.write_all(tmp_path, ROUND_1_SEED)
+    cfg = SimpleNamespace(data_root=tmp_path, bench_dir=root / "bench")
     for j in "ABC":
         job = yaml.safe_load((root / "bench" / "jobs" / f"job_{j.lower()}.yaml").read_text(encoding="utf-8"))
         chars = len(rb.instruction_of(job, cfg)) + sum(len(t) for _n, t in rb.data_units(job, cfg))

@@ -1,7 +1,7 @@
-Dear support,
+Hi team,
 
-Your API returns error 500 on the items endpoint (request 48800).
-This is blocking my team today, please prioritise it.
+Suggestion: please add a dark mode.
+No rush at all, whenever you get a chance.
 
-Thank you,
-Aiko
+Best,
+Priya

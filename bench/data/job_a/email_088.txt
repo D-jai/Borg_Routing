@@ -1,8 +1,7 @@
-Hi team,
+Dear support,
 
-I cannot log in and the password reset email never arrives.
-I have been a customer for about two years.
-Please get back to me within two or three days.
+Two-factor codes are rejected even though my phone clock is right.
+Nothing time critical, reply when convenient.
 
-Kind regards,
-Lucas
+Thanks,
+Tomas

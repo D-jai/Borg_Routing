@@ -1,7 +1,8 @@
-Dear support,
+Hello,
 
-Uploads above 20 MB fail with a timeout message.
-This is blocking my team today, please prioritise it.
+The box for order 25150 arrived damaged.
+I already searched your help pages first.
+A reply within the week would be fine.
 
-Best,
-Tomas
+Kind regards,
+Aiko

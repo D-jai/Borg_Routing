@@ -1,8 +1,7 @@
-Good morning,
+Dear support,
 
-Two-factor codes are rejected even though my phone clock is right.
-This is the first time I have had to write to you.
-A reply within the week would be fine.
+Your API returns error 500 on the items endpoint (request 24549).
+Nothing time critical, reply when convenient.
 
-Thank you,
-Dmitri
+Regards,
+Callum

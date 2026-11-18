@@ -1,7 +1,8 @@
-Hello support team,
+Dear support,
 
-Your API returns error 500 on the items endpoint (request 70886).
-URGENT: our whole business is stopped, I need help right now.
+Sync with my calendar stopped working and no events come through.
+My colleague suggested I contact you directly.
+Please reply sometime this week.
 
-Kind regards,
-Aiko
+Thank you,
+Hana

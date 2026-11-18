@@ -1,7 +1,8 @@
-Good morning,
+Hello,
 
-Your API returns error 500 on the items endpoint (request 11888).
-I would appreciate a reply in the next couple of days.
+Two-factor codes are rejected even though my phone clock is right.
+I have been a customer for about two years.
+This is blocking my team today, please prioritise it.
 
 Regards,
-Noor
+Aiko

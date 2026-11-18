@@ -1,7 +1,7 @@
-Hello,
+Hello support team,
 
-Your API returns error 500 on the items endpoint (request 95153).
-This is blocking my team today, please prioritise it.
+Uploads above 20 MB fail with a timeout message.
+A reply within the week would be fine.
 
-Thanks,
-Leila
+Regards,
+Elena

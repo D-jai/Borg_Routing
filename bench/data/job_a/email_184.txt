@@ -1,7 +1,8 @@
-Hello support team,
+Good morning,
 
-Two-factor codes are rejected even though my phone clock is right.
-Nothing time critical, reply when convenient.
+Your API returns error 500 on the items endpoint (request 44740).
+My colleague suggested I contact you directly.
+URGENT: we are losing money every hour until this is fixed.
 
-Best,
-Ingrid
+Regards,
+Hana

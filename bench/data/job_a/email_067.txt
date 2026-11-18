@@ -1,7 +1,8 @@
-Hello support team,
+Hello,
 
-The app crashes every time I open the reports tab.
-Please reply sometime this week.
+Your API returns error 500 on the items endpoint (request 42126).
+I am writing from my phone, sorry for typos.
+URGENT: we are losing money every hour until this is fixed.
 
 Best,
-Ingrid
+Hana

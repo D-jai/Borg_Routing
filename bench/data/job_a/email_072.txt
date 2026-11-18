@@ -1,7 +1,7 @@
-Hello support team,
+Dear support,
 
-Sync with my calendar stopped working and no events come through.
-URGENT: we are losing money every hour until this is fixed.
+Uploads above 20 MB fail with a timeout message.
+We cannot work properly until this is fixed, please act today.
 
-Thanks,
-Marcus
+Regards,
+Elena
