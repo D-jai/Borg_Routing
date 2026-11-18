@@ -120,3 +120,37 @@ async def test_the_step_packs_two_packs_of_20_and_returns_urgency_per_item(pk):
     assert [len(r.pack_ids) for r in stub.of_kind("packed")] == [20, 20]
     assert env.output["total"] == 40 and env.output["success_count"] == 40
     assert all(r["output"]["urgency"] == 3 for r in env.output["results"])
+
+
+async def test_every_packed_request_asks_for_urgency_in_the_task_and_the_schema(pk):
+    out = {"bucket": "a", "confidence": 0.9, "urgency": 3}
+    stub, _ = await _run(pk, _from_node(_node(_items(40))),
+                         pack_item_for=lambda r, t: dict(out), answer_for=lambda r: dict(out))
+    packed = stub.of_kind("packed")
+    assert len(packed) == 2
+    for req in packed:
+        assert "Also return these fields: urgency (integer 1-5)." in req.system
+        assert req.system.count("urgency") >= 2  # the task line and the per-item schema
+
+
+async def test_a_packed_item_reply_without_urgency_fails_the_contract_check(pk):
+    def reply(req, text):
+        return {"bucket": "a", "confidence": 0.9}
+
+    stub, env = await _run(pk, _from_node(_node(_items(40))),
+                           pack_item_for=reply, answer_for=lambda r: reply(r, ""))
+    assert env.output["success_count"] == 0 and env.output["failure_count"] == 40
+    text = str(env.output["failures"])
+    assert "BRT-ENV-011" in text or "BRT-ANS-005" in text
+
+
+async def test_deferred_item_without_an_extra_field_fails_today(pk):
+    """Current behaviour, pinned (planner to decide whether it should change): a
+    deferred item has no urgency, and the step's check requires it."""
+    defer = {"bucket": "defer", "confidence": 0.2, "defer_reason": "no bucket fits"}
+    stub, env = await _run(pk, _from_node(_node(_items(40))),
+                           pack_item_for=lambda r, t: dict(defer),
+                           answer_for=lambda r: dict(defer))
+    assert env.output["success_count"] == 0 and env.output["failure_count"] == 40
+    text = str(env.output["failures"])
+    assert ("BRT-ENV-011" in text or "BRT-ANS-005" in text) and "urgency" in text
