@@ -552,7 +552,27 @@ async def test_ids_mode_shows_no_name_in_block_reask_or_rows(monkeypatch):
 
 async def test_action_fail_places_rows_and_runs_no_c3_or_c4(monkeypatch):
     fx = _fixture("d")
-    decline = {"action": "fail", "rationale": "Only these, the rest are medium:\n" + D_JOIN}
-    run = await _replay(fx, [decline], monkeypatch)
+    # note_04 has no result; "medium" next to it is an invented value, and a
+    # sentence points at a step result: C4 and C3 would fire on an answer.
+    rationale = ("I decline to label the rest.\nnote_04.txt: medium\n"
+                 "See the step result for the others.\n" + D_JOIN)
+    run = await _replay(fx, [{"action": "fail", "rationale": rationale}], monkeypatch)
     assert run.kind == "declined" and run.sent == []
     assert "@@" not in run.answer and len(_rows_of(run.answer)[0]) == 60
+    assert "note_04.txt: medium" in run.answer            # compose's own text kept
+    # The same text as an answer does fire C4: the decline is what spares it.
+    as_answer = [c for c, _ in run.rows.problems(rationale)]
+    assert "BRT-ORC-041" in as_answer
+    assert run.rows.problems(rationale, declined=True) == []
+
+
+async def test_action_fail_runs_no_c3_and_still_places_an_output(monkeypatch):
+    fx = _fixture("b")
+    stored = fx["steps"]["n1"]["output"]["files"]
+    rationale = "I will not summarise; copy the rest from the stage result (n1).\n@@OUTPUT:n1@@"
+    pointer_only = "Copy the files from the stage result (n1)."
+    run = await _replay(fx, [{"action": "fail", "rationale": rationale}], monkeypatch)
+    assert run.kind == "declined" and run.sent == []
+    assert stored in run.answer and "@@" not in run.answer
+    assert [c for c, _ in run.rows.problems(pointer_only)] == ["BRT-ORC-040"]
+    assert run.rows.problems(pointer_only, declined=True) == []

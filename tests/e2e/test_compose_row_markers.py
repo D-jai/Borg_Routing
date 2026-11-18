@@ -833,3 +833,35 @@ async def test_long_output_run_without_cuts_makes_six_posts_at_most(env):
     await drain_log_writes()
     assert len(stub.of_kind("compose")) == 6
     assert result["response"] == "Report:\n\n" + LONG
+
+
+@pytest.mark.asyncio
+async def test_plan_and_re_plan_bodies_are_byte_identical_with_32e_on(env):
+    """The block reaches compose only: with list steps and a long output, the
+    plan and re_plan request bodies equal those of the same run with 32e's
+    context turned off (run ids masked)."""
+    db_path, mp = env
+    plain = {"type": "answerer", "id": "plain", "instruction": "Write the report.",
+             "task_type": "extraction", "tier": "light", "output_schema": {"result": "string"}}
+    uuid = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
+
+    async def bodies():
+        stub = StubModels(plan_nodes=[_rate(SMALL), plain],
+                          answer_for=lambda r: ({"result": LONG} if "Write the report" in r.system
+                                                else {"sentiment": "ok"}),
+                          compose_for=_seq({"response": "Done."})).install(mp)
+        result = await run_pipeline("Rate each and report.", db_path=db_path)
+        await drain_log_writes()
+        assert result["status"] == "completed", result.get("error")
+        sent = [uuid.sub("<id>", json.dumps(r.body, sort_keys=True))
+                for r in stub.requests if r.kind in ("plan", "re_plan")]
+        return sent, stub.of_kind("compose")[0].user
+
+    on, compose_on = await bodies()
+    real = engine._RowContext.for_run
+    mp.setattr(engine._RowContext, "for_run",
+               classmethod(lambda cls, *a, **k: cls({}, set(), None)))
+    off, compose_off = await bodies()
+    mp.setattr(engine._RowContext, "for_run", real)
+    assert on and on == off
+    assert compose_on.startswith(COMPOSE + "\n" + INTRO) and compose_off == COMPOSE

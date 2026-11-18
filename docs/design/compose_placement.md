@@ -361,7 +361,7 @@ Lead ruling 1b. **Fired** (as designed) when, for a list step S with at least 10
 - For a line (form c), "single" means that once the identity and separators are removed, exactly one cell is left and it equals a vocabulary value. "needs a human to label it low, medium or high" leaves no such cell, so it is not a hit.
 
 **Case 2: an asked-but-not-produced field** (planner addition, field-level). All of these hold:
-- The pair's key (form a, or the column header in form b) equals, case ignored, a field in `asked_but_not_produced` for a step that holds i, or for any step if i is in no list step.
+- The pair's key (form a, or the column header in form b) equals, case ignored, a field of a BRT-ORC-035 entry in `asked_but_not_produced` (an output field; a BRT-ORC-036 entry is a key nothing takes and is never read here, review round 1) for a step that holds i. (The note's "or for any step if i is in no list step" is not built: an item in no list step has no identity the checks can match.)
 - v is a value and not empty-like.
 - v is not the identity, not one of i's stored values (so `category: billing`, equal to the stored bucket, is a rename and passes), and not paired with i in any resolved step output.
 - Forms (c) and (d) carry no key and are not checked for case 2 (a stated limit).
@@ -398,7 +398,7 @@ Neither change touches the other salvage paths: 030, 029 twice, a compose call t
 - A shown raw long field goes through `guard_text_block` (BRT-LANE-009, fail closed), the same guard OUTPUT gets.
 
 **Existing tests touched by S1 or S2: none.**
-- `test_invalid_marker_twice_is_salvaged_with_032`: its second reply has no valid marker, so S2 places nothing and the text is unchanged.
+- `test_invalid_marker_twice_is_salvaged_with_032`: its second reply has no valid marker, so S2 places nothing; the test still passes, but the salvage now writes the list step in the plain marker's form (flat fields, file-name labels, under `## <step id> (n item(s) finished, k failed)`), not the nested index/item/output shape. This holds for every salvage after a failed repair (032 and 037 included), not only after 038, 040 or 041; S1 (long fields verbatim) is the part that waits for 038, 040 or 041.
 - The cut-pointer, 030 and 029 salvage tests do not take this path.
 - The one behaviour change against ruling 21: a 032 second reply holding one valid and one invalid marker now keeps the valid block. No current test covers that case.
 
@@ -552,7 +552,7 @@ Round-1 A (from stage1_job_a_replay.json)
 - ids mode: no name in any block, re-ask or row;
 - plan and re_plan bodies are unchanged.
 
-**Existing tests that change** (lead ruling 7, round-2 point 3): twelve test functions, each with its reason.
+**Existing tests that change** (lead ruling 7, round-2 point 3): thirteen test functions, each with its reason (the 13th, found in the build, is listed last).
 
 Names in rows. Each name was in the manifest compose received (`LaneContext.manifest_block` shows names unless `lane_manifest` is `ids`), so a placed name adds nothing compose had not seen. In raw_local that manifest also goes to the cloud planner with names.
 1. `tests/orchestrator/test_row_markers.py::test_raw_item_is_part_id_or_index`: the raw `doc_001` row becomes the document's name under manifest `names` and stays `doc_001` under `ids`. A non-part item stays as the index. The case grows to both modes, and the fake `_Lane` gains `docs` and `settings.manifest`.
@@ -574,6 +574,7 @@ Block, repair and pointer wording:
 10. `tests/e2e/test_compose_row_markers.py::test_marker_as_a_dict_key_takes_the_032_path` (about line 310): `composes[1].user == INVALID + "\n" + BLOCK_3` becomes the repair message with the 032 sentence and the new block. The 032 outcome is unchanged.
 11. `tests/orchestrator/test_row_markers.py::test_fields_and_block_line` (about line 119): `"- s: 3 rows, input order; fields: item, b, c, d, error"` becomes `"- s: 3 rows, input order, 1 failed; fields: item, b, c, d, error"`. The field order is unchanged.
 12. `tests/e2e/test_stage1_rootcause_bench.py::test_r2_no_final_text_asks_compose_once_more`: `startswith(_COMPOSE_REASK + "\nList steps the code")` becomes `+ "\nThe reader sees only your answer."`.
+13. `tests/orchestrator/test_row_markers.py::test_scalar_state_op_list_line`: `"- v: 3 rows, stored order; fields: (values)"` becomes `"- v: 3 rows, stored order, 0 failed; fields: (values)"` (every step line carries its failed count).
 
 **Unchanged:**
 - the no-block gate test;

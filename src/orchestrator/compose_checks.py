@@ -586,7 +586,9 @@ def invented_values(own: object, model: ItemModel, asked: list) -> tuple:
     in input order."""
     asked_by_step: dict = {}
     for entry in asked or []:
-        if isinstance(entry, dict):
+        # Case 2 reads output fields only (BRT-ORC-035); a BRT-ORC-036 key
+        # nothing takes is not a field the reader could expect a value for.
+        if isinstance(entry, dict) and rm.is_output_field(entry):
             fld = str(entry.get("field"))
             asked_by_step.setdefault(str(entry.get("step")), {})[fld.casefold()] = fld
     case1: list = []

@@ -1926,6 +1926,25 @@ def asked_but_not_produced(run_id: object) -> list:
     return list(_NOT_PRODUCED.get(str(run_id), []))
 
 
+# The code behind each not-produced entry, in the same order (32e review):
+# BRT-ORC-035 (an output field) or BRT-ORC-036 (a key nothing takes). Kept
+# apart so ``asked_but_not_produced`` keeps its three-key entries.
+_NOT_PRODUCED_CODES: dict = {}
+
+
+def _with_codes(run_id: object, entries: list) -> list:
+    """``entries`` with each one's ``code`` added when the run recorded it
+    (an entry that already carries a code keeps it)."""
+    codes = _NOT_PRODUCED_CODES.get(str(run_id), [])
+    out = []
+    for i, entry in enumerate(entries):
+        if isinstance(entry, dict) and "code" not in entry and i < len(codes) \
+                and len(codes) == len(entries):
+            entry = dict(entry, code=codes[i])
+        out.append(entry)
+    return out
+
+
 def _drop_plan_keys(nodes: list, issue: object) -> None:
     """BRT-ORC-036 second hit: the step runs without the keys nothing takes.
     The node is replaced in the batch by a copy without them (node keys, or
@@ -1993,8 +2012,12 @@ async def _check_plan(
             if issue.where in ("node", "skill_args"):
                 _drop_plan_keys(nodes, issue)
             kept = _NOT_PRODUCED.setdefault(str(run_id), [])
+            codes = _NOT_PRODUCED_CODES.setdefault(str(run_id), [])
             for field in issue.fields:
                 kept.append({"step": issue.node_id, "skill": issue.skill_id, "field": field})
+                codes.append(issue.code)
+            while len(_NOT_PRODUCED_CODES) > 64:
+                _NOT_PRODUCED_CODES.pop(next(iter(_NOT_PRODUCED_CODES)))
             while len(_NOT_PRODUCED) > 64:
                 _NOT_PRODUCED.pop(next(iter(_NOT_PRODUCED)))
             event, decision = "orchestrator_decision", {
@@ -3474,7 +3497,8 @@ class _RowContext:
 
         steps = row_markers.list_steps(results, lane)
         outputs = row_markers.long_outputs(results, steps, lane)
-        asked = asked_but_not_produced(run_id) if run_id is not None else []
+        asked = (_with_codes(run_id, asked_but_not_produced(run_id))
+                 if run_id is not None else [])
         quoted: set = set()
         model = None
         block = None

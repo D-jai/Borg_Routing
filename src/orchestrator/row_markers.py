@@ -108,6 +108,10 @@ S_BRACKETS = ("The marker for {target} puts its fields in brackets; write them p
               "the bar: @@ROWS:{target} | name=field, field@@.")
 S_UNREADABLE = ("The marker for {target} has a field entry the code cannot read ({entry}): "
                 "use plain names with no , = | @ brackets or line break.")
+# A join needs an item on every row: a stored-order list (a state_op list of
+# plain values) has none (review round 1).
+S_JOIN_STORED = ("The marker for {target} joins {id}, whose rows are in stored order with no "
+                 "item to join on: use @@ROWS:{id}@@ for it on its own.")
 # Not in the note's table (the builder's wording): an OUTPUT marker with no
 # field on a step whose output holds two or more long fields.
 S_OUTPUT_FIELD = "The marker for {target} must name one field after a bar: {fields}."
@@ -384,6 +388,10 @@ def long_outputs(results: dict, steps: Optional[dict] = None, lane=None) -> dict
             continue
         if env is None or getattr(env, "status", None) != "resolved":
             continue
+        if _is_raw(env, lane) and getattr(env, "lane_guarded", None) is not True:
+            # Salvage's withhold rule: a raw output the guard did not pass is
+            # never offered for placement.
+            continue
         out = getattr(env, "output", None)
         if isinstance(out, str):
             fields = {None: out} if len(out) >= LONG_CHARS else {}
@@ -513,6 +521,10 @@ def parse_target(keyword: str, capture: str, steps: dict, outputs: Optional[dict
     for sid in ids:
         if sid in outputs:
             return None, (CODE_MARKER, S_ROWS_ON_OUTPUT.format(id=sid))
+    if len(ids) > 1:
+        for sid in ids:
+            if steps[sid].order != INPUT_ORDER:
+                return None, (CODE_SPEC, S_JOIN_STORED.format(target=target, id=sid))
     if spec_text is None:
         return Target(kind, ids, None), None
     entries, problem = _parse_spec(spec_text, target)
@@ -701,8 +713,17 @@ def block(steps: dict, outputs: Optional[dict] = None, no_result: int = 0,
             lines.append(NO_VALUE_LINE.format(counts=", ".join(f"{f} {m}" for f, m in counts)))
     if asked:
         grouped: dict = {}
+        keys: list = []
         for entry in asked:
             if not isinstance(entry, dict):
+                continue
+            if not is_output_field(entry):
+                # BRT-ORC-036: a node or skill_args key nothing takes, not an
+                # output field (review round 1): its own line, key wording.
+                line = (f"The plan gave {entry.get('field')} to {entry.get('step')}, which "
+                        "does not take it; it was not used.")
+                if line not in keys:
+                    keys.append(line)
                 continue
             key = (str(entry.get("step")), str(entry.get("skill")))
             grouped.setdefault(key, [])
@@ -714,7 +735,19 @@ def block(steps: dict, outputs: Optional[dict] = None, no_result: int = 0,
             for (step, skill), flds in grouped.items():
                 lines.append(f"- {step} (skill {skill}): {', '.join(flds)}")
             lines.append(ASKED_TAIL)
+        lines.extend(keys)
     return "\n".join(lines)
+
+
+CODE_NOT_RETURNED = "BRT-ORC-035"
+CODE_NOT_TAKEN = "BRT-ORC-036"
+
+
+def is_output_field(entry: dict) -> bool:
+    """True for a BRT-ORC-035 entry (an output field the skill does not
+    return); False for a BRT-ORC-036 entry (a key nothing takes). An entry
+    with no code is read as 035 (the round-2 fixtures predate the code)."""
+    return str(entry.get("code") or CODE_NOT_RETURNED) != CODE_NOT_TAKEN
 
 
 def repair_message(problems: list) -> str:
@@ -729,7 +762,19 @@ def _masked(text: str) -> str:
 
 
 def loose_positions(text: str) -> list:
-    return [m.start() for m in LOOSE.finditer(_masked(text))]
+    """LOOSE hits (hunk headers masked), skipping any hit that starts inside
+    a STRICT match found at an earlier hit: the closing ``@@`` of
+    ``@@ROWS:s@@ output above`` is not a hit of its own."""
+    out: list = []
+    end = -1
+    for m in LOOSE.finditer(_masked(text)):
+        if m.start() < end:
+            continue
+        out.append(m.start())
+        strict = STRICT.match(text, m.start())
+        if strict:
+            end = strict.end()
+    return out
 
 
 def strict_matches(text: str) -> list:
@@ -994,24 +1039,29 @@ def _scan(text: str, pos: int):
 
 
 def _place_in_text(text: str, resolver: Resolver, placed: dict, guard, text_guard) -> str:
+    """Every valid marker of ``text`` placed, left to right (one pass).
+
+    Markers, bracket context and fences are read from the ORIGINAL reply,
+    never from text already placed (review round 1), so a placed output
+    holding a stray ``[`` or fence cannot change how a later marker is
+    placed. After each placement ``cur`` ends with the original's tail, so an
+    original position maps to ``position + len(cur) - len(text)``."""
+    original = text
     cur = text
     pos = 0
-    while True:
-        m = None
-        for cand in strict_matches(cur):
-            if cand.start() >= pos and resolver.target(cand) is not None:
-                m = cand
-                break
-        if m is None:
-            return cur
+    for m in strict_matches(original):
         target = resolver.target(m)
-        s, e = m.start(), m.end()
-        ctx = _scan(cur, s)
+        if target is None:
+            continue
+        shift = len(cur) - len(original)
+        s, e = m.start() + shift, m.end() + shift
+        if s < pos or cur[s:e] != m.group(0):
+            continue
+        ctx = _scan(original, m.start())
         if ctx.depth > 0:
-            new_text, new_pos = _place_nested(cur, s, e, ctx, target, resolver, guard, text_guard)
-            cur = new_text
+            cur, pos = _place_nested(cur, s, e, ctx, target, resolver, guard, text_guard,
+                                     original, shift, pos)
             placed[target.key] = placed.get(target.key, 0) + 1
-            pos = new_pos
             continue
         k = 0
         while s - k - 1 >= 0 and cur[s - k - 1] == "`":
@@ -1025,7 +1075,7 @@ def _place_in_text(text: str, resolver: Resolver, placed: dict, guard, text_guar
         b, a = before.rstrip(" \t"), after.lstrip(" \t")
         at_start = b == "" or b.endswith("\n")
         at_end = a == "" or a.startswith("\n")
-        fence = _fence_state(before)
+        fence = _fence_state(original[:s - shift])
         if target.kind == "output":
             body = resolver.text(target)
             if text_guard is not None:
@@ -1066,10 +1116,12 @@ def _place_in_text(text: str, resolver: Resolver, placed: dict, guard, text_guar
         cur = new + a
         placed[target.key] = placed.get(target.key, 0) + 1
         pos = len(new)
+    return cur
 
 
 def _place_nested(cur: str, s: int, e: int, ctx, target: Target, resolver: Resolver,
-                  guard, text_guard) -> tuple:
+                  guard, text_guard, original: Optional[str] = None, shift: int = 0,
+                  floor: int = 0) -> tuple:
     """A marker inside brackets compose wrote (compose_placement 2.2, 2.4.1):
     placed as JSON so the surrounding JSON stays valid. Returns (text, next
     scan position)."""
@@ -1094,13 +1146,16 @@ def _place_nested(cur: str, s: int, e: int, ctx, target: Target, resolver: Resol
     elif ctx.innermost == "[":
         from src.orchestrator.compose_checks import close_of  # noqa: PLC0415
 
+        # ctx and the bracket positions are the original reply's (``src``).
+        src = cur if original is None else original
         opener = ctx.stack[-1][1]
-        close = close_of(cur, opener)
-        inner = (cur[opener + 1:s] + cur[e:close if close is not None else len(cur)])
-        if close is not None and not inner.strip(" \t\r\n,"):
+        ms, me = s - shift, e - shift
+        close = close_of(src, opener)
+        inner = (src[opener + 1:ms] + src[me:close if close is not None else len(src)])
+        if close is not None and opener + shift >= floor and not inner.strip(" \t\r\n,"):
             # A list holding only the marker: compose's brackets are absorbed.
             body = compact if ctx.depth > 1 else _json_lines(rows)
-            s, e = opener, close + 1
+            s, e = opener + shift, close + shift + 1
         else:
             body = compact
     else:

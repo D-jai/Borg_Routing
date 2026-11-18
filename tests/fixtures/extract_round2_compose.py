@@ -155,6 +155,11 @@ def extract(job: str) -> dict:
 
 def _check(job: str, text: str, canaries: list) -> None:
     assert not any(c in text for c in canaries), f"a D canary in fixture {job}"
+    # C is not checked for document text: its extract_contradictions rows quote
+    # conflicting values (conflicting_values_quoted) out of the documents, by
+    # the job's design. Those quotes come from the committed synthetic bench
+    # data (bench/data/job_c, made by bench/make_data.py), not from any real
+    # document, so the fixture carries nothing that is not already in the repo.
     if job in ("A", "D"):
         folder = ROOT / "bench/data" / f"job_{job.lower()}"
         for path in folder.iterdir():

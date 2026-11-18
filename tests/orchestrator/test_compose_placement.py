@@ -403,6 +403,97 @@ def test_no_result_and_no_value_counts():
             "Leave those fields empty; do not supply a value yourself.") in block
 
 
+# --- review round 1 (lead's list) -------------------------------------------------------------
+
+@pytest.mark.parametrize("values", [[3, 1, 2], [{"name": "z"}, {"name": "y"}]])
+def test_a_join_with_a_stored_order_step_is_037(values):
+    steps = _steps({"a": _env(_agg([_ok(0, "x", k=1)])),
+                    "p": _env({"result": values}, "state_op")})
+    assert steps["p"].order == rm.STORED_ORDER
+    sentence = ("The marker for a + p joins p, whose rows are in stored order with no item to "
+                "join on: use @@ROWS:p@@ for it on its own.")
+    for marker in ("@@ROWS:a + p@@", "@@ROWS:a + p | item, k@@", "@@ROWS:p + a | name@@"):
+        problems = rm.marker_problems(marker, steps, {}, [])
+        assert [c for c, _ in problems] == ["BRT-ORC-037"], marker
+    assert rm.marker_problems("@@ROWS:a + p@@", steps, {}, []) == [("BRT-ORC-037", sentence)]
+    out, _ = rm.place("@@ROWS:a + p@@", steps)           # never placed, never crashes
+    assert out == "@@ROWS:a + p@@"
+
+
+def test_scan_context_comes_from_the_original_reply():
+    n1 = 'print("[")\n' + "a " * 1100
+    n2 = "second text " * 200
+    results = {"n1": _env({"code": n1}, "answerer"), "n2": _env({"text": n2}, "answerer"),
+               "s1": _env(_agg([_ok(0, "a", bucket="x")]))}
+    steps = _steps(results)
+    outputs = rm.long_outputs(results, steps)
+    reply = "Code:\n@@OUTPUT:n1@@\nText:\n@@OUTPUT:n2@@\nRows:\n@@ROWS:s1@@"
+    out, placed = rm.place(reply, steps, outputs=outputs)
+    assert out == ("Code:\n\n" + n1 + "\n\nText:\n\n" + n2 + "\n\nRows:\n"
+                   '```json\n[\n{"item": "a", "bucket": "x"}\n]\n```')
+    assert placed == {"n1": 1, "n2": 1, "s1": 1}
+
+
+@pytest.mark.parametrize("reply", ["@@OUTPUT:n1@@\n\nOutput notes: none.",
+                                   "@@ROWS:s@@\nRows above.", "@@ROWS:s@@ output above"])
+def test_loose_skips_the_closing_at_signs_of_a_strict_marker(reply):
+    results = {"n1": _env({"text": "t " * 1100}, "answerer"), "s": _env(_agg([_ok(0, "a", b=1)]))}
+    steps = _steps(results)
+    assert rm.marker_problems(reply, steps, rm.long_outputs(results, steps), []) == []
+
+
+ASKED_MIXED = [
+    {"step": "classify", "skill": "classify_into_buckets", "field": "urgency", "code": "BRT-ORC-035"},
+    {"step": "classify", "skill": "", "field": "colour", "code": "BRT-ORC-036"},
+    {"step": "classify", "skill": "classify_into_buckets", "field": "instruction",
+     "code": "BRT-ORC-036"},
+]
+
+
+def test_036_entries_have_their_own_key_lines():
+    steps, _, model = _d_like()
+    block = rm.block(steps, {}, 0, [], ASKED_MIXED)
+    assert ("- classify (skill classify_into_buckets): urgency\n" + rm.ASKED_TAIL) in block
+    assert block.endswith(
+        "The plan gave colour to classify, which does not take it; it was not used.\n"
+        "The plan gave instruction to classify, which does not take it; it was not used.")
+    only_036 = rm.block(steps, {}, 0, [], ASKED_MIXED[1:])
+    assert rm.ASKED_HEAD not in only_036 and rm.ASKED_TAIL not in only_036
+
+
+def test_the_engine_tells_035_from_036_entries(monkeypatch):
+    from src.orchestrator import engine
+    run_id = uuid4()
+    entries = [{k: v for k, v in e.items() if k != "code"} for e in ASKED_MIXED]
+    monkeypatch.setitem(engine._NOT_PRODUCED, str(run_id), entries)
+    monkeypatch.setitem(engine._NOT_PRODUCED_CODES, str(run_id),
+                        [e["code"] for e in ASKED_MIXED])
+    assert engine.asked_but_not_produced(run_id) == entries          # three keys, as 32c reads
+    steps, results, _ = _d_like()
+    ctx = engine._RowContext.for_run(results, _Lane(), "", None, run_id)
+    assert "- classify (skill classify_into_buckets): urgency\n" in ctx.block
+    assert "The plan gave colour to classify, which does not take it; it was not used." in ctx.block
+
+
+def test_c4_case_2_reads_035_entries_only():
+    steps, _, model = _d_like()
+    reply = '[{"file": "a.txt", "colour": "red", "instruction": "do it", "urgency": 4}]'
+    _, case2 = cc.invented_values(reply, model, ASKED_MIXED)
+    assert case2 == {"urgency": ["doc_001"]}
+
+
+def test_long_outputs_withhold_an_unguarded_raw_step():
+    class RawLane(_Lane):
+        keeps_raw_local = True
+    guarded = _env({"report": "g " * 1100}, "answerer", scope="raw")
+    guarded.lane_guarded = True
+    unguarded = _env({"report": "u " * 1100}, "answerer", scope="raw")
+    plain = _env({"report": "p " * 1100}, "answerer")
+    found = rm.long_outputs({"g": guarded, "u": unguarded, "p": plain}, {}, RawLane())
+    assert list(found) == ["g", "p"]
+    assert list(rm.long_outputs({"u": unguarded}, {}, _Lane())) == ["u"]    # by_reference: no withhold
+
+
 def test_the_gate_gives_no_block_with_nothing_to_list():
     assert rm.block({}, {}, 0, [], []) is None
     assert rm.block({}, {}, 0, [], [{"step": "s", "skill": "k", "field": "f"}]).startswith(rm.INTRO)
