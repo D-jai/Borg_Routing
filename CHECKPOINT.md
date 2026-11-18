@@ -21,11 +21,18 @@ Lead session `borg-route-f1` (Opus 5.5) since 02:20 on 16-Nov-2026. Every work o
 
 If this session stopped abruptly: `git log` and `git status` show what landed; any uncommitted changes belong to an in-progress builder: read the diff, finish or stash it, record which in the build log.
 
-**Waiting on Deej (via the planner):** whether there is a bench round 2 (after the R1-R4 fixes and a planner design for token overhead and code-assembled row lists). Also on the after-build list below.
+**Bench round 2: Deej said yes (his ruling 11, 18-Nov-2026); the planner's ruling 27 sets the rules (BUILD.md section 8).** Same rules as round 1. Freeze the tree, then reseed jobs A, C and D with the first 8 hex digits of the freeze hash read as a number (`bench/make_data.py --seed`). Job B is hand-written and stays. No paid rehearsal; cap US$6. Results go to the planner first.
 
 **CI rule (Deej, 17-Nov-2026):** Actions minutes now cost money (US$15 shared across D-jai repos until 30-Nov-2026, 7 pm Toronto). Test locally, push only when green and once per ready batch, never re-run a failed CI run, put `[skip ci]` on docs-only pushes, no manual full CI runs without Deej's go.
 
-**Next action for the lead (18-Nov-2026):** rulings 21 (row markers) and 22 (direct floor) are done and green on CI. Ruling 23 (item packing) is done: reviewed twice, live check PASS (40/40 both arms, 2 calls vs 40, US$0.0192 spent), logged in BUILD.md section 9, pushed. Next: ruling 24 (two or three demo runs, cap US$1), which unblocks 4.5 replay and then 5.2. Still waiting on Deej's round-2 answer: 5.1 and 6.1 numbers, bench round 2, floor/pool/prompt changes. Open: 5 tests in `tests/agents/test_http_pool.py` fail when run after the lane, cost and bench files (they also fail on the base tree, pass alone, and pass in CI order).
+**Round-2 freeze (18-Nov-2026, 10:45, ruling 29):** this commit is the freeze. Everything before it was reviewed and the full suite passed on `01a72c4` (1964 passed). Rulings 12, 13 and 28 are in, and demo job 1 is recorded (run d04e0d8a). Next: data-only commit (the SEED line set to int(freeze hash[:8], 16), then regenerate bench/data/ for A, C and D), tests/bench, one push, CI green, the invariant check pasted into BUILD.md, then round 2 stage 1 (cap US$6). Report to the planner at the end of stage 1.
+
+**Earlier next action (18-Nov-2026, 08:20):**
+- Done: rulings 21-23, plus 25 and 26 (26e/f/g); commits up to `62e4ca0` are reviewed. The full local suite on `62e4ca0` passed 1916, 0 failed.
+- Ruling 24 demo runs: job 2 and job 3 are recorded. The job 1 re-record was stopped at 08:16: the router put its 60 items on the CPU model, and they queued for about an hour each. The planner is choosing how job 1 should run.
+- Waiting on the planner: go or hold for the round-2 freeze, and its two protected-file questions to Deej.
+- After that: freeze commit, data-only reseed commit, one push, then the round-2 run.
+- 4.5 replay and 5.2 carry on meanwhile. Open: 5 tests in `tests/agents/test_http_pool.py` fail when run after the lane, cost and bench files (they also fail on the base tree, pass alone, and pass in CI order).
 
 ## Start the build (Deej)
 
