@@ -49,9 +49,8 @@ jobs:
       - name: UI static check (strict)
         run: python scripts/check_ui_static.py --strict
 
-      # DEFERRED until work order 5.5 (claims table and checker) is built:
-      # - name: Claims check
-      #   run: python scripts/check_claims.py
+      - name: Claims check
+        run: python scripts/check_claims.py
 
   # DEFERRED until work orders 5.2 (Docker image and compose) and 4.5 (replay mode)
   # are built: build the image, start compose in replay mode, check /health and

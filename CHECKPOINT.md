@@ -15,7 +15,7 @@ Lead session `borg-route-f1` (Opus 5.5) since 02:20 on 16-Nov-2026. Every work o
 | Stage-1 crash fixes R1-R4 (ruling 20) | Done and reviewed; replayed stage-1 replies now end "salvaged" |
 | 4.1, 4.2, 4.3, 4.4 interface | Done and reviewed. Receipt baseline estimate switched off (ruling 18) |
 | 5.7 MCP | Done and reviewed |
-| 5.3 clean tree, 5.4 docs match the code | Done and reviewed |
+| 5.3 clean tree, 5.4 docs match the code, 5.5 claims checker (user guide; README and deck rows to come) | Done and reviewed |
 | 5.6 CI | Workflow written (`fce83b9`); first run did not start (billing). CI is now paid from a small budget: see the CI rule below |
 | 4.5 replay, 4.6 interface check, 5.1, 5.2, 5.5, 5.8, 6.1 | Open. 4.5, 5.1 numbers and 6.1 numbers depend on the round-2 decision |
 
@@ -25,7 +25,7 @@ If this session stopped abruptly: `git log` and `git status` show what landed; a
 
 **CI rule (Deej, 17-Nov-2026):** Actions minutes now cost money (US$15 shared across D-jai repos until 30-Nov-2026, 7 pm Toronto). Test locally, push only when green and once per ready batch, never re-run a failed CI run, put `[skip ci]` on docs-only pushes, no manual full CI runs without Deej's go.
 
-**Next action for the lead:** work that presents no numbers and needs no round-2 decision: 5.5 claims checker, then 5.2 install (its replay default needs 4.5). Do not start a round 2, batching, or floor/pool/prompt changes for the bench until the planner's design (ruling 15-20).
+**Next action for the lead:** read the CI result of the 5.5 push (one paid run). Then nothing is left that needs no round-2 decision: 4.5 replay needs representative runs, 5.1 and 6.1 need numbers, 5.2 needs 4.5, 5.8 needs 5.1-5.7. Wait for Deej's round-2 answer via the planner. Do not start a round 2, batching, or floor/pool/prompt changes for the bench until the planner's design (ruling 15-20).
 
 ## Start the build (Deej)
 
