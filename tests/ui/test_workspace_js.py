@@ -480,3 +480,25 @@ def test_receipt_counts_steps_failed_before_any_call(tmp_path):
     assert lines([env("n1"), env("n2")],
                  [_err("BRT-LANE-002", "n3"), _err("BRT-ORC-019", "n1", severity="warning")]
                  ) == ["1 of 3 steps failed"]
+
+
+# ---------- ruling 28h: a model with no speed figure has a null cost ----------
+
+def test_why_rows_ignore_null_costs_and_label_a_cost_ranked_pick_by_cost(tmp_path):
+    routing = {"chosen": "cloud", "reason": "routed", "floor": 6.0,
+               "notes": ["speed not measured: ranked after priced models"], "candidates": [
+                   {"model_id": "cloud", "score": 7.0, "est_cost": 0.004, "est_dollars": 0.003, "est_time_cost": 0.001},
+                   {"model_id": "local", "score": 9.0, "est_cost": None, "est_dollars": 0.0, "est_time_cost": None}]}
+    rows = js(tmp_path, f"return W.whyRows({json.dumps(routing)});")
+    assert "lowest effective cost" in rows[0]["note"]
+    assert "alias or strategy" not in rows[0]["note"]
+    assert rows[1]["est_cost"] is None and rows[1]["note"] == ""
+
+
+def test_why_rows_label_a_ranked_after_pick_when_no_priced_model_qualifies(tmp_path):
+    routing = {"chosen": "local", "reason": "routed", "floor": 6.0, "candidates": [
+        {"model_id": "local", "score": 9.0, "est_cost": None, "est_dollars": 0.0},
+        {"model_id": "local2", "score": 8.0, "est_cost": None, "est_dollars": 0.0}]}
+    rows = js(tmp_path, f"return W.whyRows({json.dumps(routing)});")
+    assert "ranked after priced models" in rows[0]["note"]
+    assert "alias or strategy" not in rows[0]["note"] and "lowest effective cost" not in rows[0]["note"]

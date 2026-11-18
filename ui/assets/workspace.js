@@ -509,20 +509,24 @@
   }
 
   /* "Why this model" rows. The router ranks the models that clear the bar by effective cost
-   * (dollars plus waiting time); est_dollars is the dollars part alone. The row it chose is
-   * labelled by what actually decided it: lowest effective cost, a name from the planner, or
-   * an alias or strategy (written in routing.notes). */
+   * (dollars plus waiting time); est_dollars is the dollars part alone. A model with no speed
+   * figure, in a pool where no model has one, has no known cost (est_cost null) and is ranked
+   * after every model with a cost (ruling 28h). The row it chose is labelled by what actually
+   * decided it: lowest effective cost, a name from the planner, the 28h rule, or an alias or
+   * strategy (written in routing.notes). `lowest` ignores nulls. */
   function whyRows(routing) {
     var cands = routing && Array.isArray(routing.candidates) ? routing.candidates : [];
     var lowest = null;
     cands.forEach(function (c) { var v = num(c.est_cost); if (v !== null && (lowest === null || v < lowest)) lowest = v; });
     return cands.map(function (c) {
       var won = c.model_id === routing.chosen;
+      var cost = num(c.est_cost);
       var note = '';
       if (won) {
         if (routing.reason === 'planner_pick') note = 'Router’s choice: the planner named it';
         else if (routing.reason === 'fallback_default') note = 'Run’s default model: none cleared the bar';
-        else if (lowest === null || num(c.est_cost) === lowest) note = 'Router’s choice: lowest effective cost (dollars plus time) among those that clear ' + routing.floor;
+        else if (cost !== null && (lowest === null || cost === lowest)) note = 'Router’s choice: lowest effective cost (dollars plus time) among those that clear ' + routing.floor;
+        else if (cost === null && lowest === null) note = 'Router’s choice: speed not measured, ranked after priced models; no priced model cleared ' + routing.floor;
         else note = 'Router’s choice: picked by the routing alias or strategy (see the notes), not by cost alone';
       }
       return { model_id: c.model_id, won: won, score: c.score === undefined ? null : c.score,

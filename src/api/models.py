@@ -26,7 +26,7 @@ from src.registry.capability_matrix import CapabilityMatrix
 from src.registry.discovery import discover_all
 from src.registry.models import ModelInfo
 from src.registry.scorer import research_and_apply
-from src.registry.throughput import measure_throughput, measure_unmeasured
+from src.registry.throughput import measure_in_background, needs_measuring, speed_status, to_measure
 
 logger = logging.getLogger(__name__)
 
@@ -94,15 +94,34 @@ class KeyResponse(BaseModel):
 
 class ModelRow(ModelInfo):
     """A matrix row as the pages read it: the stored fields plus ``is_local``,
-    worked out by the server (src/registry/locality.py), never by the page."""
+    worked out by the server (src/registry/locality.py), never by the page,
+    and ``speed_status`` (``"measuring"`` while a background speed probe runs,
+    ``"BRT-REG-016"`` after a failed one, else null; ruling 28)."""
     is_local: bool = False
+    speed_status: Optional[str] = None
 
 
 async def _rows(matrix: CapabilityMatrix) -> list[dict]:
     from src.api.locality_view import locality_rules, model_row  # noqa: PLC0415
     from src.db import schema  # noqa: PLC0415
     rules = await locality_rules(schema.DB_PATH)
-    return [model_row(m, rules) for m in matrix.all()]
+    rows = []
+    for m in matrix.all():
+        row = model_row(m, rules)
+        row["speed_status"] = speed_status(m.model_id)
+        rows.append(row)
+    return rows
+
+
+def _measure_later(matrix: CapabilityMatrix, model_ids: list[str]) -> None:
+    """Ruling 28, item 7: probe the speed of these local rows in the background
+    (the request returns at once); when done, save the matrix and share it with
+    the engine. A failed probe is logged BRT-REG-016 and shown on the Models page."""
+    def _done() -> None:
+        matrix.save()
+        _share_with_engine(matrix)
+
+    measure_in_background(matrix, model_ids, on_done=_done)
 
 
 @router.get("/models", response_model=list[ModelRow])
@@ -145,17 +164,17 @@ async def discover_models(matrix: CapabilityMatrix = Depends(get_matrix)):
     """Probe LM Studio, Ollama, and the curated OpenRouter list; upsert results.
 
     Each local model found with no speed figure is then measured by one short
-    generation (planner ruling 28; a failed probe is logged BRT-REG-016 and
-    the figure stays unset). Refused (BRT-LANE-005) while lane_mode is
-    all_local.
+    generation in the background (planner ruling 28; the call returns at once,
+    a failed probe is logged BRT-REG-016 and the figure stays unset). Refused
+    (BRT-LANE-005) while lane_mode is all_local.
     """
     await _refuse_in_all_local("Discover")
     openrouter_key: Optional[str] = os.getenv("OPENROUTER_API_KEY")
     try:
         count = await discover_all(matrix, openrouter_key=openrouter_key)
-        await measure_unmeasured(matrix, checked_only=False)
         matrix.save()
         _share_with_engine(matrix)
+        _measure_later(matrix, to_measure(matrix, checked_only=False))
         return DiscoverResponse(upserted=count)
     except Exception as exc:
         logger.error("Discovery failed: %s", exc)
@@ -213,10 +232,6 @@ async def set_model_checked(
             detail=f"BRT-API-002: model '{model_id}' not found in capability matrix.",
         )
     matrix.set_checked(model_id, body.checked)
-    if body.checked:
-        # Ruling 28: a ticked local model with no speed figure is measured now
-        # (never raises; a failed probe is logged BRT-REG-016).
-        await measure_throughput(matrix, model_id)
     matrix.save()
 
     # Point the engine at this matrix so the next route sees it.
@@ -232,6 +247,10 @@ async def set_model_checked(
             "uvicorn for the change to affect routing.", model_id, exc,
         )
 
+    if body.checked and needs_measuring(matrix.get(model_id)):
+        # Ruling 28: a ticked local model with no speed figure is measured in
+        # the background; this call returns at once.
+        _measure_later(matrix, [model_id])
     return CheckedResponse(model_id=model_id, checked=body.checked)
 
 

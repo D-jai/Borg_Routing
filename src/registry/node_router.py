@@ -33,6 +33,7 @@ from .cost import (
     UNMEASURED_RANKED_AFTER_PRICED,
     call_dollars,
     effective_cost,
+    ranked_after_priced,
     route_rank,
     slowest_measured_tps,
     speed_unmeasured,
@@ -222,12 +223,17 @@ def select_model_for_node(
         notes.append("on-premise lane: this step may use local models only")
         matrix = local_view(matrix, local_filter)
 
-    def cost_of(model: ModelInfo) -> float:
+    def cost_of(model: ModelInfo) -> Optional[float]:
+        # Ruling 28h: a model ranked after the priced ones has no known cost: null, never 0.0.
+        if ranked_after_priced(model, unmeasured_tps):
+            return None
         return effective_cost(
             model, est_in, est_out, time_cost_per_sec, unmeasured_tps=unmeasured_tps
         )
 
-    def time_of(model: ModelInfo) -> float:
+    def time_of(model: ModelInfo) -> Optional[float]:
+        if ranked_after_priced(model, unmeasured_tps):
+            return None
         return time_cost(model, est_in, est_out, time_cost_per_sec, unmeasured_tps=unmeasured_tps)
 
     def rank_of(model: ModelInfo) -> tuple[bool, float]:
@@ -254,7 +260,9 @@ def select_model_for_node(
 
     def candidates_for() -> list[dict]:
         # Who else was in the running: every checked row that clears the
-        # floor and fits the input, cheapest first. est_cost is what the
+        # floor and fits the input, in rank order: models with a cost,
+        # cheapest first, then any ranked after the priced ones (ruling 28h;
+        # their est_cost and est_time_cost are null). est_cost is what the
         # router ranks by (dollars plus time); est_dollars is dollars only.
         offered = matrix.query_by_task(task_type, min_score=floor, min_context_length=est_in)
         offered.sort(key=rank_of)

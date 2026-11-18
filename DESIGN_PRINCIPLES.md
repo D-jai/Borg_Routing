@@ -64,6 +64,8 @@ Every SQLite write has an owner. Children self-clean before returning; parents v
 select_model(task_type, est_input_tokens, quality_req, strategy)
 # candidates = matrix.query(task_type) filtered by score>=quality_req and context>=tokens
 # sorted by effective_cost; tier is derived
+# an unpriced model with no speed figure is priced at the pool's slowest figure; with no figure in
+# the pool it is ranked after every model with a cost and its est_cost is null (rulings 28, 28h)
 ```
 
 ---

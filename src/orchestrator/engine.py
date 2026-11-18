@@ -158,18 +158,58 @@ def _get_matrix() -> CapabilityMatrix:
     return _shared_matrix
 
 
-async def _measure_local_speeds(matrix: CapabilityMatrix) -> None:
+async def _measure_local_speeds(
+    matrix: CapabilityMatrix,
+    run_id: Optional[UUID] = None,
+    db_path: Optional[str] = None,
+) -> None:
     """Planner ruling 28: a ticked local model still without a speed figure is
-    measured at the start of a run, before anything is routed. The figure is
-    kept in memory (the matrix file is saved by Discover and the checkbox).
-    Never raises; a failed probe is logged BRT-REG-016 and the router prices
-    the model as no faster than the slowest measured one."""
-    try:
-        from src.registry.throughput import measure_unmeasured  # noqa: PLC0415
+    measured at the start of a top-level run, before anything is routed.
 
-        await measure_unmeasured(matrix, checked_only=True)
+    - The figure is kept in memory (the matrix file is saved by Discover and
+      the checkbox).
+    - A model whose probe already failed in this process is not probed again
+      (ruling 28 item 4a) until Discover or a tick re-measures it.
+    - A failed probe writes an ``error`` event (severity warning) with
+      BRT-REG-016 and the model id, so the trace and the Run page show it.
+    - No lane mode or run option excludes local models today, so there is no
+      further condition on when the probe runs (item 4b).
+
+    Never raises; the router prices an unmeasured model as no faster than the
+    slowest measured one, or ranks it after priced models when none is.
+    """
+    try:
+        from src.registry.throughput import failure_of, measure_unmeasured  # noqa: PLC0415
+
+        figures = await measure_unmeasured(matrix, checked_only=True, skip_failed=True)
     except Exception as exc:  # noqa: BLE001
         logger.warning("BRT-REG-016: speed probe at run start failed: %s", exc)
+        return
+    if run_id is None:
+        return
+    for model_id, tps in figures.items():
+        if tps is not None:
+            continue
+        try:
+            await write_event(
+                "error",
+                run_id=run_id,
+                model_id=model_id,
+                decision={
+                    "code": "BRT-REG-016",
+                    "severity": "warning",
+                    "model_id": model_id,
+                    "msg": (
+                        f"Could not measure the speed of '{model_id}' ({failure_of(model_id)}). "
+                        "It is priced as no faster than the slowest measured model in the "
+                        "pool, or ranked after priced models when none is measured. Tick it "
+                        "again or press Discover to re-measure."
+                    ),
+                },
+                **({"db_path": db_path} if db_path else {}),
+            )
+        except Exception:
+            pass
 
 
 def reload_matrix(matrix: Optional[CapabilityMatrix] = None) -> None:
@@ -2451,7 +2491,7 @@ async def _orchestrate_run(
         else os.getenv("ORCHESTRATOR_QUALITY_REQUIREMENT", "9.0")
     )
     if current_depth == 0:
-        await _measure_local_speeds(_get_matrix())
+        await _measure_local_speeds(_get_matrix(), run_id=run_id, db_path=db_path)
     configured_time_cost = await get_config("time_cost_per_sec", db_path=db_path)
     time_cost = float(
         configured_time_cost if configured_time_cost is not None

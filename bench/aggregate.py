@@ -77,6 +77,11 @@ def compare_arms(job: dict, base_arm: str, cand_arm: str, base: dict, cand: dict
                  "base_median_cost": None, "cand_median_cost": None, "cost_ratio": None,
                  "comparisons": 0, "base_preferred": 0, "cand_preferred": 0, "ties": 0,
                  "cost_holds": None, "quality_holds": None, "wins": None, "outcomes": {}}
+    # Ruling 28 (f): the local model speed measured at stage start, as the result files carry it.
+    for rec in list(cand.values()) + list(base.values()):
+        if rec.get("local_speed"):
+            out["local_speed"] = rec["local_speed"]
+            break
     if cand and all(r.get("status") == "not run" for r in cand.values()):
         out["status"] = "not run"
         return out

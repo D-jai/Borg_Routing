@@ -27,6 +27,7 @@ Borg.ready(function () {
       m.checked = box.checked;
       statusEl.textContent = m.model_id + (box.checked ? ' is in the pool.' : ' is out of the pool.');
       A.$('no-pool').classList.toggle('hidden', models.some(function (x) { return x.checked; }));
+      if (box.checked && A.isLocalModel(m) && !m.throughput_tps) load();  // shows "speed: measuring"
     }, function () { box.checked = !box.checked; });
   }
 
@@ -45,12 +46,18 @@ Borg.ready(function () {
       box.checked = !!m.checked;
       box.addEventListener('change', function () { toggle(m, box); });
       var cells = [A.td(box), A.td(m.model_id), A.td(A.whereChip(A.isLocalModel(m))), A.td(ctx(m.context_length), 'num'),
-        A.td(price(m), 'num'), A.td(m.throughput_tps ? m.throughput_tps.toFixed(0) + ' t/s' : '-', 'num')];
+        A.td(price(m), 'num'), A.td(A.speedText(m), 'num')];
       return h('tr', {}, cells.concat(scoreCells(m)));
     })));
   }
+  // A speed probe runs in the background after Discover or a tick: refetch until none is measuring.
+  var again = null;
   function load() {
-    return B.api('/models/matrix').then(function (list) { models = list || []; render(); }, function () {
+    return B.api('/models/matrix').then(function (list) {
+      models = list || []; render();
+      if (again) { clearTimeout(again); again = null; }
+      if (models.some(function (x) { return x.speed_status === 'measuring'; })) again = setTimeout(load, 5000);
+    }, function () {
       A.clear(A.$('pool')).appendChild(h('p', { class: 'muted' }, 'The model list could not be loaded.'));
     });
   }

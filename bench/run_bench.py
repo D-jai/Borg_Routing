@@ -192,6 +192,9 @@ class Config:
     judge_model_ids: list[str] = field(default_factory=list)
     force: bool = False
     phase_cap: float = budget.PHASE_CAP_DOLLARS
+    # Ruling 28 (f): {model_id: tok/s or "not measured, BRT-REG-016"}, measured at stage start and
+    # written into every result file of the stage.
+    local_speed: dict = field(default_factory=dict)
 
     @property
     def data_root(self) -> Path:
@@ -692,6 +695,8 @@ def write_result(cfg: Config, spec: RunSpec, record: dict) -> Path:
     path = result_path(cfg, spec)
     path.parent.mkdir(parents=True, exist_ok=True)
     record = {"job": spec.job, "arm": spec.arm, "repeat": spec.n, "date": cfg.date, **record}
+    if cfg.local_speed:
+        record.setdefault("local_speed", dict(cfg.local_speed))
     path.write_text(json.dumps(record, indent=1) + "\n", encoding="utf-8")
     return path
 
@@ -1275,6 +1280,8 @@ async def run_stage(stage: int, jobs, cfg, matrix, baseline, chat=llm.chat, dock
     """
     for e in cfg.ledger.recover():
         log(f"ledger: recovered unfinished entry {e['key']} (US${e['dollars']:.4f} from its database)")
+    if not cfg.skip_local and local_model_available(matrix):
+        cfg.local_speed = await measure_local_speeds_async(matrix, log=log)
     inp = stage_inputs(stage, jobs, cfg, matrix, baseline, only, arms, jms)
     seq = list(inp["sequence"])
     measured = load_measured(cfg, jobs)
@@ -1456,22 +1463,41 @@ def _speed(model) -> str:
     return f"{model.throughput_tps:g} tok/s" if model.throughput_tps else "speed not measured"
 
 
-def measure_local_speeds(matrix, log=print) -> dict:
+NOT_MEASURED = "not measured, BRT-REG-016"
+
+
+def _local_rows(matrix):
+    return [m for m in matrix.all()
+            if m.checked and m.source in ("ollama", "lmstudio", "custom_key") and not m.remote and m.pricing is None]
+
+
+async def measure_local_speeds_async(matrix, log=print) -> dict:
     """Planner ruling 28 (f): at the start of a paid stage, the product's own measuring function
     (``src/registry/throughput.py::measure_unmeasured``) times each checked local model that has no
     figure: one short local generation, free. The figure stays in memory (the bench matrix is never
-    written) and is printed. A failed probe prints "not measured" and the router prices the model as
-    no faster than the slowest measured model in the pool."""
+    written). A failed probe is remembered by the product (ruling 28 item 4a), so the runs of the stage
+    do not probe it again; the router prices it as no faster than the slowest measured model.
+
+    Returns ``{model_id: tok/s or "not measured, BRT-REG-016"}`` for every checked local model: the
+    record written into each result file and carried into the aggregate's verdicts."""
     from src.registry.throughput import measure_unmeasured
 
-    figures = asyncio.run(measure_unmeasured(matrix, checked_only=True))
-    for model_id, tps in figures.items():
-        log(f"local speed          : {model_id} "
-            + (f"{tps:g} tok/s (measured at start)" if tps else "not measured (probe failed, BRT-REG-016)"))
-    for m in matrix.all():
-        if m.checked and m.model_id not in figures and m.source in ("ollama", "lmstudio", "custom_key")                 and not m.remote and m.pricing is None:
+    figures = await measure_unmeasured(matrix, checked_only=True)
+    record: dict = {}
+    for m in _local_rows(matrix):
+        if m.model_id in figures:
+            tps = figures[m.model_id]
+            log(f"local speed          : {m.model_id} "
+                + (f"{tps:g} tok/s (measured at start)" if tps else "not measured (probe failed, BRT-REG-016)"))
+        else:
             log(f"local speed          : {m.model_id} {_speed(m)} (figure already in the matrix)")
-    return figures
+        record[m.model_id] = m.throughput_tps if m.throughput_tps else NOT_MEASURED
+    return record
+
+
+def measure_local_speeds(matrix, log=print) -> dict:
+    """``measure_local_speeds_async`` from synchronous code."""
+    return asyncio.run(measure_local_speeds_async(matrix, log=log))
 
 
 def _header(out, cfg, matrix, baseline, jms, title):
@@ -1691,8 +1717,6 @@ def main(argv: Optional[list[str]] = None) -> int:
     rc = 0
     judge_jobs = {n: j for n, j in jobs.items() if (j.get("quality") or {}).get("kind") == "pairwise_judge"}
     if args.stage and not args.judge_only:
-        if not cfg.skip_local and local_model_available(matrix):
-            measure_local_speeds(matrix)
         res = asyncio.run(run_stage(args.stage, jobs, cfg, matrix, baseline, only=only, arms=arms, jms=jms))
         rc = res["rc"]
         judge_jobs = {n: jobs[n] for n in res["judge_jobs"]}

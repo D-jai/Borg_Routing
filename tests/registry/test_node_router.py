@@ -194,6 +194,17 @@ def test_candidates_are_recorded_cheapest_first_and_all_clear_the_floor():
     assert costs == sorted(costs)
     assert decision["candidates"][0]["score"] == 8.0
     assert decision["est_cost"] == costs[0]
+    # Ruling 28h: with no speed figure anywhere in the pool, an unmeasured local model
+    # is listed after every model with a cost, its cost unknown (null).
+    unmeasured = ModelInfo(
+        model_id="ollama/unmeasured", source="ollama", endpoint="http://127.0.0.1:11434",
+        context_length=32_000, pricing=None, throughput_tps=None,
+        task_scores={t: 9.9 for t in TASK_TYPES}, checked=True,
+    )
+    _m, d2 = _route(_node(task_type="extraction", tier="mid"), matrix=_matrix(TOP, MID, CHEAP, unmeasured))
+    assert [c["model_id"] for c in d2["candidates"]] == [MID.model_id, TOP.model_id, unmeasured.model_id]
+    priced = [c["est_cost"] for c in d2["candidates"][:2]]
+    assert priced == sorted(priced) and d2["candidates"][2]["est_cost"] is None
 
 
 def test_a_model_whose_context_is_too_small_is_not_offered():

@@ -370,3 +370,22 @@ def test_the_timeline_shows_words_for_a_decision_code_and_an_unknown_mode(tmp_pa
     return W.eventSentences(data).map(s => s.text);
     """)
     assert out == ["The planner declined to answer.", "The planner recorded a decision.", "Working."]
+
+
+# ---------- ruling 28: the Models page speed cell ----------
+
+def test_speed_text_shows_slow_figures_with_a_decimal_and_the_probe_state(tmp_path):
+    out = run_js(tmp_path, """
+    const {BorgAdmin: A} = H.load({extra: ['admin.js']});
+    return [
+      A.speedText({throughput_tps: 45.4}),
+      A.speedText({throughput_tps: 9.66}),
+      A.speedText({throughput_tps: 0.4}),
+      A.speedText({throughput_tps: 0.004}),
+      A.speedText({throughput_tps: null}),
+      A.speedText({throughput_tps: null, speed_status: 'measuring'}),
+      A.speedText({throughput_tps: null, speed_status: 'BRT-REG-016'}),
+    ];""")
+    assert out == ["45 t/s", "9.7 t/s", "0.4 t/s", "0.004 t/s", "-", "speed: measuring",
+                   "not measured (BRT-REG-016)"]
+    assert all(s != "0 t/s" for s in out)

@@ -99,10 +99,12 @@ def _no_real_speed_probe():
 
     mp = pytest.MonkeyPatch()
     mp.setattr(throughput, "_post_json", _blocked)
+    throughput.reset_state()  # the process remembers failed probes (ruling 28 4a); tests start clean
     try:
         yield
     finally:
         mp.undo()
+        throughput.reset_state()
 
 
 @pytest.fixture(autouse=True)

@@ -76,9 +76,24 @@
     return b;
   }
 
+  // Models page speed cell (ruling 28). A probe running in the background shows "speed: measuring";
+  // a failed one shows its code. Below 10 tok/s one decimal, so a slow host never reads "0 t/s".
+  function speedText(m) {
+    if (m && m.speed_status === 'measuring') return 'speed: measuring';
+    var v = m ? m.throughput_tps : null;
+    if (typeof v === 'number' && v > 0) {
+      var t = v >= 10 ? v.toFixed(0) : v.toFixed(1);
+      if (Number(t) === 0) t = v.toPrecision(1);
+      return t + ' t/s';
+    }
+    if (m && m.speed_status === 'BRT-REG-016') return 'not measured (BRT-REG-016)';
+    return '-';
+  }
+
   window.BorgAdmin = {
     h: h, clear: clear, $: $, chip: chip, whereChip: whereChip, isLocalModel: isLocalModel,
     table: table, td: td, emptyRow: emptyRow, ago: ago, short: short, statusChip: statusChip,
-    errorMessage: errorMessage, runAgainButton: runAgainButton, RUN_AGAIN_HELP: RUN_AGAIN_HELP
+    errorMessage: errorMessage, runAgainButton: runAgainButton, RUN_AGAIN_HELP: RUN_AGAIN_HELP,
+    speedText: speedText
   };
 })();

@@ -118,6 +118,12 @@ def test_with_no_figure_in_the_pool_an_unmeasured_model_is_ranked_after_priced_m
     assert UNMEASURED_RANKED_AFTER_PRICED in d["notes"]
     ids = [c["model_id"] for c in d["candidates"]]
     assert ids.index("openrouter/stub/dear") < ids.index(UNMEASURED.model_id)
+    # Review item 1: its cost is unknown, recorded as null, never 0.0.
+    local = next(c for c in d["candidates"] if c["model_id"] == UNMEASURED.model_id)
+    assert local["est_cost"] is None and local["est_time_cost"] is None
+    assert local["est_dollars"] == 0.0
+    dear = next(c for c in d["candidates"] if c["model_id"] == "openrouter/stub/dear")
+    assert dear["est_cost"] is not None and dear["est_cost"] > 0
 
 
 def test_with_no_priced_model_qualifying_unmeasured_local_models_keep_the_existing_tie_break():
@@ -132,6 +138,8 @@ def test_with_no_priced_model_qualifying_unmeasured_local_models_keep_the_existi
     assert model.model_id == high.model_id
     assert [c["model_id"] for c in d["candidates"]] == [high.model_id, twin.model_id, low.model_id]
     assert UNMEASURED_RANKED_AFTER_PRICED in d["notes"]
+    assert d["est_cost"] is None and d["est_time_cost"] is None
+    assert all(c["est_cost"] is None for c in d["candidates"])
 
 
 def test_local_first_still_picks_an_unmeasured_local_model_with_no_figure_in_the_pool():

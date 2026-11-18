@@ -122,35 +122,87 @@ async def probe_tps(
     return await _timed_rate(model, post, clock)
 
 
+# Process memory (ruling 28 4a): a model whose probe failed is not probed again by
+# run starts until Discover or a tick re-measures it, or the process restarts.
+_failed: dict[str, str] = {}
+# Rows a background probe (Discover, tick) is measuring now: the Models page
+# shows "speed: measuring" for them.
+_measuring: set[str] = set()
+_tasks: set = set()  # strong references, so a background probe is never garbage-collected
+
+
+def failure_of(model_id: str) -> Optional[str]:
+    """Why this model's last probe failed in this process, or None."""
+    return _failed.get(model_id)
+
+
+def speed_status(model_id: str) -> Optional[str]:
+    """``"measuring"`` while a background probe runs, ``"BRT-REG-016"`` after a
+    failed one, else None."""
+    if model_id in _measuring:
+        return "measuring"
+    if model_id in _failed:
+        return "BRT-REG-016"
+    return None
+
+
+def reset_state() -> None:
+    """Forget failures and running probes (tests)."""
+    _failed.clear()
+    _measuring.clear()
+
+
+def _figure(tps: float) -> float:
+    """Four significant figures: a slow host's 0.004 tok/s never rounds to 0."""
+    return float(f"{tps:.4g}")
+
+
 async def measure_throughput(
     matrix: CapabilityMatrix,
     model_id: str,
     post: Optional[PostJson] = None,
     clock: Clock = time.perf_counter,
+    skip_failed: bool = False,
 ) -> Optional[float]:
     """Probe one row and store its figure with ``update_throughput``.
 
     Returns the figure, or None when the row needs no probe (not local, priced,
-    no endpoint, already measured) or the probe failed (BRT-REG-016, logged).
-    Never raises. The caller saves the matrix.
+    no endpoint, already measured), when ``skip_failed`` and its probe already
+    failed in this process, or when the probe failed (BRT-REG-016, logged and
+    remembered). Never raises. The caller saves the matrix.
     """
     model = matrix.get(model_id)
     if not needs_measuring(model):
+        return None
+    if skip_failed and model_id in _failed:
         return None
     try:
         tps = await probe_tps(model, post=post, clock=clock)
         if tps <= 0:
             raise ValueError(f"figure {tps} is not positive")
     except Exception as exc:  # noqa: BLE001 - a failed probe never stops the caller
+        reason = f"{type(exc).__name__}: {exc}"
+        _failed[model_id] = reason
         logger.warning(
             "BRT-REG-016: could not measure the speed of '%s' at %s: %s. "
             "It is priced as no faster than the slowest measured model.",
-            model_id, model.endpoint, f"{type(exc).__name__}: {exc}",
+            model_id, model.endpoint, reason,
         )
         return None
-    matrix.update_throughput(model_id, round(tps, 2))
-    logger.info("Measured %s at %.2f tok/s", model_id, tps)
-    return round(tps, 2)
+    _failed.pop(model_id, None)
+    figure = _figure(tps)
+    matrix.update_throughput(model_id, figure)
+    logger.info("Measured %s at %s tok/s", model_id, figure)
+    return figure
+
+
+def to_measure(matrix: CapabilityMatrix, checked_only: bool = True, skip_failed: bool = False) -> list[str]:
+    """The ids ``measure_unmeasured`` would probe."""
+    return [
+        row.model_id for row in matrix.all()
+        if (row.checked or not checked_only) and needs_measuring(row)
+        and not (skip_failed and row.model_id in _failed)
+    ]
 
 
 async def measure_unmeasured(
@@ -158,16 +210,51 @@ async def measure_unmeasured(
     checked_only: bool = True,
     post: Optional[PostJson] = None,
     clock: Clock = time.perf_counter,
+    skip_failed: bool = False,
 ) -> dict[str, Optional[float]]:
     """Probe every local row with no figure (ticked rows only, unless
-    ``checked_only`` is False). Returns ``{model_id: figure or None}``, one
-    entry per row probed. Rows are probed one at a time (a local host often
-    serves one call at a time). Never raises."""
+    ``checked_only`` is False; rows whose probe already failed are left out
+    when ``skip_failed``). Returns ``{model_id: figure or None}``, one entry
+    per row probed. Rows are probed one at a time (a local host often serves
+    one call at a time). Never raises."""
     out: dict[str, Optional[float]] = {}
-    for row in matrix.all():
-        if checked_only and not row.checked:
-            continue
-        if not needs_measuring(row):
-            continue
-        out[row.model_id] = await measure_throughput(matrix, row.model_id, post=post, clock=clock)
+    for model_id in to_measure(matrix, checked_only, skip_failed):
+        out[model_id] = await measure_throughput(matrix, model_id, post=post, clock=clock)
     return out
+
+
+def measure_in_background(
+    matrix: CapabilityMatrix,
+    model_ids: list[str],
+    on_done: Optional[Callable[[], None]] = None,
+):
+    """Start probing ``model_ids`` as a background task in this event loop and
+    return the task at once (ruling 28 item 7: Discover and the tick return
+    without waiting). Each figure is stored with ``measure_throughput``;
+    ``on_done`` (save the matrix, share it with the engine) runs after. Rows
+    show ``speed_status == "measuring"`` until their probe ends."""
+    import asyncio  # noqa: PLC0415
+
+    ids = [i for i in model_ids if needs_measuring(matrix.get(i))]
+    if not ids:
+        return None
+    _measuring.update(ids)
+
+    async def _run() -> None:
+        try:
+            for model_id in ids:
+                try:
+                    await measure_throughput(matrix, model_id)
+                finally:
+                    _measuring.discard(model_id)
+            if on_done is not None:
+                on_done()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("BRT-REG-016: background speed probe failed: %s", exc)
+        finally:
+            _measuring.difference_update(ids)
+
+    task = asyncio.get_running_loop().create_task(_run())
+    _tasks.add(task)
+    task.add_done_callback(_tasks.discard)
+    return task
