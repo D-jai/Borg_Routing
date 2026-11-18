@@ -121,7 +121,7 @@ calls) is logged with its token counts and its **dollars**:
 
 The prices come from the capability-matrix row of the model that served the call.
 A model with no pricing (a local model) costs `0.0`, and so does a model the
-matrix does not know <!-- claim C05 -->; the call is never left blank, with one exception: a
+matrix does not know; <!-- claim C05 --> the call is never left blank, with one exception: a
 direct-to-model (bypass) call whose provider sends no usage is logged with its
 tokens and dollars left blank (unknown), not zero. A call that was retried
 after being cut off counts the tokens of both attempts. The tools do not carry
@@ -165,8 +165,10 @@ its own:
    that model is ticked in the pool, the step uses it.
 2. Otherwise the step's **kind of work** (`task_type`: reasoning, coding,
    summarize, writing, roleplay, agentic, extraction) and **size** (`tier`:
-   light, mid, heavy) decide. The step goes to the ticked model with the lowest effective cost (dollars plus
-   time) whose score for that kind of work is at or above the tier's floor. <!-- claim C01 -->
+   light, mid, heavy) decide. Unless a run alias such as `borg_route:local`
+   prefers local models (see "Chat model aliases"), the step goes to the ticked
+   model with the lowest effective cost (dollars plus time) whose score for that
+   kind of work is at or above the tier's floor and whose context window fits the step. <!-- claim C01 -->
    A step that invokes a skill takes the skill's own tier and specialty when
    the planner gave none. A step with no labels is `reasoning`, `mid`.
    Near-synonyms are accepted (`creative` is read as writing, `code` as
@@ -176,8 +178,9 @@ its own:
    If the skill a step names cannot be found, the trace shows a
    `BRT-ORC-023` warning and the step is routed without the skill's hints.
    An `apply_to_each` step's items all run on the step's own model.
-3. If no ticked model clears the floor, the step runs on the run's default
-   model and the trace shows a `BRT-ORC-019` warning. <!-- claim C02 --> If routing fails for
+3. Outside the on-premise lane, if no ticked model clears the floor, the step
+   runs on the run's default model and the trace shows a `BRT-ORC-019` warning. <!-- claim C02 -->
+   (A step that must stay local never falls back to a cloud model; see "On-premise lane".) If routing fails for
    any other reason, the step also runs on the default model and its route
    entry carries the error.
 
@@ -268,7 +271,7 @@ The planner, re-plan and final write-up (compose) share one prompt. The engine's
 
 1. **The answer is there, in the wrong place** (for example `{"action": "compose", "response": "..."}`, or the text under `final_answer` or `answer`, or a list where text was expected): it is used as the answer, with no extra call. The trace shows BRT-ORC-028. When the reply also carries `action` or `next_nodes` (it is shaped like a re-plan), only `response`, `direct_answer`, `final_answer` or `answer` count; a `message`, `output` or similar field there is the planner's note, not the answer, and the write-up is asked for again (step 2).
 2. **No answer in the reply:** the write-up is asked for once more (BRT-ORC-029).
-3. **Still no answer:** you get the results of the steps that finished, under a plain note saying the final write-up failed: each step's answer, or for a per-item step each item's result and how many items failed. Finished work is never thrown away. <!-- claim C10 --> The trace shows BRT-ORC-030 as a warning, and `GET /runs/{id}` shows `"answer_kind": "salvaged"` on the run (a written-up answer shows `"composed"`). With the on-premise lane in `raw_local` or `all_local`, a step that read your documents appears only if its output passed the output check, and only document ids (never document text) are shown for its items.
+3. **Still no answer:** you get the results of the steps that finished, under a plain note saying the final write-up failed: each step's answer, or for a per-item step each item's result and how many items failed. The steps that finished come back under the note, with `answer_kind` `salvaged` (in the lane, only outputs that passed the output check). <!-- claim C10 --> The trace shows BRT-ORC-030 as a warning, and `GET /runs/{id}` shows `"answer_kind": "salvaged"` on the run (a written-up answer shows `"composed"`). With the on-premise lane in `raw_local` or `all_local`, a step that read your documents appears only if its output passed the output check, and only document ids (never document text) are shown for its items.
 
 If the write-up call itself fails (a timeout, a connection error, a reply that is not JSON), step 3 happens straight away: the finished steps' results come back with the note, BRT-ORC-030 and `"answer_kind": "salvaged"`.
 
@@ -531,7 +534,7 @@ Use it to keep bulk data out of the prompt. Lists of more than a few dozen items
 2. Name them relative to that folder: `"documents": {"folder": "client_notes"}` (every file in it and below) or `"documents": {"files": ["client_notes/acme.txt"]}`.
 3. Only `.txt` and `.md` are read (as UTF-8). Other files are listed as "unsupported, not read".
 
-A path that leaves the folder (`..`, an absolute path, `C:x.txt`, `\x.txt`, a network path, a link or junction pointing outside) is refused with **BRT-LANE-001** before anything is read <!-- claim C15 -->; the message names only the path you sent. A file replaced between the check and the read is refused too.
+A path that leaves the folder (`..`, an absolute path, `C:x.txt`, `\x.txt`, a network path, a link or junction pointing outside) is refused with **BRT-LANE-001** before anything is read; <!-- claim C15 --> the message names only the path you sent. A file replaced between the check and the read is refused too.
 
 The planner never sees the text. It gets a list: an id per document (`doc_001`), its name, type and size. Set `lane_manifest` to `ids` to hide the names as well. A document longer than `lane_part_chars` (default 8000 characters) is split into parts (`doc_001#2`); nothing is cut off.
 
