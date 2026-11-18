@@ -136,7 +136,7 @@ async def update_run_status(
         await db.commit()
 
 
-ANSWER_KINDS = ("composed", "salvaged", "direct", "declined", "shortcut")
+ANSWER_KINDS = ("composed", "salvaged", "direct", "declined", "shortcut", "planner_only")
 
 
 async def set_run_answer_kind(run_id: UUID, kind: str, db_path: str = DB_PATH) -> None:
@@ -147,7 +147,7 @@ async def set_run_answer_kind(run_id: UUID, kind: str, db_path: str = DB_PATH) -
     results with a note (BRT-ORC-030). ``direct``: the planner's
     ``direct_answer``. ``declined``: compose replied ``action: fail`` and the
     answer is its rationale (or no plan and no write-up came back at all).
-    ``shortcut``: the Rule Zero shortcut answered. Every completed run has
+    ``shortcut``: the Rule Zero shortcut answered. ``planner_only``: steps were planned, none finished, and compose still wrote text, so the planning model wrote the answer alone (planner ruling 26a; a BRT-ORC-033 warning event lists the step failure codes). Every completed run has
     one (R1-R4 review). NULL: a failed run, or a run from before this column. Shown in ``GET /runs/{id}`` as ``run.answer_kind``.
     A run id with no row is ignored.
 

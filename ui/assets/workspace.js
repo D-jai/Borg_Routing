@@ -355,6 +355,28 @@
     return s;
   }
 
+  /* Planner ruling 26a: when every planned step failed and the planning model still wrote the
+   * answer (run.answer_kind "planner_only"), the receipt says so in plain words and lists the
+   * steps' failure codes from the BRT-ORC-033 event (a document step: code and document id
+   * only). null for any other answer. */
+  function noStepNote(data) {
+    var run = data && data.run;
+    if (!run || run.answer_kind !== 'planner_only') return null;
+    var d = null;
+    (data.events || []).forEach(function (ev) {
+      var x = decisionOf(ev);
+      if (x && x.code === 'BRT-ORC-033') d = x;
+    });
+    var codes = d && Array.isArray(d.step_codes) ? d.step_codes : [];
+    var n = d && typeof d.failed_steps === 'number' ? d.failed_steps : codes.length;
+    var list = codes.map(function (c) {
+      if (c && typeof c === 'object') return String(c.code) + (c.doc ? ' (document ' + c.doc + ')' : '');
+      return String(c);
+    }).join(', ');
+    return 'Every planned step failed (' + n + ' of ' + n + '), so the planning model wrote this answer alone, ' +
+      'with no step’s work behind it.' + (list ? ' Step failure codes: ' + list + '.' : '');
+  }
+
   // ---------- what the run was run under, and what the pages show about it ----------
   /* The lane mode the run recorded when it started (runs.lane_mode). Not the setting now.
    * null means the run did not record one (a run from before the column). */
@@ -410,7 +432,8 @@
       models: callsByModel(data), left: t.left, leftSource: t.leftSource,
       laneMode: mode,
       rawStayed: !!(data.run && data.run.documents) && (mode === 'raw_local' || mode === 'all_local'),
-      estimate: baselineEstimate(data)    // ruling 22: the floor, or null when none was stored
+      estimate: baselineEstimate(data),   // ruling 22: the floor, or null when none was stored
+      noStep: noStepNote(data)            // ruling 26a: the planner wrote the answer alone, or null
     };
   }
   /* The receipt's stat boxes as [k, v] pairs. */
@@ -663,7 +686,7 @@
   window.BorgWork = {
     LANE_MODES: LANE_MODES, laneTag: laneTag, historyForMode: historyForMode, laneLine: laneLine,
     readLaneMode: readLaneMode, prepareSend: prepareSend, runLaneMode: runLaneMode, runLaneWords: runLaneWords, leftCard: leftCard,
-    headerTiles: headerTiles, receiptFrom: receiptFrom, receiptStats: receiptStats, leftChipText: leftChipText,
+    headerTiles: headerTiles, receiptFrom: receiptFrom, noStepNote: noStepNote, receiptStats: receiptStats, leftChipText: leftChipText,
     stripBaseline: stripBaseline, whyRows: whyRows, makeRefresher: makeRefresher, makeLiveStream: makeLiveStream,
     parseJSON: parseJSON, decisionOf: decisionOf, stageWords: stageWords, shortModel: shortModel, shortText: shortText,
     planNodesById: planNodesById, stepsFromRun: stepsFromRun, planLayout: planLayout,

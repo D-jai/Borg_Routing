@@ -300,7 +300,11 @@ When a run has a finished per-item step (`apply_to_each`) or a `state_op` that r
 - With no such step, nothing changes: the write-up's message is exactly as before.
 - **Limit:** a list inside a child run (an `orchestrate` step) reaches the parent run as text, so the parent's write-up has to retype it.
 
-Every completed run records how its answer was made in `answer_kind` (`GET /runs/{id}`): `composed` (the final write-up), `salvaged` (the finished steps' results with a note, BRT-ORC-030), `direct` (the planner answered without steps), `declined` (the write-up declined with `action: fail` and its reason is the answer, or nothing at all came back with no steps to show) or `shortcut` (a short conversational message answered by the Rule Zero shortcut).
+Every completed run records how its answer was made in `answer_kind` (`GET /runs/{id}`): `composed` (the final write-up), `salvaged` (the finished steps' results with a note, BRT-ORC-030), `direct` (the planner answered without steps), `declined` (the write-up declined with `action: fail` and its reason is the answer, or nothing at all came back with no steps to show) or `shortcut` (a short conversational message answered by the Rule Zero shortcut). One more kind, `planner_only` (planner ruling 26a): the run had no documents, steps were planned, every one of them failed, and the write-up still returned text. The run is still `completed`, but the trace records BRT-ORC-033 as a warning, and the receipt (Ask page) and the Run page header say: "Every planned step failed (N of N), so the planning model wrote this answer alone, with no step's work behind it. Step failure codes: ...". Treat such an answer as the planning model's own, unchecked.
+
+With documents the rule is stricter (planner ruling 26b): if the run has documents (any lane mode) and no step that read them finished, the run fails with BRT-ORC-034 before the write-up is called, so no answer text exists. The error lists each failed step's code; a step that read documents shows only its code and document ids (for example `BRT-LANE-002 (document doc_001,doc_002)`), never its message or any document text.
+
+When some steps finished and some failed, the answer is composed as before. The receipt shows the number of steps, not how many of them failed; the Run page marks each failed step on the plan.
 
 ---
 

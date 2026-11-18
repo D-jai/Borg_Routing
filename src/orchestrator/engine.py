@@ -3126,6 +3126,13 @@ async def _orchestrate_run(
             db_path=db_path,
         )
 
+    # Planner ruling 26b: with documents, an answer no document step stands
+    # behind must not exist. The run fails before compose is called. Only
+    # the run that holds the documents: a child run inherits the lane but
+    # has no documents of its own (its parent's check covers it).
+    if current_depth == 0:
+        await _fail_if_no_document_step(results, run_id, db_path)
+
     # --- COMPOSE MODE ---
     # Planner ruling 21: the list-holding steps compose may name with a row
     # marker. With none, every compose request is byte-identical to before.
@@ -3392,7 +3399,12 @@ async def _handle_compose_result(
                 )
             except Exception:
                 pass
-        await _mark_answer_kind(run_id, "composed", db_path)
+        if _no_step_finished(results):
+            # Planner ruling 26a: every planned step failed; the planning
+            # model wrote this answer alone, and the run says so.
+            await _mark_planner_only(results, run_id, db_path)
+        else:
+            await _mark_answer_kind(run_id, "composed", db_path)
         return text
 
     # action == "fail" — surface rationale instead of silently 500ing.
@@ -3471,6 +3483,105 @@ async def _handle_compose_result(
     # Genuinely nothing usable anywhere — keep the original error so
     # operators still see the failure mode when it's real.
     raise ValueError("BRT-ORC-009: compose mode returned no response")
+
+
+def _no_step_finished(results: dict) -> bool:
+    """True when steps were planned and none of them finished (resolved)."""
+    return bool(results) and not any(
+        getattr(env, "status", None) == "resolved" for env in results.values()
+    )
+
+
+def _step_failure_codes(results: dict) -> list:
+    """The failure code of every failed step, in run order, as compose sees it.
+
+    A raw step (it read the run's documents) is ``{"code", "doc"}``: the
+    code and its document ids only, never a message. Any other step is its
+    code as a string.
+    """
+    codes: list = []
+    for env in (results or {}).values():
+        if env is None or getattr(env, "status", None) != "failed":
+            continue
+        view = _stage_output_for_prompt(env, "compose")
+        failure = view.get("failure") if isinstance(view, dict) else None
+        code = failure.get("code") if isinstance(failure, dict) else None
+        code = str(code or _FAILURE_CODE_FALLBACK)
+        if getattr(env, "_data_scope", None) == "raw":
+            doc = failure.get("doc") if isinstance(failure, dict) else None
+            codes.append({"code": code, "doc": doc or getattr(env, "_doc_label", None)})
+        else:
+            codes.append(code)
+    return codes
+
+
+def _codes_text(codes: list) -> str:
+    parts = []
+    for c in codes:
+        if isinstance(c, dict):
+            parts.append(f"{c['code']} (document {c['doc']})" if c.get("doc") else c["code"])
+        else:
+            parts.append(str(c))
+    return ", ".join(parts) if parts else "none"
+
+
+async def _mark_planner_only(results: dict, run_id: UUID, db_path: str) -> None:
+    """Ruling 26a: ``answer_kind = "planner_only"`` and a BRT-ORC-033 warning
+    event carrying the failed-step count and their codes (the receipt reads it)."""
+    codes = _step_failure_codes(results)
+    try:
+        await write_event(
+            "error",
+            run_id=run_id,
+            decision={
+                "code": "BRT-ORC-033",
+                "severity": "warning",
+                "msg": "every planned step failed; the planning model wrote this answer alone",
+                "failed_steps": len(codes),
+                "step_codes": codes,
+            },
+            db_path=db_path,
+        )
+    except Exception:
+        pass
+    await _mark_answer_kind(run_id, "planner_only", db_path)
+
+
+async def _fail_if_no_document_step(results: dict, run_id: UUID, db_path: str) -> None:
+    """Ruling 26b: a run with documents (any lane mode) in which no step that
+    read them finished fails with BRT-ORC-034 before compose is called, so no
+    compose text exists. The error lists the steps' failure codes; a raw step
+    shows its code and document ids only.
+
+    "Read them" is the runtime's own mark: the step's data scope is raw.
+
+    Raises:
+        ValueError: BRT-ORC-034.
+    """
+    lane = current_lane()
+    if lane is None or not lane.has_documents:
+        return
+    if any(
+        getattr(env, "status", None) == "resolved" and getattr(env, "_data_scope", None) == "raw"
+        for env in (results or {}).values()
+    ):
+        return
+    codes = _step_failure_codes(results)
+    message = (
+        "BRT-ORC-034: the run has documents and no step that read them finished, "
+        f"so no answer was written. Step failures: {_codes_text(codes)}"
+    )
+    try:
+        await write_event(
+            "error",
+            run_id=run_id,
+            decision={"code": "BRT-ORC-034", "msg": message,
+                      "failed_steps": len(codes), "step_codes": codes},
+            db_path=db_path,
+        )
+    except Exception:
+        pass
+    raise ValueError(message)
 
 
 async def _log_decision(run_id: UUID, db_path: str, decision: dict) -> None:

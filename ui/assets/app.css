@@ -151,6 +151,8 @@ dl.kv dt { color: var(--ink-3); } dl.kv dd { margin: 0; }
 .actions { display: flex; gap: var(--s2); align-items: center; flex-wrap: wrap; }
 .chip.ok { background: var(--ok-soft); color: var(--ok); } .chip.bad { background: var(--bad-soft); color: var(--bad); }
 .chip.warn { background: var(--warn-soft); color: var(--warn); }
+/* Ruling 26a: an answer no step stands behind. */
+.no-step { background: var(--warn-soft); color: var(--warn); border-radius: 6px; padding: 6px 10px; margin: 8px 0 0; }
 .callout { border-left: 3px solid var(--warn); background: var(--warn-soft); color: var(--ink); padding: var(--s3) var(--s4); border-radius: var(--radius-sm); }
 .setting { display: grid; grid-template-columns: minmax(170px, 1fr) minmax(150px, 260px) auto; gap: var(--s1) var(--s4); align-items: center; padding: var(--s3) 0; border-bottom: 1px solid var(--line); }
 .setting:last-child { border-bottom: 0; }

@@ -46,6 +46,11 @@ Borg.ready(function () {
     if (oldNote) oldNote.remove();
     var floorEst = W.baselineEstimate(data);
     if (floorEst) tiles.insertAdjacentElement('afterend', h('p', { class: 'small muted', id: 'floor-note' }, W.floorNote(floorEst)));
+    // Ruling 26a: every planned step failed and the planning model wrote the answer alone.
+    var oldNoStep = document.getElementById('no-step-note');
+    if (oldNoStep) oldNoStep.remove();
+    var noStep = W.noStepNote(data);
+    if (noStep) tiles.insertAdjacentElement('afterend', h('p', { class: 'small no-step', id: 'no-step-note' }, noStep));
   }
 
   // ---------- plan diagram ----------

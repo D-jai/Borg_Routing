@@ -392,3 +392,36 @@ def test_ruling_23_with_packing_off_each_item_is_its_own_call(tmp_path):
     parent["routing"]["items"] = 7
     line = js(tmp_path, f"return W.itemsLine(W.stepsFromRun({json.dumps(run_body([parent]))})[0]);")
     assert line == "7 items in 7 calls"
+
+
+# ---------- planner ruling 26a: an answer with no step behind it ----------
+
+def _no_step_body(kind, codes=("BRT-ORC-004", "BRT-REG-020")):
+    event = {"event_type": "error", "run_id": "r", "decision_json": json.dumps({
+        "code": "BRT-ORC-033", "severity": "warning", "failed_steps": len(codes),
+        "step_codes": list(codes)})}
+    body = run_body([env("n1", status="failed")], events=[event] if kind == "planner_only" else [])
+    body["run"]["answer_kind"] = kind
+    return body
+
+
+def test_ruling_26a_receipt_says_the_planner_wrote_it_alone(tmp_path):
+    data = _no_step_body("planner_only")
+    out = js(tmp_path, f"""const d = {json.dumps(data)}; const r = W.receiptFrom(d);
+        return {{note: r.noStep, direct: W.noStepNote(d)}};""")
+    assert out["note"] == out["direct"]
+    note = out["note"]
+    assert "Every planned step failed (2 of 2)" in note
+    assert "the planning model wrote this answer alone" in note
+    assert "BRT-ORC-004, BRT-REG-020" in note
+
+
+def test_ruling_26a_a_composed_answer_has_no_note(tmp_path):
+    data = _no_step_body("composed")
+    assert js(tmp_path, f"return W.receiptFrom({json.dumps(data)}).noStep;") is None
+
+
+def test_ruling_26a_raw_step_codes_show_code_and_document_only(tmp_path):
+    data = _no_step_body("planner_only", codes=({"code": "BRT-LANE-002", "doc": "doc_001"},))
+    note = js(tmp_path, f"return W.noStepNote({json.dumps(data)});")
+    assert "BRT-LANE-002 (document doc_001)" in note and "(1 of 1)" in note
