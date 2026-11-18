@@ -139,18 +139,6 @@ def test_only_if_field_may_be_omitted():
     validate_inbound(env, _only_if_task())  # must not raise
 
 
-def test_only_if_field_may_be_null():
-    env = _env(output={"bucket": "a", "confidence": 0.9, "defer_reason": None})
-    validate_inbound(env, _only_if_task())  # must not raise
-
-
-def test_only_if_field_present_is_kept_unchanged():
-    out = {"bucket": "defer", "confidence": 0.1, "defer_reason": "unclear"}
-    env = _env(output=dict(out))
-    validate_inbound(env, _only_if_task())
-    assert env.output == out
-
-
 def test_field_without_hint_still_required():
     env = _env(output={"bucket": "a", "defer_reason": "x"})
     with pytest.raises(ValueError, match="BRT-ENV-011") as exc:
@@ -159,17 +147,106 @@ def test_field_without_hint_still_required():
 
 
 def test_only_if_field_omitted_in_json_schema_shape():
+    """A JSON-Schema property written as a dict: the marker is in its description."""
     schema = {
         "type": "object",
         "properties": {
-            "bucket": "enum:a|b",
-            "note": "string (only if bucket='b')",
+            "bucket": {"type": "string"},
+            "note": {"type": "string", "description": "(only if bucket='b')"},
         },
     }
     task = _task(output_schema=schema)
     validate_inbound(_env(output={"bucket": "a"}), task)
     with pytest.raises(ValueError, match="BRT-ENV-011"):
         validate_inbound(_env(output={"note": "x"}), task)
+
+
+def test_only_if_string_property_in_json_schema_shape():
+    schema = {"type": "object",
+              "properties": {"bucket": "enum:a|b", "note": "string (only if bucket='b')"}}
+    validate_inbound(_env(output={"bucket": "a"}), _task(output_schema=schema))
+
+
+def test_explicit_required_list_wins_over_only_if_hint():
+    """A field named in an explicit `required` list stays required."""
+    schema = {
+        "type": "object",
+        "properties": {
+            "bucket": {"type": "string"},
+            "note": {"type": "string", "description": "(only if bucket='b')"},
+        },
+        "required": ["bucket", "note"],
+    }
+    task = _task(output_schema=schema)
+    with pytest.raises(ValueError, match="BRT-ENV-011"):
+        validate_inbound(_env(output={"bucket": "a"}), task)
+    validate_inbound(_env(output={"bucket": "a", "note": None}), task)
+
+
+def test_explicit_required_list_without_the_field_leaves_it_optional():
+    schema = {
+        "type": "object",
+        "properties": {
+            "bucket": {"type": "string"},
+            "note": {"type": "string", "description": "(only if bucket='b')"},
+        },
+        "required": ["bucket"],
+    }
+    validate_inbound(_env(output={"bucket": "a"}), _task(output_schema=schema))
+
+
+def test_with_fields_wrapped_only_if_field_may_be_omitted():
+    """Library `_with_fields` wraps an extra field as {"type","description"}."""
+    from src.skills.library import _with_fields
+
+    schema = _with_fields({"type": "object", "properties": {"bucket": {"type": "string"}}},
+                          {"why": "string (only if bucket='b')", "urgency": "integer 1-5"})
+    task = _task(output_schema=schema)
+    validate_inbound(_env(output={"bucket": "a", "urgency": 3}), task)
+    with pytest.raises(ValueError, match="BRT-ENV-011"):
+        validate_inbound(_env(output={"bucket": "a", "why": "x"}), task)
+
+
+def test_regression_only_if_field_null_passes():
+    env = _env(output={"bucket": "a", "confidence": 0.9, "defer_reason": None})
+    validate_inbound(env, _only_if_task())
+
+
+def test_regression_only_if_field_present_is_kept_unchanged():
+    out = {"bucket": "defer", "confidence": 0.1, "defer_reason": "unclear"}
+    env = _env(output=dict(out))
+    validate_inbound(env, _only_if_task())
+    assert env.output == out
+
+
+def test_packed_path_accepts_omitted_only_if_field():
+    """The packer's per-item envelope build uses the same validator."""
+    from src.lane.context import mark_model_reason
+    from src.orchestrator.packing import StepPacker
+
+    child = _only_if_task()
+    value = {"status": "resolved", "confidence": 0.9, "output": {"bucket": "a", "confidence": 0.9}}
+    env = StepPacker._envelope(None, value, child, 10, 5, 0, None, mark_model_reason, validate_inbound)
+    assert env is not None and env.status == "resolved"
+    bad = {"status": "resolved", "output": {"bucket": "a"}}  # confidence still required
+    assert StepPacker._envelope(None, bad, child, 10, 5, 0, None, mark_model_reason, validate_inbound) is None
+
+
+async def test_executor_path_accepts_omitted_only_if_field(tmp_path):
+    import json
+    from unittest.mock import AsyncMock, patch
+
+    from src.agents.executor import execute
+    from src.db.schema import create_all
+
+    db = str(tmp_path / "v.db")
+    await create_all(db)
+    task = _task(output_schema=dict(_ONLY_IF_SCHEMA), model_endpoint="http://localhost:1234",
+                 model_name="test-model")
+    reply = json.dumps({"status": "resolved", "output": {"bucket": "a", "confidence": 0.9}})
+    with patch("src.agents.executor._call_model", new=AsyncMock(return_value=(reply, 5, 5, "stop"))):
+        env = await execute(task, db_path=db)
+    assert env.status == "resolved", env.failure_reason
 
 
 def test_real_classify_into_buckets_schema_without_defer_reason_passes():

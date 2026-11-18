@@ -621,7 +621,12 @@ def _step_fields(skill_id: str, extra_fields: object, skill_schema: object) -> d
 
 
 def _with_fields(schema: object, added: dict) -> dict:
-    """``schema`` with ``added`` fields, all required by the inbound check."""
+    """``schema`` with ``added`` fields.
+
+    Each added field is required by the inbound check, except a field whose hint
+    holds "(only if", which may be omitted unless the schema has an explicit
+    ``required`` list (the added names are appended to it, so they stay required).
+    """
     if isinstance(schema, dict) and isinstance(schema.get("properties"), dict):
         out = dict(schema)
         out["properties"] = {**schema["properties"],
