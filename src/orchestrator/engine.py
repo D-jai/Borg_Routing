@@ -1962,7 +1962,7 @@ async def _check_plan(
     """
     # Change 1 (ruling 32d): accepted fields that build nothing on the node's
     # path are recorded, one note per node; nothing is refused or changed.
-    for node_id, fields in accepted_unused(nodes):
+    for node_id, fields in accepted_unused(nodes, _get_skill_lib()):
         try:
             await write_event(
                 "orchestrator_decision", run_id=run_id,

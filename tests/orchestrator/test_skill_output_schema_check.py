@@ -361,8 +361,12 @@ async def test_a_third_035_fault_in_a_later_batch_runs_and_is_not_sent_back(env)
     assert len(stub.of_kind("answerer")) == 4   # n2 and n3 (2 items each) ran
     steps = {e["step"] for e in engine.asked_but_not_produced(result["run_id"])}
     assert steps == {"n2", "n3"}
-    for r in stub.of_kind("re_plan")[1:]:
-        assert '"n3": {"failure"' not in r.system + r.user
+    # n3 was never refused: no BRT-ORC-035 error event names it, and its note says it ran.
+    refused = {d.get("node_id") for d in _events(db_path, "error") if d.get("code") == "BRT-ORC-035"}
+    assert refused == {"n1"}
+    ran = {d.get("node_id") for d in _events(db_path, "orchestrator_decision")
+           if d.get("code") == "BRT-ORC-035" and d.get("action") == "ran_without_fields"}
+    assert ran == {"n2", "n3"}
 
 
 @pytest.mark.asyncio

@@ -274,6 +274,13 @@ class SkillLibrary:
         except Exception:
             return None
 
+    def envelope_type(self, skill_id: str, version: Optional[int]) -> Optional[str]:
+        """The envelope type the skill renders as; None when not found."""
+        try:
+            return str(self.get(skill_id, version).get("envelope_type", "answerer"))
+        except Exception:
+            return None
+
     def field_names(self, value: object) -> Optional[list[str]]:
         """The field names an output_schema value names (see schema_field_names)."""
         return schema_field_names(value)

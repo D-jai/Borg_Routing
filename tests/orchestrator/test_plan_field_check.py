@@ -422,3 +422,92 @@ async def test_items_on_a_plain_answerer_is_noted_and_changes_nothing(env):
     notes = [d for d in _events(db_path, "orchestrator_decision") if d.get("action") == "accepted_unused"]
     assert [(n["node_id"], n["fields"]) for n in notes] == [("n1", ["items"])]
     assert not [e for e in _events(db_path, "error") if e.get("code") == "BRT-ORC-036"]
+
+
+def _seq(*replies):
+    """re_plan answers in order, then compose."""
+    left = list(replies)
+    return lambda req: left.pop(0) if left else {"action": "compose", "rationale": "done"}
+
+
+def _cont(*nodes, action="continue"):
+    return {"action": action, "rationale": "next", "next_nodes": list(nodes)}
+
+
+def _replan_body(stub, k):
+    r = stub.of_kind("re_plan")[k]
+    return r.system + "\n" + r.user
+
+
+@pytest.mark.asyncio
+async def test_an_unknown_type_on_a_later_hit_sends_no_plan_validation_re_plan_of_its_own(env):
+    """Ruling: its failure shows in the next ordinary re_plan, bounded by MAX_LOOPS."""
+    db_path, mp, built = env
+    widget = {"type": "widget", "id": "n1", "instruction": "x"}
+    ans = dict(BASE["answerer"], id="n3")
+    stub = StubModels(
+        plan_nodes=[widget],
+        replan_for=_seq(_cont(dict(widget, id="n2"), ans), _cont(dict(widget, id="n4"))),
+        answer_for=lambda r: {"result": "hi"}).install(mp)
+    await run_pipeline("Do x.", db_path=db_path)
+    await drain_log_writes()
+    # re_plan 1: the refusal of n1. re_plan 2: ordinary, after n3 ran, showing n2's failure.
+    # n4 (a third unknown type) fails with no re_plan of its own.
+    assert len(stub.of_kind("re_plan")) == 2
+    assert [r for r in stub.of_kind("answerer")], "n3 did not run"
+    second = _replan_body(stub, 1)
+    at = second.index('"n2": {')
+    assert "BRT-ORC-036" in second[at:at + 1500]
+    errs = {d["node_id"] for d in _events(db_path, "error") if d.get("code") == "BRT-ORC-036"}
+    assert errs == {"n1", "n2", "n4"}
+
+
+def test_accepted_unused_on_a_state_op_with_a_skill_id_and_on_an_answerer_skill():
+    sop = {"type": "state_op", "id": "n1", "op": "count", "params": {}, "skill_id": "classify_into_buckets",
+           "instruction": "x", "tier": "light", "skill_args": {"buckets": ["a"], "items_ref": "n0"}}
+    # a skill that renders as an answerer never reads node-level failed_items_only
+    answerer_skill = {"type": "answerer", "id": "n2", "skill_id": "compare_and_rank",
+                      "failed_items_only": True, "skill_args": {}}
+    apply_skill = dict(_skill(), id="n3", failed_items_only=True)
+    got = dict(accepted_unused([sop, answerer_skill, apply_skill], LIB))
+    assert got["n1"] == ("instruction", "op", "params", "tier")
+    assert got["n2"] == ("failed_items_only",)
+    assert "n3" not in got
+
+
+@pytest.mark.asyncio
+async def test_a_typeless_retry_in_a_re_plan_retries_only_the_failed_items(env):
+    db_path, mp, built = env
+    items = [f"note {i}" for i in range(6)]
+    first = {"type": "apply_to_each", "id": "n1", "instruction": "Tag this note.",
+             "items": items, "output_schema": {"tag": "string"}}
+    retry = {"id": "n2", "skill_id": "classify_into_buckets", "failed_items_only": True,
+             "skill_args": {"buckets": ["a", "b"], "items_ref": "n1"}}
+
+    def answer(req):
+        if "Tag this note." in req.system:
+            return {} if any(f"note {i}" in req.system + req.user for i in (1, 4)) else {"tag": "t"}
+        return {"bucket": "a", "confidence": 0.9, "defer_reason": ""}
+
+    stub = StubModels(plan_nodes=[first], replan_for=_seq(_cont(retry)), answer_for=answer).install(mp)
+    await run_pipeline("Tag these.", db_path=db_path)
+    await drain_log_writes()
+    assert not [d for d in _events(db_path, "error") if d.get("code") == "BRT-ORC-036"]
+    reqs = [r for r in stub.of_kind("answerer") if "EXACTLY ONE" in r.system]
+    texts = " ".join(r.system + r.user for r in reqs)
+    assert len(reqs) == 2 and "note 1" in texts and "note 4" in texts
+    assert all(f"note {i}" not in texts for i in (0, 2, 3, 5))
+
+
+@pytest.mark.asyncio
+async def test_a_cascade_re_plan_after_a_second_hit_runs_its_new_steps(env):
+    db_path, mp, built = env
+    bad = dict(BASE["answerer"], id="n1", colour="blue")
+    stub = StubModels(
+        plan_nodes=[bad],
+        replan_for=_seq(_cont(dict(bad, id="n2")),
+                        _cont(dict(BASE["answerer"], id="n3", instruction="Then this."), action="cascade")),
+        answer_for=lambda r: {"result": "hi"}).install(mp)
+    await run_pipeline("Say hi.", db_path=db_path)
+    await drain_log_writes()
+    assert any("Then this." in r.system for r in stub.of_kind("answerer")), "the cascade step did not run"

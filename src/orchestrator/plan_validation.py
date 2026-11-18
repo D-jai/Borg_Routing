@@ -152,13 +152,16 @@ SKILL_ARG_EXTRAS = ("extra_fields", "items", "failed_items_only")
 
 # Change 1 (readings under ruling 32 (3)): accepted fields that build nothing
 # on the node's path. A skill step is built from its template (library.render);
-# the node's own fields below are never read there. The node-level instruction
-# and context on a skill step are not sent to the model, but the router counts
-# them in its size estimate (node_router.py:142-147). state_query is never
+# the node's own fields below are never read there, so they build nothing for
+# the model. They are not free: the router counts the node-level instruction,
+# context and skill_args in its size estimate (node_router.py:142-147), so they
+# can change the model chosen or raise BRT-REG-020. state_query is never
 # executed on any path. A state_op ignores instruction and context, and the
-# routing fields (a state_op makes no model call). ``items`` builds nothing on a non-skill answerer or
-# orchestrate step; skill_args and skill_version build nothing without a
-# skill_id.
+# routing fields (a state_op makes no model call). ``items`` builds nothing on
+# a non-skill answerer or orchestrate step; skill_args and skill_version build
+# nothing without a skill_id. A state_op with a skill_id runs the skill branch,
+# which never reads op or params. Node-level failed_items_only is read only
+# when the skill renders as an apply_to_each.
 _SKILL_PATH_UNUSED = ("instruction", "context", "output_schema", "concurrency_limit",
                       "side_effects", "tool_requests", "max_output_tokens",
                       "dependency_input", "state_query")
@@ -270,7 +273,7 @@ def validate_plan(nodes: Any, skills: SkillRegistry) -> list:
     return issues
 
 
-def accepted_unused(nodes: Any) -> list:
+def accepted_unused(nodes: Any, skills: Any = None) -> list:
     """Change 1 (instrument only): ``(node_id, fields)`` for each node holding
     accepted fields that build nothing on the path it takes; fields sorted.
     Nodes of unknown type are left out (they are refused)."""
@@ -281,10 +284,16 @@ def accepted_unused(nodes: Any) -> list:
         node_type = _type(node)
         if node_type not in NODE_TYPES:
             continue
-        if node.get("skill_id") and node_type != "state_op":
+        if node.get("skill_id") and node_type == "state_op":
+            unused = _PATH_UNUSED["state_op"] + ("op", "params")
+        elif node.get("skill_id"):
             unused = _SKILL_PATH_UNUSED
+            envelope = getattr(skills, "envelope_type", None)
+            if envelope is not None and envelope(
+                    str(node["skill_id"]), node.get("skill_version", 1)) not in (None, "apply_to_each"):
+                unused = unused + ("failed_items_only",)
         else:
-            unused = _PATH_UNUSED[node_type] + (() if node.get("skill_id") else _NO_SKILL_UNUSED)
+            unused = _PATH_UNUSED[node_type] + _NO_SKILL_UNUSED
         fields = tuple(sorted(str(k) for k in node if k in unused))
         if fields:
             out.append((str(node.get("id", "")), fields))
