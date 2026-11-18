@@ -12,6 +12,8 @@ Every `feat:` or `fix:` commit ships together:
 - a test for the working case and a test for the failing case
 - `.env.example`, when the change adds an environment variable
 
+The presentation deck is not part of the commit law: it is updated at release.
+
 One logical change per commit. If the message needs "and", split it. Commit only the files the change touched.
 
 ## Commit messages

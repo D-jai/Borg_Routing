@@ -31,7 +31,7 @@ If a change looks necessary: stop, explain why, escalate before editing.
 
 ## Commit Discipline
 
-Every `feat:` or `fix:` commit ships together: code, error code (if a new failure mode), user-guide lines, a working-case test, a failing-case test, and a `.env.example` update (if a new env var). See `CONTRIBUTING.md`.
+Every `feat:` or `fix:` commit ships together: code, error code (if a new failure mode), user-guide lines, a working-case test, a failing-case test, and a `.env.example` update (if a new env var). The deck is updated at release, not per commit. See `CONTRIBUTING.md`.
 
 ## Forbidden Without Architectural Review
 
