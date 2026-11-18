@@ -40,11 +40,11 @@ To use external AI models (like those on OpenRouter), you need to add an API key
 1. Open `http://localhost:8000/ui/keys.html` in your browser.
 2. For OpenRouter: enter your key in the OpenRouter row (get one free at openrouter.ai).
 3. Click **Save**. The key is stored in your local `.env` file — it never leaves your machine.
-4. Go to the **Models** page and click **Discover Models** to load the new provider's models.
+4. Go to the **Models** page and click **Discover** to load the models and their prices.
 
 ### If something goes wrong
-- **"All fields are required"** — fill in the Provider Name, Base URL, and API Key before saving.
-- **Key not taking effect** — restart the server after saving a new key.
+- **The page says "In .env, restart needed"** — the key is written in `.env` but the running server does not have it yet. Restart the server.
+- Only the OpenRouter key is saved from this page. The Tavily key (web search) is set by adding `TAVILY_API_KEY` to `.env` and restarting.
 
 ---
 
@@ -57,8 +57,8 @@ by default 12 picks spanning frontier, mid, cheap, and specialty tiers.
 ### How to use it
 1. Start your local model server (LM Studio or Ollama) if you want local models.
 2. Open `http://localhost:8000/ui/models.html`.
-3. Click **Discover Models**. LM Studio + Ollama are probed live; the 12 OpenRouter rows are populated with pricing + context length.
-4. The table shows two sections: **LM Studio (local)** and **OpenRouter (curated)**.
+3. Click **Discover**. LM Studio and Ollama are probed live; the 12 OpenRouter rows are populated with pricing + context length.
+4. The table lists every model with its tick box and scores, and marks each as running on this machine or in the cloud.
 
 ### Editing the OpenRouter pool
 Edit `data/curated_models.yaml` (add / remove `- id: <openrouter-id>`
@@ -95,15 +95,15 @@ cost**: the row's estimated dollars plus a **time cost per second** for the
 waiting, so faster models are preferred when latency matters. (A chat alias
 such as `borg_route:local` can change the order; the step's route notes say so.)
 
-Fresh installs ship with developer-friendly defaults:
+Fresh installs ship with these defaults (the quality bar of 9.0 means a frontier-class model plans each run; if no ticked model reaches it, the planner falls back to the best ticked model and the trace shows `BRT-ORC-NO-FRONTIER`):
 
 | Knob | Default | Where it lives |
 |---|---|---|
-| `orchestrator_quality_requirement` | `6.5` | `.env` or Admin UI |
+| `orchestrator_quality_requirement` | `9.0` | `.env` or Admin UI |
 | `time_cost_per_sec` | `0.0001` (~$0.36/hr) | `.env` or Admin UI |
 
 Lower the quality bar to let weaker local models orchestrate (useful while
-you're still running Get Model Info). Raise it to force frontier-only
+you're still running Get Model Info; models not yet researched score a flat 5.0). Raise it to force frontier-only
 orchestration. Lower the time cost toward 0 to strongly prefer local
 (free) models; raise it toward `0.0083` ($30/hr) if you're running a SaaS
 where every second of latency costs you real money. Both settings can be
@@ -204,7 +204,7 @@ extraction). This is the "Get Model Info" button.
 1. Set `OPENROUTER_API_KEY` in `.env` (the default scoring LLM is `perplexity/sonar-pro-search`, accessed via OpenRouter).
 2. Open `http://localhost:8000/ui/models.html`.
 3. Click **Get Model Info**. The scorer processes the matrix in batches of 5, with a rolling summary so it can keep relative rankings consistent across all models.
-4. Takes 30-90 seconds for a full 19-row matrix and costs roughly $0.05-0.20 per run.
+4. It takes a while for a full pool and spends a little money on the scoring model, so run it when you add models, not before every question.
 5. Score cells fill in per task type. You can re-run any time — each click re-researches from scratch.
 
 ### Overriding the scoring model
@@ -322,7 +322,7 @@ Each tool invocation writes a `model_call` event with `model_id="tool:web_search
 
 ## Rule Zero Shortcut (BRT-ZERO-01)
 
-For unambiguously conversational short prompts — greetings, factual lookups, small requests, casual chat — BORG_ROUTE now bypasses the plan / re_plan cycle and answers in a single compose call. This saves 2-3 orchestrator calls (~$0.0035) on prompts where decomposition adds no value.
+For unambiguously conversational short prompts — greetings, factual lookups, small requests, casual chat — BORG_ROUTE now bypasses the plan / re_plan cycle and answers in a single compose call. This saves 2-3 orchestrator calls on prompts where decomposition adds no value.
 
 ### When the shortcut fires
 The pre-classifier is deterministic and rule-based:
@@ -378,7 +378,7 @@ What you see:
 <!-- Added: 2026-04-18 — Slice 3: Recursion + Admin + Resume + Threads -->
 ## Recursion and Depth Control
 
-BORG_ROUTE can orchestrate sub-problems by spawning **child runs**. Each child run has its own run ID, linked to its parent via `parent_run_id`. The depth of nesting is controlled by **Max Recursion Depth** (default: 5).
+BORG_ROUTE can orchestrate sub-problems by spawning **child runs**. Each child run has its own run ID, linked to its parent via `parent_run_id`. The depth of nesting is controlled by the maximum recursion depth (5).
 
 ### What happens at the depth cap
 When an orchestrate node is dispatched at the maximum depth, BORG_ROUTE **demotes it to an answerer** — the model responds directly rather than trying to recurse further. This is logged as a `BRT-ORC-020` event in the run trace.
@@ -457,7 +457,7 @@ sub-task and is governed by the top-level run's instruction.
 
 ## Chat model aliases
 
-The `model` field of `POST /v1/chat/completions` (and the Chat page's dropdown) steers how the router picks a model for each step:
+The `model` field of `POST /v1/chat/completions` (and the **Routing** dropdown on the Ask page) steers how the router picks a model for each step:
 
 - `borg_route`: the planner's own tier for each step.
 - `borg_route:light`, `:mid`, `:heavy`: every step is routed at that tier's quality floor, replacing the tier the planner chose. `:light` is the cheap run, `:heavy` the careful one. Planning and the final answer still use the orchestrator model.
@@ -554,7 +554,7 @@ The planner never sees the text. It gets a list: an id per document (`doc_001`),
 - `POST /v1/chat/completions`: the same `documents` field, at the top level next to `messages`, with a `borg_route` model. With a direct model id it is refused (**BRT-LANE-005**); in `all_local` every direct-model request is refused.
 - `GET /runs/{run_id}` returns `outbound`: every request this run and its child runs sent off the machine, oldest first, each with `run_id`, `url`, `destination`, `attempt`, `status` and the exact `body`. It is empty when the lane was off. The `body` of each entry is shown only to an admin (a valid `BORG_ADMIN_TOKEN`, or this computer when none is set); other callers get `body: null`. The hook is `lane_admin_allowed` in `src/api/tasks.py`. `GET /logs/entities` and `GET /logs/export` need the same admin access.
 - `POST /runs/{run_id}/resume` is refused for a run that read documents, or for a child of one (409, **BRT-LANE-008**): start a new run with the same documents. If the check itself fails, the resume is refused too. A resume, and a run started with the MCP tool `borg_route.submit_task`, follow the current `lane_mode` exactly as `POST /v1/task` does.
-- **Chat history is the client's job.** The server stores no chat history for `POST /v1/chat/completions`: each request carries its own `messages`. A client must not resend answers given under `all_local` in a later request made under another mode, or those answers go to whatever model that mode allows. The Ask page (work order 4.2, not built yet) will tag each turn with its lane mode and leave `all_local` turns out under another mode; until then, and in every other client, this is up to you.
+- **Chat history is the client's job.** The server stores no chat history for `POST /v1/chat/completions`: each request carries its own `messages`. A client must not resend answers given under `all_local` in a later request made under another mode, or those answers go to whatever model that mode allows. The Ask page tags each turn with its lane mode and leaves `all_local` turns out under another mode (see "Workspace" below); in every other client this is up to you.
 - With `lane_mode` `off`, no other lane setting is read or checked: a run is exactly as before the lane existed.
 - Discover and Get Model Info are refused while `lane_mode` is `all_local` (403, **BRT-LANE-005**).
 - The lane settings (`lane_mode`, `lane_max_output_chars`, `lane_max_verbatim_chars`, `lane_max_ngram_share`, `lane_manifest`, `lane_local_allowlist`, `lane_part_chars`) appear in `GET /config/effective` and are saved with `POST /config`; an invalid value is refused (400, **BRT-LANE-005**). A new value applies from the next run.
@@ -580,19 +580,17 @@ The planner never sees the text. It gets a list: an id per document (`doc_001`),
 
 ## Multi-turn Conversations (Threads)
 
-BORG_ROUTE tracks conversation history in **threads**. Each thread stores the sequence of user and assistant messages. When a new run is created within a thread, the last N messages are passed to the orchestrator as context, enabling coherent multi-turn conversations.
+The engine can keep conversation history in **threads** (database tables `threads` and `messages`). When a run is started with a `thread_id`, the last turns of that thread are passed to the orchestrator as `thread_window`, and the run is linked to its thread through the `thread_id` field on the run record.
 
-### How threads work
-1. A thread is created automatically when you start a conversation via the Chat UI.
-2. Each user message and assistant response is stored in the thread.
-3. The orchestrator receives the thread's recent turns as `thread_window`.
-4. Run IDs are linked to their thread via the `thread_id` field on the run record.
+### What is and is not connected
+1. No page and no API route creates a thread or passes a `thread_id` today. The Ask page keeps its conversation in the browser and resends earlier turns with each question (see "Workspace"); `POST /v1/chat/completions` uses the `messages` the client sends.
+2. Threads are used by code that calls the pipeline directly (see "Historical Memory" below).
 
 ---
 
 ## Feedback — Rating Runs
 
-After each assistant reply in the Chat UI, thumbs-up (👍) and thumbs-down (👎) buttons appear. Click either to submit a rating. Ratings are stored against the run and visible in the Dashboard Stats tab.
+After each answer on the Ask page, thumbs-up (👍) and thumbs-down (👎) buttons appear. Click either to submit a rating. Ratings are stored against the run and counted on the Logs page, Stats tab.
 
 You can also rate a run via the API: `POST /runs/{run_id}/rating` with body `{"rating": 1}` (up) or `{"rating": -1}` (down).
 
@@ -600,11 +598,11 @@ You can also rate a run via the API: `POST /runs/{run_id}/rating` with body `{"r
 
 ## Observability Logs
 
-The Logs page at `http://localhost:8000/ui/logs.html` provides three tabs:
+The Logs page at `http://localhost:8000/ui/logs.html` has three tabs:
 
 - **Events** — all model_call, orchestrator_decision, child_residue, and error events with filtering by run ID and event type
 - **Cost Summary** — aggregate token counts and dollar cost grouped by model (`model_call` plus priced `orchestrator_decision` rows)
-- **NER Entities** — named entities extracted from log payloads by the background NER worker
+- **Stats** — run outcomes, tokens by model, feedback and outlier runs (see "Logs and Stats")
 
 Click **Export JSONL** to download a full log snapshot for offline analysis.
 
@@ -625,8 +623,7 @@ structured facts:
 - **Subject-verb-object relations** — simple `(subject, verb, object)` triples
   extracted from sentences via dependency parsing.
 
-Results land in the `log_entities` and `log_relations` tables and are surfaced
-on the **NER Entities** tab of `/ui/logs.html`.
+Results land in the `log_entities` and `log_relations` tables and are available through `GET /logs/entities` (admin) and in the JSONL export. The Logs page has no NER tab.
 
 #### What it was meant to be useful for
 1. **Search across runs** — "show me every run that mentioned customer X" or
@@ -657,7 +654,7 @@ on the **NER Entities** tab of `/ui/logs.html`.
    from src.logging.ner_worker import run_ner_worker
    asyncio.run(run_ner_worker())
    ```
-3. Open `/ui/logs.html` → **NER Entities** tab. Entities for new payloads
+3. Call `GET /logs/entities` (admin). Entities for new payloads
    should appear within ~5 seconds (the worker's poll interval).
 
 #### How it behaves
@@ -714,11 +711,9 @@ become worth the cost — nothing else in the pipeline depends on it.
 
 ## Skills Library
 
-The Skills page at `http://localhost:8000/ui/skills.html` shows all loaded skills with:
-- Call count, success rate, residue count, average tokens and latency
-- An **Edit → New Version** button that opens a form to create an improved version of any skill
+The Skills page at `http://localhost:8000/ui/skills.html` is a read-only table of the loaded skills: version, tier, what it does, calls, succeeded, average tokens and average time. It has no edit form; new versions are made through the API below.
 
-New versions are appended to `data/skills.yaml` with an incremented version number. The orchestrator will use the highest version by default.
+A new version is appended to `data/skills.yaml` with an incremented version number. The orchestrator will use the highest version by default.
 
 You can also manage skills via the API:
 - `GET /skills` — list all skills with stats
