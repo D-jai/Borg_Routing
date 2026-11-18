@@ -193,7 +193,7 @@ its own:
 A config key (set through `POST /config`) wins over the `.env` value and
 takes effect on the next run. The run trace records, for every step, why
 its model was chosen: a `route` entry with the kind of work, tier, floor,
-the chosen model and the other models that cleared the floor, lowest
+up to eight models that cleared the floor (the chosen one included), lowest
 effective cost first. <!-- claim C03 -->
 
 ---
@@ -271,7 +271,7 @@ The planner, re-plan and final write-up (compose) share one prompt. The engine's
 
 1. **The answer is there, in the wrong place** (for example `{"action": "compose", "response": "..."}`, or the text under `final_answer` or `answer`, or a list where text was expected): it is used as the answer, with no extra call. The trace shows BRT-ORC-028. When the reply also carries `action` or `next_nodes` (it is shaped like a re-plan), only `response`, `direct_answer`, `final_answer` or `answer` count; a `message`, `output` or similar field there is the planner's note, not the answer, and the write-up is asked for again (step 2).
 2. **No answer in the reply:** the write-up is asked for once more (BRT-ORC-029).
-3. **Still no answer:** you get the results of the steps that finished, under a plain note saying the final write-up failed: each step's answer, or for a per-item step each item's result and how many items failed. The steps that finished come back under the note, with `answer_kind` `salvaged` (in the lane, only outputs that passed the output check). <!-- claim C10 --> The trace shows BRT-ORC-030 as a warning, and `GET /runs/{id}` shows `"answer_kind": "salvaged"` on the run (a written-up answer shows `"composed"`). With the on-premise lane in `raw_local` or `all_local`, a step that read your documents appears only if its output passed the output check, and only document ids (never document text) are shown for its items.
+3. **Still no answer:** you get the results of the steps that finished, under a plain note saying the final write-up failed: each step's answer, or for a per-item step each item's result and how many items failed. The steps that finished come back under the note, with `answer_kind` `salvaged` (in `raw_local` or `all_local`, a step that read documents shows its output only if it passed the output check). <!-- claim C10 --> The trace shows BRT-ORC-030 as a warning, and `GET /runs/{id}` shows `"answer_kind": "salvaged"` on the run (a written-up answer shows `"composed"`). With the on-premise lane in `raw_local` or `all_local`, a step that read your documents appears only if its output passed the output check, and only document ids (never document text) are shown for its items.
 
 If the write-up call itself fails (a timeout, a connection error, a reply that is not JSON), step 3 happens straight away: the finished steps' results come back with the note, BRT-ORC-030 and `"answer_kind": "salvaged"`.
 
