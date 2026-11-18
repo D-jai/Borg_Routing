@@ -237,6 +237,14 @@ Where the items come from. If the list is in the user's message, copy the items 
 Use these aggressively. "Count how many items landed in bucket A" does not
 need a model — it's SQL. Every state_op saves tokens and adds zero error risk.
 
+Params of each op. Any other param fails the step.
+- `filter`: `key` (a field name) and `value` (keep the rows where that field equals it); optional `negate`: true keeps the rows that do not match.
+- `count`: no params gives the number of rows; optional `key` gives a count per value of that field.
+- `group_by`: `key` (a field name) gives the rows per value; add `count`: true for counts per value.
+- `sample`: `n` (rows to take); optional `key` takes n per value of that field; optional `seed`. Over a `group_by` source it takes n per group.
+A field name is a field of the upstream step's output, written bare (`bucket`).
+These four are the only ops: there is no join, sort, order or limit.
+
 ### 4. `orchestrate` — Spawn a child orchestrator
 When a sub-problem is itself complex enough to need its own WBS, spawn a
 child. The child gets its own depth+1 context, its own sub-DAG. It folds
