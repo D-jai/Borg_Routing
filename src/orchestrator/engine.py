@@ -1368,6 +1368,33 @@ def _upstream_list(ref: object, results: dict) -> Optional[list]:
     return None
 
 
+def _failed_items_only(node: dict) -> bool:
+    """True when the node asks for the failed items only (ruling 32d(i)):
+    ``"failed_items_only": true`` on the node or inside its ``skill_args``."""
+    if node.get("failed_items_only") is True:
+        return True
+    skill_args = node.get("skill_args")
+    return isinstance(skill_args, dict) and skill_args.get("failed_items_only") is True
+
+
+def _failed_items_of(ref: object, results: dict) -> Optional[tuple[list, list[int]]]:
+    """The FAILED items of an earlier apply_to_each step, or None.
+
+    Returns ``(items, indexes)``: each failed entry's original ``item`` (the
+    document part id, or the inline value) in original order, and its index in
+    the original step. None when ``ref`` is not a finished apply_to_each
+    output (it has no ``failures`` list), so the flag then changes nothing.
+    """
+    if not isinstance(ref, str) or not ref or ref not in results:
+        return None
+    out = getattr(results[ref], "output", {}) or {}
+    failures = out.get("failures") if isinstance(out, dict) else None
+    if not isinstance(failures, list) or not isinstance(out.get("results"), list):
+        return None
+    rows = sorted((f for f in failures if isinstance(f, dict)), key=lambda f: f.get("index", 0))
+    return [f.get("item") for f in rows], [f.get("index", 0) for f in rows]
+
+
 def _upstream_groups(ref: object, results: dict) -> Optional[dict]:
     """The groups of rows a ``group_by`` step (without ``count``) produced, or None.
 
@@ -2309,6 +2336,13 @@ def _build_task_from_node(
                         # The step it reads failed: no items (BRT-APE-005).
                         dep["ref_failure"] = failed_ref_message(ref)
                         update["dependency_input"] = dep
+                    elif _failed_items_only(node) and (
+                        failed := _failed_items_of(ref, results)
+                    ) is not None:
+                        # Ruling 32d(i): the failed items of that step only.
+                        dep["items"], dep["original_indexes"] = failed
+                        dep["failed_items_only"] = True
+                        update["dependency_input"] = dep
                     elif (upstream := _upstream_list(ref, results)) is not None:
                         dep["items"] = upstream
                         update["dependency_input"] = dep
@@ -2384,6 +2418,7 @@ def _build_task_from_node(
         # directly into node['items'] if available.
         inputs_ref_raw = node.get("inputs_ref", "")
         items_from_node = node.get("items", [])
+        failed_indexes: Optional[list[int]] = None
         resolved_items = items_from_node
         ref_failure: Optional[str] = None
         unresolved: Optional[str] = None
@@ -2404,8 +2439,14 @@ def _build_task_from_node(
             if _failed_step(inputs_ref_raw, results):
                 ref_failure = failed_ref_message(inputs_ref_raw)
             elif inputs_ref_raw in results:
+                failed = (
+                    _failed_items_of(inputs_ref_raw, results) if _failed_items_only(node) else None
+                )
                 upstream = _upstream_list(inputs_ref_raw, results)
-                if upstream is not None:
+                if failed is not None:
+                    # Ruling 32d(i): the failed items of that step only.
+                    resolved_items, failed_indexes = failed
+                elif upstream is not None:
                     resolved_items = upstream
             else:
                 # Ruling 1a — the ref names no step of this run (the ready
@@ -2420,6 +2461,9 @@ def _build_task_from_node(
             "items": resolved_items,
             "concurrency_limit": node.get("concurrency_limit", 20),
         }
+        if failed_indexes is not None:
+            dep_input["failed_items_only"] = True
+            dep_input["original_indexes"] = failed_indexes
         if ref_failure:
             dep_input["ref_failure"] = ref_failure
         if unresolved:

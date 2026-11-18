@@ -31,6 +31,7 @@ still has its own child task, envelope and stored result, filed by
 or 1, or for any step that may not be packed, the items run as before.
 """
 import asyncio
+import logging
 import uuid
 from typing import Optional
 
@@ -288,6 +289,19 @@ async def expand_and_run(
             f"current_depth ({task.current_depth}) >= max_depth ({task.max_depth})"
         )
 
+    # Ruling 32d(i): a retry of the failed items only, with none failed,
+    # resolves with zero items and says so (no BRT-APE-005).
+    if task.dependency_input.get("failed_items_only") and task.dependency_input.get("items") == []:
+        note = "failed_items_only: the step it reads has no failed items; nothing to retry."
+        logging.getLogger(__name__).info("apply_to_each %s: %s", task.envelope_id, note)
+        return InboundEnvelope(
+            envelope_id=task.envelope_id,
+            subtask_id=task.subtask_id,
+            status="resolved",
+            output={"results": [], "failures": [], "total": 0, "success_count": 0,
+                    "failure_count": 0, "notes": [note]},
+        )
+
     # Resolve items. BRT-APE-01 — empty-items used to resolve to an envelope
     # with 0 results (phantom success). Now _resolve_items raises BRT-APE-005
     # which we surface as a failed envelope (the orchestrator sees the code
@@ -454,6 +468,13 @@ async def expand_and_run(
     # Sort results by index for deterministic ordering
     results.sort(key=lambda r: r["index"])
     failures.sort(key=lambda r: r["index"])
+    # Ruling 32d(i): a retry of failed items names each entry's index in the
+    # step it retries, so the entry keeps that item's identity.
+    original = task.dependency_input.get("original_indexes")
+    if isinstance(original, list):
+        for entry in results + failures:
+            if 0 <= entry["index"] < len(original):
+                entry["original_index"] = original[entry["index"]]
 
     aggregate = {
         "results": results,
