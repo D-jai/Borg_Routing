@@ -226,8 +226,15 @@ async def _post_chat_completion(
         raise ValueError(
             f"BRT-ANS-002: malformed response from {url} (no usable choices): {exc!r}"
         ) from exc
-    tokens_in = usage.get("prompt_tokens", 0)
-    tokens_out = usage.get("completion_tokens", 0)
+    # Ruling 35e: a null content (a reasoning model that spent its cap) reads
+    # as empty, so the call is still priced and fails its parse as before; a
+    # null usage reads as zero tokens. Packed posts share this function.
+    if not isinstance(content, str):
+        content = "" if content is None else json.dumps(content)
+    if not isinstance(usage, dict):
+        usage = {}
+    tokens_in = usage.get("prompt_tokens") or 0
+    tokens_out = usage.get("completion_tokens") or 0
     return content, tokens_in, tokens_out, finish_reason
 
 
@@ -639,6 +646,23 @@ async def _execute_answerer(task: WrappedTask, db_path: str) -> InboundEnvelope:
             tool_results=carried_tool_results,
         )
     except Exception as exc:
+        # Ruling 35e: the call was paid; price and log it before the step
+        # fails (a reply that is JSON but not an object lands here).
+        await write_event(
+            "model_call",
+            run_id=task.run_id,
+            envelope_id=task.envelope_id,
+            model_id=task.model_name,
+            tokens_input=tokens_in,
+            tokens_output=tokens_out,
+            dollars=dollars,
+            baseline_dollars=baseline_dollars,
+            latency_ms=latency_ms,
+            payload_in=system_prompt[:2000],
+            payload_out=content[:2000],
+            decision={"code": "BRT-ANS-003", "reply_type": type(raw).__name__},
+            db_path=db_path,
+        )
         raise ValueError(
             f"BRT-ANS-003: could not build InboundEnvelope from model response: {exc}. Raw: {raw}"
         ) from exc

@@ -169,11 +169,6 @@ _last_orchestrator_call: contextvars.ContextVar[Optional[str]] = contextvars.Con
 )
 
 
-def _rejects_last_reply() -> dict:
-    """Fields of an event that rejects the last compose reply (ruling 35e)."""
-    return {"rejected": True, "rejected_call": _last_orchestrator_call.get()}
-
-
 def _reply_fields(parsed: object) -> dict:
     """The rationale of a parsed reply, and ``reply_type`` when the reply is
     JSON but not an object (ruling 35e: such a reply is still logged and
@@ -997,6 +992,7 @@ async def _invoke_orchestrator_model(
     # Ruling 35e: every priced event of this call carries its id.
     call_id = uuid4().hex
     _last_orchestrator_call.set(call_id)
+    reply_notes: dict = {}
 
     async def _post_and_collect() -> tuple[str, dict, int, str]:
         """POST once; return (content, usage, latency_ms, finish_reason).
@@ -1044,11 +1040,21 @@ async def _invoke_orchestrator_model(
             raise ValueError(
                 f"BRT-ORC-001: malformed response from orchestrator (no usable choices): {exc!r}"
             ) from exc
+        # Ruling 35e: a null content (a reasoning model that spent its cap)
+        # or a null usage never stops the call being logged: content reads
+        # as empty (the parse fails and takes its retry path) and usage as
+        # zero tokens, each with a note on the event.
+        if not isinstance(content_resp, str):
+            reply_notes["content_null" if content_resp is None else "content_not_text"] = True
+            content_resp = "" if content_resp is None else json.dumps(content_resp)
+        if not isinstance(usage_resp, dict):
+            reply_notes["usage_missing"] = True
+            usage_resp = {}
         return content_resp, usage_resp, latency, finish_resp
 
     content, usage, latency_ms, finish_reason = await _post_and_collect()
-    tokens_in = usage.get("prompt_tokens", 0)
-    tokens_out = usage.get("completion_tokens", 0)
+    tokens_in = (usage.get("prompt_tokens", 0) or 0)
+    tokens_out = (usage.get("completion_tokens", 0) or 0)
 
     # BRT-ORC-018 — orchestrator response truncated by the cap.
     # Retry ONCE with the cap doubled (capped at 16k) before falling
@@ -1091,6 +1097,7 @@ async def _invoke_orchestrator_model(
                             "mode": mode,
                             "call_id": call_id,
                             "parsed": None,
+                            **reply_notes,
                             "length_retry_failed": True,
                             "finish_reason": "length",
                             "code": "BRT-ORC-018",
@@ -1103,8 +1110,8 @@ async def _invoke_orchestrator_model(
                 except Exception:
                     pass
                 raise
-            tokens_in += usage_t.get("prompt_tokens", 0)
-            tokens_out += usage_t.get("completion_tokens", 0)
+            tokens_in += (usage_t.get("prompt_tokens", 0) or 0)
+            tokens_out += (usage_t.get("completion_tokens", 0) or 0)
             latency_ms += latency_t
             content = content_t
             max_tokens = retry_max
@@ -1142,6 +1149,7 @@ async def _invoke_orchestrator_model(
                 "call_id": call_id,
                 "parsed": parsed,
                 **_reply_fields(parsed),
+                **reply_notes,
                 "parse_error": str(parse_error) if parse_error else None,
                 # Always logged (planner ruling 20): settles truncation
                 # questions from the database. After a length retry it is
@@ -1198,8 +1206,8 @@ async def _invoke_orchestrator_model(
     )
     payload["messages"][0]["content"] = retry_system
     content_retry, usage_retry, latency_retry, finish_retry = await _post_and_collect()
-    tokens_in_retry = usage_retry.get("prompt_tokens", 0)
-    tokens_out_retry = usage_retry.get("completion_tokens", 0)
+    tokens_in_retry = (usage_retry.get("prompt_tokens", 0) or 0)
+    tokens_out_retry = (usage_retry.get("completion_tokens", 0) or 0)
 
     parsed_retry: Optional[dict] = None
     retry_error: Optional[Exception] = None
@@ -1227,6 +1235,7 @@ async def _invoke_orchestrator_model(
                 "call_id": call_id,
                 "parsed": parsed_retry,
                 **_reply_fields(parsed_retry),
+                **reply_notes,
                 "retry": True,
                 "finish_reason": finish_retry,
                 "parse_error": str(retry_error) if retry_error else None,
@@ -3737,6 +3746,9 @@ async def _handle_compose_result(
     (``_salvage_after_check``). Valid markers are replaced by the stored rows
     or text; each placed block passes the lane's guards (BRT-LANE-009) first.
     """
+    # Ruling 35e: the priced reply handled here is the last orchestrator call;
+    # read now, before a re-ask makes another.
+    rejects = {"rejected": True, "rejected_call": _last_orchestrator_call.get()}
     text, field, wrong = _compose_text(compose_result)
     action = str(compose_result.get("action") or "").lower().strip() if isinstance(
         compose_result, dict) else ""
@@ -3758,7 +3770,7 @@ async def _handle_compose_result(
                     "codes": codes,
                     "msg": "compose's reply cannot be used as it is; asking compose once more",
                     "reask": True,
-                    **_rejects_last_reply(),
+                    **rejects,
                 })
                 try:
                     second = await reask_invalid(row_markers.repair_message(problems))
@@ -3771,7 +3783,7 @@ async def _handle_compose_result(
                     return await _handle_compose_result(
                         second, results, run_id, db_path, reask=reask, rows=rows)
             return await _salvage_after_check(results, run_id, db_path, rows, value,
-                                              codes, action)
+                                              codes, action, rejects)
         resolver = row_markers.Resolver(rows.steps, rows.outputs)
         if text:
             placed_value, placed = row_markers.place(
@@ -3848,7 +3860,7 @@ async def _handle_compose_result(
                     "code": "BRT-ORC-029",
                     "msg": "compose reply had no final answer; asking compose once more",
                     "compose_action": action or "(missing)",
-                    **_rejects_last_reply(),
+                    **rejects,
                 },
                 db_path=db_path,
             )
@@ -3881,7 +3893,7 @@ async def _handle_compose_result(
                     "compose_action": action or "(missing)",
                     "steps": [k for k, v in results.items()
                               if getattr(v, "status", None) == "resolved"],
-                    **(_rejects_last_reply() if reask is None else {}),
+                    **rejects,
                 },
                 db_path=db_path,
             )
@@ -4229,7 +4241,8 @@ def _salvage_after_check_text(results: dict, lane: Optional[LaneContext], rows: 
 
 
 async def _salvage_after_check(results: dict, run_id: UUID, db_path: str, rows: "_RowContext",
-                               value: object, codes: list, action: str) -> str:
+                               value: object, codes: list, action: str,
+                               rejects: Optional[dict] = None) -> str:
     """Salvage after a failed repair re-ask (ruling 32e): ``answer_kind =
     "salvaged"`` and one warning event whose code is the headline (the first
     of 032, 037, 038, 040, 041 present) and whose ``codes`` carry all of
@@ -4252,7 +4265,7 @@ async def _salvage_after_check(results: dict, run_id: UUID, db_path: str, rows: 
                 "compose_action": action or "(missing)",
                 "steps": [k for k, v in results.items()
                           if getattr(v, "status", None) == "resolved"],
-                **_rejects_last_reply(),
+                **(rejects or {}),
             },
             db_path=db_path,
         )

@@ -14,6 +14,7 @@ answered, so a call the log leaves out fails the test.
 import json
 import sqlite3
 
+import httpx
 import pytest
 
 from src.db.schema import create_all
@@ -66,9 +67,13 @@ async def env(tmp_path, monkeypatch):
 
 
 def _stub_dollars(stub):
-    """What every request the stand-in answered cost, from its own record."""
+    """What every request the stand-in answered cost, from its own record.
+    A request it failed (``unbilled``) or answered with no usage reports no
+    tokens, so it costs nothing."""
     total = 0.0
     for req in stub.requests:
+        if getattr(req, "unbilled", False):
+            continue
         pin, pout = PRICES[req.model.removeprefix("openrouter/")]
         total += max(1, len(req.system) // 4) * pin + stub.completion_tokens * pout
     return total
@@ -110,17 +115,27 @@ def _assert_receipt_counts_every_call(stub, result, db_path):
     assert result["cost_dollars"] == pytest.approx(expected, rel=1e-9)
 
 
-def _assert_rejection_names_the_reply(db_path, run_id, code):
-    """The rejection event carries the code and names the priced reply it
-    rejected (``rejected_call`` is that reply's ``call_id``)."""
-    composes = _priced(db_path, run_id, "compose")
-    rejections = [e[4] for e in _events(db_path, run_id)
-                  if e[4].get("code") == code and e[4].get("rejected_call")]
+def _call_id_of(db_path, run_id, parsed):
+    """The ``call_id`` of the one priced compose reply that parsed to ``parsed``."""
+    hits = [e[4]["call_id"] for e in _priced(db_path, run_id, "compose")
+            if e[4].get("parsed") == parsed]
+    assert len(hits) == 1, (parsed, hits)
+    return hits[0]
+
+
+def _rejections(db_path, run_id, code):
+    return [e[4] for e in _events(db_path, run_id)
+            if e[4].get("code") == code and e[4].get("rejected") is True]
+
+
+def _assert_rejection_names_the_reply(db_path, run_id, code, rejected_parsed):
+    """Every rejection event with ``code`` names the reply it rejected:
+    ``rejected_call`` is the ``call_id`` of the priced reply that parsed to
+    ``rejected_parsed``, never another compose call's."""
+    want = _call_id_of(db_path, run_id, rejected_parsed)
+    rejections = _rejections(db_path, run_id, code)
     assert rejections, f"no rejection event with {code}"
-    rejected = {e[4].get("call_id"): e for e in composes}
-    for r in rejections:
-        assert r["rejected_call"] in rejected
-        assert r["rejected"] is True
+    assert [r["rejected_call"] for r in rejections] == [want] * len(rejections)
 
 
 # --- 029: no final answer, then a good one ----------------------------------------------
@@ -146,7 +161,7 @@ async def test_029_rejected_reply_is_priced_logged_and_counted(env, first):
     if not isinstance(first, dict):
         typed = [e[4].get("reply_type") for e in composes if e[4].get("reply_type")]
         assert typed == [type(first).__name__]
-    _assert_rejection_names_the_reply(db_path, run_id, "BRT-ORC-029")
+    _assert_rejection_names_the_reply(db_path, run_id, "BRT-ORC-029", first)
     _assert_receipt_counts_every_call(stub, result, db_path)
 
 
@@ -158,9 +173,8 @@ async def test_two_replies_with_no_final_answer_are_both_priced_then_salvaged(en
     assert result["response"].startswith(engine.SALVAGE_NOTE)
     run_id = result["run_id"]
     assert len(_priced(db_path, run_id, "compose")) == 2
-    _assert_rejection_names_the_reply(db_path, run_id, "BRT-ORC-029")
-    salvage = [e[4] for e in _events(db_path, run_id) if e[4].get("code") == "BRT-ORC-030"]
-    assert salvage and salvage[0]["rejected"] is True and salvage[0]["rejected_call"]
+    _assert_rejection_names_the_reply(db_path, run_id, "BRT-ORC-029", ["a"])
+    _assert_rejection_names_the_reply(db_path, run_id, "BRT-ORC-030", ["b"])
     _assert_receipt_counts_every_call(stub, result, db_path)
 
 
@@ -208,7 +222,7 @@ async def test_repair_reask_rejected_reply_is_priced_and_counted(env, code):
     assert len(stub.of_kind("compose")) == 2
     composes = _priced(db_path, run_id, "compose")
     assert len(composes) == 2
-    _assert_rejection_names_the_reply(db_path, run_id, f"BRT-ORC-{code}")
+    _assert_rejection_names_the_reply(db_path, run_id, f"BRT-ORC-{code}", first)
     _assert_receipt_counts_every_call(stub, result, db_path)
 
 
@@ -222,10 +236,11 @@ async def test_repair_reask_rejected_twice_both_priced_then_salvaged(env):
     assert result["response"].startswith(engine.SALVAGE_NOTE)
     run_id = result["run_id"]
     assert len(_priced(db_path, run_id, "compose")) == 2
-    rejections = [e[4] for e in _events(db_path, run_id)
-                  if e[4].get("code") == "BRT-ORC-032"]
-    assert len(rejections) == 2 and all(r["rejected"] and r["rejected_call"] for r in rejections)
-    assert len({r["rejected_call"] for r in rejections}) == 2
+    first = _call_id_of(db_path, run_id, {"response": "@@ROWS:nope@@"})
+    second = _call_id_of(db_path, run_id, {"response": "@@rows:nope@@"})
+    by_kind = {("salvage" if r.get("severity") == "warning" else "reask"): r["rejected_call"]
+               for r in _rejections(db_path, run_id, "BRT-ORC-032")}
+    assert by_kind == {"reask": first, "salvage": second}
     _assert_receipt_counts_every_call(stub, result, db_path)
 
 
@@ -333,3 +348,223 @@ async def test_a_non_object_plan_or_replan_reply_is_still_priced(env, mode):
     events = _priced(db_path, run_id, mode)
     assert len(events) == 1 and events[0][4]["reply_type"] == "list"
     assert isinstance(events[0][4]["parsed"], list)
+
+
+# --- review round 1: the salvage after a failed repair re-ask names the reply --------------
+
+def _http_500():
+    request = httpx.Request("POST", "https://openrouter.ai/api/v1/chat/completions")
+    return httpx.HTTPStatusError("500", request=request,
+                                 response=httpx.Response(500, request=request))
+
+
+class _Unbilled:
+    """compose_for: the first compose reply, then ``fail(req)`` for every
+    later call; a request answered with an exception is marked unbilled."""
+
+    def __init__(self, first, fail):
+        self.first, self.fail, self.calls = first, fail, 0
+
+    def __call__(self, req):
+        self.calls += 1
+        if self.calls == 1:
+            return self.first
+        reply = self.fail(req)
+        if isinstance(reply, Exception):
+            req.unbilled = True
+        return reply
+
+
+@pytest.mark.parametrize("fail", ["http_500", "brt_orc_002"])
+@pytest.mark.asyncio
+async def test_salvage_after_a_failed_repair_reask_names_the_salvaged_reply(env, fail):
+    db_path, mp = env
+    first = {"response": "@@ROWS:nope@@"}
+    reply = (lambda r: _http_500()) if fail == "http_500" else (lambda r: "Sure, in prose.")
+    stub = StubModels(plan_nodes=[_rate()], answer_for=lambda r: {"sentiment": "ok"},
+                      compose_for=_Unbilled(first, reply))
+    result = await _run(stub, mp, db_path, "Rate each.")
+    assert result["response"].startswith(engine.SALVAGE_NOTE)
+    run_id = result["run_id"]
+    # 500: one re-ask post; 002: the re-ask and its JSON-only retry, both priced.
+    assert len(stub.of_kind("compose")) == (2 if fail == "http_500" else 3)
+    want = _call_id_of(db_path, run_id, first)
+    rejections = _rejections(db_path, run_id, "BRT-ORC-032")
+    assert sorted(r.get("severity") or "" for r in rejections) == ["", "warning"]
+    assert all(r["rejected_call"] == want for r in rejections)
+    _assert_receipt_counts_every_call(stub, result, db_path)
+
+
+# --- review round 1: null content, null usage, a non-object answerer reply ----------------
+
+class _Edited(StubModels):
+    """Edits a reply's body after the stand-in builds it: ``edit(req, body)``."""
+
+    def _answer(self, url, payload):
+        resp = super()._answer(url, payload)
+        edit = getattr(self, "edit", None)
+        if edit is not None:
+            edit(self.requests[-1], resp._body)
+        return resp
+
+
+def _nth_of_kind(kind, n, change):
+    """An edit applying ``change(req, body)`` to the n-th request of a kind (1-based)."""
+    seen = {"n": 0}
+
+    def edit(req, body):
+        if req.kind == kind:
+            seen["n"] += 1
+            if seen["n"] == n:
+                change(req, body)
+    return edit
+
+
+def _null_content(finish=None):
+    def change(req, body):
+        body["choices"][0]["message"]["content"] = None
+        if finish:
+            body["choices"][0]["finish_reason"] = finish
+    return change
+
+
+def _null_usage(req, body):
+    body["usage"] = None
+    req.unbilled = True                      # no usage: nothing can be priced
+
+
+def _content(text):
+    def change(req, body):
+        body["choices"][0]["message"]["content"] = text
+    return change
+
+
+async def _edited_run(env, edit, message="Say hello.", **kwargs):
+    db_path, mp = env
+    kwargs.setdefault("plan_nodes", [_plain()])
+    stub = _Edited(**kwargs)
+    stub.edit = edit
+    result = await _run(stub, mp, db_path, message)
+    return stub, result, db_path
+
+
+@pytest.mark.asyncio
+async def test_null_compose_content_is_priced_then_json_retried(env):
+    stub, result, db = await _edited_run(env, _nth_of_kind("compose", 1, _null_content()),
+                                         compose_text="Final.")
+    assert result["status"] == "completed", result.get("error")
+    assert result["response"] == "Final."
+    events = _priced(db, result["run_id"], "compose")
+    assert len(events) == 2
+    assert [e[4].get("content_null") for e in events].count(True) == 2  # notes cover the call
+    _assert_receipt_counts_every_call(stub, result, db)
+
+
+@pytest.mark.asyncio
+async def test_null_compose_content_cut_then_retry_fails_prices_the_first_attempt(env):
+    db_path, mp = env
+    calls = []
+
+    def compose_for(req):
+        calls.append(req)
+        if len(calls) == 1:
+            return ("placeholder", "length")
+        req.unbilled = True
+        return ValueError("BRT-ORC-001: stand-in transport failure")
+
+    stub = _Edited(plan_nodes=[_plain()], compose_for=compose_for)
+    stub.edit = _nth_of_kind("compose", 1, _null_content())
+    result = await _run(stub, mp, db_path)
+    events = _priced(db_path, result["run_id"], "compose")
+    assert len(events) == 1
+    assert events[0][4]["length_retry_failed"] is True and events[0][4]["content_null"] is True
+    _assert_receipt_counts_every_call(stub, result, db_path)
+
+
+@pytest.mark.asyncio
+async def test_null_content_on_the_json_retry_is_priced(env):
+    db_path, mp = env
+    stub = _Edited(plan_nodes=[_plain()],
+                   compose_for=_seq("Sure, in prose.", "placeholder"))
+    stub.edit = _nth_of_kind("compose", 2, _null_content())
+    result = await _run(stub, mp, db_path)
+    # Both attempts unparseable: the compose call fails and finished work is salvaged.
+    assert result["response"].startswith(engine.SALVAGE_NOTE)
+    events = _priced(db_path, result["run_id"], "compose")
+    assert len(events) == 2
+    retry = [e for e in events if e[4].get("retry")]
+    assert len(retry) == 1 and retry[0][4]["content_null"] is True
+    _assert_receipt_counts_every_call(stub, result, db_path)
+
+
+@pytest.mark.parametrize("kind", ["plan", "compose"])
+@pytest.mark.asyncio
+async def test_null_usage_on_an_orchestrator_call_never_crashes(env, kind):
+    stub, result, db = await _edited_run(env, _nth_of_kind(kind, 1, _null_usage),
+                                         compose_text="Final.")
+    assert result["status"] == "completed", result.get("error")
+    events = _priced(db, result["run_id"], kind)
+    assert len(events) == 1
+    _et, tin, tout, dollars, decision = events[0]
+    assert (tin, tout, dollars) == (0, 0, 0.0) and decision["usage_missing"] is True
+    _assert_receipt_counts_every_call(stub, result, db)
+
+
+def _answerer_events(db_path, run_id):
+    return [e for e in _events(db_path, run_id) if e[0] == "model_call"]
+
+
+@pytest.mark.asyncio
+async def test_non_object_answerer_reply_is_priced_then_the_step_fails(env):
+    stub, result, db = await _edited_run(
+        env, _nth_of_kind("answerer", 1,
+                          _content('[{"file": "a.txt", "category": "billing"}]')),
+        compose_text="Final.")
+    assert result["status"] == "completed", result.get("error")
+    calls = _answerer_events(db, result["run_id"])
+    assert len(calls) == 1 and calls[0][3] > 0
+    assert calls[0][4] == {"code": "BRT-ANS-003", "reply_type": "list"}
+    _assert_receipt_counts_every_call(stub, result, db)
+
+
+@pytest.mark.parametrize("finish", [None, "length"])
+@pytest.mark.asyncio
+async def test_null_answerer_content_is_priced_then_the_step_fails(env, finish):
+    def edit(req, body):
+        if req.kind == "answerer":
+            _null_content(finish)(req, body)
+
+    stub, result, db = await _edited_run(env, edit, compose_text="Final.")
+    assert result["status"] == "completed", result.get("error")
+    calls = _answerer_events(db, result["run_id"])
+    assert len(calls) == 1 and calls[0][3] > 0
+    if finish == "length":
+        assert calls[0][4]["code"] == "BRT-ANS-009"
+    _assert_receipt_counts_every_call(stub, result, db)
+
+
+@pytest.mark.asyncio
+async def test_null_answerer_usage_never_crashes(env):
+    stub, result, db = await _edited_run(env, _nth_of_kind("answerer", 1, _null_usage),
+                                         compose_text="Final.")
+    assert result["status"] == "completed", result.get("error")
+    calls = _answerer_events(db, result["run_id"])
+    assert len(calls) == 1 and (calls[0][1], calls[0][2], calls[0][3]) == (0, 0, 0.0)
+    _assert_receipt_counts_every_call(stub, result, db)
+
+
+@pytest.mark.asyncio
+async def test_null_packed_content_is_priced_and_its_items_run_alone(env):
+    db_path, mp = env
+    mp.setenv("BORG_PACK_MAX_ITEMS", "20")
+    stub, result, db = await _edited_run(env, _nth_of_kind("packed", 1, _null_content()),
+                                         message="Rate each.", plan_nodes=[_rate()],
+                                         answer_for=lambda r: {"sentiment": "ok"},
+                                         compose_text="Final.")
+    assert result["status"] == "completed", result.get("error")
+    assert len(stub.of_kind("packed")) == 1
+    assert len(stub.of_kind("answerer")) == len(SMALL)       # each item ran alone
+    packed = [e for e in _answerer_events(db, result["run_id"]) if "pack" in e[4]]
+    assert len(packed) == len(SMALL) and sum(e[3] for e in packed) > 0
+    expected = _stub_dollars(stub)
+    assert _digest_cost(db, result["run_id"]) == pytest.approx(expected, rel=1e-6)
