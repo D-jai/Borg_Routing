@@ -64,6 +64,45 @@ def is_conditional_field(hint: object) -> bool:
     return isinstance(hint, str) and ONLY_IF_MARKER in hint
 
 
+DEFER_VALUE = "defer"
+
+
+def is_deferred(output: object) -> bool:
+    """True when an item's output is the worker's deferral: a top-level value
+    of "defer" (``bucket: defer``, ``result_or_defer: defer``)."""
+    return isinstance(output, dict) and any(
+        isinstance(v, str) and v.strip().casefold() == DEFER_VALUE for v in output.values()
+    )
+
+
+def missing_extra_fields(env: InboundEnvelope, task: WrappedTask) -> list[str]:
+    """The task's extra fields a resolved reply leaves absent or null
+    (planner reading (2) under ruling 35). A deferred item needs none. An
+    extra field marked "(only if" whose requirement is implied (ruling 32b)
+    is never counted. Empty for a failed reply or a task with no extra fields.
+    """
+    if env.status != "resolved":
+        return []
+    return missing_extra_fields_in(env.output, task)
+
+
+def missing_extra_fields_in(output: object, task: WrappedTask) -> list[str]:
+    """``missing_extra_fields`` for a stored item output."""
+    extra = list(task.extra_fields or [])
+    if not extra or not isinstance(output, dict) or is_deferred(output):
+        return []
+    schema = task.output_schema if isinstance(task.output_schema, dict) else {}
+    if isinstance(schema.get("properties"), dict):
+        props = schema["properties"]
+        explicit = isinstance(schema.get("required"), list)
+    else:
+        props, explicit = schema, False
+    return [
+        f for f in extra
+        if output.get(f) is None and (explicit or not is_conditional_field(props.get(f)))
+    ]
+
+
 def validate_inbound(env: InboundEnvelope, task: WrappedTask) -> None:
     """Validate that an inbound envelope conforms to the outbound task contract.
 
@@ -76,6 +115,13 @@ def validate_inbound(env: InboundEnvelope, task: WrappedTask) -> None:
     may be absent or null, but only where the requirement is implied (flat
     schema, or ``properties`` without a ``required`` list). A field named in an
     explicit ``required`` list stays required.
+
+    Only presence is checked: a present value of any type passes.
+
+    An extra field (``task.extra_fields``, planner reading (2) under ruling 35)
+    is never required here: a reply without one passes, and the packed path
+    retries it once alone (``missing_extra_fields``). The skill's own fields
+    stay required as above.
 
     Raises:
         ValueError: BRT-ENV-012 if status=failed but failure_reason is missing.
@@ -105,9 +151,11 @@ def validate_inbound(env: InboundEnvelope, task: WrappedTask) -> None:
             expected = list(schema.keys())
 
         # Ruling 32b: a field whose hint holds "(only if" may be absent or null.
+        # Ruling 35, reading (2): an extra field is retried, then kept.
+        extra = set(task.extra_fields or [])
         missing = [
             k for k in expected
-            if k not in env.output
+            if k not in env.output and k not in extra
             and (explicit or not is_conditional_field(props.get(k)))
         ]
         if missing:

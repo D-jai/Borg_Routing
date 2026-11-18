@@ -95,6 +95,12 @@ class WrappedTask(BaseModel):
     skill_id: Optional[str] = None
     skill_version: Optional[int] = None
     skill_args: Optional[dict] = None
+    # Planner reading (2) under ruling 35: the names of the fields the step
+    # added through ``skill_args.extra_fields`` (set by the skill library's
+    # render, copied to each apply_to_each child). A reply without one is
+    # retried where a failing item is retried today, then kept; the skill's
+    # own fields stay strict (src/envelopes/validator.py).
+    extra_fields: list[str] = []
     # On-premise lane (docs/design/on_premise_lane.md section 5). Set by the
     # runtime, never by the planner: "raw" when the task reads document
     # content or the unguarded output of a raw step. A raw task is routed to

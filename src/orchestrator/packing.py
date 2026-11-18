@@ -567,7 +567,7 @@ class StepPacker:
 
     async def _send(self, pack, serial, phase_one, alone, post_fn, call_scope, build_system_prompt) -> _Post:
         from src.lane.context import guard_envelope, mark_model_reason  # noqa: PLC0415
-        from src.envelopes.validator import validate_inbound  # noqa: PLC0415
+        from src.envelopes.validator import missing_extra_fields, validate_inbound  # noqa: PLC0415
         from src.logging.writer import write_event  # noqa: PLC0415
 
         task, ctx = self.task, self.ctx
@@ -686,6 +686,13 @@ class StepPacker:
                                      mark_model_reason, validate_inbound)
                 if env is None:
                     outcome["invalid"] += 1
+                    to_alone.append(i)
+                    continue
+                if missing_extra_fields(env, child):
+                    # Ruling 35, reading (2): a reply without an extra field
+                    # takes the same retry alone; the single call keeps it.
+                    outcome["invalid"] += 1
+                    outcome["extra_missing"] = outcome.get("extra_missing", 0) + 1
                     to_alone.append(i)
                     continue
                 if ctx.lane is not None and child.data_scope == "raw":

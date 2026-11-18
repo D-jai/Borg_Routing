@@ -191,6 +191,7 @@ def _make_child_task(
         trigger_reason=f"apply_to_each:{parent.envelope_id}:item_{index}",
         skill_id=parent.skill_id,
         skill_version=parent.skill_version,
+        extra_fields=list(parent.extra_fields),
         data_scope=parent.data_scope,
         documents=documents,
     )
@@ -488,6 +489,7 @@ async def expand_and_run(
     # Sort results by index for deterministic ordering
     results.sort(key=lambda r: r["index"])
     failures.sort(key=lambda r: r["index"])
+    await _note_extra_fields_missing(task, results, db_path)
     # Ruling 32d(i): a retry of failed items names each entry's index in the
     # step it retries, so the entry keeps that item's identity.
     original = task.dependency_input.get("original_indexes")
@@ -521,6 +523,36 @@ async def expand_and_run(
     )
     out_env._model_reason_indexes = model_reasons
     return out_env
+
+
+async def _note_extra_fields_missing(task: WrappedTask, results: list, db_path: str) -> None:
+    """Planner reading (2) under ruling 35: one plan note per step saying how
+    many kept items ended without each extra field (deferred items need
+    none). Written only when some item lacks one."""
+    if not task.extra_fields:
+        return
+    from src.envelopes.validator import missing_extra_fields_in  # noqa: PLC0415
+
+    counts = {f: 0 for f in task.extra_fields}
+    for entry in results:
+        for f in missing_extra_fields_in(entry.get("output"), task):
+            counts[f] += 1
+    if not any(counts.values()):
+        return
+    from src.logging.writer import write_event  # noqa: PLC0415
+
+    try:
+        await write_event(
+            "orchestrator_decision",
+            run_id=task.run_id,
+            envelope_id=task.envelope_id,
+            model_id=task.model_name,
+            decision={"mode": "extra_fields_missing", "step": str(task.envelope_id),
+                      "fields": counts},
+            db_path=db_path,
+        )
+    except Exception:
+        pass
 
 
 def _level_suffix(index: int) -> str:

@@ -265,6 +265,7 @@ class SkillLibrary:
             skill_id=skill_id,
             skill_version=version,
             skill_args=given_args,
+            extra_fields=list(added),
         )
 
 
