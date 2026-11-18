@@ -376,12 +376,18 @@ async def expand_and_run(
                     if env.lane_guarded:
                         guarded[0] += 1
                 else:
-                    failures.append({
+                    failure = {
                         "index": index,
                         "item": item,
                         "reason": _failure_reason(child, env.failure_reason or "status=failed", env),
                         "model_id": child.model_name,
-                    })
+                    }
+                    # Planner ruling 21: the row marker shows a model-written
+                    # reason as BRT-ANS-010, never parsed. Stripped from every
+                    # prompt (engine._stage_output_for_prompt).
+                    if env._reason_from_model:
+                        failure["_from_model"] = True
+                    failures.append(failure)
             except Exception as exc:
                 failures.append({
                     "index": index,

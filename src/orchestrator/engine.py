@@ -48,6 +48,10 @@ Error codes:
                steps' results with a note, runs.answer_kind = "salvaged"
                (warning; the run completes)
 - BRT-ORC-031: compose returned action=fail; its rationale is the answer (answer_kind "declined").
+- BRT-ORC-032: compose used a row marker that names no list step; asked once
+               more, then salvaged (warning; planner ruling 21a)
+- BRT-LANE-009: a rows block placed by code copied a document (raw_local /
+               all_local); the run fails closed (planner ruling 21b)
 
 On-premise lane (docs/design/on_premise_lane.md; on only when the run has a
 lane context, see src/lane/context.py):
@@ -648,6 +652,20 @@ _FAILURE_CODE_FALLBACK = "BRT-ORC-004"
 _MODEL_FAILURE_CODE = "BRT-ANS-010"   # the model itself declined or reported failure
 
 
+def _without_private_keys(output: object) -> object:
+    """An aggregate's failure entries without ``_from_model`` (ruling 21:
+    recorded for the row markers, never shown in a prompt). Anything else is
+    returned unchanged, so prompts stay byte-identical."""
+    if not (isinstance(output, dict) and isinstance(output.get("failures"), list)):
+        return output
+    if not any(isinstance(f, dict) and "_from_model" in f for f in output["failures"]):
+        return output
+    return {**output, "failures": [
+        {k: v for k, v in f.items() if k != "_from_model"} if isinstance(f, dict) else f
+        for f in output["failures"]
+    ]}
+
+
 def _stage_output_for_prompt(env: InboundEnvelope, mode: str = "re_plan") -> dict:
     """One step's entry in the stage_results block of an orchestrator prompt.
 
@@ -667,7 +685,7 @@ def _stage_output_for_prompt(env: InboundEnvelope, mode: str = "re_plan") -> dic
     failure is shown by the non-raw rules above.
     """
     if env.status != "failed":
-        return env.output
+        return _without_private_keys(env.output)
     if env._data_scope == "raw":
         shown = (env.output or {}).get("failure")
         if env.lane_guarded is False and isinstance(shown, dict) and shown.get("code"):
@@ -714,8 +732,16 @@ async def _invoke_orchestrator_model(
     db_path: str,
     governance_instruction: Optional[str] = None,
     user_message: Optional[str] = None,
+    extra_user_lines: Optional[str] = None,
+    pointer_lines: Optional[str] = None,
 ) -> dict:
     """One call to the orchestrator model. Returns parsed JSON dict.
+
+    ``extra_user_lines`` (compose only, planner ruling 21) is the row-marker
+    block added after the user message's first line; None leaves the
+    request byte-identical. ``pointer_lines`` are the list steps' lines: with
+    them, a compose reply cut at the cap is retried once, always, with the
+    row-marker pointer as its user message (``row_markers.ROWS_POINTER``).
 
     The user message is the instruction in plan mode and one short line
     naming the mode otherwise (``_MODE_USER_MESSAGES``; planner ruling 20,
@@ -845,7 +871,7 @@ async def _invoke_orchestrator_model(
                 user_message if user_message is not None
                 else user_instruction if mode == "plan"
                 else _MODE_USER_MESSAGES.get(mode, "continue")
-            )},
+            ) + (("\n" + extra_user_lines) if extra_user_lines else "")},
         ],
         "temperature": 0.1,
         "max_tokens": max_tokens,
@@ -912,11 +938,19 @@ async def _invoke_orchestrator_model(
     # cut produces partial JSON that may or may not parse — and even if
     # it does, the plan it encodes is broken.
     length_retried = False
-    if finish_reason == "length" and max_tokens < 16000:
-        retry_max = min(max_tokens * 2, 16000)
-        if retry_max > max_tokens:
+    # Planner ruling 21: a compose reply cut while list steps exist is
+    # retried once, always (also at the ceiling), pointing to the marker.
+    rows_pointer = mode == "compose" and bool(pointer_lines)
+    pointer_cut_again = False
+    if finish_reason == "length" and (max_tokens < 16000 or rows_pointer):
+        retry_max = max(max_tokens, min(max_tokens * 2, 16000))
+        if retry_max > max_tokens or rows_pointer:
             length_retried = True
             payload["max_tokens"] = retry_max
+            if rows_pointer:
+                from src.orchestrator.row_markers import ROWS_POINTER  # noqa: PLC0415
+
+                payload["messages"][1]["content"] = ROWS_POINTER + "\n" + pointer_lines
             try:
                 content_t, usage_t, latency_t, finish_reason = await _post_and_collect()
             except ValueError as exc:
@@ -955,6 +989,7 @@ async def _invoke_orchestrator_model(
             latency_ms += latency_t
             content = content_t
             max_tokens = retry_max
+            pointer_cut_again = rows_pointer and finish_reason == "length"
 
     # BRT-ORC-02b — ALWAYS log the raw payload_out before attempting to
     # parse it. Previously _extract_json raised ValueError before
@@ -1002,6 +1037,7 @@ async def _invoke_orchestrator_model(
                         "code": "BRT-ORC-018",
                         "retry_max_tokens": max_tokens,
                         "first_finish_reason": "length",
+                        **({"retry_message": "rows_pointer"} if rows_pointer else {}),
                     }
                     if length_retried
                     else {}
@@ -1017,6 +1053,14 @@ async def _invoke_orchestrator_model(
 
     if parsed is not None:
         return parsed
+
+    if pointer_cut_again:
+        # Ruling 21: the pointer retry was cut too; no JSON-only retry. The
+        # caller salvages (a compose call that raises).
+        raise ValueError(
+            "BRT-ORC-002: compose reply cut at the cap again after the row-marker "
+            f"retry; not parseable: {parse_error}"
+        )
 
     # BRT-ORC-02b — one retry with a "JSON ONLY" reinforcement. Works for
     # the ~5 % of cases where response_format was ignored or the model
@@ -2214,7 +2258,9 @@ def _build_task_from_node(
         for upstream_id in depends_on:
             if upstream_id in results:
                 env = results[upstream_id]
-                upstream_results[upstream_id] = getattr(env, "output", {}) or {}
+                upstream_results[upstream_id] = _without_private_keys(
+                    getattr(env, "output", {}) or {}
+                )
             else:
                 missing.append(upstream_id)
         if upstream_results:
@@ -3018,6 +3064,7 @@ async def _orchestrate_run(
         for nid, env, done_task in dispatched:
             results[nid] = env
             env._data_scope = done_task.data_scope
+            env._node_type = done_task.type
             env._doc_label = doc_label(list(done_task.documents))
             if done_task.data_scope == "raw" and not env.lane_guarded:
                 raw_unstamped.add(nid)
@@ -3032,11 +3079,15 @@ async def _orchestrate_run(
         )
 
     # --- COMPOSE MODE ---
+    # Planner ruling 21: the list-holding steps compose may name with a row
+    # marker. With none, every compose request is byte-identical to before.
+    rows = _RowContext.for_run(results, current_lane(), user_instruction, governance_instruction)
     try:
         compose_result = await _invoke_orchestrator_model(
             mode="compose",
             stage_results=results,
             child_scratch_digest=child_digests,
+            **rows.call_kwargs(),
             **base_kwargs,
         )
     except LaneError:
@@ -3069,14 +3120,20 @@ async def _orchestrate_run(
         await _mark_answer_kind(run_id, "salvaged", db_path)
         return salvaged
 
-    async def _reask() -> dict:
+    async def _reask(message: str = _COMPOSE_REASK) -> dict:
         return await _invoke_orchestrator_model(
             mode="compose",
             stage_results=results,
             child_scratch_digest=child_digests,
-            user_message=_COMPOSE_REASK,
+            user_message=message,
+            **rows.call_kwargs(),
             **base_kwargs,
         )
+
+    async def _reask_invalid() -> dict:
+        from src.orchestrator.row_markers import INVALID_REASK  # noqa: PLC0415
+
+        return await _reask(INVALID_REASK)
 
     return await _handle_compose_result(
         compose_result=compose_result,
@@ -3084,7 +3141,54 @@ async def _orchestrate_run(
         run_id=run_id,
         db_path=db_path,
         reask=_reask,
+        rows=rows if rows.steps else None,
+        reask_invalid=_reask_invalid if rows.steps else None,
     )
+
+
+class _RowContext:
+    """The run's list-holding steps for compose row markers (planner ruling
+    21; docs/design/compose_row_markers.md)."""
+
+    def __init__(self, steps: dict, quoted: list, lane: Optional[LaneContext]) -> None:
+        self.steps = steps
+        self.quoted = quoted
+        self.lane = lane
+
+    @classmethod
+    def for_run(cls, results: dict, lane: Optional[LaneContext],
+                user_instruction: str, governance_instruction: Optional[str]) -> "_RowContext":
+        from src.orchestrator import row_markers  # noqa: PLC0415
+
+        steps = row_markers.list_steps(results, lane)
+        quoted: list = []
+        if steps:
+            stage_text = json.dumps(
+                {str(k): _without_private_keys(getattr(v, "output", None))
+                 for k, v in results.items()},
+                ensure_ascii=False, default=str,
+            )
+            quoted = [user_instruction or "", governance_instruction or "", stage_text]
+        return cls(steps, quoted, lane)
+
+    def call_kwargs(self) -> dict:
+        from src.orchestrator import row_markers  # noqa: PLC0415
+
+        if not self.steps:
+            return {}
+        return {
+            "extra_user_lines": row_markers.block(self.steps),
+            "pointer_lines": row_markers.step_lines(self.steps),
+        }
+
+    def guard(self):
+        """The rows-block guard (ruling 21b), or None when it does not run."""
+        lane = self.lane
+        if lane is None or not lane.keeps_raw_local or not lane.has_documents:
+            return None
+        from src.lane.context import guard_rows_block  # noqa: PLC0415
+
+        return lambda rows, block: guard_rows_block(rows, block, lane)
 
 
 # Reply fields read as the final answer when compose put it somewhere other
@@ -3143,6 +3247,8 @@ async def _handle_compose_result(
     run_id: UUID,
     db_path: str,
     reask=None,
+    rows: Optional["_RowContext"] = None,
+    reask_invalid=None,
 ) -> str:
     """The run's final answer from a compose reply (planner ruling
     20, R2). In order:
@@ -3163,8 +3269,61 @@ async def _handle_compose_result(
     5. Nothing finished: BRT-ORC-009.
 
     A composed answer marks the run ``answer_kind = "composed"``.
+
+    Row markers (planner ruling 21; only when ``rows`` holds list steps, so
+    the block was sent): every marker in the chosen answer (or a declined
+    rationale) must name a list step, else compose is asked once more
+    (``reask_invalid``, BRT-ORC-032) and a second invalid reply is salvaged
+    (BRT-ORC-032 warning). Valid markers are replaced by the stored rows;
+    each placed block passes the lane's rows guard (BRT-LANE-009) first.
     """
     text, field, wrong = _compose_text(compose_result)
+    action = str(compose_result.get("action") or "").lower().strip() if isinstance(
+        compose_result, dict) else ""
+    if rows is not None and (text or action == "fail"):
+        candidate = text if text else str(
+            compose_result.get("rationale") or compose_result.get("msg") or "")
+        from src.orchestrator import row_markers  # noqa: PLC0415
+
+        if row_markers.invalid_hits(candidate, rows.steps, rows.quoted):
+            if reask_invalid is not None:
+                await _log_decision(run_id, db_path, {
+                    "code": "BRT-ORC-032",
+                    "msg": "compose used a list marker that names no list step; "
+                           "asking compose once more",
+                    "reask": True,
+                })
+                try:
+                    second = await reask_invalid()
+                except LaneError:
+                    raise
+                except ValueError as exc:
+                    logger.warning("compose marker re-ask failed for run %s: %s", run_id, exc)
+                    second = None
+                if second is not None:
+                    return await _handle_compose_result(
+                        second, results, run_id, db_path, reask=reask, rows=rows)
+            return await _salvage_or_fail(
+                results, run_id, db_path, "BRT-ORC-032",
+                "compose used a list marker that names no list step, also when asked "
+                "again; the answer is the finished steps' results with a note",
+                action,
+            )
+        if text:
+            placed_value, placed = row_markers.place(
+                compose_result[field], rows.steps, guard=rows.guard())
+            if placed:
+                text, _, _ = _compose_text({**compose_result, field: placed_value})
+        else:
+            placed_value, placed = row_markers.place(candidate, rows.steps, guard=rows.guard())
+            if placed:
+                compose_result = {**compose_result, "rationale": placed_value}
+        if placed:
+            await _log_decision(run_id, db_path, {
+                "msg": "rows placed by code (row markers)",
+                "rows_placed": {sid: len(rows.steps[sid].rows) for sid in placed},
+                "markers": placed,
+            })
     if text:
         if wrong:
             try:
@@ -3183,9 +3342,6 @@ async def _handle_compose_result(
                 pass
         await _mark_answer_kind(run_id, "composed", db_path)
         return text
-
-    action = str(compose_result.get("action") or "").lower().strip() if isinstance(
-        compose_result, dict) else ""
 
     # action == "fail" — surface rationale instead of silently 500ing.
     # Run completes (not raises); user sees a coherent decline message.
@@ -3235,7 +3391,8 @@ async def _handle_compose_result(
             second = None
         if second is not None:
             # No reask this time: a second reply with no final text salvages.
-            return await _handle_compose_result(second, results, run_id, db_path)
+            return await _handle_compose_result(
+                second, results, run_id, db_path, rows=rows, reask_invalid=reask_invalid)
 
     salvaged = _salvage_finished_results(results, current_lane())
     if salvaged:
@@ -3262,6 +3419,43 @@ async def _handle_compose_result(
     # Genuinely nothing usable anywhere — keep the original error so
     # operators still see the failure mode when it's real.
     raise ValueError("BRT-ORC-009: compose mode returned no response")
+
+
+async def _log_decision(run_id: UUID, db_path: str, decision: dict) -> None:
+    """An ``orchestrator_decision`` event; a logging hiccup never fails the run."""
+    try:
+        await write_event("orchestrator_decision", run_id=run_id, decision=decision,
+                          db_path=db_path)
+    except Exception:
+        pass
+
+
+async def _salvage_or_fail(results: dict, run_id: UUID, db_path: str, code: str,
+                           msg: str, action: str) -> str:
+    """The finished steps' results with a note, recorded with ``code`` as a
+    warning and ``answer_kind = "salvaged"``; with nothing finished, the run
+    fails with ``code``."""
+    salvaged = _salvage_finished_results(results, current_lane())
+    if not salvaged:
+        raise ValueError(f"{code}: {msg}")
+    try:
+        await write_event(
+            "error",
+            run_id=run_id,
+            decision={
+                "code": code,
+                "severity": "warning",
+                "msg": msg,
+                "compose_action": action or "(missing)",
+                "steps": [k for k, v in results.items()
+                          if getattr(v, "status", None) == "resolved"],
+            },
+            db_path=db_path,
+        )
+    except Exception:
+        pass
+    await _mark_answer_kind(run_id, "salvaged", db_path)
+    return salvaged
 
 
 SALVAGE_NOTE = (

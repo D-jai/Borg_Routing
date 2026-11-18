@@ -344,6 +344,33 @@ def prompt_json(value: object, **kwargs) -> str:
     return _LONE_SURROGATE.sub("�", json.dumps(value, ensure_ascii=False, **kwargs))
 
 
+def guard_rows_block(rows: list, block_text: str, ctx: Optional[LaneContext]) -> None:
+    """The guard on a rows block placed by code (planner ruling 21b).
+
+    In ``raw_local``/``all_local`` with documents, the backstop's copy rules
+    (``copied_rule``: a verbatim run of ``lane_max_verbatim_chars``, or a
+    short document present whole) are checked against every run document on
+    the decoded row values (the same walk as ``guard_envelope``, never
+    escaped JSON text) and, for a Markdown table, on the rendered text. A hit
+    raises BRT-LANE-009 naming the document only: a defect, the run fails
+    closed. Compose's own text is never checked here, and neither is the
+    coverage rule (b) on rows joined in code (a stated limit).
+    """
+    if ctx is None or not ctx.keeps_raw_local or not ctx.has_documents:
+        return
+    forms = [normalise(serialise(rows))]
+    if block_text.lstrip().startswith("|"):
+        forms.append(normalise(block_text))
+    for doc in ctx.indexes(None):
+        for form in forms:
+            if copied_rule(doc, form, ctx.settings.max_verbatim_chars):
+                raise LaneError(
+                    "BRT-LANE-009",
+                    f"a rows block placed by code copies document {doc.doc_id}; withheld",
+                    doc=doc.doc_id,
+                )
+
+
 def guard_envelope(env: InboundEnvelope, task: WrappedTask, ctx: LaneContext) -> InboundEnvelope:
     """The output guard (P2), applied to a raw envelope whatever its status.
 

@@ -280,6 +280,15 @@ If the write-up call itself fails (a timeout, a connection error, a reply that i
 
 If no step finished either, the run fails with BRT-ORC-009 (or the failed call's own error) as before.
 
+### Long lists in the answer: rows placed by code (BRT-ORC-032)
+
+When a run has a finished per-item step (`apply_to_each`) or a `state_op` that returned a list, the write-up does not need to retype its rows. The engine adds a few lines to the write-up's message: each such step's id, its row count, whether its rows are in input order or stored order, and its field names (nothing else). The write-up may then write `@@ROWS:<step id>@@` where the list belongs, and the engine replaces it with that step's stored rows, one row per line in a ```` ```json ```` block, or `@@ROWS_TABLE:<step id>@@` for a Markdown table. Each row is `{"item": <the item or its id>, ...the step's output fields}`. A failed item stays in its place as `{"item": ..., "error": "<code>"}`. A failure the model itself reported shows as **BRT-ANS-010**. <!-- claim C24 --> So a 200-row answer costs the write-up a sentence and one marker instead of thousands of output tokens. A write-up that types the rows itself still works.
+
+- **A marker is never left in an answer.** A marker that names no list step, or a near-miss such as `@@Row:x@@`, gets the write-up asked once more with the valid ids (BRT-ORC-032). If the second reply is wrong too, the finished steps' results come back as in step 3 above, with BRT-ORC-032 as a warning and `"answer_kind": "salvaged"`. Text like a marker that you wrote in your own message, or that a step returned, is left alone.
+- **A write-up cut off by the token cap** while such a step exists is retried once (even at the 16,000-token ceiling), and the retry tells it to use the marker instead of typing the rows. If that retry is cut off too, the finished steps' results come back (salvaged).
+- With no such step, nothing changes: the write-up's message is exactly as before.
+- **Limit:** a list inside a child run (an `orchestrate` step) reaches the parent run as text, so the parent's write-up has to retype it.
+
 Every completed run records how its answer was made in `answer_kind` (`GET /runs/{id}`): `composed` (the final write-up), `salvaged` (the finished steps' results with a note, BRT-ORC-030), `direct` (the planner answered without steps), `declined` (the write-up declined with `action: fail` and its reason is the answer, or nothing at all came back with no steps to show) or `shortcut` (a short conversational message answered by the Rule Zero shortcut).
 
 ---
@@ -551,6 +560,7 @@ The planner never sees the text. It gets a list: an id per document (`doc_001`),
 - With documents, the planner may not answer directly or skip the plan (**BRT-ORC-003**), and the short-prompt shortcut is off.
 - An `orchestrate` step given documents is refused outside `all_local` (**BRT-LANE-005**): its own planner would read them.
 - Every call a raw step makes, retries included, is checked right before it is sent; a call about to leave the machine is blocked (**BRT-LANE-003**, which means a defect).
+- Rows the engine writes into the answer for a row marker (see "Long lists in the answer") are rows the write-up already received in that run: placing them sends nothing new off the machine. Each rows block is also checked against the documents with the same copy rules as the output check, before it is placed; a hit fails the run and nothing is stored (**BRT-LANE-009**, which means a defect). The write-up's own text is not checked this way.
 
 ### The check on everything sent out, and the record
 
@@ -578,7 +588,9 @@ The planner never sees the text. It gets a list: an id per document (`doc_001`),
 - The copy checks (the output guard and the check on everything sent out) do not catch:
   - documents shorter than 24 characters once case, punctuation and spacing are folded: these are never checked;
   - encodings (base64, hex), reversed text or reversed word order, look-alike letters from other alphabets, a marker word inserted every few words, or a copy placed one word per key name;
-  - paraphrase and summaries.
+  - paraphrase and summaries;
+  - a document spread over many rows of a list placed by code, each row below both copy limits: the 8-word-sequence check is not run on rows joined in code (each row was checked on its own);
+  - the results joined in code when the write-up fails ("salvaged" answers): these get no check of their own beyond each step's output check.
 
   The check is a backstop, not proof.
 - File names are visible to the planner unless `lane_manifest` is set to `ids`.

@@ -79,6 +79,10 @@ class StubModels:
                    ``output``; defaults to ``{"result": "done by <model>"}``.
     completion_tokens: reported for every call (prompt tokens are derived
                    from the prompt length), so costs are computable.
+    compose_for:   optional ``fn(request)`` scripting each compose call (the
+                   first, a re-ask, a retry). It returns the reply: a dict
+                   (sent as JSON), a str (sent as is, e.g. cut-off JSON), a
+                   ``(reply, finish_reason)`` tuple, or an Exception (raised).
     """
     plan_nodes: list[dict]
     compose_text: str = "Final answer."
@@ -89,6 +93,7 @@ class StubModels:
     plan_content_for: Optional[Callable[[StubRequest], dict]] = None
     error_for: Optional[Callable[[StubRequest], Optional[Exception]]] = None
     finish_for: Optional[Callable[[StubRequest], str]] = None
+    compose_for: Optional[Callable[[StubRequest], Any]] = None
     requests: list[StubRequest] = field(default_factory=list)
 
     def install(self, monkeypatch) -> "StubModels":
@@ -143,6 +148,8 @@ class StubModels:
                 self.replan_for(req) if self.replan_for
                 else {"action": "compose", "rationale": "all steps done"}
             )
+        elif kind == "compose" and self.compose_for is not None:
+            content = self.compose_for(req)
         elif kind == "compose":
             content = {"response": self.compose_text, "rationale": "scripted compose"}
         else:
@@ -152,10 +159,15 @@ class StubModels:
             content = {"status": "resolved", "confidence": 0.9, "output": output}
 
         finish = self.finish_for(req) if self.finish_for else "stop"
+        if isinstance(content, Exception):
+            raise content
+        if isinstance(content, tuple):
+            content, finish = content
+        text = content if isinstance(content, str) else json.dumps(content)
         return _StubResponse(
             {
                 "choices": [
-                    {"message": {"content": json.dumps(content)}, "finish_reason": finish}
+                    {"message": {"content": text}, "finish_reason": finish}
                 ],
                 "usage": {
                     "prompt_tokens": max(1, len(system) // 4),

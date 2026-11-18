@@ -459,7 +459,9 @@ async def test_r2_no_final_text_asks_compose_once_more(env):
     await drain_log_writes()
     assert result["response"] == "SECOND TRY."
     composes = stub.of_kind("compose")
-    assert len(composes) == 2 and composes[1].user == engine._COMPOSE_REASK
+    # Ruling 21: with a list step the re-ask also carries the row-marker block.
+    assert len(composes) == 2
+    assert composes[1].user.startswith(engine._COMPOSE_REASK + "\nList steps the code")
     codes = await _codes(db_path, result["run_id"])
     assert "BRT-ORC-029" in codes and "BRT-ORC-030" not in codes
     assert await _answer_kind(db_path, result["run_id"]) == "composed"

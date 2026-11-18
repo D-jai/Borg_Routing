@@ -1,0 +1,1972 @@
+{
+ "source": "bench/results/2026_11_17/dbs/A_borg_cloud_1.db (run 0ef867a2)",
+ "lane_mode": "by_reference",
+ "folder": "job_a",
+ "instruction": "Each file in the folder is one customer support email. For every email, assign a category\n(one of: billing, technical, account_access, shipping, feedback) and an urgency from 1\n(lowest) to 5 (highest). Return one JSON list with an object {\"file\": <file name>,\n\"category\": <category>, \"urgency\": <1-5>} for every email, covering all 200 emails, and no other text.",
+ "orchestrator_replies": {
+  "plan": [
+   {
+    "direct_answer": null,
+    "plan": {
+     "nodes": [
+      {
+       "type": "apply_to_each",
+       "id": "classify_emails",
+       "skill_id": "classify_into_buckets",
+       "skill_version": 1,
+       "skill_args": {
+        "buckets": [
+         "billing",
+         "technical",
+         "account_access",
+         "shipping",
+         "feedback"
+        ],
+        "items_ref": "documents",
+        "extra_fields": {
+         "urgency": "integer from 1 (lowest) to 5 (highest)"
+        }
+       },
+       "output_schema": {
+        "file": "string",
+        "category": "string",
+        "urgency": "integer"
+       },
+       "concurrency_limit": 20,
+       "tier": "light",
+       "recommended_model": "openrouter/google/gemini-3.1-flash-lite-preview"
+      }
+     ]
+    },
+    "rationale": "The user instruction exactly matches the classify_into_buckets skill. Using apply_to_each over all 200 documents with a light model for cost efficiency. The skill will produce structured per-email results that can be directly assembled into the requested JSON list in compose mode."
+   }
+  ],
+  "re_plan": [
+   {
+    "action": "continue",
+    "next_nodes": [
+     {
+      "type": "apply_to_each",
+      "id": "extract_urgency",
+      "instruction": "Read this customer support email and output ONLY a JSON object with exactly these keys: urgency (integer 1-5 where 1=lowest, 5=highest), category (one of: billing, technical, account_access, shipping, feedback). Base urgency on severity, impact, and time-sensitivity described. Do not add any other text.",
+      "inputs_ref": "documents",
+      "output_schema": {
+       "urgency": "integer",
+       "category": "string"
+      },
+      "concurrency_limit": 20,
+      "tier": "light",
+      "recommended_model": "openrouter/google/gemini-3.1-flash-lite-preview"
+     },
+     {
+      "type": "state_op",
+      "id": "merge_classifications",
+      "op": "join",
+      "source": "classify_emails",
+      "params": {
+       "join_with": "extract_urgency",
+       "on": "item",
+       "fields": [
+        "bucket",
+        "confidence",
+        "urgency",
+        "category"
+       ]
+      },
+      "depends_on": [
+       "extract_urgency"
+      ]
+     }
+    ],
+    "rationale": "The first classification stage succeeded on 189/200 emails but had 11 schema failures. Now running parallel extraction of urgency+category on all documents (using the exact user-required categories). Then merge via state_op so we can build the final 200-item list in compose."
+   },
+   {
+    "action": "continue",
+    "next_nodes": [
+     {
+      "type": "state_op",
+      "id": "fix_classify_failures",
+      "op": "filter",
+      "source": "classify_emails",
+      "params": {
+       "keep": "failures",
+       "output_as": "failed_classifications"
+      },
+      "depends_on": [
+       "classify_emails"
+      ]
+     },
+     {
+      "type": "apply_to_each",
+      "id": "retry_classify",
+      "skill_id": "classify_into_buckets",
+      "skill_version": 1,
+      "skill_args": {
+       "buckets": [
+        "billing",
+        "technical",
+        "account_access",
+        "shipping",
+        "feedback"
+       ],
+       "items_ref": "failed_classifications",
+       "concurrency_limit": 11
+      },
+      "output_schema": {
+       "bucket": "string",
+       "confidence": "number",
+       "defer_reason": "string"
+      },
+      "depends_on": [
+       "fix_classify_failures"
+      ]
+     },
+     {
+      "type": "state_op",
+      "id": "merge_all_classifications",
+      "op": "group_by",
+      "source": "classify_emails",
+      "params": {
+       "group_key": "item",
+       "merge_with": "retry_classify",
+       "merge_strategy": "coalesce",
+       "output_as": "all_classifications"
+      },
+      "depends_on": [
+       "classify_emails",
+       "retry_classify"
+      ]
+     }
+    ],
+    "rationale": "11 classification failures due to missing defer_reason key. Retry them with the same skill, then merge all category results with the already-successful urgency extraction via state_op. This gives a complete 200-item dataset for final composition."
+   },
+   {
+    "action": "continue",
+    "next_nodes": [
+     {
+      "type": "state_op",
+      "id": "fix_classify_failures",
+      "op": "filter",
+      "source": "classify_emails",
+      "params": {
+       "key": "failures",
+       "keep": true
+      },
+      "depends_on": [
+       "classify_emails"
+      ]
+     },
+     {
+      "type": "apply_to_each",
+      "id": "retry_classify",
+      "skill_id": "classify_into_buckets",
+      "skill_version": 1,
+      "skill_args": {
+       "buckets": [
+        "billing",
+        "technical",
+        "account_access",
+        "shipping",
+        "feedback"
+       ],
+       "items_ref": "fix_classify_failures",
+       "concurrency_limit": 11
+      },
+      "depends_on": [
+       "fix_classify_failures"
+      ]
+     },
+     {
+      "type": "state_op",
+      "id": "merge_all_classifications",
+      "op": "group_by",
+      "source": "classify_emails",
+      "params": {
+       "key": "results",
+       "group_by": "item"
+      },
+      "depends_on": [
+       "classify_emails",
+       "retry_classify"
+      ]
+     }
+    ],
+    "rationale": "Fix the 11 classification failures from the first run using a retry on the failed items only. Then merge all classification results (original + retries) into one clean list per document. The extract_urgency stage already succeeded for all 200 items and includes category+urgency. Final merge and output formatting will happen in compose."
+   }
+  ],
+  "compose": [
+   {
+    "action": "compose",
+    "next_nodes": null,
+    "rationale": "Previous stages have provided category+urgency classifications for all 200 emails (with failures fixed via retries in the extract_urgency stage). The merge steps failed due to orchestration errors, but the raw results contain complete per-email data. In compose mode I can now synthesize the required JSON list directly from stage_results."
+   }
+  ]
+ },
+ "items": {
+  "classify_emails": {
+   "doc_001": {
+    "bucket": "billing",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_002": {
+    "bucket": "technical",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_004": {
+    "bucket": "shipping",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_005": {
+    "bucket": "feedback",
+    "confidence": 0.95,
+    "defer_reason": null
+   },
+   "doc_006": {
+    "bucket": "billing",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_007": {
+    "bucket": "technical",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_008": {
+    "bucket": "account_access",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_009": {
+    "bucket": "shipping",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_010": {
+    "bucket": "feedback",
+    "confidence": 0.95,
+    "defer_reason": ""
+   },
+   "doc_011": {
+    "bucket": "billing",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_012": {
+    "bucket": "technical",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_013": {
+    "bucket": "account_access",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_014": {
+    "bucket": "shipping",
+    "confidence": 1.0,
+    "defer_reason": null
+   },
+   "doc_015": {
+    "bucket": "feedback",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_016": {
+    "bucket": "billing",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_017": {
+    "bucket": "technical",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_018": {
+    "bucket": "account_access",
+    "confidence": 1.0,
+    "defer_reason": null
+   },
+   "doc_019": {
+    "bucket": "shipping",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_020": {
+    "bucket": "feedback",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_021": {
+    "bucket": "billing",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_022": {
+    "bucket": "technical",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_023": {
+    "bucket": "account_access",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_024": {
+    "bucket": "shipping",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_025": {
+    "bucket": "billing",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_026": {
+    "bucket": "billing",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_027": {
+    "bucket": "technical",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_028": {
+    "bucket": "account_access",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_029": {
+    "bucket": "shipping",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_030": {
+    "bucket": "feedback",
+    "confidence": 1.0,
+    "defer_reason": null
+   },
+   "doc_031": {
+    "bucket": "billing",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_032": {
+    "bucket": "technical",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_033": {
+    "bucket": "account_access",
+    "confidence": 1.0,
+    "defer_reason": null
+   },
+   "doc_034": {
+    "bucket": "shipping",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_035": {
+    "bucket": "feedback",
+    "confidence": 0.95,
+    "defer_reason": ""
+   },
+   "doc_037": {
+    "bucket": "technical",
+    "confidence": 1.0,
+    "defer_reason": null
+   },
+   "doc_038": {
+    "bucket": "account_access",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_039": {
+    "bucket": "shipping",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_040": {
+    "bucket": "feedback",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_041": {
+    "bucket": "billing",
+    "confidence": 1.0,
+    "defer_reason": null
+   },
+   "doc_042": {
+    "bucket": "technical",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_043": {
+    "bucket": "account_access",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_044": {
+    "bucket": "shipping",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_045": {
+    "bucket": "feedback",
+    "confidence": 0.9,
+    "defer_reason": ""
+   },
+   "doc_046": {
+    "bucket": "billing",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_047": {
+    "bucket": "technical",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_048": {
+    "bucket": "account_access",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_049": {
+    "bucket": "shipping",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_050": {
+    "bucket": "feedback",
+    "confidence": 0.95,
+    "defer_reason": ""
+   },
+   "doc_051": {
+    "bucket": "billing",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_052": {
+    "bucket": "technical",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_053": {
+    "bucket": "account_access",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_054": {
+    "bucket": "shipping",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_055": {
+    "bucket": "feedback",
+    "confidence": 0.9,
+    "defer_reason": ""
+   },
+   "doc_056": {
+    "bucket": "billing",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_057": {
+    "bucket": "technical",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_058": {
+    "bucket": "account_access",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_059": {
+    "bucket": "shipping",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_060": {
+    "bucket": "feedback",
+    "confidence": 0.9,
+    "defer_reason": ""
+   },
+   "doc_061": {
+    "bucket": "billing",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_062": {
+    "bucket": "technical",
+    "confidence": 1.0,
+    "defer_reason": null
+   },
+   "doc_063": {
+    "bucket": "account_access",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_064": {
+    "bucket": "shipping",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_066": {
+    "bucket": "billing",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_067": {
+    "bucket": "technical",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_068": {
+    "bucket": "account_access",
+    "confidence": 1.0,
+    "defer_reason": null
+   },
+   "doc_069": {
+    "bucket": "shipping",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_070": {
+    "bucket": "feedback",
+    "confidence": 0.95,
+    "defer_reason": ""
+   },
+   "doc_071": {
+    "bucket": "billing",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_072": {
+    "bucket": "technical",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_073": {
+    "bucket": "account_access",
+    "confidence": 1.0,
+    "defer_reason": null
+   },
+   "doc_074": {
+    "bucket": "shipping",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_075": {
+    "bucket": "billing",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_076": {
+    "bucket": "billing",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_077": {
+    "bucket": "technical",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_078": {
+    "bucket": "account_access",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_079": {
+    "bucket": "shipping",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_080": {
+    "bucket": "feedback",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_081": {
+    "bucket": "billing",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_082": {
+    "bucket": "technical",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_083": {
+    "bucket": "account_access",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_084": {
+    "bucket": "shipping",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_085": {
+    "bucket": "feedback",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_086": {
+    "bucket": "billing",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_087": {
+    "bucket": "technical",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_088": {
+    "bucket": "account_access",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_089": {
+    "bucket": "shipping",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_090": {
+    "bucket": "billing",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_091": {
+    "bucket": "billing",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_092": {
+    "bucket": "technical",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_093": {
+    "bucket": "account_access",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_094": {
+    "bucket": "shipping",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_095": {
+    "bucket": "billing",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_096": {
+    "bucket": "billing",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_097": {
+    "bucket": "technical",
+    "confidence": 1.0,
+    "defer_reason": null
+   },
+   "doc_098": {
+    "bucket": "account_access",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_099": {
+    "bucket": "shipping",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_100": {
+    "bucket": "billing",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_101": {
+    "bucket": "account_access",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_102": {
+    "bucket": "technical",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_103": {
+    "bucket": "billing",
+    "confidence": 1.0,
+    "defer_reason": null
+   },
+   "doc_104": {
+    "bucket": "shipping",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_105": {
+    "bucket": "account_access",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_106": {
+    "bucket": "shipping",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_107": {
+    "bucket": "shipping",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_108": {
+    "bucket": "billing",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_109": {
+    "bucket": "technical",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_110": {
+    "bucket": "feedback",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_111": {
+    "bucket": "account_access",
+    "confidence": 1.0,
+    "defer_reason": null
+   },
+   "doc_112": {
+    "bucket": "technical",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_113": {
+    "bucket": "shipping",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_114": {
+    "bucket": "account_access",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_115": {
+    "bucket": "shipping",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_116": {
+    "bucket": "account_access",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_117": {
+    "bucket": "feedback",
+    "confidence": 0.95,
+    "defer_reason": ""
+   },
+   "doc_118": {
+    "bucket": "shipping",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_119": {
+    "bucket": "technical",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_120": {
+    "bucket": "billing",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_121": {
+    "bucket": "billing",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_123": {
+    "bucket": "account_access",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_124": {
+    "bucket": "feedback",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_125": {
+    "bucket": "billing",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_126": {
+    "bucket": "account_access",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_127": {
+    "bucket": "shipping",
+    "confidence": 1.0,
+    "defer_reason": null
+   },
+   "doc_128": {
+    "bucket": "shipping",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_129": {
+    "bucket": "account_access",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_130": {
+    "bucket": "billing",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_131": {
+    "bucket": "technical",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_132": {
+    "bucket": "shipping",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_133": {
+    "bucket": "billing",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_134": {
+    "bucket": "technical",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_135": {
+    "bucket": "shipping",
+    "confidence": 1.0,
+    "defer_reason": null
+   },
+   "doc_136": {
+    "bucket": "account_access",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_137": {
+    "bucket": "account_access",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_138": {
+    "bucket": "technical",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_139": {
+    "bucket": "technical",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_140": {
+    "bucket": "billing",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_141": {
+    "bucket": "account_access",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_142": {
+    "bucket": "shipping",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_143": {
+    "bucket": "account_access",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_144": {
+    "bucket": "shipping",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_145": {
+    "bucket": "account_access",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_147": {
+    "bucket": "technical",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_148": {
+    "bucket": "shipping",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_149": {
+    "bucket": "billing",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_150": {
+    "bucket": "feedback",
+    "confidence": 0.95,
+    "defer_reason": ""
+   },
+   "doc_151": {
+    "bucket": "billing",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_152": {
+    "bucket": "shipping",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_153": {
+    "bucket": "billing",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_154": {
+    "bucket": "billing",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_155": {
+    "bucket": "account_access",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_156": {
+    "bucket": "billing",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_157": {
+    "bucket": "billing",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_158": {
+    "bucket": "technical",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_159": {
+    "bucket": "feedback",
+    "confidence": 0.9,
+    "defer_reason": ""
+   },
+   "doc_160": {
+    "bucket": "shipping",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_161": {
+    "bucket": "shipping",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_162": {
+    "bucket": "account_access",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_163": {
+    "bucket": "technical",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_164": {
+    "bucket": "billing",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_165": {
+    "bucket": "technical",
+    "confidence": 1.0,
+    "defer_reason": null
+   },
+   "doc_166": {
+    "bucket": "feedback",
+    "confidence": 1.0,
+    "defer_reason": null
+   },
+   "doc_167": {
+    "bucket": "billing",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_170": {
+    "bucket": "account_access",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_171": {
+    "bucket": "defer",
+    "confidence": 0.8,
+    "defer_reason": "Email lacks specific intent or issue topic."
+   },
+   "doc_173": {
+    "bucket": "feedback",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_174": {
+    "bucket": "technical",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_175": {
+    "bucket": "shipping",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_176": {
+    "bucket": "account_access",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_177": {
+    "bucket": "feedback",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_178": {
+    "bucket": "account_access",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_179": {
+    "bucket": "account_access",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_180": {
+    "bucket": "billing",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_181": {
+    "bucket": "shipping",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_182": {
+    "bucket": "account_access",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_183": {
+    "bucket": "technical",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_184": {
+    "bucket": "account_access",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_185": {
+    "bucket": "feedback",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_186": {
+    "bucket": "account_access",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_187": {
+    "bucket": "billing",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_188": {
+    "bucket": "technical",
+    "confidence": 1.0,
+    "defer_reason": null
+   },
+   "doc_189": {
+    "bucket": "billing",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_190": {
+    "bucket": "feedback",
+    "confidence": 0.9,
+    "defer_reason": ""
+   },
+   "doc_191": {
+    "bucket": "technical",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_194": {
+    "bucket": "feedback",
+    "confidence": 0.95,
+    "defer_reason": ""
+   },
+   "doc_195": {
+    "bucket": "technical",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_197": {
+    "bucket": "technical",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_198": {
+    "bucket": "technical",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_199": {
+    "bucket": "billing",
+    "confidence": 1.0,
+    "defer_reason": ""
+   },
+   "doc_200": {
+    "bucket": "feedback",
+    "confidence": 0.95,
+    "defer_reason": null
+   }
+  },
+  "extract_urgency": {
+   "doc_001": {
+    "urgency": 4,
+    "category": "billing"
+   },
+   "doc_002": {
+    "urgency": 5,
+    "category": "technical"
+   },
+   "doc_003": {
+    "urgency": 2,
+    "category": "account_access"
+   },
+   "doc_004": {
+    "urgency": 1,
+    "category": "shipping"
+   },
+   "doc_005": {
+    "urgency": 1,
+    "category": "feedback"
+   },
+   "doc_006": {
+    "urgency": 1,
+    "category": "billing"
+   },
+   "doc_007": {
+    "urgency": 1,
+    "category": "technical"
+   },
+   "doc_008": {
+    "urgency": 5,
+    "category": "account_access"
+   },
+   "doc_009": {
+    "urgency": 2,
+    "category": "shipping"
+   },
+   "doc_010": {
+    "urgency": 2,
+    "category": "feedback"
+   },
+   "doc_011": {
+    "urgency": 3,
+    "category": "billing"
+   },
+   "doc_012": {
+    "urgency": 3,
+    "category": "technical"
+   },
+   "doc_013": {
+    "urgency": 2,
+    "category": "account_access"
+   },
+   "doc_014": {
+    "urgency": 2,
+    "category": "shipping"
+   },
+   "doc_015": {
+    "urgency": 1,
+    "category": "feedback"
+   },
+   "doc_016": {
+    "urgency": 4,
+    "category": "billing"
+   },
+   "doc_017": {
+    "urgency": 2,
+    "category": "technical"
+   },
+   "doc_018": {
+    "urgency": 4,
+    "category": "account_access"
+   },
+   "doc_019": {
+    "urgency": 2,
+    "category": "shipping"
+   },
+   "doc_020": {
+    "urgency": 1,
+    "category": "feedback"
+   },
+   "doc_021": {
+    "urgency": 3,
+    "category": "billing"
+   },
+   "doc_022": {
+    "urgency": 3,
+    "category": "technical"
+   },
+   "doc_023": {
+    "urgency": 1,
+    "category": "account_access"
+   },
+   "doc_024": {
+    "urgency": 5,
+    "category": "shipping"
+   },
+   "doc_025": {
+    "urgency": 1,
+    "category": "feedback"
+   },
+   "doc_026": {
+    "urgency": 3,
+    "category": "billing"
+   },
+   "doc_027": {
+    "urgency": 4,
+    "category": "technical"
+   },
+   "doc_028": {
+    "urgency": 5,
+    "category": "account_access"
+   },
+   "doc_029": {
+    "urgency": 4,
+    "category": "shipping"
+   },
+   "doc_030": {
+    "urgency": 1,
+    "category": "feedback"
+   },
+   "doc_031": {
+    "urgency": 2,
+    "category": "billing"
+   },
+   "doc_032": {
+    "urgency": 2,
+    "category": "technical"
+   },
+   "doc_033": {
+    "urgency": 3,
+    "category": "account_access"
+   },
+   "doc_034": {
+    "urgency": 4,
+    "category": "shipping"
+   },
+   "doc_035": {
+    "urgency": 1,
+    "category": "feedback"
+   },
+   "doc_036": {
+    "urgency": 2,
+    "category": "billing"
+   },
+   "doc_037": {
+    "urgency": 5,
+    "category": "technical"
+   },
+   "doc_038": {
+    "urgency": 1,
+    "category": "account_access"
+   },
+   "doc_039": {
+    "urgency": 2,
+    "category": "shipping"
+   },
+   "doc_040": {
+    "urgency": 1,
+    "category": "feedback"
+   },
+   "doc_041": {
+    "urgency": 2,
+    "category": "billing"
+   },
+   "doc_042": {
+    "urgency": 1,
+    "category": "technical"
+   },
+   "doc_043": {
+    "urgency": 4,
+    "category": "account_access"
+   },
+   "doc_044": {
+    "urgency": 2,
+    "category": "shipping"
+   },
+   "doc_045": {
+    "urgency": 1,
+    "category": "feedback"
+   },
+   "doc_046": {
+    "urgency": 1,
+    "category": "billing"
+   },
+   "doc_047": {
+    "urgency": 1,
+    "category": "technical"
+   },
+   "doc_048": {
+    "urgency": 1,
+    "category": "account_access"
+   },
+   "doc_049": {
+    "urgency": 2,
+    "category": "shipping"
+   },
+   "doc_050": {
+    "urgency": 2,
+    "category": "feedback"
+   },
+   "doc_051": {
+    "urgency": 2,
+    "category": "billing"
+   },
+   "doc_052": {
+    "urgency": 2,
+    "category": "technical"
+   },
+   "doc_053": {
+    "urgency": 2,
+    "category": "account_access"
+   },
+   "doc_054": {
+    "urgency": 2,
+    "category": "shipping"
+   },
+   "doc_055": {
+    "urgency": 2,
+    "category": "feedback"
+   },
+   "doc_056": {
+    "urgency": 3,
+    "category": "billing"
+   },
+   "doc_057": {
+    "urgency": 4,
+    "category": "technical"
+   },
+   "doc_058": {
+    "urgency": 2,
+    "category": "account_access"
+   },
+   "doc_059": {
+    "urgency": 5,
+    "category": "shipping"
+   },
+   "doc_060": {
+    "urgency": 2,
+    "category": "feedback"
+   },
+   "doc_061": {
+    "urgency": 1,
+    "category": "billing"
+   },
+   "doc_062": {
+    "urgency": 2,
+    "category": "technical"
+   },
+   "doc_063": {
+    "urgency": 2,
+    "category": "account_access"
+   },
+   "doc_064": {
+    "urgency": 4,
+    "category": "shipping"
+   },
+   "doc_065": {
+    "urgency": 1,
+    "category": "feedback"
+   },
+   "doc_066": {
+    "urgency": 1,
+    "category": "billing"
+   },
+   "doc_067": {
+    "urgency": 3,
+    "category": "technical"
+   },
+   "doc_068": {
+    "urgency": 5,
+    "category": "account_access"
+   },
+   "doc_069": {
+    "urgency": 5,
+    "category": "shipping"
+   },
+   "doc_070": {
+    "urgency": 2,
+    "category": "feedback"
+   },
+   "doc_071": {
+    "urgency": 4,
+    "category": "billing"
+   },
+   "doc_072": {
+    "urgency": 5,
+    "category": "technical"
+   },
+   "doc_073": {
+    "urgency": 2,
+    "category": "account_access"
+   },
+   "doc_074": {
+    "urgency": 4,
+    "category": "shipping"
+   },
+   "doc_075": {
+    "urgency": 1,
+    "category": "billing"
+   },
+   "doc_076": {
+    "urgency": 1,
+    "category": "billing"
+   },
+   "doc_077": {
+    "urgency": 2,
+    "category": "technical"
+   },
+   "doc_078": {
+    "urgency": 3,
+    "category": "account_access"
+   },
+   "doc_079": {
+    "urgency": 1,
+    "category": "shipping"
+   },
+   "doc_080": {
+    "urgency": 2,
+    "category": "feedback"
+   },
+   "doc_081": {
+    "urgency": 2,
+    "category": "billing"
+   },
+   "doc_082": {
+    "urgency": 3,
+    "category": "technical"
+   },
+   "doc_083": {
+    "urgency": 5,
+    "category": "account_access"
+   },
+   "doc_084": {
+    "urgency": 2,
+    "category": "shipping"
+   },
+   "doc_085": {
+    "urgency": 1,
+    "category": "feedback"
+   },
+   "doc_086": {
+    "urgency": 3,
+    "category": "billing"
+   },
+   "doc_087": {
+    "urgency": 2,
+    "category": "technical"
+   },
+   "doc_088": {
+    "urgency": 4,
+    "category": "account_access"
+   },
+   "doc_089": {
+    "urgency": 5,
+    "category": "shipping"
+   },
+   "doc_090": {
+    "urgency": 2,
+    "category": "billing"
+   },
+   "doc_091": {
+    "urgency": 1,
+    "category": "billing"
+   },
+   "doc_092": {
+    "urgency": 5,
+    "category": "technical"
+   },
+   "doc_093": {
+    "urgency": 1,
+    "category": "account_access"
+   },
+   "doc_094": {
+    "urgency": 2,
+    "category": "shipping"
+   },
+   "doc_095": {
+    "urgency": 2,
+    "category": "feedback"
+   },
+   "doc_096": {
+    "urgency": 5,
+    "category": "billing"
+   },
+   "doc_097": {
+    "urgency": 1,
+    "category": "technical"
+   },
+   "doc_098": {
+    "urgency": 4,
+    "category": "account_access"
+   },
+   "doc_099": {
+    "urgency": 2,
+    "category": "shipping"
+   },
+   "doc_100": {
+    "urgency": 1,
+    "category": "feedback"
+   },
+   "doc_101": {
+    "urgency": 2,
+    "category": "account_access"
+   },
+   "doc_102": {
+    "urgency": 4,
+    "category": "technical"
+   },
+   "doc_103": {
+    "urgency": 4,
+    "category": "billing"
+   },
+   "doc_104": {
+    "urgency": 4,
+    "category": "shipping"
+   },
+   "doc_105": {
+    "urgency": 1,
+    "category": "account_access"
+   },
+   "doc_106": {
+    "urgency": 5,
+    "category": "shipping"
+   },
+   "doc_107": {
+    "urgency": 5,
+    "category": "shipping"
+   },
+   "doc_108": {
+    "urgency": 5,
+    "category": "billing"
+   },
+   "doc_109": {
+    "urgency": 5,
+    "category": "technical"
+   },
+   "doc_110": {
+    "urgency": 1,
+    "category": "feedback"
+   },
+   "doc_111": {
+    "urgency": 1,
+    "category": "account_access"
+   },
+   "doc_112": {
+    "urgency": 2,
+    "category": "technical"
+   },
+   "doc_113": {
+    "urgency": 2,
+    "category": "shipping"
+   },
+   "doc_114": {
+    "urgency": 2,
+    "category": "account_access"
+   },
+   "doc_115": {
+    "urgency": 1,
+    "category": "shipping"
+   },
+   "doc_116": {
+    "urgency": 4,
+    "category": "account_access"
+   },
+   "doc_117": {
+    "urgency": 1,
+    "category": "feedback"
+   },
+   "doc_118": {
+    "urgency": 2,
+    "category": "shipping"
+   },
+   "doc_119": {
+    "urgency": 5,
+    "category": "technical"
+   },
+   "doc_120": {
+    "urgency": 2,
+    "category": "billing"
+   },
+   "doc_121": {
+    "urgency": 2,
+    "category": "billing"
+   },
+   "doc_122": {
+    "urgency": 5,
+    "category": "account_access"
+   },
+   "doc_123": {
+    "urgency": 5,
+    "category": "account_access"
+   },
+   "doc_124": {
+    "urgency": 1,
+    "category": "feedback"
+   },
+   "doc_125": {
+    "urgency": 2,
+    "category": "billing"
+   },
+   "doc_126": {
+    "urgency": 3,
+    "category": "account_access"
+   },
+   "doc_127": {
+    "urgency": 4,
+    "category": "shipping"
+   },
+   "doc_128": {
+    "urgency": 2,
+    "category": "shipping"
+   },
+   "doc_129": {
+    "urgency": 2,
+    "category": "account_access"
+   },
+   "doc_130": {
+    "urgency": 2,
+    "category": "feedback"
+   },
+   "doc_131": {
+    "urgency": 5,
+    "category": "technical"
+   },
+   "doc_132": {
+    "urgency": 3,
+    "category": "shipping"
+   },
+   "doc_133": {
+    "urgency": 1,
+    "category": "billing"
+   },
+   "doc_134": {
+    "urgency": 3,
+    "category": "technical"
+   },
+   "doc_135": {
+    "urgency": 1,
+    "category": "shipping"
+   },
+   "doc_136": {
+    "urgency": 3,
+    "category": "account_access"
+   },
+   "doc_137": {
+    "urgency": 3,
+    "category": "account_access"
+   },
+   "doc_138": {
+    "urgency": 4,
+    "category": "technical"
+   },
+   "doc_139": {
+    "urgency": 5,
+    "category": "technical"
+   },
+   "doc_140": {
+    "urgency": 2,
+    "category": "billing"
+   },
+   "doc_141": {
+    "urgency": 2,
+    "category": "account_access"
+   },
+   "doc_142": {
+    "urgency": 2,
+    "category": "shipping"
+   },
+   "doc_143": {
+    "urgency": 4,
+    "category": "account_access"
+   },
+   "doc_144": {
+    "urgency": 2,
+    "category": "shipping"
+   },
+   "doc_145": {
+    "urgency": 3,
+    "category": "account_access"
+   },
+   "doc_146": {
+    "urgency": 4,
+    "category": "account_access"
+   },
+   "doc_147": {
+    "urgency": 4,
+    "category": "technical"
+   },
+   "doc_148": {
+    "urgency": 5,
+    "category": "shipping"
+   },
+   "doc_149": {
+    "urgency": 2,
+    "category": "billing"
+   },
+   "doc_150": {
+    "urgency": 1,
+    "category": "feedback"
+   },
+   "doc_151": {
+    "urgency": 5,
+    "category": "billing"
+   },
+   "doc_152": {
+    "urgency": 1,
+    "category": "shipping"
+   },
+   "doc_153": {
+    "urgency": 2,
+    "category": "billing"
+   },
+   "doc_154": {
+    "urgency": 4,
+    "category": "billing"
+   },
+   "doc_155": {
+    "urgency": 5,
+    "category": "account_access"
+   },
+   "doc_156": {
+    "urgency": 2,
+    "category": "billing"
+   },
+   "doc_157": {
+    "urgency": 2,
+    "category": "billing"
+   },
+   "doc_158": {
+    "urgency": 4,
+    "category": "technical"
+   },
+   "doc_159": {
+    "urgency": 1,
+    "category": "feedback"
+   },
+   "doc_160": {
+    "urgency": 4,
+    "category": "shipping"
+   },
+   "doc_161": {
+    "urgency": 3,
+    "category": "shipping"
+   },
+   "doc_162": {
+    "urgency": 5,
+    "category": "account_access"
+   },
+   "doc_163": {
+    "urgency": 4,
+    "category": "technical"
+   },
+   "doc_164": {
+    "urgency": 2,
+    "category": "billing"
+   },
+   "doc_165": {
+    "urgency": 2,
+    "category": "technical"
+   },
+   "doc_166": {
+    "urgency": 2,
+    "category": "feedback"
+   },
+   "doc_167": {
+    "urgency": 2,
+    "category": "billing"
+   },
+   "doc_168": {
+    "urgency": 1,
+    "category": "feedback"
+   },
+   "doc_169": {
+    "urgency": 2,
+    "category": "billing"
+   },
+   "doc_170": {
+    "urgency": 1,
+    "category": "account_access"
+   },
+   "doc_171": {
+    "urgency": 2,
+    "category": "feedback"
+   },
+   "doc_172": {
+    "urgency": 5,
+    "category": "shipping"
+   },
+   "doc_173": {
+    "urgency": 1,
+    "category": "feedback"
+   },
+   "doc_174": {
+    "urgency": 4,
+    "category": "technical"
+   },
+   "doc_175": {
+    "urgency": 1,
+    "category": "shipping"
+   },
+   "doc_176": {
+    "urgency": 3,
+    "category": "account_access"
+   },
+   "doc_177": {
+    "urgency": 1,
+    "category": "feedback"
+   },
+   "doc_178": {
+    "urgency": 5,
+    "category": "account_access"
+   },
+   "doc_179": {
+    "urgency": 2,
+    "category": "account_access"
+   },
+   "doc_180": {
+    "urgency": 5,
+    "category": "billing"
+   },
+   "doc_181": {
+    "urgency": 1,
+    "category": "shipping"
+   },
+   "doc_182": {
+    "urgency": 1,
+    "category": "account_access"
+   },
+   "doc_183": {
+    "urgency": 3,
+    "category": "technical"
+   },
+   "doc_184": {
+    "urgency": 1,
+    "category": "account_access"
+   },
+   "doc_185": {
+    "urgency": 1,
+    "category": "feedback"
+   },
+   "doc_186": {
+    "urgency": 5,
+    "category": "account_access"
+   },
+   "doc_187": {
+    "urgency": 1,
+    "category": "billing"
+   },
+   "doc_188": {
+    "urgency": 5,
+    "category": "technical"
+   },
+   "doc_189": {
+    "urgency": 2,
+    "category": "billing"
+   },
+   "doc_190": {
+    "urgency": 1,
+    "category": "feedback"
+   },
+   "doc_191": {
+    "urgency": 3,
+    "category": "technical"
+   },
+   "doc_192": {
+    "urgency": 3,
+    "category": "account_access"
+   },
+   "doc_193": {
+    "urgency": 1,
+    "category": "feedback"
+   },
+   "doc_194": {
+    "urgency": 2,
+    "category": "feedback"
+   },
+   "doc_195": {
+    "urgency": 5,
+    "category": "technical"
+   },
+   "doc_196": {
+    "urgency": 5,
+    "category": "account_access"
+   },
+   "doc_197": {
+    "urgency": 3,
+    "category": "technical"
+   },
+   "doc_198": {
+    "urgency": 2,
+    "category": "technical"
+   },
+   "doc_199": {
+    "urgency": 1,
+    "category": "billing"
+   },
+   "doc_200": {
+    "urgency": 1,
+    "category": "feedback"
+   }
+  }
+ },
+ "failures": {
+  "classify_emails": {
+   "doc_003": "BRT-ANS-005",
+   "doc_036": "BRT-ANS-005",
+   "doc_065": "BRT-ANS-005",
+   "doc_122": "BRT-ANS-005",
+   "doc_146": "BRT-ANS-005",
+   "doc_168": "BRT-ANS-005",
+   "doc_169": "BRT-ANS-005",
+   "doc_172": "BRT-ANS-005",
+   "doc_192": "BRT-ANS-005",
+   "doc_193": "BRT-ANS-005",
+   "doc_196": "BRT-ANS-005"
+  },
+  "extract_urgency": {}
+ }
+}

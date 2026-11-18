@@ -359,6 +359,7 @@ Backing notation: `test:<file>::<test name>` (or `<file>::<Class>::<test name>`)
 | C20 | The exact text sent to cloud models is shown only to an admin | test:tests/api/test_admin_lock.py::test_outbound_bodies_hidden_without_admin; test:tests/api/test_admin_lock.py::test_outbound_bodies_follow_the_loopback_rule_when_unset |
 | C21 | Every page and API response carries a Content-Security-Policy, and no page has an inline script | test:tests/api/test_csp.py::test_every_response_carries_the_policy; test:tests/api/test_csp.py::test_a_streaming_response_carries_it_too; test:tests/api/test_csp.py::test_no_page_has_an_inline_script_or_handler |
 | C22 | A reply cut off by the token cap is retried once at double the cap, never above 16000, then fails with BRT-ANS-009 | test:tests/agents/test_executor.py::test_truncation_retry_succeeds; test:tests/agents/test_executor.py::test_truncation_retry_exhausted_returns_brt_ans_009; test:tests/agents/test_executor.py::test_answerer_retry_is_capped_at_16000; test:tests/agents/test_executor.py::test_cut_off_at_the_ceiling_does_not_retry_and_says_so |
+| C24 | A long list in the answer is written by code from the stored rows: the write-up names the step with a marker, every row comes back in input order, and a failed item keeps its place with its error code | test:tests/e2e/test_compose_row_markers.py::test_200_rows_placed_in_order_with_a_short_compose_reply; test:tests/orchestrator/test_row_markers.py::test_rows_merge_results_and_failures_in_input_order |
 
 ## 8. Rulings log
 

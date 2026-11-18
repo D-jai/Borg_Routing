@@ -167,3 +167,7 @@ class InboundEnvelope(BaseModel):
     # never serialised. Decides what a prompt shows of a failure.
     _data_scope: Optional[str] = PrivateAttr(default=None)
     _doc_label: Optional[str] = PrivateAttr(default=None)
+    # The node type of the task that produced it (planner ruling 21: compose
+    # row markers place the rows of apply_to_each and list state_op steps).
+    # Set by the engine; never serialised.
+    _node_type: Optional[str] = PrivateAttr(default=None)

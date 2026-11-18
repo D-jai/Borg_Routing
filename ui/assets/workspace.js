@@ -529,7 +529,7 @@
     orchestrator: 'Working',
     'BRT-ORC-018': 'Retrying a reply that was cut off', 'BRT-ORC-028': 'Writing the answer',
     'BRT-ORC-029': 'Asking for the answer once more', 'BRT-ORC-030': 'Putting the finished steps together',
-    'BRT-ORC-031': 'The planner declined to answer', 'BRT-ZERO-01-ESCALATED': 'Moving from one call to a plan',
+    'BRT-ORC-031': 'The planner declined to answer', 'BRT-ORC-032': 'A list marker named no list step', 'BRT-ZERO-01-ESCALATED': 'Moving from one call to a plan',
     'BRT-APE-CAPPED': 'Limiting a long list', 'BRT-ORC-NO-FRONTIER': 'Choosing a model for a step'
   };
   function stageWords(stage) {
