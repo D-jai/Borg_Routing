@@ -301,7 +301,11 @@ async def test_every_envelope_records_its_plan_node_id_state_ops_included(db, en
         {"type": "answerer", "id": "n3", "instruction": "Write it up.",
          "depends_on": ["n2"], "output_schema": {"result": "string"}},
     ]
-    StubModels(plan_nodes=plan).install(env)
+    # n1 returns its list: since ruling 25 a state_op's inputs_ref is its
+    # source, and a failed source fails the state_op before it runs.
+    StubModels(plan_nodes=plan, answer_for=lambda r: (
+        {"items": ["a", "b"]} if "List the items." in r.system else {"result": "done"}
+    )).install(env)
 
     result = await run_pipeline(INSTRUCTION, db_path=db)
     await drain_log_writes()

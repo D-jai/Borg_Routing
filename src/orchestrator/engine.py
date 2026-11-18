@@ -1300,6 +1300,36 @@ def _upstream_list(ref: object, results: dict) -> Optional[list]:
     return None
 
 
+def _upstream_groups(ref: object, results: dict) -> Optional[dict]:
+    """The groups of rows a ``group_by`` step (without ``count``) produced, or None.
+
+    Read from the step's ``result`` when it is an object whose every value is
+    a list (ruling 25d). Counts per group are not rows, so they give None.
+    """
+    if not isinstance(ref, str) or not ref or ref not in results:
+        return None
+    out = getattr(results[ref], "output", {}) or {}
+    groups = out.get("result") if isinstance(out, dict) else None
+    if isinstance(groups, dict) and groups and all(isinstance(v, list) for v in groups.values()):
+        return groups
+    return None
+
+
+def _state_op_source(node: dict) -> Optional[str]:
+    """The step a state_op reads: ``source``, ``source_ref`` or ``inputs_ref``.
+
+    ``inputs_ref`` is read as the source because the ready check and the
+    failed-dependency check (``_node_refs``) already treat it as the step's
+    input ref (review of 1071659): it is never silently ignored. A list is
+    not a step id.
+    """
+    for key in ("source", "source_ref", "inputs_ref"):
+        value = node.get(key)
+        if isinstance(value, str) and value:
+            return value
+    return None
+
+
 _DOCUMENTS_REF = "documents"
 
 
@@ -2147,7 +2177,7 @@ def _build_task_from_node(
             "op": node.get("op", "count"),
             "params": node.get("params", {}),
         }
-        source = node.get("source") or node.get("source_ref")
+        source = _state_op_source(node)
         if source:
             dep_input["source_ref"] = source
         # R4 — a step named as the source supplies its list; items written in
@@ -2159,6 +2189,10 @@ def _build_task_from_node(
             items = _upstream_list(source, results)
         if items is not None:
             dep_input["items"] = items
+        elif source and (groups := _upstream_groups(source, results)) is not None:
+            # Ruling 25d — a group_by step without count gives groups of
+            # rows; sample takes n from each, the other ops read the rows.
+            dep_input["groups"] = groups
         elif not source:
             dep_input["items"] = []
 
@@ -2786,7 +2820,7 @@ async def _orchestrate_run(
             # A state_op whose source step failed has no items: it fails
             # here with BRT-APE-005 instead of running empty (BRT-SOP-003).
             if node.get("type") == "state_op" and not node.get("items"):
-                source = node.get("source") or node.get("source_ref")
+                source = _state_op_source(node)
                 if _failed_step(source, results):
                     await _fail_step_before_call(
                         results, raw_unstamped if raw else None, run_id, node_id,
