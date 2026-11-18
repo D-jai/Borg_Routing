@@ -160,6 +160,30 @@ _route_options: contextvars.ContextVar[Optional[dict]] = contextvars.ContextVar(
 )
 _shared_skill_lib: Optional[SkillLibrary] = None
 
+# Planner ruling 35e: the ``call_id`` of the last orchestrator call this task
+# made (each priced ``orchestrator_decision`` event carries it), so an event
+# that rejects a compose reply can name the priced reply it rejects
+# (``rejected_call``).
+_last_orchestrator_call: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar(
+    "borg_last_orchestrator_call", default=None
+)
+
+
+def _rejects_last_reply() -> dict:
+    """Fields of an event that rejects the last compose reply (ruling 35e)."""
+    return {"rejected": True, "rejected_call": _last_orchestrator_call.get()}
+
+
+def _reply_fields(parsed: object) -> dict:
+    """The rationale of a parsed reply, and ``reply_type`` when the reply is
+    JSON but not an object (ruling 35e: such a reply is still logged and
+    priced; reading ``.get`` on it once dropped the event)."""
+    if isinstance(parsed, dict):
+        return {"rationale": parsed.get("rationale", "")}
+    if parsed is None:
+        return {"rationale": ""}
+    return {"rationale": "", "reply_type": type(parsed).__name__}
+
 
 def _get_matrix() -> CapabilityMatrix:
     global _shared_matrix
@@ -970,6 +994,9 @@ async def _invoke_orchestrator_model(
     }
 
     attempts = [0]
+    # Ruling 35e: every priced event of this call carries its id.
+    call_id = uuid4().hex
+    _last_orchestrator_call.set(call_id)
 
     async def _post_and_collect() -> tuple[str, dict, int, str]:
         """POST once; return (content, usage, latency_ms, finish_reason).
@@ -1062,6 +1089,7 @@ async def _invoke_orchestrator_model(
                         latency_ms=latency_ms,
                         decision={
                             "mode": mode,
+                            "call_id": call_id,
                             "parsed": None,
                             "length_retry_failed": True,
                             "finish_reason": "length",
@@ -1111,8 +1139,9 @@ async def _invoke_orchestrator_model(
             latency_ms=latency_ms,
             decision={
                 "mode": mode,
+                "call_id": call_id,
                 "parsed": parsed,
-                "rationale": (parsed or {}).get("rationale", ""),
+                **_reply_fields(parsed),
                 "parse_error": str(parse_error) if parse_error else None,
                 # Always logged (planner ruling 20): settles truncation
                 # questions from the database. After a length retry it is
@@ -1195,8 +1224,9 @@ async def _invoke_orchestrator_model(
             latency_ms=latency_retry,
             decision={
                 "mode": mode,
+                "call_id": call_id,
                 "parsed": parsed_retry,
-                "rationale": (parsed_retry or {}).get("rationale", ""),
+                **_reply_fields(parsed_retry),
                 "retry": True,
                 "finish_reason": finish_retry,
                 "parse_error": str(retry_error) if retry_error else None,
@@ -3728,6 +3758,7 @@ async def _handle_compose_result(
                     "codes": codes,
                     "msg": "compose's reply cannot be used as it is; asking compose once more",
                     "reask": True,
+                    **_rejects_last_reply(),
                 })
                 try:
                     second = await reask_invalid(row_markers.repair_message(problems))
@@ -3817,6 +3848,7 @@ async def _handle_compose_result(
                     "code": "BRT-ORC-029",
                     "msg": "compose reply had no final answer; asking compose once more",
                     "compose_action": action or "(missing)",
+                    **_rejects_last_reply(),
                 },
                 db_path=db_path,
             )
@@ -3849,6 +3881,7 @@ async def _handle_compose_result(
                     "compose_action": action or "(missing)",
                     "steps": [k for k, v in results.items()
                               if getattr(v, "status", None) == "resolved"],
+                    **(_rejects_last_reply() if reask is None else {}),
                 },
                 db_path=db_path,
             )
@@ -4219,6 +4252,7 @@ async def _salvage_after_check(results: dict, run_id: UUID, db_path: str, rows: 
                 "compose_action": action or "(missing)",
                 "steps": [k for k, v in results.items()
                           if getattr(v, "status", None) == "resolved"],
+                **_rejects_last_reply(),
             },
             db_path=db_path,
         )
