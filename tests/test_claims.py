@@ -129,3 +129,115 @@ def test_the_real_files_are_not_touched_by_these_tests(tree, capsys):
     # main() with explicit paths never reads the repository's own BUILD.md
     code, out = run(tree, [ROW1, ROW2], DOC, capsys)
     assert "C99" not in out
+
+
+# ---- review round 1 additions ----
+
+REPO = Path(__file__).resolve().parents[1]
+
+
+def test_the_repository_claims_pass():
+    assert cc.main([]) == 0
+
+
+def test_removing_a_row_from_the_real_table_fails(tmp_path, capsys):
+    text = (REPO / "BUILD.md").read_text(encoding="utf-8")
+    kept = [ln for ln in text.splitlines() if not ln.startswith("| C01 |")]
+    assert len(kept) == len(text.splitlines()) - 1
+    build = tmp_path / "BUILD.md"
+    build.write_text("\n".join(kept), encoding="utf-8")
+    guide = tmp_path / "guide.md"
+    guide.write_text((REPO / "docs" / "user-guide.md").read_text(encoding="utf-8"), encoding="utf-8")
+    code = cc.main(["--root", str(REPO), "--build", str(build), "--doc", str(guide)])
+    out = capsys.readouterr().out
+    assert code == 1
+    assert "C01" in out and "no row" in out
+
+
+def test_a_duplicate_id_fails(tree, capsys):
+    code, out = run(tree, [ROW1, ROW2, ROW1], DOC, capsys)
+    assert code == 1
+    assert "duplicate" in out
+
+
+@pytest.mark.parametrize("marker", [
+    "<!-- claim c01 -->", "<!--claim C01-->x <!-- Claim C01 -->", "<!-- claim C1x -->",
+    "<!-- claim -->",
+])
+def test_a_malformed_marker_fails(tree, capsys, marker):
+    code, out = run(tree, [ROW1, ROW2], DOC + marker + "\n", capsys)
+    assert code == 1
+    assert "malformed" in out
+
+
+def test_a_lower_case_id_in_a_table_row_fails(tree, capsys):
+    code, out = run(tree, [ROW1, ROW2, "| c03 | x | test:tests/test_sample.py::test_alpha |"], DOC, capsys)
+    assert code == 1
+    assert "upper case" in out
+
+
+def test_a_row_with_too_few_cells_fails(tree, capsys):
+    code, out = run(tree, [ROW1, ROW2, "| C03 | only a claim |"], DOC, capsys)
+    assert code == 1
+    assert "fewer than three cells" in out
+
+
+def test_a_def_inside_a_string_or_comment_does_not_count(tree, capsys):
+    (tree / "tests" / "test_tricky.py").write_text(
+        '"""\ndef test_in_docstring():\n    pass\n"""\n'
+        "# def test_in_comment():\n"
+        "def helper():\n    def test_nested():\n        pass\n", encoding="utf-8")
+    for name in ("test_in_docstring", "test_in_comment", "test_nested"):
+        row = f"| C03 | x | test:tests/test_tricky.py::{name} |"
+        code, out = run(tree, [ROW1, ROW2, row], DOC, capsys)
+        assert code == 1, name
+        assert name in out
+
+
+def test_a_method_must_sit_in_the_named_class(tree, capsys):
+    bad = "| C02 | Second | test:tests/test_sample.py::test_gamma |"
+    code, out = run(tree, [ROW1, bad], DOC, capsys)
+    assert code == 1 and "test_gamma" in out
+    bad2 = "| C02 | Second | test:tests/test_sample.py::TestBeta::test_alpha |"
+    code, out = run(tree, [ROW1, bad2], DOC, capsys)
+    assert code == 1 and "test_alpha" in out
+
+
+def test_a_number_with_an_attached_dash_is_not_the_number(tree, capsys):
+    row = "| C03 | Costs 42.5 | result:bench/res.json#a.b.1=42.5 |"
+    doc = DOC + "Warns BRT-ORC-019 and costs 42.5 <!-- claim C03 -->\n"
+    code, out = run(tree, [ROW1, ROW2, row], doc, capsys)
+    assert code == 0, out
+    # and the code-like token alone does not count as the number
+    doc2 = DOC + "Warns BRT-ORC-019 <!-- claim C03 -->\n"
+    code, out = run(tree, [ROW1, ROW2, row], doc2, capsys)
+    assert code == 1 and "no number" in out
+
+
+def test_every_result_backing_of_a_row_is_compared(tree, capsys):
+    row = "| C03 | x | result:bench/res.json#a.b.1=42.5; result:bench/res.json#a.b.0=10 |"
+    code, out = run(tree, [ROW1, ROW2, row], DOC + "Costs 42.5 <!-- claim C03 -->\n", capsys)
+    assert code == 1
+    assert "says 42.5" in out and "says 10" in out
+
+
+def test_a_marker_inside_a_fence_is_ignored(tree, capsys):
+    doc = DOC + "```\n<!-- claim C77 -->\n<!-- claim bad -->\n```\n"
+    code, out = run(tree, [ROW1, ROW2], doc, capsys)
+    assert code == 0, out
+
+
+def test_a_missing_document_or_build_file_is_a_fail_line(tree, capsys):
+    (tree / "BUILD.md").write_text(TABLE.format(rows=ROW1), encoding="utf-8")
+    code = cc.main(["--root", str(tree), "--build", "BUILD.md", "--doc", "nope.md"])
+    out = capsys.readouterr().out
+    assert code == 1 and "FAIL" in out and "nope.md" in out
+    code = cc.main(["--root", str(tree), "--build", "gone.md", "--doc", "nope.md"])
+    out = capsys.readouterr().out
+    assert code == 1 and "gone.md" in out
+
+
+def test_relative_paths_resolve_against_root(tree, capsys):
+    (tree / "BUILD.md").write_text(TABLE.format(rows=ROW1), encoding="utf-8")
+    (tree / "guide.md").write_text("Fine. <!-- claim C01 -->\n", encoding="utf-8")
+    assert cc.main(["--root", str(tree), "--build", "BUILD.md", "--doc", "guide.md"]) == 0

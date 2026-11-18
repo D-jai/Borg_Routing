@@ -31,7 +31,19 @@ def test_every_response_carries_the_policy(client, path):
 
 
 def test_a_streaming_response_carries_it_too(client):
-    resp = client.post("/v1/chat/completions", json={"model": "borg_route", "messages": []})
+    from unittest.mock import patch
+
+    async def mock_pipeline(user_instruction, thread_window=None, **kwargs):
+        return {"run_id": "csp-run", "response": "Streamed answer.", "status": "completed",
+                "latency_ms": 1, "envelope_count": 0, "error": None}
+
+    body = {"model": "borg_route", "stream": True,
+            "messages": [{"role": "user", "content": "Hello"}]}
+    with patch("src.api.chat_completions.run_pipeline", new=mock_pipeline):
+        resp = client.post("/v1/chat/completions", json=body)
+    assert resp.status_code == 200
+    assert "text/event-stream" in resp.headers.get("content-type", "")
+    assert "[DONE]" in resp.text
     assert resp.headers.get("content-security-policy")
 
 

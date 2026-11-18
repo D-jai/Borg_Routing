@@ -37,6 +37,7 @@ GUARDED = [
     ("POST", "/models/research", {}),
     ("PATCH", "/models/some-model/checked", {}),
     ("POST", "/skills/some-skill/version", {}),
+    ("GET", "/logs", None),
     ("GET", "/logs/entities", None),
     ("GET", "/logs/export", None),
 ]

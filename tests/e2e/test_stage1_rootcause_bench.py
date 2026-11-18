@@ -865,6 +865,23 @@ async def test_first_compose_call_raising_salvages_finished_work(env, error):
 
 
 @pytest.mark.asyncio
+async def test_a_plain_answerer_step_is_salvaged_when_compose_fails(env):
+    """C10: a plain answerer step (not apply_to_each) that finished comes back
+    under the note when compose fails twice."""
+    db_path, mp = env
+    ComposeSeqStub(plan_nodes=[_ans("Name the capital of France.", id="a")],
+                   compose_seq=[{"action": "compose"}, httpx.ConnectError("compose down")],
+                   answer_for=lambda r: {"result": "PARIS-SALVAGE-MARKER"}).install(mp)
+    result = await run_pipeline("Name the capital of France.", db_path=db_path)
+    await drain_log_writes()
+    assert result["status"] == "completed", result.get("error")
+    assert result["response"].startswith(engine.SALVAGE_NOTE)
+    assert "PARIS-SALVAGE-MARKER" in result["response"]
+    assert "BRT-ORC-030" in await _codes(db_path, result["run_id"])
+    assert await _answer_kind(db_path, result["run_id"]) == "salvaged"
+
+
+@pytest.mark.asyncio
 async def test_first_compose_call_raising_with_nothing_finished_fails(env):
     """TC-ORC-030-F (failure direction): no step finished, the first compose
     call raises: the run fails as before, no answer_kind."""

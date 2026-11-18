@@ -12,12 +12,15 @@ Backing notation (several backings in one cell are separated by ``;``):
     test:tests/path/test_file.py::TestClass::test_name
     result:bench/results/run/summary.json#a.b.0.c=42.5
 
-A ``test:`` backing is checked by reading the file for ``def test_name`` (and
-``class TestClass``); pytest is never run here. A ``result:`` backing names a
+A ``test:`` backing is checked by parsing the file with ``ast``: the function
+must be a top-level def, or a method directly inside the named class (text in
+strings, comments or nested helpers does not count); pytest is never run here. A ``result:`` backing names a
 JSON file, a dotted path into it (list positions are numbers) and the value
-expected there. The check reads the number written on the marker's line in
-the document (the first number once the marker itself is removed; commas,
-``$``, ``%`` and spaces are ignored) and requires it to equal the JSON value.
+expected there. The check reads the number written just before the marker on its line (the
+last whole number before it; a token with a letter or ``-`` attached, such as
+BRT-ORC-019, is not a number; commas, ``$`` and ``%`` are ignored) and requires
+it to equal the JSON value. Every ``result:`` backing of a row is compared.
+Lines inside ``` fences are skipped.
 
 Exit 0 when everything holds (warnings may print). Exit 1 on any error.
 
@@ -27,6 +30,7 @@ Exit 0 when everything holds (warnings may print). Exit 1 on any error.
 from __future__ import annotations
 
 import argparse
+import ast
 import json
 import re
 import sys
@@ -35,8 +39,10 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
 MARKER = re.compile(r"<!--\s*claim\s+(C\d+)\s*-->")
-ROW = re.compile(r"^\|\s*(C\d+)\s*\|(.*)\|\s*$")
-NUMBER = re.compile(r"[-+]?\$?\d[\d,]*(?:\.\d+)?%?|[-+]?\$?\.\d+%?")
+ANY_CLAIM_COMMENT = re.compile(r"<!--\s*claim\b", re.I)
+ROW_START = re.compile(r"^\|\s*[Cc]")
+ID_OK = re.compile(r"^C\d+$")
+NUM_TOKEN = re.compile(r"[-+]?\$?\d[\d,]*(?:\.\d+)?%?")
 
 
 def default_docs(root: Path) -> list[Path]:
@@ -45,8 +51,8 @@ def default_docs(root: Path) -> list[Path]:
     return [d for d in docs if d.is_file()]
 
 
-def parse_table(build_text: str) -> dict[str, dict]:
-    """Return {id: {"claim": str, "backings": [str, ...]}} from section 7."""
+def parse_table(build_text: str) -> tuple[dict[str, dict], list[str]]:
+    """Return ({id: {"claim", "backings"}}, errors) from section 7."""
     m = re.search(r"^##\s+7\.\s+Claims table\s*$", build_text, re.M)
     if not m:
         raise ValueError("BUILD.md has no '## 7. Claims table' section")
@@ -54,26 +60,52 @@ def parse_table(build_text: str) -> dict[str, dict]:
     nxt = re.search(r"^##\s", rest, re.M)
     section = rest[: nxt.start()] if nxt else rest
     rows: dict[str, dict] = {}
+    errors: list[str] = []
     for line in section.splitlines():
-        r = ROW.match(line.strip())
-        if not r:
+        line = line.strip()
+        if not ROW_START.match(line):
             continue
-        cells = [c.strip() for c in r.group(2).split("|")]
-        if len(cells) < 2:
+        body = line.strip("|")
+        cells = [c.strip() for c in body.split("|")]
+        if len(cells) < 3:
+            errors.append(f"table line has fewer than three cells (id, claim, backing): {line[:80]}")
             continue
-        claim, backing = " | ".join(cells[:-1]), cells[-1]
-        backings = [b.strip().strip("`").strip() for b in backing.split(";") if b.strip()]
-        rows[r.group(1)] = {"claim": claim, "backings": backings}
-    return rows
+        cid = cells[0]
+        if not ID_OK.match(cid):
+            what = "must be upper case" if re.match(r"^[Cc]\d+$", cid) else "is not a claim id like C01"
+            errors.append(f"table id '{cid}' {what}")
+            continue
+        if cid in rows:
+            errors.append(f"{cid}: duplicate id in the claims table")
+            continue
+        backings = [b.strip().strip("`").strip() for b in cells[-1].split(";") if b.strip()]
+        rows[cid] = {"claim": " | ".join(cells[1:-1]), "backings": backings}
+    return rows, errors
 
 
-def find_markers(doc_paths: list[Path]) -> list[tuple[str, Path, int, str]]:
-    found = []
+def find_markers(doc_paths: list[Path]) -> tuple[list[tuple[str, Path, int, str, int]], list[str]]:
+    """Markers as (id, file, line no, line, column). Malformed ones are errors."""
+    found, errors = [], []
     for p in doc_paths:
+        in_fence = False
         for n, line in enumerate(p.read_text(encoding="utf-8").splitlines(), 1):
-            for m in MARKER.finditer(line):
-                found.append((m.group(1), p, n, line))
-    return found
+            if line.lstrip().startswith("```"):
+                in_fence = not in_fence
+                continue
+            if in_fence:
+                continue
+            strict = {m.start(): m for m in MARKER.finditer(line)}
+            for m in ANY_CLAIM_COMMENT.finditer(line):
+                if m.start() in strict:
+                    found.append((strict[m.start()].group(1), p, n, line, m.start()))
+                else:
+                    errors.append(f"{p.name}:{n}: malformed claim marker (want <!-- claim C01 -->): "
+                                  f"{line[m.start():m.start() + 40]!r}")
+    return found, errors
+
+
+def _find_func(body: list[ast.stmt], name: str) -> bool:
+    return any(isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name == name for n in body)
 
 
 def check_test_backing(spec: str, root: Path) -> str | None:
@@ -84,23 +116,27 @@ def check_test_backing(spec: str, root: Path) -> str | None:
         return f"test file not found: {file_part}"
     if not names:
         return f"no test name in '{spec}'"
-    text = path.read_text(encoding="utf-8")
+    try:
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+    except SyntaxError as exc:
+        return f"cannot parse {file_part}: {exc}"
     *classes, func = [re.sub(r"\[.*\]$", "", n) for n in names]
+    body = tree.body
     for c in classes:
-        if not re.search(rf"^\s*class\s+{re.escape(c)}\b", text, re.M):
+        cls = next((n for n in body if isinstance(n, ast.ClassDef) and n.name == c), None)
+        if cls is None:
             return f"class {c} not found in {file_part}"
-    if not re.search(rf"^\s*(?:async\s+)?def\s+{re.escape(func)}\s*\(", text, re.M):
-        return f"test {func} not found in {file_part}"
+        body = cls.body
+    if not _find_func(body, func):
+        where = f"class {classes[-1]} in " if classes else ""
+        return f"test {func} not found in {where}{file_part}"
     return None
 
 
 def json_lookup(data, dotted: str):
     cur = data
     for key in dotted.split("."):
-        if isinstance(cur, list):
-            cur = cur[int(key)]
-        else:
-            cur = cur[key]
+        cur = cur[int(key)] if isinstance(cur, list) else cur[key]
     return cur
 
 
@@ -138,62 +174,71 @@ def check_result_value(spec: str, root: Path) -> tuple[str | None, Decimal | Non
     return None, got
 
 
-def number_on_line(line: str) -> Decimal | None:
-    text = MARKER.sub(" ", line)
-    for m in NUMBER.finditer(text):
-        d = to_decimal(m.group(0))
-        if d is not None:
-            return d
-    return None
+def number_before(line: str, column: int) -> Decimal | None:
+    """The last whole numeric token before the marker. A token with a letter
+    or '-' attached (BRT-ORC-019) is not a number."""
+    last = None
+    for tok in line[:column].split():
+        tok = tok.strip("(\"'").rstrip(".,;:)\"'")
+        if NUM_TOKEN.fullmatch(tok):
+            last = to_decimal(tok)
+    return last
 
 
-def check(build_path: Path, doc_paths: list[Path], root: Path) -> tuple[list[str], list[str]]:
+def check(build_path: Path, doc_paths: list[Path], root: Path) -> tuple[list[str], list[str], int]:
     errors: list[str] = []
     warnings: list[str] = []
+    if not build_path.is_file():
+        return [f"claims file not found: {build_path}"], [], 0
+    missing = [d for d in doc_paths if not d.is_file()]
+    errors += [f"document not found: {d}" for d in missing]
+    doc_paths = [d for d in doc_paths if d.is_file()]
     try:
-        rows = parse_table(build_path.read_text(encoding="utf-8"))
-    except (OSError, ValueError) as exc:
-        return [str(exc)], []
+        rows, table_errors = parse_table(build_path.read_text(encoding="utf-8"))
+    except ValueError as exc:
+        return errors + [str(exc)], [], 0
+    errors += table_errors
 
-    markers = find_markers(doc_paths)
-    used = {cid for cid, *_ in markers}
+    markers, marker_errors = find_markers(doc_paths)
+    errors += marker_errors
+    used = {m[0] for m in markers}
 
-    for cid, doc, n, _line in markers:
+    for cid, doc, n, _line, _col in markers:
         if cid not in rows:
             errors.append(f"{doc.name}:{n}: marker {cid} has no row in the claims table")
 
     for cid, row in rows.items():
         if not row["backings"]:
             errors.append(f"{cid}: the row has no backing")
-        results_ok: Decimal | None = None
-        has_result = False
+        json_values: list[Decimal] = []
         for b in row["backings"]:
             if b.startswith("test:"):
                 err = check_test_backing(b[5:].strip(), root)
                 if err:
                     errors.append(f"{cid}: {err}")
             elif b.startswith("result:"):
-                has_result = True
-                err, results_ok = check_result_value(b[7:].strip(), root)
+                err, val = check_result_value(b[7:].strip(), root)
                 if err:
                     errors.append(f"{cid}: {err}")
+                elif val is not None:
+                    json_values.append(val)
             else:
                 errors.append(f"{cid}: backing '{b}' must start with 'test:' or 'result:'")
-        if has_result and results_ok is not None:
-            for mid, doc, n, line in markers:
+        if json_values:
+            for mid, doc, n, line, col in markers:
                 if mid != cid:
                     continue
-                shown = number_on_line(line)
+                shown = number_before(line, col)
                 if shown is None:
-                    errors.append(f"{cid}: {doc.name}:{n}: no number on the marker's line to compare")
-                elif shown != results_ok:
-                    errors.append(
-                        f"{cid}: {doc.name}:{n}: the document says {shown}, "
-                        f"the results file says {results_ok}"
-                    )
+                    errors.append(f"{cid}: {doc.name}:{n}: no number just before the marker to compare")
+                    continue
+                for val in json_values:
+                    if shown != val:
+                        errors.append(f"{cid}: {doc.name}:{n}: the document says {shown}, "
+                                      f"the results file says {val}")
         if cid not in used:
             warnings.append(f"{cid}: no document carries this claim's marker")
-    return errors, warnings
+    return errors, warnings, len(rows)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -204,9 +249,9 @@ def main(argv: list[str] | None = None) -> int:
                     help="document to scan for markers (repeatable; default: README, user guide, deck)")
     args = ap.parse_args(argv)
     root = args.root.resolve()
-    build = args.build or root / "BUILD.md"
-    docs = args.doc if args.doc else default_docs(root)
-    errors, warnings = check(build, [Path(d) for d in docs], root)
+    build = root / (args.build or "BUILD.md")
+    docs = [root / d for d in args.doc] if args.doc else default_docs(root)
+    errors, warnings, count = check(build, docs, root)
     for w in warnings:
         print(f"WARN  {w}")
     for e in errors:
@@ -214,8 +259,7 @@ def main(argv: list[str] | None = None) -> int:
     if errors:
         print(f"{len(errors)} problem(s). Claims check failed.")
         return 1
-    rows = parse_table(build.read_text(encoding="utf-8"))
-    print(f"OK  {len(rows)} claim(s), {len(warnings)} warning(s).")
+    print(f"OK  {count} claim(s), {len(warnings)} warning(s).")
     return 0
 
 
