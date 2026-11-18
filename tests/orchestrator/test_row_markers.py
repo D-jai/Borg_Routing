@@ -24,12 +24,24 @@ def _agg(results, failures=()):
 
 
 class _Lane:
+    """A raw lane whose documents are ``doc_001`` (``mail/a.txt``) and
+    ``doc_002`` in two parts (``mail/b.txt``); ``manifest`` is the
+    ``lane_manifest`` setting (ruling 32e names rows by it)."""
     keeps_raw_local = True
     has_documents = True
 
-    @staticmethod
-    def is_part_id(value):
-        return isinstance(value, str) and value.startswith("doc_")
+    def __init__(self, manifest="names"):
+        from types import SimpleNamespace
+        from src.lane.documents import Document, DocPart, LoadedDocuments
+        self.settings = SimpleNamespace(manifest=manifest)
+        self.docs = LoadedDocuments([
+            Document("doc_001", "mail/a.txt", "txt", 1, "x", [DocPart("doc_001", "doc_001", "x")]),
+            Document("doc_002", "mail/b.txt", "txt", 1, "y",
+                     [DocPart("doc_002#1", "doc_002", "y"), DocPart("doc_002#2", "doc_002", "z")]),
+        ], [])
+
+    def is_part_id(self, value):
+        return isinstance(value, str) and value in self.docs.part_index
 
 
 # --- rows ---------------------------------------------------------------------
@@ -74,10 +86,14 @@ def test_output_keys_renamed_and_non_object_output():
         {"item": "b", "output": "plain"}]
 
 
-def test_raw_item_is_part_id_or_index():
+@pytest.mark.parametrize("manifest, label", [("names", "mail/a.txt"), ("ids", "doc_001")])
+def test_raw_item_is_part_id_or_index(manifest, label):
+    """Ruling 32e: a document part shows the name the manifest showed
+    (``names``, the default), or its part id under ``lane_manifest: ids``. A
+    non-part raw item stays its index."""
     env = _env(_agg([{"index": 0, "item": "doc_001", "output": {"s": 1}},
                      {"index": 1, "item": "RAW TEXT", "output": {"s": 2}}]), scope="raw")
-    assert [r["item"] for r in rm.rows_for(env, _Lane())] == ["doc_001", 1]
+    assert [r["item"] for r in rm.rows_for(env, _Lane(manifest))] == [label, 1]
     assert [r["item"] for r in rm.rows_for(env, None)] == ["doc_001", "RAW TEXT"]
 
 
@@ -116,7 +132,7 @@ def test_fields_and_block_line():
                      {"index": 1, "item": "b", "output": {"d": 3}}],
                     [{"index": 2, "item": "c", "reason": "BRT-ANS-005: x"}]))
     steps = rm.list_steps({"s": env}, None)
-    assert rm.step_lines(steps) == "- s: 3 rows, input order; fields: item, b, c, d, error"
+    assert rm.step_lines(steps) == "- s: 3 rows, input order, 1 failed; fields: item, b, c, d, error"
 
 
 # --- parsing --------------------------------------------------------------------
@@ -234,7 +250,7 @@ def test_table_marker_in_a_longer_leaf_is_compact():
 
 def test_scalar_state_op_list_line():
     steps = rm.list_steps({"v": _env({"result": [3, 1, 2]}, "state_op")}, None)
-    assert rm.step_lines(steps) == "- v: 3 rows, stored order; fields: (values)"
+    assert rm.step_lines(steps) == "- v: 3 rows, stored order, 0 failed; fields: (values)"
 
 
 # --- review round 2 (final fix) ----------------------------------------------------

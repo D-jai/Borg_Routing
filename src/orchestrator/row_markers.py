@@ -1,16 +1,26 @@
-"""Rows placed by code: compose row markers (planner ruling 21).
+"""Rows and outputs placed by code: compose markers (planner rulings 21 and 32e).
 
-Design: ``docs/design/compose_row_markers.md``. Compose names a finished
-list-holding step with ``@@ROWS:<step id>@@`` (a JSON array) or
-``@@ROWS_TABLE:<step id>@@`` (a Markdown table); the engine writes that
-step's stored rows in, so compose never retypes a long list.
+Designs: ``docs/design/compose_row_markers.md`` (ruling 21) and
+``docs/design/compose_placement.md`` (ruling 32e). Compose names a finished
+list-holding step with ``@@ROWS:<target>@@`` (a JSON array) or
+``@@ROWS_TABLE:<target>@@`` (a Markdown table), and a step's long output with
+``@@OUTPUT:<step id>@@``; the engine writes the stored rows or text in, so
+compose never retypes them.
 
-- ``list_steps`` finds the list-holding steps of a run and their rows.
-- ``block`` / ``step_lines`` build the code-side lines added to compose's
-  user message (id, row count, order and field names only).
-- ``invalid_hits`` finds markers that name no list step, and near-misses.
-- ``place`` substitutes every valid marker, once (placed rows are never
-  scanned again), calling ``guard`` on each rendered block.
+- ``list_steps`` finds the list-holding steps of a run and their rows; an
+  item that is a document part is labelled by the document's name as the
+  manifest showed it (``_item_label``).
+- ``long_outputs`` finds the resolved steps whose output holds a string of
+  ``LONG_CHARS`` or more.
+- ``parse_target`` reads a marker's target: one step, steps joined with
+  ``+``, and an optional spec after ``|`` choosing fields and names.
+- ``select`` / ``join`` build the rows a spec asks for.
+- ``block`` / ``pointer_lines`` build the code-side lines added to compose's
+  user message.
+- ``marker_problems`` finds markers that cannot be placed (BRT-ORC-032,
+  BRT-ORC-037), and near-misses.
+- ``place`` substitutes every valid marker, once (placed text is never
+  scanned again), calling the guards on each rendered block.
 
 No model call and no prompt file: ``src/prompts/`` is not touched.
 """
@@ -21,25 +31,89 @@ import re
 from dataclasses import dataclass, field
 from typing import Callable, Optional
 
-STRICT = re.compile(r"@@\s*(ROWS_TABLE|ROWS)\s*:\s*([^@\n]{1,200}?)\s*@@", re.IGNORECASE)
-LOOSE = re.compile(r"@@\s*row", re.IGNORECASE)
+STRICT = re.compile(r"@@\s*(ROWS_TABLE|ROWS|OUTPUT)\s*:\s*([^@\n]{1,600}?)\s*@@", re.IGNORECASE)
+LOOSE = re.compile(r"@@\s*(row|output)", re.IGNORECASE)
+# A diff hunk header ("@@ -1,2 +1,2 @@") is masked before LOOSE runs, so a
+# context line such as "@@ -1,2 +1,2 @@ output = x" is not a hit.
+_HUNK = re.compile(r"@@ -\d+(,\d+)? \+\d+(,\d+)? @@")
 _HIT_MAX = 200
 _ID_MAX = 200
+_CAPTURE_MAX = 600
+_NAME_MAX = 64
+_ECHO_MAX = 40
+_FORBIDDEN = set(",=|@[]{}\n")
+LONG_CHARS = 2000
 
-HEADER = (
-    "List steps the code can write out for you: put @@ROWS:<step id>@@ in your answer "
-    "where a step's rows belong (a JSON array, one row per line), or "
-    "@@ROWS_TABLE:<step id>@@ for a Markdown table. Do not type those rows yourself."
+INTRO = (
+    "The reader sees only your answer. They cannot see any step, step id or step result, "
+    "so never refer them to one: everything they need must be in your answer, written by "
+    "you or placed by the code.\n"
+    "The code can place stored results for you, exactly as stored. Do not retype rows or "
+    "long outputs yourself; naming a few items in your own text is fine."
 )
-INVALID_REASK = (
-    "Mode: compose. Your last reply used a list marker that names no list step. "
-    'Use only the step ids listed below. Reply with {"response": "<the final answer>"} only.'
+ROWS_BULLET = (
+    "- Rows: write @@ROWS:<step id>@@ where a step's rows belong (a JSON array, one row per "
+    "line), or @@ROWS_TABLE:<step id>@@ for a Markdown table. Put the marker on its own line, "
+    "outside any brackets you write: the code writes the brackets. To choose fields, their "
+    "order and their names, add them after a bar: @@ROWS:<step id> | <name>=<field>, <field>@@ "
+    "(for example @@ROWS:s1 | file=item, label=bucket@@). To join steps on the item, list them "
+    "with +: @@ROWS:<step id> + <step id> | ...@@; when both give a field, the later step's "
+    "value is used. Use only the fields listed for those steps. An item with no result keeps "
+    "its error and gets no other value."
+)
+OUTPUT_BULLET = (
+    "- Whole output: write @@OUTPUT:<step id>@@ where a step's whole output belongs; the code "
+    "writes it in word for word."
+)
+NO_RESULT_LINE = (
+    "Items with no result (a step failed them and no other step gave them a value): {m}. "
+    "Never give them a value: say they have no result."
+)
+NO_VALUE_LINE = (
+    "Rows with no value (a step returned the item but left the field empty): {counts}. "
+    "Leave those fields empty; do not supply a value yourself."
+)
+ASKED_HEAD = (
+    "Asked for but not produced (the plan asked a step for these fields and the step does "
+    "not return them):"
+)
+ASKED_TAIL = (
+    "Do not supply values for these fields yourself. You may show the item or a field the "
+    "step did return under one of these names in a rows marker (for example category=bucket); "
+    "otherwise leave the field out and tell the reader it was not produced."
 )
 ROWS_POINTER = (
     "Mode: compose. Your last reply was cut off at the length limit. Do not type out a "
-    "step's rows: put @@ROWS:<step id>@@ where they belong and the code writes them in. "
+    "step's rows or long output: put @@ROWS:<step id>@@ or @@OUTPUT:<step id>@@ where they "
+    "belong and the code writes them in. "
     'Reply with {"response": "<the final answer>"} only.'
 )
+REPAIR_HEAD = "Mode: compose. Your last reply cannot be used as it is:"
+REPAIR_TAIL = 'Fix these and reply with {"response": "<the final answer>"} only.'
+
+# Marker problems (docs/design/compose_placement.md 2.4.6): exact sentences.
+S_NO_STEP = "A marker names no step the code can place. Use only the step ids listed below."
+S_OUTPUT_ON_LIST = ("@@OUTPUT:{id}@@ names a step that has rows, not a long output: "
+                    "use @@ROWS:{id}@@ for it.")
+S_ROWS_ON_OUTPUT = ("@@ROWS:{id}@@ names a step that has a long output, not rows: "
+                    "use @@OUTPUT:{id}@@ for it.")
+S_MISSPELLED = ("A marker is misspelled. Write it exactly as shown below, with two @ signs "
+                "at each end.")
+S_TOO_LONG = "A marker is longer than 600 characters; name fewer fields."
+S_UNKNOWN = ("The marker for {target} names fields that step does not have: {names}. "
+             "Its fields are: {fields}. No step produced the others; do not give values for them.")
+S_DUPLICATE = "The marker for {target} uses the name {name} twice; each name may appear once."
+S_EMPTY = "The marker for {target} has a bar but no fields after it."
+S_BRACKETS = ("The marker for {target} puts its fields in brackets; write them plainly after "
+              "the bar: @@ROWS:{target} | name=field, field@@.")
+S_UNREADABLE = ("The marker for {target} has a field entry the code cannot read ({entry}): "
+                "use plain names with no , = | @ brackets or line break.")
+# Not in the note's table (the builder's wording): an OUTPUT marker with no
+# field on a step whose output holds two or more long fields.
+S_OUTPUT_FIELD = "The marker for {target} must name one field after a bar: {fields}."
+
+CODE_MARKER = "BRT-ORC-032"
+CODE_SPEC = "BRT-ORC-037"
 
 INPUT_ORDER = "input order"
 STORED_ORDER = "stored order"
@@ -51,6 +125,30 @@ class ListStep:
     rows: list
     order: str
     fields: list = field(default_factory=list)
+    # The canonical identity of each row's item (the part id for documents),
+    # in row order; None for a stored-order list of plain values.
+    identities: list = field(default_factory=list)
+    # "file name", "document id" or None: what the item label shows.
+    item_kind: Optional[str] = None
+    raw: bool = False
+
+
+@dataclass
+class LongOutput:
+    id: str
+    fields: dict                 # {field name or None (a bare string): text}
+    raw: bool = False
+
+
+@dataclass
+class Target:
+    kind: str                    # "rows" | "table" | "output"
+    ids: list
+    spec: Optional[list]         # [(name, field)] or None
+
+    @property
+    def key(self) -> str:
+        return " + ".join(self.ids)
 
 
 # --- rows -------------------------------------------------------------------
@@ -65,12 +163,46 @@ def _is_entry(value: object) -> bool:
     return isinstance(value, dict) and "index" in value and "output" in value
 
 
-def _item_id(entry: dict, raw: bool, lane) -> object:
+def _is_entry_item(value: object) -> bool:
+    """An item that is itself an aggregate entry (a retry over a step's
+    stored results, as in round-2 job D)."""
+    return isinstance(value, dict) and "index" in value and "item" in value
+
+
+def _is_part(lane, value: object) -> bool:
+    return lane is not None and hasattr(lane, "is_part_id") and lane.is_part_id(value)
+
+
+def _doc_label(lane, part_id: str) -> str:
+    """The name the manifest showed for a document part: the document's name
+    (``name#k`` for part k), or the part id under ``lane_manifest: ids``."""
+    docs = getattr(lane, "docs", None)
+    settings = getattr(lane, "settings", None)
+    if docs is None or getattr(settings, "manifest", "names") == "ids":
+        return part_id
+    part = docs.part_index.get(part_id)
+    if part is None:
+        return part_id
+    doc = docs.doc_index.get(part.doc_id)
+    if doc is None:
+        return part_id
+    if part_id == doc.doc_id:
+        return doc.name
+    return f"{doc.name}#{part_id.split('#', 1)[1]}" if "#" in part_id else doc.name
+
+
+def _identity(entry: dict, raw: bool, lane) -> object:
+    """The item's canonical identity: the inner item value (the part id for
+    documents), else ruling 21's id rule."""
     item = entry.get("item")
+    if _is_entry_item(item):
+        item = item.get("item")
     # A retry of failed items names its entries by the original step's index.
     index = entry.get("original_index", entry.get("index"))
+    if _is_part(lane, item):
+        return item
     if raw:
-        return item if lane.is_part_id(item) else index
+        return index
     if isinstance(item, (str, int, float)) and not isinstance(item, bool):
         return item
     if isinstance(item, dict):
@@ -78,6 +210,19 @@ def _item_id(entry: dict, raw: bool, lane) -> object:
         if isinstance(ident, (str, int, float)) and not isinstance(ident, bool):
             return ident
     return index
+
+
+def _item_label(entry: dict, raw: bool, lane) -> object:
+    """What a row's ``item`` shows: a document part as the manifest named it,
+    else the identity."""
+    ident = _identity(entry, raw, lane)
+    if _is_part(lane, ident):
+        return _doc_label(lane, ident)
+    return ident
+
+
+# Kept for callers of ruling 21's name.
+_item_id = _item_label
 
 
 def _failure_code(entry: dict, from_model: bool) -> str:
@@ -92,7 +237,7 @@ def _failure_code(entry: dict, from_model: bool) -> str:
 
 
 def _resolved_row(entry: dict, raw: bool, lane) -> dict:
-    row: dict = {"item": _item_id(entry, raw, lane)}
+    row: dict = {"item": _item_label(entry, raw, lane)}
     out = entry.get("output")
     if isinstance(out, dict):
         for key, value in out.items():
@@ -102,46 +247,67 @@ def _resolved_row(entry: dict, raw: bool, lane) -> dict:
     return row
 
 
+def _is_raw(env, lane) -> bool:
+    return (
+        lane is not None and getattr(lane, "keeps_raw_local", False)
+        and getattr(env, "_data_scope", None) == "raw"
+    )
+
+
+def _entries(env, lane) -> Optional[list]:
+    """``[(kind, entry)]`` in row order for a list-holding step, else None.
+    kind is "ok", "fail" or "plain" (an element of a stored-order list)."""
+    if env is None or getattr(env, "status", None) != "resolved":
+        return None
+    node_type = getattr(env, "_node_type", None)
+    out = getattr(env, "output", None)
+    raw = _is_raw(env, lane)
+    if node_type == "apply_to_each" and _is_aggregate(out):
+        entries = [("ok", e) for e in out.get("results") or [] if isinstance(e, dict)]
+        entries += [("fail", e) for e in out.get("failures") or [] if isinstance(e, dict)]
+        entries.sort(key=lambda pair: (pair[1].get("index") is None, pair[1].get("index") or 0))
+        return entries
+    if node_type == "state_op" and isinstance(out, dict) and isinstance(out.get("result"), list):
+        values = out["result"]
+        if values and all(_is_entry(v) for v in values):
+            ordered = sorted(values, key=lambda e: (e.get("index") is None, e.get("index") or 0))
+            return [("ok", e) for e in ordered]
+        if raw:
+            return None
+        return [("plain", v) for v in values]
+    return None
+
+
 def rows_for(env, lane) -> Optional[list]:
     """The rows of one finished step, or None when it holds no list.
 
     apply_to_each: results and failures merged on ``index`` (input order). A
     state_op returning a list: aggregate entries sorted on ``index``; any
     other list as stored, except on a raw step in ``raw_local``/``all_local``
-    (not offered). A raw item shows its document part id, else its index.
+    (not offered). An item that is a document part shows the document's
+    name (``_item_label``); any other raw item shows its index.
     """
-    if env is None or getattr(env, "status", None) != "resolved":
+    entries = _entries(env, lane)
+    if entries is None:
         return None
-    node_type = getattr(env, "_node_type", None)
-    out = getattr(env, "output", None)
-    raw = (
-        lane is not None and getattr(lane, "keeps_raw_local", False)
-        and getattr(env, "_data_scope", None) == "raw"
-    )
-    if node_type == "apply_to_each" and _is_aggregate(out):
-        # Indexes whose failure the model itself wrote (never stored in the
-        # output; set by apply_to_each on the envelope).
-        model_reasons = getattr(env, "_model_reason_indexes", None) or set()
-        entries = [("ok", e) for e in out.get("results") or [] if isinstance(e, dict)]
-        entries += [("fail", e) for e in out.get("failures") or [] if isinstance(e, dict)]
-        entries.sort(key=lambda pair: (pair[1].get("index") is None, pair[1].get("index") or 0))
-        rows = []
-        for kind, entry in entries:
-            if kind == "ok":
-                rows.append(_resolved_row(entry, raw, lane))
-            else:
-                rows.append({"item": _item_id(entry, raw, lane),
-                             "error": _failure_code(entry, entry.get("index") in model_reasons)})
-        return rows
-    if node_type == "state_op" and isinstance(out, dict) and isinstance(out.get("result"), list):
-        values = out["result"]
-        if values and all(_is_entry(v) for v in values):
-            ordered = sorted(values, key=lambda e: (e.get("index") is None, e.get("index") or 0))
-            return [_resolved_row(e, raw, lane) for e in ordered]
-        if raw:
-            return None
-        return list(values)
-    return None
+    raw = _is_raw(env, lane)
+    model_reasons = getattr(env, "_model_reason_indexes", None) or set()
+    rows = []
+    for kind, entry in entries:
+        if kind == "ok":
+            rows.append(_resolved_row(entry, raw, lane))
+        elif kind == "fail":
+            rows.append({"item": _item_label(entry, raw, lane),
+                         "error": _failure_code(entry, entry.get("index") in model_reasons)})
+        else:
+            rows.append(entry)
+    return rows
+
+
+def _identities_for(env, lane) -> list:
+    entries = _entries(env, lane) or []
+    raw = _is_raw(env, lane)
+    return [None if kind == "plain" else _identity(entry, raw, lane) for kind, entry in entries]
 
 
 def _order_of(env) -> str:
@@ -178,6 +344,10 @@ def markable(step_id: object) -> bool:
     )
 
 
+def is_failed_row(row: object) -> bool:
+    return isinstance(row, dict) and "error" in row and set(row) <= {"item", "error"}
+
+
 def list_steps(results: dict, lane) -> dict:
     """``{step id: ListStep}`` for every markable list-holding step, in run order."""
     steps: dict = {}
@@ -188,28 +358,389 @@ def list_steps(results: dict, lane) -> dict:
         if rows is None:
             continue
         order = _order_of(env)
+        identities = _identities_for(env, lane)
+        if len(identities) != len(rows):
+            identities = [r.get("item") if isinstance(r, dict) else None for r in rows]
+        kind = None
+        if any(_is_part(lane, i) for i in identities):
+            settings = getattr(lane, "settings", None)
+            kind = "document id" if getattr(settings, "manifest", "names") == "ids" else "file name"
         steps[str(step_id)] = ListStep(
             id=str(step_id), rows=rows, order=order,
             fields=_fields(rows, keyed=order == INPUT_ORDER),
+            identities=identities, item_kind=kind, raw=_is_raw(env, lane),
         )
     return steps
 
 
+def long_outputs(results: dict, steps: Optional[dict] = None, lane=None) -> dict:
+    """``{step id: LongOutput}`` for every markable resolved step (not a list
+    step) whose output is a string of ``LONG_CHARS`` or more, or holds such a
+    top-level string field. The text is the output as compose was shown it."""
+    found: dict = {}
+    for step_id, env in (results or {}).items():
+        sid = str(step_id)
+        if not markable(step_id) or (steps and sid in steps):
+            continue
+        if env is None or getattr(env, "status", None) != "resolved":
+            continue
+        out = getattr(env, "output", None)
+        if isinstance(out, str):
+            fields = {None: out} if len(out) >= LONG_CHARS else {}
+        elif isinstance(out, dict) and not _is_aggregate(out):
+            fields = {k: v for k, v in out.items()
+                      if isinstance(k, str) and isinstance(v, str) and len(v) >= LONG_CHARS}
+        else:
+            fields = {}
+        if fields:
+            found[sid] = LongOutput(id=sid, fields=fields, raw=_is_raw(env, lane))
+    return found
+
+
+# --- specs and joins --------------------------------------------------------------
+
+def _cut(text: object) -> str:
+    text = str(text)
+    return text if len(text) <= _ECHO_MAX else text[:_ECHO_MAX]
+
+
+def _resolve_ids(text: str, listed) -> Optional[list]:
+    text = text.strip()
+    if text in listed:
+        return [text]
+    parts = [p.strip() for p in text.split("+")]
+    if len(parts) > 1 and all(p in listed for p in parts):
+        return parts
+    return None
+
+
+def _step_fields(ids: list, steps: dict) -> list:
+    names: list = []
+    for sid in ids:
+        for f in steps[sid].fields:
+            if f not in names and f != "(values)":
+                names.append(f)
+    if "item" in names:
+        names.remove("item")
+        names.insert(0, "item")
+    if "error" in names:
+        names.remove("error")
+        names.append("error")
+    return names
+
+
+def _parse_spec(text: str, target: str) -> tuple:
+    """(entries, problem): entries ``[(name, field)]`` or a 037 sentence."""
+    body = text.strip()
+    if not body:
+        return None, S_EMPTY.format(target=target)
+    if body[0] in "[{":
+        return None, S_BRACKETS.format(target=target)
+    entries: list = []
+    for raw in body.split(","):
+        entry = raw.strip()
+        if not entry:
+            continue
+        renamed = "=" in entry
+        name, fld = entry.split("=", 1) if renamed else (entry, entry)
+        name, fld = name.strip(), fld.strip()
+        if fld.startswith("output."):
+            # output.x means x (ruling 25a); only top-level keys are selectable.
+            fld = fld[len("output."):]
+            if not renamed:
+                name = fld
+        for part in (name, fld):
+            if not part or len(part) > _NAME_MAX or any(c in _FORBIDDEN for c in part):
+                return None, S_UNREADABLE.format(target=target, entry=_cut(entry))
+        entries.append((name, fld))
+    if not entries:
+        return None, S_EMPTY.format(target=target)
+    seen: set = set()
+    for name, _ in entries:
+        if name in seen:
+            return None, S_DUPLICATE.format(target=target, name=_cut(name))
+        seen.add(name)
+    return entries, None
+
+
+def parse_target(keyword: str, capture: str, steps: dict, outputs: Optional[dict] = None) -> tuple:
+    """``(Target, None)`` or ``(None, (code, sentence))`` for one strict marker.
+
+    Resolution order (compose_placement.md 2.1): the whole trimmed capture is
+    a listed id; else the first ``|`` whose left part resolves as a target
+    (one id, or ids joined by ``+``), the rest being the spec; else the whole
+    capture split on ``+``; else the marker is invalid (BRT-ORC-032)."""
+    outputs = outputs or {}
+    kind = {"ROWS": "rows", "ROWS_TABLE": "table", "OUTPUT": "output"}[keyword.upper()]
+    listed = set(steps) | set(outputs)
+    cap = capture.strip()
+    ids: Optional[list] = None
+    spec_text: Optional[str] = None
+    if cap in listed:
+        ids = [cap]
+    else:
+        for i, ch in enumerate(cap):
+            if ch == "|":
+                res = _resolve_ids(cap[:i], listed)
+                if res:
+                    ids, spec_text = res, cap[i + 1:]
+                    break
+        if ids is None and "+" in cap:
+            ids = _resolve_ids(cap, listed)
+    if ids is None:
+        return None, (CODE_MARKER, S_NO_STEP)
+    target = " + ".join(ids)
+    if kind == "output":
+        if len(ids) > 1:
+            return None, (CODE_MARKER, S_NO_STEP)
+        if ids[0] in steps:
+            return None, (CODE_MARKER, S_OUTPUT_ON_LIST.format(id=ids[0]))
+        long = outputs[ids[0]]
+        names = [f for f in long.fields if f is not None]
+        if spec_text is None:
+            if len(long.fields) > 1:
+                return None, (CODE_SPEC, S_OUTPUT_FIELD.format(target=target, fields=", ".join(names)))
+            return Target(kind, ids, None), None
+        entries, problem = _parse_spec(spec_text, target)
+        if problem:
+            return None, (CODE_SPEC, problem)
+        unknown = [f for _, f in entries if f not in long.fields]
+        if unknown or len(entries) != 1:
+            return None, (CODE_SPEC, S_UNKNOWN.format(
+                target=target, names=", ".join(_cut(f) for f in (unknown or [e[1] for e in entries[1:]])),
+                fields=", ".join(names) or "(the whole output)"))
+        return Target(kind, ids, entries), None
+    for sid in ids:
+        if sid in outputs:
+            return None, (CODE_MARKER, S_ROWS_ON_OUTPUT.format(id=sid))
+    if spec_text is None:
+        return Target(kind, ids, None), None
+    entries, problem = _parse_spec(spec_text, target)
+    if problem:
+        return None, (CODE_SPEC, problem)
+    known = _step_fields(ids, steps)
+    known_set = set(known) | {"item", "error"}
+    unknown = [f for _, f in entries if f not in known_set]
+    if unknown:
+        return None, (CODE_SPEC, S_UNKNOWN.format(
+            target=target, names=", ".join(_cut(f) for f in dict.fromkeys(unknown)),
+            fields=", ".join(known)))
+    return Target(kind, ids, entries), None
+
+
+def select(step: ListStep, spec: list) -> tuple:
+    """(rows, columns) of one step with chosen fields (compose_placement 2.1)."""
+    err_name = next((n for n, f in spec if f == "error"), None)
+    rows: list = []
+    any_failed = False
+    for row in step.rows:
+        if not isinstance(row, dict):
+            rows.append({n: None for n, _ in spec})
+            continue
+        if is_failed_row(row):
+            any_failed = True
+            out = {}
+            for n, f in spec:
+                if f == "item":
+                    out[n] = row.get("item")
+                elif f == "error":
+                    out[n] = row.get("error")
+            if err_name is None:
+                out["error"] = row.get("error")
+            rows.append(out)
+        else:
+            rows.append({n: (row.get("item") if f == "item" else row.get(f)) for n, f in spec})
+    columns = [n for n, _ in spec] + (["error"] if err_name is None and any_failed else [])
+    return rows, columns
+
+
+def join(steps: list, spec: Optional[list]) -> tuple:
+    """(rows, columns) of steps joined on the item's canonical identity
+    (compose_placement 2.1, lead ruling 1a)."""
+    if spec is None:
+        names = _step_fields([s.id for s in steps], {s.id: s for s in steps})
+        spec = [(f, f) for f in names if f != "error"]
+    err_name = next((n for n, f in spec if f == "error"), None)
+    order: list = []
+    state: dict = {}                    # identity -> {step id: ("ok", row) | ("fail", code)}
+    labels: dict = {}
+    for step in steps:
+        for ident, row in zip(step.identities, step.rows):
+            key = ident if not isinstance(ident, (dict, list)) else json.dumps(ident, sort_keys=True)
+            if key not in state:
+                state[key] = {}
+                order.append(key)
+                labels[key] = row.get("item") if isinstance(row, dict) else ident
+            if is_failed_row(row):
+                state[key][step.id] = ("fail", row.get("error"))
+            elif isinstance(row, dict):
+                state[key][step.id] = ("ok", row)
+    rows: list = []
+    any_failed = False
+    for key in order:
+        st = state[key]
+        resolved = [s for s in steps if st.get(s.id, ("", None))[0] == "ok"]
+        if not resolved:
+            any_failed = True
+            code = next(st[s.id][1] for s in reversed(steps) if st.get(s.id, ("", None))[0] == "fail")
+            out = {}
+            for n, f in spec:
+                if f == "item":
+                    out[n] = labels[key]
+                elif f == "error":
+                    out[n] = code
+            if err_name is None:
+                out["error"] = code
+            rows.append(out)
+            continue
+        out = {}
+        for n, f in spec:
+            if f == "item":
+                out[n] = labels[key]
+                continue
+            if f == "error":
+                out[n] = None
+                continue
+            having = [s for s in steps if f in s.fields]
+            resolvers = [s for s in having if st.get(s.id, ("", None))[0] == "ok"]
+            value = None
+            found = False
+            for s in reversed(resolvers):
+                v = st[s.id][1].get(f)
+                if v is not None:
+                    value, found = v, True
+                    break
+            if not found and not resolvers:
+                failers = [s for s in having if st.get(s.id, ("", None))[0] == "fail"]
+                value = st[failers[-1].id][1] if failers else None
+            out[n] = value
+        rows.append(out)
+    columns = [n for n, _ in spec] + (["error"] if err_name is None and any_failed else [])
+    return rows, columns
+
+
+def target_rows(target: Target, steps: dict) -> tuple:
+    """(rows, columns) a rows or table marker places."""
+    if len(target.ids) == 1:
+        step = steps[target.ids[0]]
+        if target.spec is None:
+            return step.rows, list(step.fields) or ["value"]
+        return select(step, target.spec)
+    return join([steps[i] for i in target.ids], target.spec)
+
+
+def target_text(target: Target, outputs: dict) -> str:
+    long = outputs[target.ids[0]]
+    if target.spec:
+        return long.fields[target.spec[0][1]]
+    return next(iter(long.fields.values()))
+
+
+# --- the block ---------------------------------------------------------------------
+
+def _failed_count(step: ListStep) -> int:
+    return sum(1 for r in step.rows if is_failed_row(r))
+
+
 def step_lines(steps: dict) -> str:
-    return "\n".join(
-        f"- {s.id}: {len(s.rows)} rows, {s.order}; fields: {', '.join(map(str, s.fields))}"
-        for s in steps.values()
-    )
+    lines = []
+    for s in steps.values():
+        fields = [f"item ({s.item_kind})" if f == "item" and s.item_kind else str(f)
+                  for f in s.fields]
+        lines.append(f"- {s.id}: {len(s.rows)} rows, {s.order}, {_failed_count(s)} failed; "
+                     f"fields: {', '.join(fields)}")
+    return "\n".join(lines)
 
 
-def block(steps: dict) -> Optional[str]:
-    """The lines added to compose's user message, or None with no list step."""
-    if not steps:
+def output_lines(outputs: dict) -> str:
+    lines = []
+    for o in outputs.values():
+        several = len(o.fields) > 1
+        for name, text in o.fields.items():
+            n = f"{len(text):,} characters"
+            if name is None:
+                lines.append(f"- {o.id}: {n}")
+            elif several:
+                lines.append(f"- {o.id}: {n} (field {name}; write @@OUTPUT:{o.id} | {name}@@)")
+            else:
+                lines.append(f"- {o.id}: {n} (field {name})")
+    return "\n".join(lines)
+
+
+def pointer_lines(steps: dict, outputs: Optional[dict] = None) -> str:
+    parts = []
+    if steps:
+        parts.append("Steps with rows:\n" + step_lines(steps))
+    if outputs:
+        parts.append("Steps with a long output:\n" + output_lines(outputs))
+    return "\n".join(parts)
+
+
+def block(steps: dict, outputs: Optional[dict] = None, no_result: int = 0,
+          no_value: Optional[list] = None, asked: Optional[list] = None) -> Optional[str]:
+    """The lines added after compose's first user-message line, or None with
+    no list step, no long output and no asked-but-not-produced entry (every
+    request then stays byte-identical)."""
+    outputs = outputs or {}
+    asked = asked or []
+    if not steps and not outputs and not asked:
         return None
-    return HEADER + "\n" + step_lines(steps)
+    lines = [INTRO]
+    if steps:
+        lines.append(ROWS_BULLET)
+    if outputs:
+        lines.append(OUTPUT_BULLET)
+    if steps:
+        lines.append("Steps with rows:\n" + step_lines(steps))
+    if outputs:
+        lines.append("Steps with a long output:\n" + output_lines(outputs))
+    if steps:
+        lines.append(NO_RESULT_LINE.format(m=no_result))
+        counts = [(f, m) for f, m in (no_value or []) if m > 0]
+        if counts:
+            lines.append(NO_VALUE_LINE.format(counts=", ".join(f"{f} {m}" for f, m in counts)))
+    if asked:
+        grouped: dict = {}
+        for entry in asked:
+            if not isinstance(entry, dict):
+                continue
+            key = (str(entry.get("step")), str(entry.get("skill")))
+            grouped.setdefault(key, [])
+            fld = str(entry.get("field"))
+            if fld not in grouped[key]:
+                grouped[key].append(fld)
+        if grouped:
+            lines.append(ASKED_HEAD)
+            for (step, skill), flds in grouped.items():
+                lines.append(f"- {step} (skill {skill}): {', '.join(flds)}")
+            lines.append(ASKED_TAIL)
+    return "\n".join(lines)
 
 
-# --- markers --------------------------------------------------------------------
+def repair_message(problems: list) -> str:
+    """The repair re-ask's own lines; the engine adds the block after them."""
+    return "\n".join([REPAIR_HEAD] + [f"- {s}" for _, s in problems] + [REPAIR_TAIL])
+
+
+# --- markers ----------------------------------------------------------------------
+
+def _masked(text: str) -> str:
+    return _HUNK.sub(lambda m: " " * len(m.group(0)), text)
+
+
+def loose_positions(text: str) -> list:
+    return [m.start() for m in LOOSE.finditer(_masked(text))]
+
+
+def strict_matches(text: str) -> list:
+    """STRICT matches that start at a LOOSE hit (hunk headers masked)."""
+    out = []
+    for pos in loose_positions(text):
+        m = STRICT.match(text, pos)
+        if m:
+            out.append(m)
+    return out
+
 
 def _hit_text(text: str, pos: int) -> str:
     m = STRICT.match(text, pos)
@@ -229,58 +760,96 @@ def quoted_hits(quoted: list) -> set:
     for q in quoted or []:
         if not isinstance(q, str):
             continue
-        for loose in LOOSE.finditer(q):
-            found.add(_hit_text(q, loose.start()))
+        for pos in loose_positions(q):
+            found.add(_hit_text(q, pos))
     return found
 
 
-def _text_hits(text: str, steps: dict, quoted: set, placeable: bool) -> list:
-    bad = []
-    for loose in LOOSE.finditer(text):
-        pos = loose.start()
+def _over_long(text: str, pos: int, listed) -> Optional[tuple]:
+    """A LOOSE hit whose text up to the next ``@@`` on its line is longer than
+    600 characters: (code, sentence), else None."""
+    line_end = text.find("\n", pos)
+    line_end = len(text) if line_end < 0 else line_end
+    end = text.find("@@", pos + 2, line_end)
+    if end < 0:
+        return None
+    inner = text[pos + 2:end]
+    if len(inner) <= _CAPTURE_MAX:
+        return None
+    after = inner.split(":", 1)[1] if ":" in inner else ""
+    head = re.split(r"[|+]", after, maxsplit=1)[0].strip()
+    return (CODE_SPEC if head in listed else CODE_MARKER, S_TOO_LONG)
+
+
+def _text_problems(text: str, steps: dict, outputs: dict, quoted: set, placeable: bool) -> list:
+    found = []
+    listed = set(steps) | set(outputs)
+    for pos in loose_positions(text):
         m = STRICT.match(text, pos)
-        if placeable and m and m.group(2).strip() in steps:
-            continue
         if m:
             # A whole marker is quoted data only when that exact marker was
             # quoted; a quoted fragment ("@@ROWS") must not exempt it.
             if m.group(0) in quoted:
                 continue
-        elif any(qh and text.startswith(qh, pos) for qh in quoted):
+            target, problem = parse_target(m.group(1), m.group(2), steps, outputs)
+            if problem is None and placeable:
+                continue
+            found.append((m.group(0), problem or (CODE_MARKER, S_NO_STEP)))
             continue
-        bad.append(_hit_text(text, pos))
-    return bad
+        if any(qh and text.startswith(qh, pos) for qh in quoted):
+            continue
+        found.append((_hit_text(text, pos), _over_long(text, pos, listed) or (CODE_MARKER, S_MISSPELLED)))
+    return found
 
 
-def invalid_hits(value, steps: dict, quoted: list) -> list:
-    """Every marker-like hit in an answer ``value`` (a string, or the decoded
-    object or list of an object answer) that ``place`` would not replace: a
-    hit that is not a strict marker naming a list step, and any hit in an
-    object key (keys are never placed). A hit whose text, from its start,
-    repeats a hit found in ``quoted`` is data and stays as text."""
-    qhits = quoted_hits(quoted) if not isinstance(quoted, set) else quoted
-    bad: list = []
+def _walk_problems(value, steps: dict, outputs: dict, qhits: set) -> list:
+    found: list = []
 
     def walk(v) -> None:
         if isinstance(v, str):
-            bad.extend(_text_hits(v, steps, qhits, placeable=True))
+            found.extend(_text_problems(v, steps, outputs, qhits, placeable=True))
         elif isinstance(v, dict):
             for k, item in v.items():
                 if isinstance(k, str):
-                    bad.extend(_text_hits(k, steps, qhits, placeable=False))
+                    found.extend(_text_problems(k, steps, outputs, qhits, placeable=False))
                 walk(item)
         elif isinstance(v, list):
             for item in v:
                 walk(item)
 
     walk(value)
-    return bad
+    return found
 
+
+def marker_problems(value, steps: dict, outputs: Optional[dict], quoted) -> list:
+    """``[(code, sentence)]`` for every marker-like hit in an answer that
+    ``place`` would not replace (BRT-ORC-032, BRT-ORC-037), each sentence
+    once, in first-seen order. A hit in an object key is never placed."""
+    qhits = quoted if isinstance(quoted, set) else quoted_hits(quoted)
+    out: list = []
+    for _, problem in _walk_problems(value, steps, outputs or {}, qhits):
+        if problem not in out:
+            out.append(problem)
+    return out
+
+
+def invalid_hits(value, steps: dict, quoted, outputs: Optional[dict] = None) -> list:
+    """Every marker-like hit text in an answer ``value`` that ``place`` would
+    not replace (ruling 21's reader; see ``marker_problems``)."""
+    qhits = quoted if isinstance(quoted, set) else quoted_hits(quoted)
+    return [hit for hit, _ in _walk_problems(value, steps, outputs or {}, qhits)]
+
+
+# --- rendering ----------------------------------------------------------------------
 
 def _json_lines(rows: list) -> str:
     if not rows:
         return "[]"
     return "[\n" + ",\n".join(json.dumps(r, ensure_ascii=False, default=str) for r in rows) + "\n]"
+
+
+def _compact(rows: list) -> str:
+    return json.dumps(rows, ensure_ascii=False, default=str)
 
 
 def _cell(value: object) -> str:
@@ -295,17 +864,21 @@ def _cell(value: object) -> str:
     return text.replace("\r\n", " ").replace("\n", " ").replace("\r", " ").replace("|", "\\|")
 
 
-def _table(step: ListStep) -> str:
-    cols = list(step.fields) or ["value"]
+def table_of(rows: list, columns: list) -> str:
+    cols = list(columns) or ["value"]
     lines = ["| " + " | ".join(_cell(c) for c in cols) + " |",
              "| " + " | ".join("---" for _ in cols) + " |"]
-    for row in step.rows:
+    for row in rows:
         if isinstance(row, dict):
             cells = [_cell(row.get(c)) for c in cols]
         else:
             cells = [_cell(row)] + [""] * (len(cols) - 1)
         lines.append("| " + " | ".join(cells) + " |")
     return "\n".join(lines)
+
+
+def _table(step: ListStep) -> str:
+    return table_of(step.rows, step.fields)
 
 
 _FENCE_OPEN = re.compile(r"(`{3,}|~{3,})(.*)$")
@@ -331,6 +904,26 @@ def _fence_state(before: str) -> Optional[tuple]:
         elif _closes(line, opening):
             opening = None
     return opening
+
+
+def fence_region(before: str) -> tuple:
+    """(start offset of the scan region, fence or None): the innermost open
+    fence's first line, else the end of the last closed fence, else 0."""
+    opening: Optional[tuple] = None
+    start = 0
+    offset = 0
+    for line in before.split("\n")[:-1]:
+        nxt = offset + len(line) + 1
+        if opening is None:
+            m = _FENCE_OPEN.match(line.lstrip())
+            if m and not (m.group(1)[0] == "`" and "`" in m.group(2)):
+                opening = (m.group(1)[0], len(m.group(1)), line.strip())
+                start = nxt
+        elif _closes(line, opening):
+            opening = None
+            start = nxt
+        offset = nxt
+    return start, opening
 
 
 def _table_in_fence(b: str, a: str, at_start: bool, fence: tuple) -> tuple:
@@ -367,20 +960,59 @@ def _table_in_fence(b: str, a: str, at_start: bool, fence: tuple) -> tuple:
     return (head + "\n\n" if head else ""), ("\n\n" + tail if tail else "")
 
 
-def _place_in_text(text: str, steps: dict, placed: dict, guard) -> str:
+class Resolver:
+    """Resolves strict markers to what they place; each target is built once."""
+
+    def __init__(self, steps: dict, outputs: Optional[dict] = None) -> None:
+        self.steps = steps or {}
+        self.outputs = outputs or {}
+        self._cache: dict = {}
+        self.sizes: dict = {}
+
+    def target(self, m) -> Optional[Target]:
+        target, problem = parse_target(m.group(1), m.group(2), self.steps, self.outputs)
+        return None if problem else target
+
+    def rows(self, target: Target) -> tuple:
+        key = ("rows", target.key, repr(target.spec))
+        if key not in self._cache:
+            self._cache[key] = target_rows(target, self.steps)
+        rows, cols = self._cache[key]
+        self.sizes[target.key] = len(rows)
+        return rows, cols
+
+    def text(self, target: Target) -> str:
+        text = target_text(target, self.outputs)
+        self.sizes[target.key] = len(text)
+        return text
+
+
+def _scan(text: str, pos: int):
+    from src.orchestrator.compose_checks import scan  # noqa: PLC0415
+
+    return scan(text, pos)
+
+
+def _place_in_text(text: str, resolver: Resolver, placed: dict, guard, text_guard) -> str:
     cur = text
     pos = 0
     while True:
-        m = STRICT.search(cur, pos)
-        if not m:
+        m = None
+        for cand in strict_matches(cur):
+            if cand.start() >= pos and resolver.target(cand) is not None:
+                m = cand
+                break
+        if m is None:
             return cur
-        step_id = m.group(2).strip()
-        if step_id not in steps:
-            pos = m.end()
-            continue
-        step = steps[step_id]
-        table = m.group(1).upper() == "ROWS_TABLE"
+        target = resolver.target(m)
         s, e = m.start(), m.end()
+        ctx = _scan(cur, s)
+        if ctx.depth > 0:
+            new_text, new_pos = _place_nested(cur, s, e, ctx, target, resolver, guard, text_guard)
+            cur = new_text
+            placed[target.key] = placed.get(target.key, 0) + 1
+            pos = new_pos
+            continue
         k = 0
         while s - k - 1 >= 0 and cur[s - k - 1] == "`":
             k += 1
@@ -394,8 +1026,22 @@ def _place_in_text(text: str, steps: dict, placed: dict, guard) -> str:
         at_start = b == "" or b.endswith("\n")
         at_end = a == "" or a.startswith("\n")
         fence = _fence_state(before)
-        if table:
-            body = _table(step)
+        if target.kind == "output":
+            body = resolver.text(target)
+            if text_guard is not None:
+                text_guard(body)
+            if fence is not None:
+                prefix, a = _table_in_fence(b, a, at_start, fence)
+                new = prefix + body
+            else:
+                head = b.rstrip("\n")
+                new = (head + "\n\n" if head else "") + body + ("\n\n" if a.strip("\n") else "")
+                a = a.lstrip("\n")
+        elif target.kind == "table":
+            rows, cols = resolver.rows(target)
+            body = table_of(rows, cols)
+            if guard is not None:
+                guard(rows, body)
             if fence is not None:
                 prefix, a = _table_in_fence(b, a, at_start, fence)
                 new = prefix + body
@@ -404,65 +1050,131 @@ def _place_in_text(text: str, steps: dict, placed: dict, guard) -> str:
                 new = (head + "\n\n" if head else "") + body + ("\n\n" if a.strip("\n") else "")
                 a = a.lstrip("\n")
         else:
-            body = _json_lines(step.rows)
+            rows, _ = resolver.rows(target)
+            body = _json_lines(rows)
             if fence is not None:
                 if at_start and at_end:
                     new = b + body
                 else:
-                    body = json.dumps(step.rows, ensure_ascii=False, default=str)
+                    body = _compact(rows)
                     b, a, new = before, after, before + body
             else:
                 body = "```json\n" + body + "\n```"
                 new = b + ("" if at_start else "\n") + body + ("" if at_end else "\n")
-        if guard is not None:
-            guard(step.rows, body)
+            if guard is not None:
+                guard(rows, body)
         cur = new + a
-        placed[step_id] = placed.get(step_id, 0) + 1
+        placed[target.key] = placed.get(target.key, 0) + 1
         pos = len(new)
 
 
-def _place_value(value, steps: dict, placed: dict, guard):
+def _place_nested(cur: str, s: int, e: int, ctx, target: Target, resolver: Resolver,
+                  guard, text_guard) -> tuple:
+    """A marker inside brackets compose wrote (compose_placement 2.2, 2.4.1):
+    placed as JSON so the surrounding JSON stays valid. Returns (text, next
+    scan position)."""
+    if target.kind == "output":
+        text = resolver.text(target)
+        if text_guard is not None:
+            text_guard(text)
+        if ctx.in_string:
+            body = json.dumps(text, ensure_ascii=False)[1:-1]
+        else:
+            body = json.dumps(text, ensure_ascii=False)
+        return cur[:s] + body + cur[e:], s + len(body)
+    rows, _ = resolver.rows(target)
+    compact = _compact(rows)
+    if ctx.in_string:
+        if s > 0 and cur[s - 1] == '"' and e < len(cur) and cur[e] == '"':
+            # The marker is the whole quoted value: the quotes are dropped.
+            body = compact
+            s, e = s - 1, e + 1
+        else:
+            body = json.dumps(compact, ensure_ascii=False)[1:-1]
+    elif ctx.innermost == "[":
+        from src.orchestrator.compose_checks import close_of  # noqa: PLC0415
+
+        opener = ctx.stack[-1][1]
+        close = close_of(cur, opener)
+        inner = (cur[opener + 1:s] + cur[e:close if close is not None else len(cur)])
+        if close is not None and not inner.strip(" \t\r\n,"):
+            # A list holding only the marker: compose's brackets are absorbed.
+            body = compact if ctx.depth > 1 else _json_lines(rows)
+            s, e = opener, close + 1
+        else:
+            body = compact
+    else:
+        body = compact
+    if guard is not None:
+        guard(rows, body)
+    return cur[:s] + body + cur[e:], s + len(body)
+
+
+def _whole_marker(value: str):
+    whole = STRICT.fullmatch(value.strip())
+    return whole
+
+
+def _place_value(value, resolver: Resolver, placed: dict, guard, text_guard):
     if isinstance(value, str):
-        return _place_in_text(value, steps, placed, guard)
+        return _place_in_text(value, resolver, placed, guard, text_guard)
     if isinstance(value, list):
-        return [_place_leaf(v, steps, placed, guard) for v in value]
+        if len(value) == 1 and isinstance(value[0], str):
+            whole = _whole_marker(value[0])
+            target = resolver.target(whole) if whole else None
+            if target is not None and target.kind == "rows":
+                # In an object answer, a list whose only element is the
+                # marker becomes the rows list.
+                return _place_leaf(value[0], resolver, placed, guard, text_guard)
+        return [_place_leaf(v, resolver, placed, guard, text_guard) for v in value]
     if isinstance(value, dict):
-        return {k: _place_leaf(v, steps, placed, guard) for k, v in value.items()}
+        return {k: _place_leaf(v, resolver, placed, guard, text_guard) for k, v in value.items()}
     return value
 
 
-def _place_leaf(value, steps: dict, placed: dict, guard):
+def _place_leaf(value, resolver: Resolver, placed: dict, guard, text_guard):
     """Inside an object or list answer: a leaf that is exactly a marker
-    becomes the rows list (or the table text); a marker inside a longer leaf
-    is placed in compact form."""
+    becomes the rows list (or the table text, or the output text); a marker
+    inside a longer leaf is placed in compact form (an output as its text)."""
     if isinstance(value, (list, dict)):
-        return _place_value(value, steps, placed, guard)
+        return _place_value(value, resolver, placed, guard, text_guard)
     if not isinstance(value, str):
         return value
-    whole = STRICT.fullmatch(value.strip())
-    if whole and whole.group(2).strip() in steps:
-        step = steps[whole.group(2).strip()]
-        placed[step.id] = placed.get(step.id, 0) + 1
-        if whole.group(1).upper() == "ROWS_TABLE":
-            body = _table(step)
+    whole = _whole_marker(value)
+    target = resolver.target(whole) if whole else None
+    if target is not None:
+        placed[target.key] = placed.get(target.key, 0) + 1
+        if target.kind == "output":
+            text = resolver.text(target)
+            if text_guard is not None:
+                text_guard(text)
+            return text
+        rows, cols = resolver.rows(target)
+        if target.kind == "table":
+            body = table_of(rows, cols)
             if guard is not None:
-                guard(step.rows, body)
+                guard(rows, body)
             return body
         if guard is not None:
-            guard(step.rows, json.dumps(step.rows, ensure_ascii=False, default=str))
-        return list(step.rows)
+            guard(rows, _compact(rows))
+        return list(rows)
     out = []
     pos = 0
-    for m in STRICT.finditer(value):
-        step_id = m.group(2).strip()
-        if step_id not in steps:
+    for m in strict_matches(value):
+        target = resolver.target(m)
+        if target is None:
             continue
-        step = steps[step_id]
-        # Inside a longer leaf both forms are placed compact, on one line.
-        body = json.dumps(step.rows, ensure_ascii=False, default=str)
-        if guard is not None:
-            guard(step.rows, body)
-        placed[step_id] = placed.get(step_id, 0) + 1
+        if target.kind == "output":
+            body = resolver.text(target)
+            if text_guard is not None:
+                text_guard(body)
+        else:
+            rows, _ = resolver.rows(target)
+            # Inside a longer leaf both row forms are placed compact, on one line.
+            body = _compact(rows)
+            if guard is not None:
+                guard(rows, body)
+        placed[target.key] = placed.get(target.key, 0) + 1
         out.append(value[pos:m.start()])
         out.append(body)
         pos = m.end()
@@ -470,11 +1182,15 @@ def _place_leaf(value, steps: dict, placed: dict, guard):
     return "".join(out)
 
 
-def place(value, steps: dict, guard: Optional[Callable[[list, str], None]] = None):
-    """``(value with every valid marker replaced, {step id: times placed})``.
+def place(value, steps: dict, guard: Optional[Callable[[list, str], None]] = None,
+          outputs: Optional[dict] = None, text_guard: Optional[Callable[[str], None]] = None,
+          resolver: Optional[Resolver] = None):
+    """``(value with every valid marker replaced, {target: times placed})``.
 
-    One pass: placed rows are never scanned again. ``guard(rows, block)``
-    runs on each rendered block before it is placed and may raise.
+    One pass: placed text is never scanned again. ``guard(rows, block)`` runs
+    on each rendered rows block and ``text_guard(text)`` on each placed
+    output before it is placed; either may raise.
     """
     placed: dict = {}
-    return _place_value(value, steps, placed, guard), placed
+    resolver = resolver or Resolver(steps, outputs)
+    return _place_value(value, resolver, placed, guard, text_guard), placed

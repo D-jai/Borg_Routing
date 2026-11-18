@@ -3381,7 +3381,8 @@ async def _orchestrate_run(
     # --- COMPOSE MODE ---
     # Planner ruling 21: the list-holding steps compose may name with a row
     # marker. With none, every compose request is byte-identical to before.
-    rows = _RowContext.for_run(results, current_lane(), user_instruction, governance_instruction)
+    rows = _RowContext.for_run(results, current_lane(), user_instruction, governance_instruction,
+                               run_id)
     try:
         compose_result = await _invoke_orchestrator_model(
             mode="compose",
@@ -3430,56 +3431,82 @@ async def _orchestrate_run(
             **base_kwargs,
         )
 
-    async def _reask_invalid() -> dict:
-        from src.orchestrator.row_markers import INVALID_REASK  # noqa: PLC0415
-
-        return await _reask(INVALID_REASK)
-
     return await _handle_compose_result(
         compose_result=compose_result,
         results=results,
         run_id=run_id,
         db_path=db_path,
         reask=_reask,
-        rows=rows if rows.steps else None,
-        reask_invalid=_reask_invalid if rows.steps else None,
+        rows=rows if rows.active else None,
+        reask_invalid=_reask if rows.active else None,
     )
 
 
 class _RowContext:
-    """The run's list-holding steps for compose row markers (planner ruling
-    21; docs/design/compose_row_markers.md)."""
+    """What compose may place and what it is told (planner rulings 21 and
+    32e; docs/design/compose_row_markers.md, docs/design/compose_placement.md):
+    the run's list steps, its long outputs, the asked-but-not-produced list
+    (ruling 32c) and the item model the checks read. ``active`` is False when
+    there is none of the three: every compose request is then byte-identical
+    to before."""
 
-    def __init__(self, steps: dict, quoted: list, lane: Optional[LaneContext]) -> None:
+    def __init__(self, steps: dict, quoted, lane: Optional[LaneContext],
+                 outputs: Optional[dict] = None, asked: Optional[list] = None,
+                 model=None, step_ids=(), block: Optional[str] = None) -> None:
         self.steps = steps
         self.quoted = quoted
         self.lane = lane
+        self.outputs = outputs or {}
+        self.asked = asked or []
+        self.model = model
+        self.step_ids = list(step_ids)
+        self.block = block
+
+    @property
+    def active(self) -> bool:
+        return bool(self.steps or self.outputs or self.asked)
 
     @classmethod
     def for_run(cls, results: dict, lane: Optional[LaneContext],
-                user_instruction: str, governance_instruction: Optional[str]) -> "_RowContext":
-        from src.orchestrator import row_markers  # noqa: PLC0415
+                user_instruction: str, governance_instruction: Optional[str],
+                run_id: object = None) -> "_RowContext":
+        from src.orchestrator import compose_checks, row_markers  # noqa: PLC0415
 
         steps = row_markers.list_steps(results, lane)
+        outputs = row_markers.long_outputs(results, steps, lane)
+        asked = asked_but_not_produced(run_id) if run_id is not None else []
         quoted: set = set()
-        if steps:
+        model = None
+        block = None
+        if steps or outputs or asked:
             # The hits the operator or a step wrote (decoded string leaves,
             # never the JSON dump): a reply that repeats one is quoting data.
             texts = [user_instruction or "", governance_instruction or ""]
             for env in results.values():
                 texts.extend(_string_leaves(getattr(env, "output", None)))
             quoted = row_markers.quoted_hits(texts)
-        return cls(steps, quoted, lane)
+            model = compose_checks.ItemModel.build(steps, results)
+            block = row_markers.block(
+                steps, outputs, len(model.no_result()), model.no_value_counts(), asked)
+        return cls(steps, quoted, lane, outputs, asked, model,
+                   [str(k) for k in (results or {})], block)
 
     def call_kwargs(self) -> dict:
         from src.orchestrator import row_markers  # noqa: PLC0415
 
-        if not self.steps:
+        if not self.active:
             return {}
         return {
-            "extra_user_lines": row_markers.block(self.steps),
-            "pointer_lines": row_markers.step_lines(self.steps),
+            "extra_user_lines": self.block,
+            "pointer_lines": row_markers.pointer_lines(self.steps, self.outputs) or None,
         }
+
+    def problems(self, value, declined: bool = False) -> list:
+        """``[(code, sentence)]`` for one reply (compose_checks.check)."""
+        from src.orchestrator import compose_checks  # noqa: PLC0415
+
+        return compose_checks.check(value, self.steps, self.outputs, self.model, self.asked,
+                                    self.quoted, self.step_ids, declined=declined)
 
     def guard(self):
         """The rows-block guard (ruling 21b), or None when it does not run."""
@@ -3489,6 +3516,15 @@ class _RowContext:
         from src.lane.context import guard_rows_block  # noqa: PLC0415
 
         return lambda rows, block: guard_rows_block(rows, block, lane)
+
+    def text_guard(self):
+        """The text guard on placed or salvaged long text (ruling 32e), or None."""
+        lane = self.lane
+        if lane is None or not lane.keeps_raw_local or not lane.has_documents:
+            return None
+        from src.lane.context import guard_text_block  # noqa: PLC0415
+
+        return lambda text: guard_text_block(text, lane)
 
 
 # Reply fields read as the final answer when compose put it somewhere other
@@ -3570,12 +3606,16 @@ async def _handle_compose_result(
 
     A composed answer marks the run ``answer_kind = "composed"``.
 
-    Row markers (planner ruling 21; only when ``rows`` holds list steps, so
-    the block was sent): every marker in the chosen answer (or a declined
-    rationale) must name a list step, else compose is asked once more
-    (``reask_invalid``, BRT-ORC-032) and a second invalid reply is salvaged
-    (BRT-ORC-032 warning). Valid markers are replaced by the stored rows;
-    each placed block passes the lane's rows guard (BRT-LANE-009) first.
+    Markers and checks (planner rulings 21 and 32e; only when ``rows`` is
+    given, so the code-side block was sent): the chosen answer (or a
+    declined rationale) is checked for markers that cannot be placed
+    (BRT-ORC-032, BRT-ORC-037), rows typed around a rows marker
+    (BRT-ORC-038), and, for an answer only, a long output pointed at but not
+    placed (BRT-ORC-040) and values no step produced (BRT-ORC-041). Any
+    problem asks compose once more with one repair message
+    (``reask_invalid``); a second reply with problems is salvaged
+    (``_salvage_after_check``). Valid markers are replaced by the stored rows
+    or text; each placed block passes the lane's guards (BRT-LANE-009) first.
     """
     text, field, wrong = _compose_text(compose_result)
     action = str(compose_result.get("action") or "").lower().strip() if isinstance(
@@ -3587,45 +3627,47 @@ async def _handle_compose_result(
 
         # Checked on the decoded answer (an object's keys and leaves, never
         # its JSON dump): every hit ``place`` would not replace, a key
-        # included, takes the BRT-ORC-032 path, so none is left.
+        # included, is a problem, so none is left.
         value = compose_result[field] if text else candidate
-        if row_markers.invalid_hits(value, rows.steps, rows.quoted):
+        problems = rows.problems(value, declined=not text)
+        if problems:
+            codes = list(dict.fromkeys(code for code, _ in problems))
             if reask_invalid is not None:
                 await _log_decision(run_id, db_path, {
-                    "code": "BRT-ORC-032",
-                    "msg": "compose used a list marker that names no list step; "
-                           "asking compose once more",
+                    "code": codes[0],
+                    "codes": codes,
+                    "msg": "compose's reply cannot be used as it is; asking compose once more",
                     "reask": True,
                 })
                 try:
-                    second = await reask_invalid()
+                    second = await reask_invalid(row_markers.repair_message(problems))
                 except LaneError:
                     raise
                 except ValueError as exc:
-                    logger.warning("compose marker re-ask failed for run %s: %s", run_id, exc)
+                    logger.warning("compose repair re-ask failed for run %s: %s", run_id, exc)
                     second = None
                 if second is not None:
                     return await _handle_compose_result(
                         second, results, run_id, db_path, reask=reask, rows=rows)
-            return await _salvage_or_fail(
-                results, run_id, db_path, "BRT-ORC-032",
-                "compose used a list marker that names no list step, also when asked "
-                "again; the answer is the finished steps' results with a note",
-                action,
-            )
+            return await _salvage_after_check(results, run_id, db_path, rows, value,
+                                              codes, action)
+        resolver = row_markers.Resolver(rows.steps, rows.outputs)
         if text:
             placed_value, placed = row_markers.place(
-                compose_result[field], rows.steps, guard=rows.guard())
+                compose_result[field], rows.steps, guard=rows.guard(),
+                text_guard=rows.text_guard(), resolver=resolver)
             if placed:
                 text, _, _ = _compose_text({**compose_result, field: placed_value})
         else:
-            placed_value, placed = row_markers.place(candidate, rows.steps, guard=rows.guard())
+            placed_value, placed = row_markers.place(
+                candidate, rows.steps, guard=rows.guard(), text_guard=rows.text_guard(),
+                resolver=resolver)
             if placed:
                 compose_result = {**compose_result, "rationale": placed_value}
         if placed:
             await _log_decision(run_id, db_path, {
                 "msg": "rows placed by code (row markers)",
-                "rows_placed": {sid: len(rows.steps[sid].rows) for sid in placed},
+                "rows_placed": {key: resolver.sizes.get(key) for key in placed},
                 "markers": placed,
             })
     if text:
@@ -3909,34 +3951,6 @@ async def _log_decision(run_id: UUID, db_path: str, decision: dict) -> None:
         pass
 
 
-async def _salvage_or_fail(results: dict, run_id: UUID, db_path: str, code: str,
-                           msg: str, action: str) -> str:
-    """The finished steps' results with a note, recorded with ``code`` as a
-    warning and ``answer_kind = "salvaged"``; with nothing finished, the run
-    fails with ``code``."""
-    salvaged = _salvage_finished_results(results, current_lane())
-    if not salvaged:
-        raise ValueError(f"{code}: {msg}")
-    try:
-        await write_event(
-            "error",
-            run_id=run_id,
-            decision={
-                "code": code,
-                "severity": "warning",
-                "msg": msg,
-                "compose_action": action or "(missing)",
-                "steps": [k for k, v in results.items()
-                          if getattr(v, "status", None) == "resolved"],
-            },
-            db_path=db_path,
-        )
-    except Exception:
-        pass
-    await _mark_answer_kind(run_id, "salvaged", db_path)
-    return salvaged
-
-
 SALVAGE_NOTE = (
     "The final write-up step failed, so this answer was not composed. "
     "Below are the results of the steps that finished, as they came back."
@@ -3958,12 +3972,40 @@ def _salvage_finished_results(results: dict, lane: Optional[LaneContext] = None)
     it is a document part id, never text. Anything else from a raw step is
     named as withheld, with no content.
     """
-    if not results:
+    sections, withheld = _salvage_sections(results, lane)
+    return _salvage_text([], sections, withheld)
+
+
+def _salvage_text(placed: list, sections: list, withheld: list) -> Optional[str]:
+    if not placed and not sections:
         return None
+    text = SALVAGE_NOTE + "\n\n" + "\n\n".join(placed + sections)
+    if withheld:
+        text += (
+            "\n\nNot shown (steps that read your documents whose output did not pass "
+            "the on-premise output check): " + ", ".join(withheld)
+        )
+    return text
+
+
+def _salvage_sections(results: dict, lane: Optional[LaneContext], skip=(),
+                      rows: Optional["_RowContext"] = None,
+                      long_verbatim: bool = False) -> tuple:
+    """(sections, withheld step ids) of the salvage view (see
+    ``_salvage_finished_results``). With ``rows`` (salvage after a failed
+    check, ruling 32e) a list step is written in the plain marker's form
+    (flat fields, file-name labels) with the rows guard; with
+    ``long_verbatim`` (S1, after BRT-ORC-038, 040 or 041) a step's long
+    string fields are written verbatim, with the text guard on a raw one.
+    Steps in ``skip`` (placed already) are left out."""
+    if not results:
+        return [], []
     hide_raw = lane is not None and lane.keeps_raw_local
     sections: list[str] = []
     withheld: list[str] = []
     for step_id, env in results.items():
+        if str(step_id) in skip:
+            continue
         if env is None or getattr(env, "status", None) != "resolved":
             continue
         out = getattr(env, "output", None)
@@ -3975,7 +4017,21 @@ def _salvage_finished_results(results: dict, lane: Optional[LaneContext] = None)
             withheld.append(str(step_id))
             continue
         if aggregate:
-            rows = []
+            failed = len(out.get("failures") or [])
+            done = len([e for e in out["results"] if isinstance(e, dict)])
+            head = f"## {step_id} ({done} item(s) finished"
+            head += f", {failed} failed)" if failed else ")"
+            if rows is not None and str(step_id) in rows.steps:
+                from src.orchestrator import row_markers  # noqa: PLC0415
+
+                step_rows = rows.steps[str(step_id)].rows
+                body = "```json\n" + row_markers._json_lines(step_rows) + "\n```"
+                guard = rows.guard()
+                if guard is not None:
+                    guard(step_rows, body)
+                sections.append(head + "\n" + body)
+                continue
+            listed = []
             for entry in out["results"]:
                 if not isinstance(entry, dict):
                     continue
@@ -3984,25 +4040,101 @@ def _salvage_finished_results(results: dict, lane: Optional[LaneContext] = None)
                 if not raw or (lane is not None and lane.is_part_id(item)):
                     row["item"] = item
                 row["output"] = entry.get("output")
-                rows.append(row)
-            failed = len(out.get("failures") or [])
-            head = f"## {step_id} ({len(rows)} item(s) finished"
-            head += f", {failed} failed)" if failed else ")"
-            sections.append(head + "\n" + json.dumps(rows, indent=2, ensure_ascii=False))
+                listed.append(row)
+            sections.append(head + "\n" + json.dumps(listed, indent=2, ensure_ascii=False))
             continue
         body = _step_text(out)
+        if body is None and long_verbatim and rows is not None and str(step_id) in rows.outputs:
+            body = _long_fields_text(out, rows.outputs[str(step_id)], rows, raw)
         if body is None and out:
             body = json.dumps(out, indent=2, ensure_ascii=False, default=str)
         if body:
             sections.append(f"## {step_id}\n{body}")
-    if not sections:
-        return None
-    text = SALVAGE_NOTE + "\n\n" + "\n\n".join(sections)
-    if withheld:
-        text += (
-            "\n\nNot shown (steps that read your documents whose output did not pass "
-            "the on-premise output check): " + ", ".join(withheld)
+    return sections, withheld
+
+
+def _long_fields_text(out: object, long, rows: "_RowContext", raw: bool) -> str:
+    """S1 (ruling 32e): a step's long string fields verbatim (``### <field>``
+    when there are several), then its other fields as JSON. A raw one passes
+    the text guard (BRT-LANE-009) first."""
+    guard = rows.text_guard() if raw else None
+    parts = []
+    several = len(long.fields) > 1
+    for name, text in long.fields.items():
+        if guard is not None:
+            guard(text)
+        parts.append((f"### {name}\n" if several and name is not None else "") + text)
+    if isinstance(out, dict):
+        rest = {k: v for k, v in out.items() if k not in long.fields}
+        if rest:
+            parts.append(json.dumps(rest, indent=2, ensure_ascii=False, default=str))
+    return "\n\n".join(parts)
+
+
+def _salvage_after_check_text(results: dict, lane: Optional[LaneContext], rows: "_RowContext",
+                              value: object, codes: list) -> Optional[str]:
+    """S2 and S1 (ruling 32e, 2.4.5): the second reply's valid markers placed
+    from stored results (each under ``## <target>``, with the guards); then
+    the finished steps not placed, list steps in the plain marker's form, and
+    long string fields verbatim when a check 038, 040 or 041 failed.
+    Compose's own text is dropped."""
+    from src.orchestrator import compose_checks, row_markers  # noqa: PLC0415
+
+    resolver = row_markers.Resolver(rows.steps, rows.outputs)
+    placed: list = []
+    skip: set = set()
+    guard, text_guard = rows.guard(), rows.text_guard()
+    for target in compose_checks.placed_targets(value, resolver):
+        if target.kind == "output":
+            body = resolver.text(target)
+            if text_guard is not None:
+                text_guard(body)
+        else:
+            step_rows, cols = resolver.rows(target)
+            if target.kind == "table":
+                body = row_markers.table_of(step_rows, cols)
+            else:
+                body = "```json\n" + row_markers._json_lines(step_rows) + "\n```"
+            if guard is not None:
+                guard(step_rows, body)
+        placed.append(f"## {target.key}\n{body}")
+        skip.update(target.ids)
+    s1 = any(c in ("BRT-ORC-038", "BRT-ORC-040", "BRT-ORC-041") for c in codes)
+    sections, withheld = _salvage_sections(results, lane, skip=skip, rows=rows,
+                                           long_verbatim=s1)
+    return _salvage_text(placed, sections, withheld)
+
+
+async def _salvage_after_check(results: dict, run_id: UUID, db_path: str, rows: "_RowContext",
+                               value: object, codes: list, action: str) -> str:
+    """Salvage after a failed repair re-ask (ruling 32e): ``answer_kind =
+    "salvaged"`` and one warning event whose code is the headline (the first
+    of 032, 037, 038, 040, 041 present) and whose ``codes`` carry all of
+    them. Nothing finished: the run fails with the headline code."""
+    head = codes[0]
+    msg = ("compose's reply could not be used, also when asked again; the answer is "
+           "the finished steps' results with a note")
+    text = _salvage_after_check_text(results, current_lane(), rows, value, codes)
+    if not text:
+        raise ValueError(f"{head}: {msg}")
+    try:
+        await write_event(
+            "error",
+            run_id=run_id,
+            decision={
+                "code": head,
+                "codes": codes,
+                "severity": "warning",
+                "msg": msg,
+                "compose_action": action or "(missing)",
+                "steps": [k for k, v in results.items()
+                          if getattr(v, "status", None) == "resolved"],
+            },
+            db_path=db_path,
         )
+    except Exception:
+        pass
+    await _mark_answer_kind(run_id, "salvaged", db_path)
     return text
 
 

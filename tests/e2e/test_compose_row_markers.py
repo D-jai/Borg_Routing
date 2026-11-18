@@ -22,26 +22,57 @@ from tests.e2e.stub_model_server import (
 )
 
 COMPOSE = "Mode: compose. Reply with the final answer."
-HEADER = (
-    "List steps the code can write out for you: put @@ROWS:<step id>@@ in your answer "
-    "where a step's rows belong (a JSON array, one row per line), or "
-    "@@ROWS_TABLE:<step id>@@ for a Markdown table. Do not type those rows yourself."
+# Ruling 32e's block (docs/design/compose_placement.md 2.3) replaces ruling
+# 21's header; its fixed lines, as the note writes them.
+INTRO = (
+    "The reader sees only your answer. They cannot see any step, step id or step result, so "
+    "never refer them to one: everything they need must be in your answer, written by you or "
+    "placed by the code.\n"
+    "The code can place stored results for you, exactly as stored. Do not retype rows or long "
+    "outputs yourself; naming a few items in your own text is fine."
+)
+ROWS_BULLET = (
+    "- Rows: write @@ROWS:<step id>@@ where a step's rows belong (a JSON array, one row per "
+    "line), or @@ROWS_TABLE:<step id>@@ for a Markdown table. Put the marker on its own line, "
+    "outside any brackets you write: the code writes the brackets. To choose fields, their order "
+    "and their names, add them after a bar: @@ROWS:<step id> | <name>=<field>, <field>@@ (for "
+    "example @@ROWS:s1 | file=item, label=bucket@@). To join steps on the item, list them with +: "
+    "@@ROWS:<step id> + <step id> | ...@@; when both give a field, the later step's value is "
+    "used. Use only the fields listed for those steps. An item with no result keeps its error "
+    "and gets no other value."
 )
 REASK = ('Mode: compose. Your last reply had no final answer. Reply with '
          '{"response": "<the final answer>"} only.')
-INVALID = ('Mode: compose. Your last reply used a list marker that names no list step. '
-           'Use only the step ids listed below. Reply with {"response": "<the final answer>"} only.')
 POINTER = ("Mode: compose. Your last reply was cut off at the length limit. Do not type out a "
-           "step's rows: put @@ROWS:<step id>@@ where they belong and the code writes them in. "
+           "step's rows or long output: put @@ROWS:<step id>@@ or @@OUTPUT:<step id>@@ where they "
+           "belong and the code writes them in. "
            'Reply with {"response": "<the final answer>"} only.')
+NO_STEP = "A marker names no step the code can place. Use only the step ids listed below."
+MISSPELLED = ("A marker is misspelled. Write it exactly as shown below, with two @ signs at "
+              "each end.")
+
+
+def _block(line, no_result=0):
+    return (INTRO + "\n" + ROWS_BULLET + "\nSteps with rows:\n" + line + "\n"
+            "Items with no result (a step failed them and no other step gave them a value): "
+            f"{no_result}. Never give them a value: say they have no result.")
+
+
+def _repair(*sentences):
+    """Ruling 32e's repair re-ask (it replaces ruling 21's 032 re-ask)."""
+    return "\n".join(["Mode: compose. Your last reply cannot be used as it is:"]
+                     + [f"- {s}" for s in sentences]
+                     + ['Fix these and reply with {"response": "<the final answer>"} only.'])
+
 
 ITEMS = [f"review {i:03d}" for i in range(200)]
 FAIL_ITEM = "review 007"
-LINE_200 = "- rate: 200 rows, input order; fields: item, sentiment, error"
-BLOCK_200 = HEADER + "\n" + LINE_200
+LINE_200 = "- rate: 200 rows, input order, 1 failed; fields: item, sentiment, error"
+BLOCK_200 = _block(LINE_200, no_result=1)
 SMALL = ["Kettle: boils fast", "Toaster: burnt everything", "Blender: loud but fine"]
-LINE_3 = "- rate: 3 rows, input order; fields: item, sentiment"
-BLOCK_3 = HEADER + "\n" + LINE_3
+LINE_3 = "- rate: 3 rows, input order, 0 failed; fields: item, sentiment"
+BLOCK_3 = _block(LINE_3)
+INVALID = _repair(NO_STEP)
 
 
 class RowStub(StubModels):
@@ -200,8 +231,8 @@ async def test_table_form_on_its_own_lines(env):
     assert result["response"] == (
         "Table:\n\n| item | sentiment |\n| --- | --- |\n| a\\|b | ok |\n| c | ok |\n| d | ok |\n\nDone."
     )
-    assert stub.of_kind("compose")[0].user == COMPOSE + "\n" + HEADER + "\n" + (
-        "- rate: 3 rows, input order; fields: item, sentiment")
+    assert stub.of_kind("compose")[0].user == COMPOSE + "\n" + _block(
+        "- rate: 3 rows, input order, 0 failed; fields: item, sentiment")
 
 
 @pytest.mark.asyncio
@@ -217,12 +248,13 @@ async def test_object_answer_leaf_marker_becomes_the_rows_list(env):
 
 # --- 4. invalid and near-miss markers -----------------------------------------
 
-BAD = ["@@ROWS:nope@@", "@@ROWS:plain@@", "@@Row:rate@@", "@@ROWS rate@@", "@@ROWS:rate@"]
+BAD = [("@@ROWS:nope@@", NO_STEP), ("@@ROWS:plain@@", NO_STEP), ("@@Row:rate@@", MISSPELLED),
+       ("@@ROWS rate@@", MISSPELLED), ("@@ROWS:rate@", MISSPELLED)]
 
 
-@pytest.mark.parametrize("bad", BAD)
+@pytest.mark.parametrize("bad, sentence", BAD)
 @pytest.mark.asyncio
-async def test_invalid_marker_is_asked_once_then_placed(env, bad):
+async def test_invalid_marker_is_asked_once_then_placed(env, bad, sentence):
     db_path, mp = env
     stub = StubModels(plan_nodes=[_rate(SMALL), _plain()],
                       answer_for=lambda r: ({"result": "hi"} if "Say hello" in r.system
@@ -234,7 +266,7 @@ async def test_invalid_marker_is_asked_once_then_placed(env, bad):
     assert result["status"] == "completed", result.get("error")
     composes = stub.of_kind("compose")
     assert len(composes) == 2
-    assert composes[1].user == INVALID + "\n" + BLOCK_3
+    assert composes[1].user == _repair(sentence) + "\n" + BLOCK_3
     assert [r["item"] for r in _rows(result["response"])] == SMALL
     assert "@@" not in result["response"]
     codes = await _codes(db_path, result["run_id"])
@@ -385,7 +417,7 @@ async def test_cut_off_compose_retry_points_to_the_marker(env, cap, retry_cap):
     assert len(composes) == 2
     assert composes[0].max_tokens == cap
     assert composes[1].max_tokens == retry_cap
-    assert composes[1].user == POINTER + "\n" + LINE_3
+    assert composes[1].user == POINTER + "\nSteps with rows:\n" + LINE_3
     assert [r["item"] for r in _rows(result["response"])] == SMALL
     events = [d for d in await _decisions(db_path, result["run_id"])
               if d.get("code") == "BRT-ORC-018"]
@@ -531,9 +563,29 @@ async def test_same_passage_in_compose_text_behaves_as_today(tmp_path, monkeypat
     text = result["response"]
     assert text.startswith(PASSAGE + "\n```json\n")
     rows = _rows(text)
-    assert len(rows) == 2 and all(r["item"].startswith("doc_") for r in rows)
+    # Ruling 32e: rows carry the names the manifest showed compose, never
+    # document text (ruling 21's "part ids only" pin, widened to names).
+    assert [r["item"] for r in rows] == ["email_001.txt", "email_002.txt"]
     assert "parcel" not in text and "Please call me back" not in text
     assert [r for r in stub.of_kind("answerer") if r.is_local]
+
+
+@pytest.mark.asyncio
+async def test_ids_manifest_rows_carry_part_ids_only(tmp_path, monkeypatch):
+    _lane_env(tmp_path, monkeypatch, "raw_local")
+    monkeypatch.setenv("BORG_LANE_MANIFEST", "ids")
+    db_path = str(tmp_path / "guard_ids.db")
+    await create_all(db_path)
+    stub = StubModels(plan_nodes=[_classify()], answer_for=_bucket,
+                      compose_for=_seq({"response": "@@ROWS:classify@@"})).install(monkeypatch)
+    result = await run_pipeline("Classify each email.", db_path=db_path,
+                                documents={"folder": "."})
+    await drain_log_writes()
+    assert result["status"] == "completed", result.get("error")
+    rows = _rows(result["response"])
+    assert [r["item"] for r in rows] == ["doc_001", "doc_002"]
+    assert "email_00" not in stub.of_kind("compose")[0].user
+    assert "fields: item (document id)" in stub.of_kind("compose")[0].user
 
 
 @pytest.mark.asyncio
@@ -649,11 +701,135 @@ async def test_replayed_stage1_job_a_completes_with_full_rows(tmp_path, monkeypa
             assert re.sub(r"_\d+$", "", nid) in recorded, nid
     assert not stub.replans, "a re_plan reply was not used"
     composes = stub.of_kind("compose")
-    assert len(composes) == 2 and composes[1].user.startswith(REASK + "\n" + HEADER)
-    assert "- extract_urgency: 200 rows, input order; fields: item, urgency, category" in composes[1].user
+    assert len(composes) == 2 and composes[1].user.startswith(REASK + "\n" + INTRO)
+    assert ("- extract_urgency: 200 rows, input order, 0 failed; fields: item (file name), "
+            "urgency, category") in composes[1].user
     rows = _rows(result["response"])
     docs = sorted(rec["items"]["extract_urgency"])
-    assert [r["item"] for r in rows] == docs
-    for row in rows:
-        assert {k: v for k, v in row.items() if k != "item"} == rec["items"]["extract_urgency"][row["item"]]
+    # Ruling 32e: the rows carry the documents' names as the manifest showed them.
+    names = [f"job_a/email_{d[4:]}.txt" for d in docs]
+    assert [r["item"] for r in rows] == names
+    for doc, row in zip(docs, rows):
+        assert {k: v for k, v in row.items() if k != "item"} == rec["items"]["extract_urgency"][doc]
     assert await _answer_kind(db_path, result["run_id"]) == "composed"
+
+
+# --- 9. ruling 32e: whole outputs, lane and post counts --------------------------------------
+
+LONG = "LONGREPORT " + "w" * 2489                     # 2,500 characters
+
+
+def _read(node_id="read"):
+    return {"type": "answerer", "id": node_id, "instruction": "Report on the email.",
+            "documents": ["doc_001"], "task_type": "extraction", "tier": "light",
+            "output_schema": {"report": "string"}}
+
+
+def _force_passage(monkeypatch):
+    """A long raw output holding a document passage the output guard missed
+    (the ruling-21b forced-row pattern): the text guard must withhold it."""
+    from src.orchestrator import row_markers  # noqa: PLC0415
+    real = row_markers.long_outputs
+
+    def forced(results, steps=None, lane=None):
+        found = real(results, steps, lane)
+        for o in found.values():
+            for k in list(o.fields):
+                o.fields[k] = o.fields[k] + " " + PASSAGE
+        return found
+    monkeypatch.setattr(row_markers, "long_outputs", forced)
+
+
+@pytest.mark.asyncio
+async def test_placed_raw_output_holding_a_passage_gives_lane_009(tmp_path, monkeypatch):
+    _lane_env(tmp_path, monkeypatch, "raw_local")
+    monkeypatch.setenv("BORG_LANE_MAX_OUTPUT_CHARS", "10000")      # the setting raised
+    _force_passage(monkeypatch)
+    db_path = str(tmp_path / "out_guard.db")
+    await create_all(db_path)
+    StubModels(plan_nodes=[_read()], answer_for=lambda r: {"report": LONG},
+               compose_for=_seq({"response": "Report:\n@@OUTPUT:read@@"})).install(monkeypatch)
+    result = await run_pipeline("Report on the email.", db_path=db_path, documents={"folder": "."})
+    await drain_log_writes()
+    assert result["status"] == "failed"
+    assert "BRT-LANE-009" in str(result.get("error"))
+    assert "duplicated" not in (result["response"] or "")
+
+
+@pytest.mark.asyncio
+async def test_s1_salvage_of_a_raw_long_field_gets_the_same_guard(tmp_path, monkeypatch):
+    _lane_env(tmp_path, monkeypatch, "raw_local")
+    monkeypatch.setenv("BORG_LANE_MAX_OUTPUT_CHARS", "10000")
+    _force_passage(monkeypatch)
+    db_path = str(tmp_path / "s1_guard.db")
+    await create_all(db_path)
+    pointer = {"response": "The report is in the step result (read)."}
+    StubModels(plan_nodes=[_read()], answer_for=lambda r: {"report": LONG},
+               compose_for=_seq(pointer, pointer)).install(monkeypatch)
+    result = await run_pipeline("Report on the email.", db_path=db_path, documents={"folder": "."})
+    await drain_log_writes()
+    assert result["status"] == "failed"
+    assert "BRT-LANE-009" in str(result.get("error"))
+
+
+@pytest.mark.asyncio
+async def test_output_marker_on_a_held_back_step_is_032_and_its_text_goes_nowhere(
+        tmp_path, monkeypatch):
+    _lane_env(tmp_path, monkeypatch, "raw_local")              # default 1,500-character cap
+    db_path = str(tmp_path / "held_back.db")
+    await create_all(db_path)
+    # A finished document step (classify) keeps the run from BRT-ORC-034.
+    stub = StubModels(plan_nodes=[_classify(), _read()],
+                      answer_for=lambda r: ({"report": LONG} if "Report on" in r.system
+                                            else _bucket(r)),
+                      compose_for=_seq({"response": "@@OUTPUT:read@@"},
+                                       {"response": "The report could not be shown."})).install(monkeypatch)
+    result = await run_pipeline("Look at the emails.", db_path=db_path, documents={"folder": "."})
+    await drain_log_writes()
+    assert result["response"] == "The report could not be shown."
+    composes = stub.of_kind("compose")
+    assert len(composes) == 2 and composes[1].user.startswith(_repair(NO_STEP))
+    assert (await _codes(db_path, result["run_id"])).count("BRT-ORC-032") == 1
+    for req in stub.requests:
+        if req.kind in ("plan", "re_plan", "compose"):
+            assert "LONGREPORT" not in json.dumps(req.body)
+    assert "LONGREPORT" not in result["response"]
+
+
+@pytest.mark.asyncio
+async def test_long_output_run_worst_case_is_nine_compose_posts(env):
+    """An answerer run with a 2,500-character output now gets the block, so the
+    pointer retry always runs: 3 invocations x 3 posts (6 without the JSON retry)."""
+    db_path, mp = env
+    plain = {"type": "answerer", "id": "plain", "instruction": "Write the report.",
+             "task_type": "extraction", "tier": "light", "output_schema": {"result": "string"}}
+    stub = StubModels(plan_nodes=[plain], answer_for=lambda r: {"result": LONG},
+                      compose_for=_seq(
+                          ("garbage", "length"), ("not json", "stop"), {"action": "compose"},
+                          ("garbage", "length"), ("not json", "stop"), {"response": "@@OUTPUT:nope@@"},
+                          ("garbage", "length"), ("not json", "stop"), {"response": "@@OUTPUT:plain@@"},
+                      )).install(mp)
+    result = await run_pipeline("Write the report.", db_path=db_path)
+    await drain_log_writes()
+    composes = stub.of_kind("compose")
+    assert len(composes) == 9
+    assert composes[1].user.startswith(POINTER + "\nSteps with a long output:\n- plain: 2,500")
+    assert result["response"] == LONG
+    assert await _answer_kind(db_path, result["run_id"]) == "composed"
+
+
+@pytest.mark.asyncio
+async def test_long_output_run_without_cuts_makes_six_posts_at_most(env):
+    db_path, mp = env
+    plain = {"type": "answerer", "id": "plain", "instruction": "Write the report.",
+             "task_type": "extraction", "tier": "light", "output_schema": {"result": "string"}}
+    stub = StubModels(plan_nodes=[plain], answer_for=lambda r: {"result": LONG},
+                      compose_for=_seq(
+                          ("garbage", "length"), {"action": "compose"},
+                          ("garbage", "length"), {"response": "See (plain)."},
+                          ("garbage", "length"), {"response": "Report:\n@@OUTPUT:plain@@"},
+                      )).install(mp)
+    result = await run_pipeline("Write the report.", db_path=db_path)
+    await drain_log_writes()
+    assert len(stub.of_kind("compose")) == 6
+    assert result["response"] == "Report:\n\n" + LONG

@@ -371,6 +371,28 @@ def guard_rows_block(rows: list, block_text: str, ctx: Optional[LaneContext]) ->
                 )
 
 
+def guard_text_block(text: str, ctx: Optional[LaneContext]) -> None:
+    """The guard on long text placed or salvaged by code (planner ruling
+    32e): a step output written in by ``@@OUTPUT:<id>@@``, or a long string
+    field written out verbatim by salvage (S1).
+
+    The text form of ``guard_rows_block``: in ``raw_local``/``all_local``
+    with documents, ``copied_rule`` is checked against every run document on
+    the normalised text. A hit raises BRT-LANE-009 naming the document only;
+    the run fails closed. Compose's own text is never checked here.
+    """
+    if ctx is None or not ctx.keeps_raw_local or not ctx.has_documents:
+        return
+    form = normalise(text or "")
+    for doc in ctx.indexes(None):
+        if copied_rule(doc, form, ctx.settings.max_verbatim_chars):
+            raise LaneError(
+                "BRT-LANE-009",
+                f"a text block placed by code copies document {doc.doc_id}; withheld",
+                doc=doc.doc_id,
+            )
+
+
 def guard_envelope(env: InboundEnvelope, task: WrappedTask, ctx: LaneContext) -> InboundEnvelope:
     """The output guard (P2), applied to a raw envelope whatever its status.
 
