@@ -7,6 +7,7 @@ The engine does not rewrite the step: the planner chooses a different one.
 """
 import json
 import re
+import sqlite3
 
 import pytest
 
@@ -123,14 +124,46 @@ async def test_job_a_step_fails_before_any_call_and_re_plan_is_shown_it(env):
 
 
 @pytest.mark.asyncio
-async def test_the_same_plan_again_does_not_loop_forever(env):
+async def test_the_same_plan_again_is_re_planned_exactly_once(env):
     db_path, mp = env
     again = {"action": "continue", "rationale": "same again", "next_nodes": [_node(JOB_A)]}
     stub = StubModels(plan_nodes=[_node(JOB_A)], replan_for=lambda req: again).install(mp)
     await run_pipeline("Sort these.", db_path=db_path)
     await drain_log_writes()
-    assert 1 <= len(stub.of_kind("re_plan")) <= engine.MAX_LOOPS
-    assert not stub.of_kind("answerer")
+    assert len(stub.of_kind("re_plan")) == 1
+    assert not stub.of_kind("answerer"), "the skill step made a model call"
+    with sqlite3.connect(db_path) as conn:
+        rows = conn.execute("SELECT decision_json FROM logs WHERE event_type='error'").fetchall()
+    msgs = [json.loads(r[0]).get("msg", "") for r in rows if r[0]]
+    assert any("BRT-ORC-035" in m and "(second time; not re-planned)" in m for m in msgs), msgs
+
+
+@pytest.mark.asyncio
+async def test_two_bad_steps_in_the_first_plan_still_get_one_re_plan(env):
+    db_path, mp = env
+    plan = [_node(JOB_A), _node(JOB_A, id="n2")]
+    stub = StubModels(plan_nodes=plan).install(mp)
+    await run_pipeline("Sort these.", db_path=db_path)
+    await drain_log_writes()
+    assert len(stub.of_kind("re_plan")) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_planner_that_fixes_the_plan_runs_normally(env):
+    db_path, mp = env
+    calls: list = []
+    fixed = {"action": "continue", "rationale": "fixed",
+             "next_nodes": [_node({"bucket": "string"}, id="n2")]}
+    stub = StubModels(
+        plan_nodes=[_node(JOB_A)],
+        replan_for=lambda req: fixed if not calls.append(1) and len(calls) == 1 else
+        {"action": "compose", "rationale": "done"},
+        answer_for=lambda req: {"bucket": "billing", "confidence": 0.9, "defer_reason": ""},
+    ).install(mp)
+    await run_pipeline("Sort these.", db_path=db_path)
+    await drain_log_writes()
+    assert stub.of_kind("answerer"), "the fixed step did not run"
+    assert len(stub.of_kind("re_plan")) == 2
 
 
 @pytest.mark.asyncio

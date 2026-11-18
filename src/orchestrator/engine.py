@@ -2770,6 +2770,11 @@ async def _orchestrate_run(
     documents_reserved = lane is not None
     # True once a wave ran (or a step was failed) since the last re_plan.
     ran_since_replan = False
+    # Ruling 32c: BRT-ORC-035 goes to re_plan once per run; the second time
+    # the step fails and re_plan is not called again (local to this check).
+    schema_error_seen = False
+    schema_replanned = False   # a re_plan ran after the first one
+    stop_replan = False
     # Ruling 26b: True once this run planned a step that reads the documents.
     doc_step_planned = False
 
@@ -2812,8 +2817,11 @@ async def _orchestrate_run(
                 # re_plan sent nothing new to run (e.g. only steps that
                 # already ran): compose.
                 break
+            if stop_replan:
+                break   # BRT-ORC-035 a second time: not re-planned (ruling 32c)
             ran_since_replan = False
             loop_count += 1
+            schema_replanned = schema_error_seen
 
             # --- RE_PLAN MODE ---
             replan_result = await _invoke_orchestrator_model(
@@ -2927,6 +2935,11 @@ async def _orchestrate_run(
             # not pick another step; re_plan is shown the skill's fields.
             schema_msg = skill_schema_message(node)
             if schema_msg is not None:
+                if schema_replanned:
+                    schema_msg = schema_msg.replace(
+                        ": ", ": (second time; not re-planned) ", 1)[:200]
+                    stop_replan = True
+                schema_error_seen = True
                 await _fail_step_before_call(
                     results, raw_unstamped if raw else None, run_id, node_id,
                     "BRT-ORC-035", schema_msg, node_docs, db_path, raw,
