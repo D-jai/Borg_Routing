@@ -151,7 +151,7 @@ def effective_cost(
         estimated_input_tokens: Expected number of input tokens.
         estimated_output_tokens: Expected number of output tokens.
         time_cost_per_sec: How much a second of waiting costs (configurable
-            via Admin UI; default $30/hr = $0.0083/sec).
+            via Admin UI; default $0.0001/sec, about $0.36/hr).
 
     Returns:
         Effective cost in USD (float). Lower is cheaper.

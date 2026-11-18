@@ -566,8 +566,8 @@ async def _select_orchestrator_model(
         pass
 
     # Degraded fallback: if no checked model meets the quality bar, retry at
-    # 5.1 — just above the default 5.0 unresearched score, so rows that have
-    # genuinely been scored even weakly are preferred over flat defaults.
+    # 5.1 — just above the scorer's flat 5.0 fallback (a model it could not
+    # research), so rows that have genuinely been scored are preferred.
     try:
         model = select_model(
             matrix=matrix,

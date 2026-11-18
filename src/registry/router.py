@@ -62,7 +62,7 @@ def select_model(
             f"with quality_requirement={quality_requirement} and "
             f"min_context_length={estimated_input_tokens}. "
             "Possible causes: no models are currently checked on the Models page; "
-            "the Get Info pass has not been run so scores are at the default 5.0; "
+            "the Get Info pass has not been run so the models have no scores yet; "
             "or the quality bar is too strict. Check models, lower the bar, or "
             "re-run Get Info."
         )

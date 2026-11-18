@@ -103,7 +103,7 @@ Fresh installs ship with these defaults (the quality bar of 9.0 means a frontier
 | `time_cost_per_sec` | `0.0001` (~$0.36/hr) | `.env` or Admin UI |
 
 Lower the quality bar to let weaker local models orchestrate (useful while
-you're still running Get Model Info; a model not yet researched has no scores and is not routed until Get Model Info runs, while the 12 curated rows ship with scores). Raise it to force frontier-only
+you're still running Get Model Info; a model not yet researched has no scores and is not chosen by score-based routing until Get Model Info runs (the planner can still name it, and a request can call it by exact id), while the 12 curated rows ship with scores). Raise it to force frontier-only
 orchestration. Lower the time cost toward 0 and speed counts for less, so
 price decides; this only makes cloud rows cheaper, because local rows added
 by Discover have no price and no measured speed, so they already carry no time cost.
