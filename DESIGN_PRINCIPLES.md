@@ -26,7 +26,7 @@ Every SQLite write has an owner. Children self-clean before returning; parents v
 - Parent sweeps `WHERE level = {child_level}` after fold-in. Residue → `child_residue` event + trust adjustment + cleanup.
 - Scratch is ephemeral; structured envelope outputs persist.
 
-**Status (16-Nov-2026).** The rule stands. Its machinery (the `scratch` table, cleanup directives, fold-in residue check) exists, but no current step writes scratch: `write_scratch` has no caller in `src/`, and an answerer's `scratch_writes` are recorded, not stored. Law 2 is therefore not exercised by any current run and is outside the showcase's claims.
+**Status (16-Nov-2026).** The rule stands. Its machinery (the `scratch` table, cleanup directives, fold-in residue check) exists, but no current step writes scratch: `write_scratch` has no caller in `src/`, and an answerer's `scratch_writes` are recorded, not stored. Law 2 is therefore not exercised by any current run and is outside the showcase's claims. The same holds for the `deferrals` side effect (18-Nov-2026, planner ruling 32): a deferral is carried in the item's own result (bucket `defer` plus `defer_reason`) and reaches re_plan in the step output; no deferrals table is filled.
 
 ---
 
