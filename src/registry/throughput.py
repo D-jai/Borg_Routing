@@ -237,9 +237,15 @@ async def measure_throughput(
             return None
         running = _probe_task(matrix, model_id, post, clock)
     try:
-        return await asyncio.shield(running)
+        figure = await asyncio.shield(running)
     except Exception:  # noqa: BLE001 - e.g. the owner was cancelled
         return None
+    # The owner stored the figure in the matrix it was started with; a waiter
+    # holding another matrix object stores it there too, or it would probe again.
+    current = matrix.get(model_id)
+    if figure is not None and current is not None and current.throughput_tps is None:
+        matrix.update_throughput(model_id, figure)
+    return figure
 
 
 def to_measure(matrix: CapabilityMatrix, checked_only: bool = True, skip_failed: bool = False) -> list[str]:

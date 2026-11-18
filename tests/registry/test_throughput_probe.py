@@ -294,6 +294,33 @@ def test_tick_twice_discover_and_a_run_start_share_one_probe(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_a_waiter_with_another_matrix_object_stores_the_shared_figure(monkeypatch):
+    """Lead's final check of 209f1c9: a run start holding its own matrix waits for a
+    tick's probe and keeps the figure, so its next run does not probe again."""
+    import asyncio
+
+    app_matrix, run_matrix = _matrix(OLLAMA), _matrix(OLLAMA)
+    gate = asyncio.Event()
+    calls = []
+
+    async def slow(url, body, timeout):
+        calls.append(url)
+        await gate.wait()
+        return {"eval_count": 32, "eval_duration": 4_000_000_000}
+
+    monkeypatch.setattr(throughput, "_post_json", slow)
+    owner = asyncio.ensure_future(throughput.measure_throughput(app_matrix, OLLAMA.model_id))
+    await asyncio.sleep(0)
+    waiter = asyncio.ensure_future(throughput.measure_throughput(run_matrix, OLLAMA.model_id))
+    await asyncio.sleep(0)
+    gate.set()
+    assert await owner == await waiter == 8.0
+    assert len(calls) == 1
+    assert run_matrix.get(OLLAMA.model_id).throughput_tps == 8.0
+    assert not throughput.needs_measuring(run_matrix.get(OLLAMA.model_id))
+
+
+@pytest.mark.asyncio
 async def test_a_failure_never_overwrites_a_figure_stored_meanwhile(monkeypatch):
     m = _matrix(OLLAMA)
 
