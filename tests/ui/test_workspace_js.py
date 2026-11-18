@@ -529,6 +529,24 @@ def test_receipt_has_one_line_per_field_a_plan_asked_for_and_the_skill_did_not_r
     assert js(tmp_path, f"return W.notProducedLines({json.dumps({'events': [other]})});") == []
 
 
+def test_receipt_has_one_line_per_key_the_plan_gave_that_nothing_takes(tmp_path):
+    """Ruling 32d: the BRT-ORC-036 plan note (second hit) becomes receipt lines,
+    from the skill for a skill_args key, from the step for a node key."""
+    skill = {"event_type": "orchestrator_decision", "decision_json": json.dumps({
+        "code": "BRT-ORC-036", "action": "ran_without_fields", "node_id": "n2",
+        "skill_id": "classify_into_buckets", "fields": ["instruction"]})}
+    node = {"event_type": "orchestrator_decision", "decision_json": json.dumps({
+        "code": "BRT-ORC-036", "action": "ran_without_fields", "node_id": "n2",
+        "skill_id": "", "fields": ["colour"]})}
+    unused = {"event_type": "orchestrator_decision", "decision_json": json.dumps({
+        "action": "accepted_unused", "node_id": "n2", "fields": ["state_query"]})}
+    got = js(tmp_path, f"return W.notProducedLines({json.dumps({'events': [skill, node, unused]})});")
+    assert got == [
+        "the plan asked for instruction from classify_into_buckets, which does not take it; not used",
+        "the plan asked for colour from step n2, which does not take it; not used",
+    ]
+
+
 def test_not_produced_line_renders_from_the_redacted_note_shape(tmp_path):
     """What a non-admin gets under a lane: only the five whitelisted keys."""
     note = {"event_type": "orchestrator_decision", "decision_json": json.dumps({

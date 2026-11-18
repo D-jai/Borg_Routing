@@ -266,6 +266,14 @@ class SkillLibrary:
         )
 
 
+    def arg_names(self, skill_id: str, version: Optional[int]) -> Optional[list[str]]:
+        """The skill's declared required_args names (plan validation, ruling
+        32d(iii)); None when the skill or version is not found."""
+        try:
+            return [str(a) for a in (self.get(skill_id, version).get("required_args") or {})]
+        except Exception:
+            return None
+
     def field_names(self, value: object) -> Optional[list[str]]:
         """The field names an output_schema value names (see schema_field_names)."""
         return schema_field_names(value)

@@ -43,6 +43,12 @@ Error codes:
                every lane. Second time: the step runs as the skill step it
                is; the fault is a plan note, a receipt line and an entry in
                asked_but_not_produced()
+- BRT-ORC-036: a plan node key no code reads or prompt teaches for its type,
+               a skill_args key the skill does not take, or a node type that
+               is not one of the four (planner ruling 32d); found by plan
+               validation, re_plan once per run shared with BRT-ORC-035.
+               Second time: an unknown key is dropped and the step runs,
+               recorded as for BRT-ORC-035; an unknown type fails the step
 - BRT-ORC-026: a re_plan step reused the id of a step that already ran; it
                was renamed <id>_2 (_3 ...) and the batch's refs to it follow
                (warning; the step runs)
@@ -134,7 +140,7 @@ from src.registry.node_router import (
     tokens_needed,
 )
 from src.registry.router import select_model
-from src.orchestrator.plan_validation import validate_plan
+from src.orchestrator.plan_validation import accepted_unused, validate_plan
 from src.skills.library import SkillLibrary
 
 MAX_LOOPS = 10
@@ -1885,27 +1891,73 @@ def asked_but_not_produced(run_id: object) -> list:
     return list(_NOT_PRODUCED.get(str(run_id), []))
 
 
+def _drop_plan_keys(nodes: list, issue: object) -> None:
+    """BRT-ORC-036 second hit: the step runs without the keys nothing takes.
+    The node is replaced in the batch by a copy without them (node keys, or
+    skill_args keys); the plan as logged is unchanged."""
+    for i, node in enumerate(nodes):
+        if not isinstance(node, dict) or str(node.get("id", "")) != issue.node_id:
+            continue
+        drop = set(issue.fields)
+        if issue.where == "node":
+            nodes[i] = {k: v for k, v in node.items() if k not in drop}
+        elif isinstance(node.get("skill_args"), dict):
+            nodes[i] = dict(node, skill_args={
+                k: v for k, v in node["skill_args"].items() if k not in drop})
+
+
 async def _check_plan(
     nodes: list, results: dict, run_id: UUID, db_path: str, state: dict,
 ) -> bool:
-    """Plan validation (BRT-ORC-035) on a plan or re_plan batch, before any of
-    its steps is dispatched. True when a step was refused (re_plan is due).
+    """Plan validation (BRT-ORC-035, BRT-ORC-036) on a plan or re_plan batch,
+    before any of its steps is dispatched. True when a step was refused
+    (re_plan is due).
 
-    First time in a run: each offending step fails with the full message, in
-    every lane (it is built from the plan and the skill list only), and
-    re_plan is shown it. Second time: the step runs as the skill step it is;
-    the run stops re-planning on this code; the fault is recorded as a plan
-    note (orchestrator_decision), in the run's not-produced list and, by the
-    receipt, as one line.
+    The two codes share one re_plan per run ("plan-validation re_plan used",
+    ruling 32d). First time in a run: each offending step fails with the full
+    message, in every lane (it is built from the plan and the skill list
+    only), and re_plan is shown it. Second time: the run stops re-planning;
+    a BRT-ORC-035 step runs as the skill step it is, a BRT-ORC-036 step runs
+    without the keys nothing takes (dropped from the batch before the build),
+    and each is recorded as a plan note (orchestrator_decision, action
+    ``ran_without_fields``), in the run's not-produced list and, by the
+    receipt, as one line per field. An unknown node type fails the step both
+    times. Accepted fields that build nothing are noted, never refused.
     """
+    # Change 1 (ruling 32d): accepted fields that build nothing on the node's
+    # path are recorded, one note per node; nothing is refused or changed.
+    for node_id, fields in accepted_unused(nodes):
+        try:
+            await write_event(
+                "orchestrator_decision", run_id=run_id,
+                decision={"action": "accepted_unused", "node_id": node_id, "fields": list(fields)},
+                db_path=db_path,
+            )
+        except Exception:
+            pass
     issues = validate_plan(nodes, _get_skill_lib())
     if not issues:
         return False
     second = state["seen"]
     state["seen"] = True
     for issue in issues:
+        fails = not second or issue.where == "type"
         if second:
             state["stop"] = True
+        if fails:
+            # First time in the run, or an unknown type (nothing sensible to
+            # run): the step fails. A node's first issue is its message.
+            if issue.node_id not in results:
+                results[issue.node_id] = InboundEnvelope(
+                    envelope_id=uuid4(), subtask_id=uuid4(), status="failed",
+                    output={}, failure_reason=issue.message,
+                )
+            event, decision = "error", {
+                "code": issue.code, "msg": issue.message, "node_id": issue.node_id,
+            }
+        else:
+            if issue.where in ("node", "skill_args"):
+                _drop_plan_keys(nodes, issue)
             kept = _NOT_PRODUCED.setdefault(str(run_id), [])
             for field in issue.fields:
                 kept.append({"step": issue.node_id, "skill": issue.skill_id, "field": field})
@@ -1915,14 +1967,6 @@ async def _check_plan(
                 "code": issue.code, "msg": issue.message, "node_id": issue.node_id,
                 "skill_id": issue.skill_id, "fields": list(issue.fields),
                 "action": "ran_without_fields",
-            }
-        else:
-            results[issue.node_id] = InboundEnvelope(
-                envelope_id=uuid4(), subtask_id=uuid4(), status="failed",
-                output={}, failure_reason=issue.message,
-            )
-            event, decision = "error", {
-                "code": issue.code, "msg": issue.message, "node_id": issue.node_id,
             }
         try:
             await write_event(event, run_id=run_id, decision=decision, db_path=db_path)

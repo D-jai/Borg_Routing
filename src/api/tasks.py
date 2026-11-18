@@ -275,14 +275,16 @@ def _redact_events(events: list[dict]) -> list[dict]:
                 kept.append(dict(ev, decision_json=json.dumps(counts)))
                 continue
             # Ruling 32c: the plan note for a skill field that was asked for and
-            # not produced. Built from the plan and the skill list only, so it
-            # stays: these five keys, each string cut at 40, at most 10 fields.
+            # not produced (BRT-ORC-035), and ruling 32d: a key no node or skill
+            # takes, dropped (BRT-ORC-036). Built from the plan and the skill list
+            # only, so it stays: these five keys, each string cut at 40, at most
+            # 10 fields.
             if (ev.get("event_type") == "orchestrator_decision"
-                    and decision.get("code") == "BRT-ORC-035"
+                    and decision.get("code") in ("BRT-ORC-035", "BRT-ORC-036")
                     and decision.get("action") == "ran_without_fields"):
                 fields = decision.get("fields")
                 note = {
-                    "code": "BRT-ORC-035", "action": "ran_without_fields",
+                    "code": decision["code"], "action": "ran_without_fields",
                     "node_id": str(decision.get("node_id", ""))[:40],
                     "skill_id": str(decision.get("skill_id", ""))[:40],
                     "fields": [str(f)[:40] for f in (fields if isinstance(fields, list) else [])[:10]],

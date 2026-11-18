@@ -414,10 +414,19 @@
     var out = [];
     (data && data.events || []).forEach(function (ev) {
       var d = ev && ev.event_type === 'orchestrator_decision' ? decisionOf(ev) : null;
-      if (!d || d.code !== 'BRT-ORC-035' || d.action !== 'ran_without_fields' || !Array.isArray(d.fields)) return;
-      d.fields.forEach(function (f) {
-        out.push('the plan asked for ' + f + ' from ' + d.skill_id + ', which does not return it; not produced');
-      });
+      if (!d || d.action !== 'ran_without_fields' || !Array.isArray(d.fields)) return;
+      if (d.code === 'BRT-ORC-035') {
+        d.fields.forEach(function (f) {
+          out.push('the plan asked for ' + f + ' from ' + d.skill_id + ', which does not return it; not produced');
+        });
+      } else if (d.code === 'BRT-ORC-036') {
+        /* Ruling 32d: a key no node or skill takes, dropped; from the skill for a skill_args
+         * key, from the step for a node key (its skill_id is empty). */
+        var from = d.skill_id ? d.skill_id : 'step ' + d.node_id;
+        d.fields.forEach(function (f) {
+          out.push('the plan asked for ' + f + ' from ' + from + ', which does not take it; not used');
+        });
+      }
     });
     return out;
   }
