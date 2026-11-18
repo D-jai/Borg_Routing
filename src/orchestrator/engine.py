@@ -36,6 +36,10 @@ Error codes:
 - BRT-ORC-025: a step's depends_on step failed (cycle-failed included); the
                step fails before any model call and the message names the
                failed step (an item ref to it keeps BRT-APE-005)
+- BRT-ORC-035: a skill step's output_schema names a field the skill does not
+               return (planner ruling 32c); it fails before any model call and
+               the message names the skill's fields, so re_plan can choose an
+               apply_to_each with its own output_schema
 - BRT-ORC-026: a re_plan step reused the id of a step that already ran; it
                was renamed <id>_2 (_3 ...) and the batch's refs to it follow
                (warning; the step runs)
@@ -1866,6 +1870,48 @@ def _failed_dependency(node: dict, results: dict, documents_reserved: bool) -> O
     return None
 
 
+_SKILL_SCHEMA_HINT = "for other fields use apply_to_each with your own output_schema"
+
+
+def _clip(text: str, limit: int) -> str:
+    return text if len(text) <= limit else text[: limit - 3] + "..."
+
+
+def skill_schema_message(node: dict) -> Optional[str]:
+    """BRT-ORC-035 text when a skill step's ``output_schema`` names a field
+    the skill does not return (its own fields plus the step's
+    ``extra_fields``); None when the step is fine, has no ``output_schema``,
+    or the skill's fields cannot be told. At most 200 characters, the hint
+    last (planner ruling 32c).
+    """
+    skill_id = node.get("skill_id")
+    named = node.get("output_schema")
+    if not skill_id or not named:
+        return None
+    if isinstance(named, dict):
+        names = list(named["properties"] if isinstance(named.get("properties"), dict) else named)
+    elif isinstance(named, list):
+        names = [n if isinstance(n, str) else str((n or {}).get("name", "")) if isinstance(n, dict) else str(n)
+                 for n in named]
+    else:
+        return None
+    args = node.get("skill_args")
+    fields = _get_skill_lib().return_fields(
+        str(skill_id), node.get("skill_version", 1), args if isinstance(args, dict) else {}
+    )
+    if fields is None:
+        return None
+    unknown = [str(n) for n in names if n and str(n) not in fields]
+    if not unknown:
+        return None
+    tail = f"; {_SKILL_SCHEMA_HINT}"
+    head = (
+        f"BRT-ORC-035: skill '{_clip(str(skill_id), 24)}' returns only "
+        f"{_clip(', '.join(fields), 70)}, not {_clip(', '.join(unknown), 30)}"
+    )
+    return _clip(head, 200 - len(tail)) + tail
+
+
 def ref_cycle_message(node_id: str, cycle: Optional[list[str]]) -> str:
     """BRT-ORC-024 failure text for a step on a ref / depends_on cycle."""
     path = " -> ".join(cycle) if cycle else "steps that wait on each other"
@@ -2874,6 +2920,17 @@ async def _orchestrate_run(
                     )
                 except Exception:
                     pass
+                continue
+
+            # A skill step whose output_schema names a field the skill does
+            # not return fails now (BRT-ORC-035, ruling 32c): the engine does
+            # not pick another step; re_plan is shown the skill's fields.
+            schema_msg = skill_schema_message(node)
+            if schema_msg is not None:
+                await _fail_step_before_call(
+                    results, raw_unstamped if raw else None, run_id, node_id,
+                    "BRT-ORC-035", schema_msg, node_docs, db_path, raw,
+                )
                 continue
 
             # A state_op whose source step failed has no items: it fails

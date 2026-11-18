@@ -266,6 +266,25 @@ class SkillLibrary:
         )
 
 
+    def return_fields(self, skill_id: str, version: Optional[int], args: object) -> Optional[list[str]]:
+        """The field names a skill step returns per item: the skill's own
+        output_schema keys plus the step's ``extra_fields``; None when they
+        cannot be told without rendering (a schema derived from an arg, a
+        skill not found, extra_fields that do not parse).
+        """
+        try:
+            skill = self.get(skill_id, version)
+            raw = (skill.get("outbound_template") or {}).get("output_schema")
+            if not isinstance(raw, dict) or not raw:
+                return None
+            names = list(raw["properties"] if isinstance(raw.get("properties"), dict) else raw)
+            extra = args.get("extra_fields") if isinstance(args, dict) else None
+            names += [n for n in _step_fields(skill_id, extra, raw) if n not in names]
+            return [str(n) for n in names]
+        except Exception:
+            return None
+
+
 _PLACEHOLDER = re.compile(r"\{(\w+)\}")
 
 # Wording for an optional arg's ``<arg>_instruction`` line; any other arg
