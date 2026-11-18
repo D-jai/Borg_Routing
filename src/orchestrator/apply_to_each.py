@@ -23,6 +23,8 @@ Error codes:
                On a raw (lane) step both are shown upward as code+doc only.
 - BRT-APE-007: BORG_PACK_MAX_ITEMS is not a whole number of 0 or more;
                packing is off for the step (warning event, ruling 23)
+- BRT-APE-008: failed_items_only named a step that is not a per-item step;
+               all items run (warning event, ruling 32d(i))
 
 Packing (planner ruling 23, ``src/orchestrator/packing.py``): a step whose
 calls go to a cloud host may send several small items in one call. Each item
@@ -300,6 +302,8 @@ async def expand_and_run(
             status="resolved",
             output={"results": [], "failures": [], "total": 0, "success_count": 0,
                     "failure_count": 0, "notes": [note]},
+            # Same as the normal path with nothing failed.
+            lane_guarded=True if task.data_scope == "raw" else None,
         )
 
     # Resolve items. BRT-APE-01 — empty-items used to resolve to an envelope
@@ -351,6 +355,22 @@ async def expand_and_run(
     from src.lane.outbound import MAX_CONCURRENCY  # noqa: PLC0415
 
     notes: list[str] = []
+    ignored = task.dependency_input.get("failed_items_ignored")
+    if ignored:
+        # Ruling 32d(i): the flag named a step that is not a per-item step.
+        notes.append(str(ignored))
+        from src.logging.writer import write_event  # noqa: PLC0415
+
+        try:
+            await write_event(
+                "error",
+                run_id=task.run_id,
+                envelope_id=task.envelope_id,
+                decision={"code": "BRT-APE-008", "severity": "warning", "msg": str(ignored)},
+                db_path=db_path,
+            )
+        except Exception:
+            pass
     if concurrency_limit > MAX_CONCURRENCY:
         note = f"concurrency_limit {concurrency_limit} capped at {MAX_CONCURRENCY}"
         notes.append(note)

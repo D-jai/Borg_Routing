@@ -1371,10 +1371,17 @@ def _upstream_list(ref: object, results: dict) -> Optional[list]:
 def _failed_items_only(node: dict) -> bool:
     """True when the node asks for the failed items only (ruling 32d(i)):
     ``"failed_items_only": true`` on the node or inside its ``skill_args``."""
-    if node.get("failed_items_only") is True:
-        return True
+    def _true(value: object) -> bool:
+        return value is True or (isinstance(value, str) and value.strip().lower() == "true")
+
     skill_args = node.get("skill_args")
-    return isinstance(skill_args, dict) and skill_args.get("failed_items_only") is True
+    return _true(node.get("failed_items_only")) or (
+        isinstance(skill_args, dict) and _true(skill_args.get("failed_items_only"))
+    )
+
+
+def _failed_items_ignored_note(ref: object) -> str:
+    return f"failed_items_only ignored: {ref} is not a per-item step; all items run"
 
 
 def _failed_items_of(ref: object, results: dict) -> Optional[tuple[list, list[int]]]:
@@ -1392,7 +1399,8 @@ def _failed_items_of(ref: object, results: dict) -> Optional[tuple[list, list[in
     if not isinstance(failures, list) or not isinstance(out.get("results"), list):
         return None
     rows = sorted((f for f in failures if isinstance(f, dict)), key=lambda f: f.get("index", 0))
-    return [f.get("item") for f in rows], [f.get("index", 0) for f in rows]
+    # A retry of a retry points back to the first step (its own original_index).
+    return [f.get("item") for f in rows], [f.get("original_index", f.get("index", 0)) for f in rows]
 
 
 def _upstream_groups(ref: object, results: dict) -> Optional[dict]:
@@ -2343,8 +2351,15 @@ def _build_task_from_node(
                         dep["items"], dep["original_indexes"] = failed
                         dep["failed_items_only"] = True
                         update["dependency_input"] = dep
+                        if lane is not None and failed[0] and all(
+                            lane.is_part_id(i) for i in failed[0]
+                        ):
+                            # The failed document parts, as the first step had them.
+                            update["documents"] = list(failed[0])
                     elif (upstream := _upstream_list(ref, results)) is not None:
                         dep["items"] = upstream
+                        if _failed_items_only(node):
+                            dep["failed_items_ignored"] = _failed_items_ignored_note(ref)
                         update["dependency_input"] = dep
                     elif isinstance(ref, str) and ref and ref not in results:
                         # Names no step: the expander fails it (BRT-APE-006).
@@ -2419,6 +2434,7 @@ def _build_task_from_node(
         inputs_ref_raw = node.get("inputs_ref", "")
         items_from_node = node.get("items", [])
         failed_indexes: Optional[list[int]] = None
+        failed_ignored: Optional[str] = None
         resolved_items = items_from_node
         ref_failure: Optional[str] = None
         unresolved: Optional[str] = None
@@ -2446,8 +2462,15 @@ def _build_task_from_node(
                 if failed is not None:
                     # Ruling 32d(i): the failed items of that step only.
                     resolved_items, failed_indexes = failed
+                    if lane is not None and resolved_items and all(
+                        lane.is_part_id(i) for i in resolved_items
+                    ):
+                        # The failed document parts, as the first step had them.
+                        named_docs = list(resolved_items)
                 elif upstream is not None:
                     resolved_items = upstream
+                    if _failed_items_only(node):
+                        failed_ignored = _failed_items_ignored_note(inputs_ref_raw)
             else:
                 # Ruling 1a — the ref names no step of this run (the ready
                 # check has already waited for any step of this plan it
@@ -2464,6 +2487,8 @@ def _build_task_from_node(
         if failed_indexes is not None:
             dep_input["failed_items_only"] = True
             dep_input["original_indexes"] = failed_indexes
+        if failed_ignored:
+            dep_input["failed_items_ignored"] = failed_ignored
         if ref_failure:
             dep_input["ref_failure"] = ref_failure
         if unresolved:
@@ -3957,7 +3982,7 @@ def _salvage_finished_results(results: dict, lane: Optional[LaneContext] = None)
             for entry in out["results"]:
                 if not isinstance(entry, dict):
                     continue
-                row = {"index": entry.get("index")}
+                row = {"index": entry.get("original_index", entry.get("index"))}
                 item = entry.get("item")
                 if not raw or (lane is not None and lane.is_part_id(item)):
                     row["item"] = item

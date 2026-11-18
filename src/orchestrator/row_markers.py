@@ -67,7 +67,8 @@ def _is_entry(value: object) -> bool:
 
 def _item_id(entry: dict, raw: bool, lane) -> object:
     item = entry.get("item")
-    index = entry.get("index")
+    # A retry of failed items names its entries by the original step's index.
+    index = entry.get("original_index", entry.get("index"))
     if raw:
         return item if lane.is_part_id(item) else index
     if isinstance(item, (str, int, float)) and not isinstance(item, bool):
