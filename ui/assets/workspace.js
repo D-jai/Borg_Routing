@@ -322,10 +322,11 @@
     var n = Number(v);
     if (!isFinite(n) || n < 0) return '-';
     if (n === 0) return '$0.00';
-    if (n >= 1) return '$' + (Math.floor(n * 100) / 100).toFixed(2);
+    // toPrecision(12) cleans float error first (1.15 * 100 is 114.999...), so an exact value is not shown one unit low.
+    if (n >= 1) return '$' + (Math.floor(Number((n * 100).toPrecision(12))) / 100).toFixed(2);
     var digits = 2 - Math.floor(Math.log10(n));
     var f = Math.pow(10, digits);
-    return '$' + (Math.floor(n * f) / f).toFixed(digits);
+    return '$' + (Math.floor(Number((n * f).toPrecision(12))) / f).toFixed(digits);
   }
   /* What the floor leaves out, as one short note under the receipt. */
   function floorNote(est) {

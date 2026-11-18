@@ -235,6 +235,13 @@ def test_ruling_22_the_displayed_floor_never_exceeds_the_stored_value(tmp_path):
     assert shown[0] == "$0.0929"
 
 
+def test_ruling_22_an_exact_floor_is_shown_whole_not_one_unit_low(tmp_path):
+    """Rounding down must not drop a digit to float error: 1.15 * 100 is 114.999... in floating point."""
+    values = [1.15, 4.35, 2.01, 0.0012, 0.00104, 0.6012]
+    shown = js(tmp_path, f"return {json.dumps(values)}.map(v => W.floorMoney(v));")
+    assert shown == ["$1.15", "$4.35", "$2.01", "$0.00120", "$0.00104", "$0.601"]
+
+
 FLOOR_DIGEST = {"cost_dollars": 0.05, "direct_floor_dollars": 0.092993,
                 "direct_floor_model": "openrouter/anthropic/claude-opus-5.5", "direct_floor_ratio": [1.3, 4.4]}
 
