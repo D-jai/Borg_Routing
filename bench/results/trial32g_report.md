@@ -25,6 +25,8 @@ The trial win rule is the round's rule on one run: cost at most 70% of the store
 | round 1 | A | 0.1027 | 0.2085 | 49% | 200 of 200 answered; accuracy over all items 0.0 (category 0.935, urgency 0) | composed | 1 | BRT-ORC-035 (first plan) | accepted_unused: {output_schema} on both nodes; 035 ran_without_fields on classify_emails_2 | 10 packs of 20 (one accepted 19) | no win: urgency not produced |
 | round 1 | C | 0.2417 | 0.7977 | 30% | the judge chose direct (1-0); informational facts 5 of 8, contradictions 0 of 2 | composed | 3 | BRT-ORC-029 once, 032 twice | none | none | no win: judge chose direct |
 
+**Job C's costs are understated by one compose call each** (planner ruling 35e). Both C runs' first compose reply was valid JSON but not an object. Its log row was never written: a `try/except` around the logging swallowed the error, so that call's dollars are missing from both figures above. The cause was found and fixed in ruling 35e. Each missing call is about the size of the run's other compose posts (estimated US$0.03 to 0.04).
+
 ## Plain reading
 
 - What the fixes changed: packing (A's 200 items in 10 calls, D's 60 in 3), the optional "(only if" field (D's 31 failures gone, D 0.60 to 1.00), the plan checks 035 and 036 (they caught the bad schema and the stray key), and compose's check 041 (it caught a guessed value and the re-ask gave an honest answer). B's answer now holds its files.

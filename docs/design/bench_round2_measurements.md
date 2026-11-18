@@ -198,7 +198,7 @@ Ruling 23 held. In both runs one pack of 20 came back with 19 accepted, 1 missin
 
 ### Open (trial 32g)
 
-- Why the first compose reply of job C is never stored.
+- Why the first compose reply of job C is never stored: answered by ruling 35e. The reply was valid JSON but not an object, and building its log event raised inside a 	ry/except Exception: pass, so the event and its dollars were dropped. Fixed, with a test for each re-ask path.
 - Whether `depends_on` hands an apply_to_each's rows to an answerer under by_reference (code reading only).
 - Whether a worker asked for urgency in its schema while the governance block shows `{file, category, urgency}` marks items failed as a "contradiction" (untested).
 - Why r1's re_plan chose compose while its rationale says an urgency stage is needed.
