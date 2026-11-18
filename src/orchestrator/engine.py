@@ -2370,13 +2370,8 @@ async def orchestrate_run(
     root_instruction: Optional[str] = None,
     route_options: Optional[dict] = None,
     lane: Optional[LaneContext] = None,
-    documents_step: bool = False,
 ) -> str:
     """Main orchestration loop. Returns the final response text.
-
-    ``documents_step`` is True for a child run started by a step that reads
-    the run's documents (an orchestrate step given documents, all_local):
-    the child then answers to ruling 26b like a top-level run with documents.
 
     ``route_options`` carries a chat alias (``borg_route:light`` and so on)
     into step routing for this run and the child runs it starts.
@@ -2404,11 +2399,11 @@ async def orchestrate_run(
             with lane_scope(lane):
                 return await _orchestrate_run(
                     run_id, user_instruction, thread_window, rolling_summary, db_path,
-                    current_depth, root_instruction, documents_step,
+                    current_depth, root_instruction,
                 )
         return await _orchestrate_run(
             run_id, user_instruction, thread_window, rolling_summary, db_path,
-            current_depth, root_instruction, documents_step,
+            current_depth, root_instruction,
         )
     finally:
         if token is not None:
@@ -2423,7 +2418,6 @@ async def _orchestrate_run(
     db_path: str,
     current_depth: int,
     root_instruction: Optional[str],
-    documents_step: bool = False,
 ) -> str:
     if thread_window is None:
         thread_window = []
@@ -2674,6 +2668,8 @@ async def _orchestrate_run(
     documents_reserved = lane is not None
     # True once a wave ran (or a step was failed) since the last re_plan.
     ran_since_replan = False
+    # Ruling 26b: True once this run planned a step that reads the documents.
+    doc_step_planned = False
 
     while loop_count < MAX_LOOPS:
         # Within one plan, waves run until no step is ready; only then is
@@ -2782,6 +2778,7 @@ async def _orchestrate_run(
             node_docs: list[str] = []
             if lane is not None:
                 reads_docs = _node_reads_documents(node)
+                doc_step_planned = doc_step_planned or reads_docs
                 raw = reads_docs or any(ref in raw_unstamped for ref in _node_refs(node))
                 # by_reference: a raw step is marked and handed its documents
                 # the same way, but may be routed to any checked model.
@@ -3133,11 +3130,11 @@ async def _orchestrate_run(
         )
 
     # Planner ruling 26b: with documents, an answer no document step stands
-    # behind must not exist. The run fails before compose is called. A
-    # child run inherits the lane but holds no documents of its own: it is
-    # checked only when the step that started it reads documents (ruling
-    # 26b edge), so its planner's text never stands in for a failed step.
-    if current_depth == 0 or documents_step:
+    # behind must not exist; the run fails before compose is called. A
+    # top-level run with documents is always checked. A child run inherits
+    # the lane (and the manifest) but holds no documents of its own: it is
+    # checked when it planned a step that reads them.
+    if current_depth == 0 or doc_step_planned:
         await _fail_if_no_document_step(results, run_id, db_path)
 
     # --- COMPOSE MODE ---
@@ -3584,6 +3581,44 @@ async def _mark_planner_only(results: dict, run_id: UUID, db_path: str) -> None:
     except Exception:
         pass
     await _mark_answer_kind(run_id, "planner_only", db_path)
+
+
+async def planner_only_failure(run_id: UUID, db_path: str) -> Optional[str]:
+    """Ruling 26g: when run ``run_id`` (a child run) ended ``planner_only``,
+    the reason its parent's orchestrate step fails, else None.
+
+    ``BRT-ORC-022`` carrying the child's BRT-ORC-033 and its step failure
+    codes, cut to fit the 200 characters re_plan is shown. Never the child's
+    text. Call it after the child's log writes are flushed.
+    """
+    try:
+        from src.db.state import get_run  # noqa: PLC0415
+
+        run = await get_run(run_id, db_path=db_path)
+        if (run or {}).get("answer_kind") != "planner_only":
+            return None
+        import aiosqlite  # noqa: PLC0415
+
+        codes: list = []
+        async with aiosqlite.connect(db_path) as db:
+            async with db.execute(
+                "SELECT decision_json FROM logs WHERE run_id=? AND event_type='error' "
+                "ORDER BY rowid", (str(run_id),),
+            ) as cur:
+                for (raw,) in await cur.fetchall():
+                    try:
+                        d = json.loads(raw or "null")
+                    except (TypeError, ValueError):
+                        continue
+                    if isinstance(d, dict) and d.get("code") == "BRT-ORC-033":
+                        codes = d.get("step_codes") or []
+    except Exception:
+        return None
+    head = ("BRT-ORC-022: the child run's steps all failed (BRT-ORC-033), so its "
+            "answer was not used. Child step failures: ")
+    text = head + _codes_text(codes)
+    limit = 200 - len("BRT-ORC-004: ")
+    return text if len(text) <= limit else text[: limit - 3] + "..."
 
 
 async def _fail_if_no_document_step(results: dict, run_id: UUID, db_path: str) -> None:

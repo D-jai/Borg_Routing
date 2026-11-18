@@ -458,3 +458,25 @@ def test_ruling_26a_note_for_a_redacted_viewer_leaves_out_the_count(tmp_path):
     note = js(tmp_path, f"return W.noStepNote({json.dumps(data)});")
     assert note.startswith("Every planned step failed, so the planning model wrote this answer alone")
     assert "0 of 0" not in note and "codes" not in note
+
+
+# ---------- round 2 of 82d3da4: steps failed before any call are counted ----------
+
+def _err(code, node_id, **kw):
+    return {"event_type": "error", "run_id": "r",
+            "decision_json": json.dumps(dict({"code": code, "node_id": node_id}, **kw))}
+
+
+def test_receipt_counts_steps_failed_before_any_call(tmp_path):
+    def lines(envs, events):
+        data = run_body(envs, events=events)
+        return js(tmp_path, f"return W.failedLines(W.receiptFrom({json.dumps(data)}));")
+
+    # A bad state_op (its envelope failed), then one reading it: failed before
+    # any call (BRT-APE-005), so it has an event and no envelope.
+    assert lines([env("n1", type_="state_op", status="failed")],
+                 [_err("BRT-APE-005", "n2")]) == ["2 of 2 steps failed"]
+    # One step refused in an otherwise finished run; a warning is not a failure.
+    assert lines([env("n1"), env("n2")],
+                 [_err("BRT-LANE-002", "n3"), _err("BRT-ORC-019", "n1", severity="warning")]
+                 ) == ["1 of 3 steps failed"]

@@ -380,19 +380,31 @@
       (list ? ' Step failure codes: ' + list + '.' : '');
   }
 
-  /* Ruling 26e: {steps, stepsFailed, items, itemsFailed} from the steps' stored results. A step
-   * failed when its envelope failed, or (ruling 26f) it is an apply_to_each whose every item
-   * failed. An apply_to_each with some failed items is not a failed step: its items count. */
+  /* Ruling 26e: {steps, stepsFailed, items, itemsFailed}. A step failed when its envelope failed,
+   * when (ruling 26f) it is an apply_to_each whose every item failed, or when it failed before any
+   * call and so has no envelope (BRT-LANE-002, -ORC-025, -APE-005, -ORC-008, -ORC-024, -REG-020):
+   * those are read from the run's error events by node_id (a warning is not a failure). Steps are
+   * counted once each by node id. An apply_to_each with some failed items is not a failed step:
+   * its items count. */
   function failedCounts(data) {
-    var steps = stepsFromRun(data), out = { steps: steps.length, stepsFailed: 0, items: 0, itemsFailed: 0 };
-    steps.forEach(function (s) {
+    var failed = {}, ok = {}, out = { steps: 0, stepsFailed: 0, items: 0, itemsFailed: 0 };
+    stepsFromRun(data).forEach(function (s) {
       var inb = parseJSON(s.envelope && s.envelope.inbound_payload) || {};
       var o = inb.output && typeof inb.output === 'object' ? inb.output : {};
       var allItemsFailed = Array.isArray(o.results) && !o.results.length && Array.isArray(o.failures) && o.failures.length > 0;
-      if (s.status === 'failed' || allItemsFailed) { out.stepsFailed += 1; return; }
+      if (s.status === 'failed' || allItemsFailed) { failed[s.id] = true; return; }
+      ok[s.id] = true;
       var bad = num(o.failure_count), total = num(o.total);
       if (s.type === 'apply_to_each' && bad && total) { out.itemsFailed += bad; out.items += total; }
     });
+    (data && data.events || []).forEach(function (ev) {
+      if (!ev || ev.event_type !== 'error') return;
+      var d = decisionOf(ev);
+      if (!d || typeof d.node_id !== 'string' || !d.node_id || d.severity === 'warning') return;
+      if (!ok[d.node_id]) failed[d.node_id] = true;
+    });
+    out.stepsFailed = Object.keys(failed).length;
+    out.steps = out.stepsFailed + Object.keys(ok).filter(function (k) { return !failed[k]; }).length;
     return out;
   }
   /* The receipt's failure lines: "k of N steps failed" only when k > 0, then "m of n items

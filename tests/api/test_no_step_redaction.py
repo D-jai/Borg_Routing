@@ -33,3 +33,27 @@ def test_a_step_code_that_is_not_a_code_never_leaves():
 def test_other_error_events_are_still_dropped():
     ev = _event({"code": "BRT-ORC-034", "msg": "doc text", "step_codes": ["BRT-ORC-004"]})
     assert _redact_events([ev])[0]["decision_json"] is None
+
+
+def test_codes_and_document_ids_must_have_their_real_shape():
+    ev = _event({"code": "BRT-ORC-033", "failed_steps": 2,
+                 "step_codes": ["BRT-LANE-ACME-CORP", {"code": "BRT-LANE-002", "doc": "Smith"},
+                                {"code": "BRT-LANE-002", "doc": "doc_001#2,doc_014"}]})
+    kept = json.loads(_redact_events([ev])[0]["decision_json"])
+    text = json.dumps(kept)
+    assert "ACME" not in text and "Smith" not in text
+    assert kept["step_codes"] == [{"code": "BRT-LANE-002"},
+                                  {"code": "BRT-LANE-002", "doc": "doc_001#2,doc_014"}]
+
+
+def test_a_step_failure_event_keeps_its_code_and_step_id_only():
+    """Round 2: the receipt counts steps failed before any call from these events."""
+    ev = _event({"code": "BRT-APE-005", "msg": "document text", "node_id": "n2"})
+    assert json.loads(_redact_events([ev])[0]["decision_json"]) == {
+        "code": "BRT-APE-005", "node_id": "n2"}
+    warn = _event({"code": "BRT-ORC-019", "severity": "warning", "node_id": "n1", "msg": "x"})
+    assert json.loads(_redact_events([warn])[0]["decision_json"]) == {
+        "code": "BRT-ORC-019", "node_id": "n1", "severity": "warning"}
+    for bad in ({"code": "BRT-APE-005", "node_id": "n2 the client said"},
+                {"code": "Smith", "node_id": "n2"}):
+        assert _redact_events([_event(bad)])[0]["decision_json"] is None

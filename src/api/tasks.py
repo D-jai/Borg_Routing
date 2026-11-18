@@ -284,12 +284,45 @@ def _redact_events(events: list[dict]) -> list[dict]:
             if no_step is not None:
                 kept.append(dict(ev, decision_json=json.dumps(no_step)))
                 continue
+            step_failure = _step_failure_ids(ev.get("decision_json"))
+            if step_failure is not None:
+                kept.append(dict(ev, decision_json=json.dumps(step_failure)))
+                continue
         kept.append(dict(ev, decision_json=None))
     return kept
 
 
-_CODE_RE = re.compile(r"^BRT-[A-Z]+-[0-9A-Z-]{1,24}$")
-_DOC_IDS_RE = re.compile(r"^[A-Za-z0-9_#.:-]+(,[A-Za-z0-9_#.:-]+)*$")
+# A step failure code (the registry's shape) and document part ids as the lane
+# makes them (``doc_001``, ``doc_001#2``; src/lane/documents.py, joined with
+# commas by ``doc_label``). Anything else never leaves a redacted event.
+_CODE_RE = re.compile(r"^BRT-[A-Z]{2,5}-\d{3}$")
+_DOC_ID = r"doc_\d{3,}(#\d+)?"
+_DOC_IDS_RE = re.compile(rf"^{_DOC_ID}(,{_DOC_ID})*$")
+_NODE_ID_RE = re.compile(r"^[A-Za-z0-9_.:-]{1,64}$")
+
+
+def _step_failure_ids(decision_json: object) -> Optional[dict]:
+    """Round 2 of 82d3da4: what a redacted viewer keeps of an error event
+    about one step (it carries ``node_id``), else None.
+
+    Only ``code`` and ``node_id`` (and ``severity`` when it is a warning), so
+    the receipt can count steps that failed before any call; plan step ids
+    are already shown in each envelope's ``outbound_payload``.
+    """
+    try:
+        decision = json.loads(decision_json or "null")
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(decision, dict):
+        return None
+    code, node_id = decision.get("code"), decision.get("node_id")
+    if not (isinstance(code, str) and _CODE_RE.match(code)
+            and isinstance(node_id, str) and _NODE_ID_RE.match(node_id)):
+        return None
+    out = {"code": code, "node_id": node_id}
+    if decision.get("severity") == "warning":
+        out["severity"] = "warning"
+    return out
 
 
 def _no_step_counts(decision_json: object) -> Optional[dict]:

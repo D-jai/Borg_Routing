@@ -203,10 +203,13 @@ async def test_child_with_documents_whose_steps_all_fail_hands_the_parent_a_fail
         if "Your Assignment In This Run" not in req.system:
             assert CHILD_TEXT not in req.system + req.user, req.kind
     assert CHILD_TEXT not in (result["response"] or "")
-    # The child itself failed with BRT-ORC-034 (not some other error) ...
+    # The child planned no document step, so 26b does not apply inside it
+    # (round 2 of 82d3da4): it ends planner_only and keeps its answer (ruling
+    # 26g), and the parent's step fails with BRT-ORC-022 carrying BRT-ORC-033.
     with sqlite3.connect(lane["db"]) as conn:
         child = conn.execute(
-            "SELECT run_id, status FROM runs WHERE parent_run_id=?", (result["run_id"],)
+            "SELECT run_id, status, answer_kind FROM runs WHERE parent_run_id=?",
+            (result["run_id"],),
         ).fetchall()
         child_events = [
             json.loads(r[0]) for r in conn.execute(
@@ -214,9 +217,130 @@ async def test_child_with_documents_whose_steps_all_fail_hands_the_parent_a_fail
                 (child[0][0],),
             ).fetchall()
         ]
-    assert [c[1] for c in child] == ["failed"]
-    assert any(e.get("code") == "BRT-ORC-034" for e in child_events), child_events
+    assert [(c[1], c[2]) for c in child] == [("completed", "planner_only")]
+    assert any(e.get("code") == "BRT-ORC-033" for e in child_events), child_events
+    replan = [r for r in stub.of_kind("re_plan")
+              if "Your Assignment In This Run" not in r.system]
+    assert replan and "BRT-ORC-022" in replan[0].system + replan[0].user
     # ... and the parent, with no document step that finished, fails too.
     assert result["status"] == "failed", result
     assert "BRT-ORC-034" in (result["error"] or "")
     assert "not defined" not in json.dumps(child_events)
+
+
+# --- Round 2 of 82d3da4: a child of a step that names no documents ------------
+
+PARENT_READ = "Summarise the client note."
+CHILD_READ = "Child: rate the client in the note."
+
+
+def _is_child(req):
+    return "Your Assignment In This Run" in req.system
+
+
+async def test_child_that_plans_its_own_document_step_answers_to_26b(lane):
+    """all_local: n1 reads doc_001 and finishes; n2 is an orchestrate step with
+    no documents; its child plans one answerer over doc_001, which fails
+    (BRT-ANS-005). The child fails with BRT-ORC-034; its text never reaches
+    the parent."""
+    parent_plan = [
+        {"type": "answerer", "id": "n1", "instruction": PARENT_READ, "documents": ["doc_001"],
+         "task_type": "reasoning", "tier": "light", "output_schema": {"result": "string"}},
+        {"type": "orchestrate", "id": "n2", "instruction": "Rate the client.",
+         "task_type": "reasoning", "tier": "light", "output_schema": {"result": "string"}},
+    ]
+    child_plan = [{"type": "answerer", "id": "c1", "instruction": CHILD_READ,
+                   "documents": ["doc_001"], "task_type": "reasoning", "tier": "light",
+                   "output_schema": {"risk": "string"}}]
+
+    def answers(req):
+        if CHILD_READ in req.system:
+            return {"nothing": True}          # misses "risk": BRT-ANS-005
+        return {"result": "a short summary"}
+
+    stub, result = await _run(
+        lane, "all_local", lane_matrix(), plan=parent_plan,
+        plan_for=lambda r: child_plan if _is_child(r) else parent_plan,
+        compose_for=lambda r: {"response": CHILD_TEXT if _is_child(r) else COMPOSED},
+        answer_for=answers)
+    with sqlite3.connect(lane["db"]) as conn:
+        child = conn.execute("SELECT run_id, status FROM runs WHERE parent_run_id=?",
+                             (result["run_id"],)).fetchall()
+        child_codes = [json.loads(r[0]).get("code") for r in conn.execute(
+            "SELECT decision_json FROM logs WHERE event_type='error' AND run_id=?",
+            (child[0][0],)).fetchall()]
+    assert [c[1] for c in child] == ["failed"], child
+    assert "BRT-ORC-034" in child_codes, child_codes
+    for req in stub.requests:
+        if not _is_child(req):
+            assert CHILD_TEXT not in req.system + req.user, req.kind
+    assert CHILD_TEXT not in (result["response"] or "")
+    assert result["status"] == "completed", result.get("error")   # n1 finished
+
+
+# --- Planner ruling 26g: a planner_only child is a failed step in its parent ----
+
+@pytest.mark.asyncio
+async def test_g_planner_only_child_is_a_failed_step_and_its_text_stays_down(env):
+    db_path, mp = env
+    parent_plan = [{"type": "orchestrate", "id": "n1", "instruction": "Solve the sub-problem.",
+                    "task_type": "reasoning", "tier": "light",
+                    "output_schema": {"result": "string"}}]
+    child_plan = [BAD_STEP]
+    stub = StubModels(
+        plan_nodes=parent_plan,
+        plan_for=lambda r: child_plan if _is_child(r) else parent_plan,
+        compose_for=lambda r: {"response": CHILD_TEXT if _is_child(r) else COMPOSED},
+    ).install(mp)
+    result = await run_pipeline("Work it out.", db_path=db_path)
+    await drain_log_writes()
+    assert result["status"] == "completed", result.get("error")
+    for req in stub.requests:
+        if not _is_child(req):
+            assert CHILD_TEXT not in req.system + req.user, req.kind
+    assert CHILD_TEXT not in (result["response"] or "")
+    with sqlite3.connect(db_path) as conn:
+        env_row = conn.execute(
+            "SELECT status, inbound_payload FROM envelopes WHERE run_id=? AND type='orchestrate'",
+            (result["run_id"],)).fetchone()
+        child = conn.execute("SELECT run_id, status, answer_kind FROM runs WHERE parent_run_id=?",
+                             (result["run_id"],)).fetchone()
+    assert env_row[0] == "failed", env_row
+    reason = json.loads(env_row[1])["failure_reason"]
+    assert "BRT-ORC-022" in reason and "BRT-ORC-033" in reason and "BRT-ORC-004" in reason
+    # re_plan sees the failure and the child's step codes within 200 characters.
+    replan = stub.of_kind("re_plan")
+    replan = [r for r in replan if not _is_child(r)][0]
+    assert "BRT-ORC-033" in replan.system + replan.user
+    assert len(reason) <= 213
+    # The child keeps its planner_only answer; the parent, with no other step, is planner_only.
+    assert child[1] == "completed" and child[2] == "planner_only"
+    assert await _answer_kind(db_path, result["run_id"]) == "planner_only"
+
+
+@pytest.mark.asyncio
+async def test_g_child_that_answers_directly_still_resolves(env):
+    db_path, mp = env
+    parent_plan = [{"type": "orchestrate", "id": "n1", "instruction": "Solve the sub-problem.",
+                    "task_type": "reasoning", "tier": "light",
+                    "output_schema": {"result": "string"}}]
+
+    def plan_content(req):
+        if _is_child(req):
+            return {"direct_answer": "The child answered directly.", "plan": None,
+                    "rationale": "no steps needed"}
+        return {"plan": {"nodes": parent_plan}, "rationale": "scripted plan"}
+
+    StubModels(plan_nodes=parent_plan, plan_content_for=plan_content,
+               compose_text=COMPOSED).install(mp)
+    result = await run_pipeline("Work it out.", db_path=db_path)
+    await drain_log_writes()
+    with sqlite3.connect(db_path) as conn:
+        env_row = conn.execute(
+            "SELECT status FROM envelopes WHERE run_id=? AND type='orchestrate'",
+            (result["run_id"],)).fetchone()
+        child = conn.execute("SELECT answer_kind FROM runs WHERE parent_run_id=?",
+                             (result["run_id"],)).fetchone()
+    assert child[0] == "direct"
+    assert env_row[0] == "resolved"
+    assert await _answer_kind(db_path, result["run_id"]) == "composed"

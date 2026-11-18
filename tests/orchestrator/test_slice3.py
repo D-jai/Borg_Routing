@@ -128,8 +128,7 @@ async def test_orchestrate_below_cap_spawns_child_run(db):
         return child_id
 
     async def mock_orchestrate_run(
-        run_id, user_instruction, db_path, current_depth, root_instruction=None,
-        documents_step=False,
+        run_id, user_instruction, db_path, current_depth, root_instruction=None
     ):
         return "child response"
 
