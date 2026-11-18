@@ -481,33 +481,36 @@ async def _stream_bypass_relay(
     If the model endpoint does not support streaming, falls back to
     word-by-word simulation so the caller always gets a valid SSE stream.
     """
-    model_info = matrix.get(model_id)
-    if not model_info:
-        # Fallback: non-streaming fetch then simulate
+    async def _simulated() -> AsyncIterator[str]:
+        # Non-streaming fetch, then a simulated stream. A success is recorded
+        # like the non-streaming path (run, cost, lane mode); a failure records
+        # nothing, as the non-streaming path does (it answers 502, no run row).
+        t_fb = time.monotonic()
         try:
-            text, _usage = await _bypass_to_model(matrix, model_id, messages)
+            text, fb_usage = await _bypass_to_model(matrix, model_id, messages)
         except Exception as exc:
             err = {"id": f"chatcmpl-{run_id}", "object": "chat.completion.chunk",
                    "created": int(time.time()), "model": model_alias,
                    "choices": [{"index": 0, "delta": {"content": f"[BRT-API-013] {exc}"}, "finish_reason": "stop"}]}
             yield f"data: {json.dumps(err)}\n\ndata: [DONE]\n\n"
             return
+        await _record_bypass_call(
+            matrix, model_id, run_id, messages, text, fb_usage,
+            int((time.monotonic() - t_fb) * 1000), lane_mode,
+        )
         async for chunk in _stream_response(text, model_alias, run_id):
+            yield chunk
+
+    model_info = matrix.get(model_id)
+    if not model_info:
+        async for chunk in _simulated():
             yield chunk
         return
 
     try:
         url, headers, body_model = resolve_model_call(model_info)
     except ValueError:
-        try:
-            text, _usage = await _bypass_to_model(matrix, model_id, messages)
-        except Exception as exc:
-            err = {"id": f"chatcmpl-{run_id}", "object": "chat.completion.chunk",
-                   "created": int(time.time()), "model": model_alias,
-                   "choices": [{"index": 0, "delta": {"content": f"[BRT-API-013] {exc}"}, "finish_reason": "stop"}]}
-            yield f"data: {json.dumps(err)}\n\ndata: [DONE]\n\n"
-            return
-        async for chunk in _stream_response(text, model_alias, run_id):
+        async for chunk in _simulated():
             yield chunk
         return
 

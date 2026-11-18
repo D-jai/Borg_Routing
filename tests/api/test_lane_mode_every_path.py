@@ -106,12 +106,110 @@ def test_a_non_streaming_bypass_records_raw_local(db, monkeypatch):
     assert modes(db) == [("bypass", "raw_local")]
 
 
-def test_a_streaming_bypass_records_raw_local(db, monkeypatch):
-    mid, _seen = _bypass_model(monkeypatch)
-    resp = client().post("/v1/chat/completions", json={
+@pytest.fixture(autouse=True)
+def no_network(monkeypatch):
+    """No test in this file may reach the network, whatever keys are in .env."""
+    import httpx
+
+    def refuse(*_a, **_k):
+        raise AssertionError("a test in this file tried to reach the network")
+
+    # Every async HTTP call goes through send; a raw connection through the loop.
+    monkeypatch.setattr(httpx.AsyncClient, "send", refuse)
+    monkeypatch.setattr(asyncio.BaseEventLoop, "create_connection", refuse)
+
+
+class _StubStream:
+    status_code = 200
+
+    async def aiter_lines(self):
+        for line in (
+            'data: {"choices":[{"delta":{"content":"hi"}}]}',
+            'data: {"choices":[{"delta":{"content":"!"}}],"usage":{"prompt_tokens":3,"completion_tokens":4}}',
+            "data: [DONE]",
+        ):
+            yield line
+
+
+class _StubRelayClient:
+    def stream(self, method, url, json=None, headers=None):
+        class _Ctx:
+            async def __aenter__(self_inner):
+                return _StubStream()
+
+            async def __aexit__(self_inner, *exc):
+                return None
+
+        return _Ctx()
+
+
+def _stream_post(mid):
+    return client().post("/v1/chat/completions", json={
         "model": mid, "stream": True, "messages": [{"role": "user", "content": "q"}]})
+
+
+def _force_fallback(monkeypatch):
+    def refuse_key(_model):
+        raise ValueError("BRT-ORC-013: no key")
+
+    monkeypatch.setattr(cc, "resolve_model_call", refuse_key)
+
+
+def _force_relay(monkeypatch):
+    async def stub_client(_local, _timeout):
+        return _StubRelayClient()
+
+    monkeypatch.setattr(cc, "resolve_model_call", lambda _m: ("http://stub/v1/chat/completions", {}, "m"))
+    monkeypatch.setattr("src.lane.outbound.relay_client_for", stub_client)
+
+
+def test_a_streaming_bypass_records_raw_local(db, monkeypatch):
+    """The fallback path (no usable key): one run row with the lane mode."""
+    mid, _seen = _bypass_model(monkeypatch)
+    _force_fallback(monkeypatch)
+    resp = _stream_post(mid)
     assert resp.status_code == 200, resp.text
     assert modes(db) == [("bypass", "raw_local")]
+
+
+def test_a_streaming_relay_bypass_records_raw_local(db, monkeypatch):
+    """The relay path, through a stubbed shared client: one run row with the lane mode."""
+    from main import matrix as m
+
+    mid = m.all()[0].model_id
+    _force_relay(monkeypatch)
+    resp = _stream_post(mid)
+    assert resp.status_code == 200, resp.text
+    assert "hi" in resp.text and resp.text.rstrip().endswith("[DONE]")
+    assert modes(db) == [("bypass", "raw_local")]
+
+
+def test_a_streamed_fallback_records_its_cost_and_run(db, monkeypatch):
+    mid, _seen = _bypass_model(monkeypatch)       # the fallback answers "hi", 1 + 1 tokens
+    _force_fallback(monkeypatch)
+    resp = _stream_post(mid)
+    assert resp.status_code == 200 and "hi" in resp.text
+    with sqlite3.connect(db) as c:
+        run = c.execute("SELECT kind, status, lane_mode FROM runs").fetchall()
+        calls = c.execute(
+            "SELECT model_id, tokens_input, tokens_output FROM logs WHERE event_type='model_call'"
+        ).fetchall()
+    assert run == [("bypass", "completed", "raw_local")]
+    assert calls == [(mid, 1, 1)]
+
+
+def test_a_failed_streamed_fallback_records_no_run(db, monkeypatch):
+    """Like the non-streaming path (502, no row): a failed call records nothing."""
+    async def boom(matrix, model_id, messages):
+        raise RuntimeError("provider down")
+
+    monkeypatch.setattr(cc, "_bypass_to_model", boom)
+    _force_fallback(monkeypatch)
+    from main import matrix as m
+
+    resp = _stream_post(m.all()[0].model_id)
+    assert resp.status_code == 200 and "BRT-API-013" in resp.text
+    assert modes(db) == []
 
 
 def test_a_bypass_with_the_lane_off_records_off(db, monkeypatch):
