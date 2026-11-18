@@ -346,8 +346,10 @@ async def test_a_non_object_plan_or_replan_reply_is_still_priced(env, mode):
     result = await _run(stub, mp, db_path)
     run_id = result["run_id"]
     events = _priced(db_path, run_id, mode)
-    assert len(events) == 1 and events[0][4]["reply_type"] == "list"
-    assert isinstance(events[0][4]["parsed"], list)
+    # The reply and its JSON-only retry (d7ea8db) are both priced and logged.
+    assert len(events) == 2 and all(e[4]["reply_type"] == "list" for e in events)
+    assert all(isinstance(e[4]["parsed"], list) for e in events)
+    assert all((e[3] or 0) > 0 for e in events)
 
 
 # --- review round 1: the salvage after a failed repair re-ask names the reply --------------
