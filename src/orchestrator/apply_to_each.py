@@ -355,6 +355,7 @@ async def expand_and_run(
     # Tokens and dollars of every item call, summed onto this envelope.
     totals = {"input": 0, "output": 0, "dollars": 0.0, "baseline": 0.0}
     guarded = [0]   # raw items whose output passed the lane's output guard
+    model_reasons: set = set()   # item indexes whose failure the model wrote
 
     async def _run_one(index: int, item: object) -> None:
         suffix = _level_suffix(index)
@@ -376,18 +377,17 @@ async def expand_and_run(
                     if env.lane_guarded:
                         guarded[0] += 1
                 else:
-                    failure = {
+                    failures.append({
                         "index": index,
                         "item": item,
                         "reason": _failure_reason(child, env.failure_reason or "status=failed", env),
                         "model_id": child.model_name,
-                    }
-                    # Planner ruling 21: the row marker shows a model-written
-                    # reason as BRT-ANS-010, never parsed. Stripped from every
-                    # prompt (engine._stage_output_for_prompt).
+                    })
+                    # Planner ruling 21: a row marker shows a model-written
+                    # reason as BRT-ANS-010, never parsed. Kept on the
+                    # envelope, never in the stored output.
                     if env._reason_from_model:
-                        failure["_from_model"] = True
-                    failures.append(failure)
+                        model_reasons.add(index)
             except Exception as exc:
                 failures.append({
                     "index": index,
@@ -411,7 +411,7 @@ async def expand_and_run(
     }
     if notes:
         aggregate["notes"] = notes
-    return InboundEnvelope(
+    out_env = InboundEnvelope(
         envelope_id=task.envelope_id,
         subtask_id=task.subtask_id,
         status="resolved",
@@ -425,6 +425,8 @@ async def expand_and_run(
             (not failures and guarded[0] == len(items)) if task.data_scope == "raw" else None
         ),
     )
+    out_env._model_reason_indexes = model_reasons
+    return out_env
 
 
 def _level_suffix(index: int) -> str:

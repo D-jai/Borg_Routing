@@ -52,9 +52,10 @@ def test_rows_merge_results_and_failures_in_input_order():
 ])
 def test_failure_codes(reason, from_model, code):
     entry = {"index": 0, "item": "a", "reason": reason}
+    env = _env(_agg([], [entry]))
     if from_model:
-        entry["_from_model"] = True
-    assert rm.rows_for(_env(_agg([], [entry])), None) == [{"item": "a", "error": code}]
+        env._model_reason_indexes = {0}
+    assert rm.rows_for(env, None) == [{"item": "a", "error": code}]
 
 
 @pytest.mark.parametrize("item, expected", [
@@ -182,10 +183,55 @@ def test_guard_called_per_block():
     assert [s[0] for s in seen] == [1, 1]
 
 
-# --- _from_model stays out of prompts -------------------------------------------
+# --- review of 8fd4c23 -----------------------------------------------------------
 
-def test_from_model_key_stripped_from_prompt_view():
-    env = _env(_agg([], [{"index": 0, "item": "a", "reason": "no", "_from_model": True}]))
-    shown = engine._stage_output_for_prompt(env, "compose")
-    assert "_from_model" not in json.dumps(shown)
-    assert "_from_model" in json.dumps(env.output)
+def test_marker_as_a_dict_key_is_left_over():
+    assert rm.invalid_hits({"@@ROWS:rate@@": "x"}, _steps(), [])
+    assert rm.invalid_hits([{"k": {"@@rows:rate@@": 1}}], _steps(), [])
+
+
+def test_quoted_hit_matches_decoded_leaf_and_runs_on():
+    quoted = ['use @@rows "x" here']
+    assert rm.invalid_hits('They said: use @@rows "x" here. Done.', _steps(), quoted) == []
+    assert rm.invalid_hits('use @@rows "y" here', _steps(), quoted)
+
+
+@pytest.mark.parametrize("step_id", ['ra"te', "ra\\te"])
+def test_marker_in_a_dict_leaf_is_read_decoded(step_id):
+    steps = rm.list_steps({step_id: _env(_agg([{"index": 0, "item": "a", "output": {}}]))}, None)
+    value = {"rows": f"@@ROWS:{step_id}@@"}
+    assert rm.invalid_hits(value, steps, []) == []
+    out, _ = rm.place(value, steps)
+    assert out == {"rows": [{"item": "a"}]}
+
+
+TABLE = "| item | s |\n| --- | --- |\n| a\\|b | x y |"
+
+
+@pytest.mark.parametrize("fence, close", [("````text", "````"), ("~~~", "~~~")])
+def test_table_inside_long_or_tilde_fence_ends_up_outside(fence, close):
+    text = f"Intro\n{fence}\nhead\n```\n@@ROWS_TABLE:rate@@\ntail\n{close}\nEnd"
+    out, _ = rm.place(text, _steps())
+    assert out == f"Intro\n{fence}\nhead\n```\n{close}\n\n{TABLE}\n\n{fence}\ntail\n{close}\nEnd"
+
+
+@pytest.mark.parametrize("fence", ["~~~", "````"])
+def test_table_alone_in_a_fence_leaves_no_stray_fence(fence):
+    out, _ = rm.place(f"Intro\n{fence}\n@@ROWS_TABLE:rate@@\n{fence}\nEnd", _steps())
+    assert out == f"Intro\n\n{TABLE}\n\nEnd"
+    assert "~" not in out and "`" not in out
+
+
+def test_tilde_fence_counts_for_the_json_form():
+    out, _ = rm.place("~~~\n@@ROWS:rate@@\n~~~", _steps())
+    assert out == '~~~\n[\n{"item": "a|b", "s": "x\\ny"}\n]\n~~~'
+
+
+def test_table_marker_in_a_longer_leaf_is_compact():
+    out, _ = rm.place({"n": "see @@ROWS_TABLE:rate@@ ok"}, _steps())
+    assert out == {"n": 'see [{"item": "a|b", "s": "x\\ny"}] ok'}
+
+
+def test_scalar_state_op_list_line():
+    steps = rm.list_steps({"v": _env({"result": [3, 1, 2]}, "state_op")}, None)
+    assert rm.step_lines(steps) == "- v: 3 rows, stored order; fields: (values)"

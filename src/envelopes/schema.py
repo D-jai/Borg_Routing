@@ -171,3 +171,6 @@ class InboundEnvelope(BaseModel):
     # row markers place the rows of apply_to_each and list state_op steps).
     # Set by the engine; never serialised.
     _node_type: Optional[str] = PrivateAttr(default=None)
+    # apply_to_each: the item indexes whose failure reason the model itself
+    # wrote (ruling 21: shown as BRT-ANS-010). Never serialised.
+    _model_reason_indexes: set = PrivateAttr(default_factory=set)

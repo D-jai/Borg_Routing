@@ -106,6 +106,18 @@ async def _decisions(db_path, run_id):
     return [json.loads(r[0]) for r in rows if r[0]]
 
 
+async def _stored_envelopes(db_path, run_id):
+    """(type, node id, inbound payload) of every stored envelope of the run."""
+    import aiosqlite  # noqa: PLC0415
+    async with aiosqlite.connect(db_path) as db:
+        rows = await (await db.execute(
+            "SELECT type, outbound_payload, inbound_payload FROM envelopes WHERE run_id=?",
+            (run_id,),
+        )).fetchall()
+    return [(t, (json.loads(out) if out else {}).get("node_id"), inbound)
+            for t, out, inbound in rows]
+
+
 async def _codes(db_path, run_id):
     return [d.get("code") for d in await _decisions(db_path, run_id)]
 
@@ -150,6 +162,10 @@ async def test_200_rows_placed_in_order_with_a_short_compose_reply(env):
     assert await _answer_kind(db_path, result["run_id"]) == "composed"
     placed = [d for d in await _decisions(db_path, result["run_id"]) if "rows_placed" in d]
     assert placed and placed[0]["rows_placed"] == {"rate": 200}
+    # The model's own failure is BRT-ANS-010 above, yet no stored output
+    # carries the private origin flag.
+    stored = await _stored_envelopes(db_path, result["run_id"])
+    assert stored and not any("_from_model" in (inbound or "") for _, _, inbound in stored)
     # The planner's view is unchanged: no block outside compose.
     for kind in ("plan", "re_plan"):
         for r in stub.of_kind(kind):
@@ -278,6 +294,62 @@ async def test_declined_rationale_gets_rows_too(env):
     assert "@@" not in result["response"]
     assert [r["item"] for r in _rows(result["response"])] == SMALL
     assert await _answer_kind(db_path, result["run_id"]) == "declined"
+
+
+@pytest.mark.asyncio
+async def test_marker_as_a_dict_key_takes_the_032_path(env):
+    db_path, mp = env
+    stub = StubModels(plan_nodes=[_rate(SMALL)], answer_for=lambda r: {"sentiment": "ok"},
+                      compose_for=_seq({"response": {"@@ROWS:rate@@": "x"}},
+                                       {"response": "List:\n@@ROWS:rate@@"})).install(mp)
+    result = await run_pipeline("Rate each.", db_path=db_path)
+    await drain_log_writes()
+    composes = stub.of_kind("compose")
+    assert len(composes) == 2 and composes[1].user == INVALID + "\n" + BLOCK_3
+    assert "@@" not in result["response"]
+    assert [r["item"] for r in _rows(result["response"])] == SMALL
+    assert (await _codes(db_path, result["run_id"])).count("BRT-ORC-032") == 1
+
+
+@pytest.mark.asyncio
+async def test_worker_text_quoted_by_compose_stays_text(env):
+    db_path, mp = env
+    said = 'use @@rows "x" here'
+    stub = StubModels(plan_nodes=[_rate(SMALL)], answer_for=lambda r: {"sentiment": said},
+                      compose_for=_seq({"response": f"The reviewers wrote: {said}. That is all."})).install(mp)
+    result = await run_pipeline("Rate each.", db_path=db_path)
+    await drain_log_writes()
+    assert result["response"] == f"The reviewers wrote: {said}. That is all."
+    assert len(stub.of_kind("compose")) == 1
+    assert "BRT-ORC-032" not in await _codes(db_path, result["run_id"])
+
+
+@pytest.mark.parametrize("step_id", ['ra"te', "ra\\te"])
+@pytest.mark.asyncio
+async def test_step_id_with_quote_or_backslash_in_a_dict_answer(env, step_id):
+    db_path, mp = env
+    node = {**_rate(SMALL), "id": step_id}
+    stub = StubModels(plan_nodes=[node], answer_for=lambda r: {"sentiment": "ok"},
+                      compose_for=_seq({"response": {"rows": f"@@ROWS:{step_id}@@"}})).install(mp)
+    result = await run_pipeline("Rate each.", db_path=db_path)
+    await drain_log_writes()
+    assert len(stub.of_kind("compose")) == 1
+    rows = json.loads(result["response"])["rows"]
+    assert [r["item"] for r in rows] == SMALL
+
+
+@pytest.mark.asyncio
+async def test_reask_without_a_list_step_is_byte_identical(env):
+    db_path, mp = env
+    stub = StubModels(plan_nodes=[_plain()],
+                      compose_for=_seq({"action": "compose"}, {"response": "Second."})).install(mp)
+    result = await run_pipeline("Say hello.", db_path=db_path)
+    await drain_log_writes()
+    composes = stub.of_kind("compose")
+    assert len(composes) == 2
+    assert composes[0].user == engine._MODE_USER_MESSAGES["compose"]
+    assert composes[1].user == engine._COMPOSE_REASK
+    assert result["response"] == "Second."
 
 
 # --- 5. retyping still works --------------------------------------------------
@@ -484,7 +556,9 @@ JOB_A_DATA = Path(__file__).resolve().parents[2] / "bench" / "data"
 
 
 class ReplayStub(StubModels):
-    """Answers only from the recording; any other request fails loudly."""
+    """Answers from the recording, plus two supplied replies (the fourth
+    re_plan and the marker reply); any further unrecorded request fails
+    loudly."""
 
     def __init__(self, rec, compose_for):
         super().__init__(plan_nodes=[], compose_for=compose_for)
@@ -523,6 +597,10 @@ class ReplayStub(StubModels):
 
 @pytest.mark.asyncio
 async def test_replayed_stage1_job_a_completes_with_full_rows(tmp_path, monkeypatch):
+    """Stage-1 job A replayed from its recording (plan, three re_plans, the
+    compose reply and every item's output), plus two supplied replies (the
+    fourth re_plan and the marker reply): the recorded run never reached a
+    fourth re_plan, and it never got a compose re-ask."""
     rec = json.loads(FIXTURE.read_text(encoding="utf-8"))
     db_path = str(tmp_path / "replay_a.db")
     await create_all(db_path)
@@ -541,9 +619,19 @@ async def test_replayed_stage1_job_a_completes_with_full_rows(tmp_path, monkeypa
                                 documents={"folder": rec["folder"]})
     await drain_log_writes()
     assert result["status"] == "completed", result.get("error")
-    # The run's step ids are the recording's.
-    plan_ids = [n["id"] for n in rec["orchestrator_replies"]["plan"][0]["plan"]["nodes"]]
-    assert plan_ids == ["classify_emails"]
+    # The run's per-item steps, read from its stored envelopes, are the
+    # recording's.
+    stored = await _stored_envelopes(db_path, result["run_id"])
+    resolved = {nid for kind, nid, inbound in stored
+                if kind == "apply_to_each" and json.loads(inbound or "{}").get("status") == "resolved"}
+    assert resolved == set(rec["items"])
+    # Every stored step id is a recorded one, or R1's rename of a re-sent one.
+    replies = rec["orchestrator_replies"]
+    recorded = {n["id"] for n in replies["plan"][0]["plan"]["nodes"]}
+    recorded |= {n["id"] for r in replies["re_plan"] for n in (r.get("next_nodes") or [])}
+    for _, nid, _ in stored:
+        if nid is not None:
+            assert re.sub(r"_\d+$", "", nid) in recorded, nid
     assert not stub.replans, "a recorded re_plan reply was not used"
     composes = stub.of_kind("compose")
     assert len(composes) == 2 and composes[1].user.startswith(REASK + "\n" + HEADER)

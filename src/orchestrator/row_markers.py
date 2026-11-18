@@ -79,11 +79,11 @@ def _item_id(entry: dict, raw: bool, lane) -> object:
     return index
 
 
-def _failure_code(entry: dict) -> str:
+def _failure_code(entry: dict, from_model: bool) -> str:
     reason = entry.get("reason")
     if isinstance(reason, dict) and isinstance(reason.get("code"), str):
         return reason["code"]
-    if entry.get("_from_model"):
+    if from_model:
         return "BRT-ANS-010"
     from src.lane.context import raw_failure_code  # noqa: PLC0415
 
@@ -118,6 +118,9 @@ def rows_for(env, lane) -> Optional[list]:
         and getattr(env, "_data_scope", None) == "raw"
     )
     if node_type == "apply_to_each" and _is_aggregate(out):
+        # Indexes whose failure the model itself wrote (never stored in the
+        # output; set by apply_to_each on the envelope).
+        model_reasons = getattr(env, "_model_reason_indexes", None) or set()
         entries = [("ok", e) for e in out.get("results") or [] if isinstance(e, dict)]
         entries += [("fail", e) for e in out.get("failures") or [] if isinstance(e, dict)]
         entries.sort(key=lambda pair: (pair[1].get("index") is None, pair[1].get("index") or 0))
@@ -126,7 +129,8 @@ def rows_for(env, lane) -> Optional[list]:
             if kind == "ok":
                 rows.append(_resolved_row(entry, raw, lane))
             else:
-                rows.append({"item": _item_id(entry, raw, lane), "error": _failure_code(entry)})
+                rows.append({"item": _item_id(entry, raw, lane),
+                             "error": _failure_code(entry, entry.get("index") in model_reasons)})
         return rows
     if node_type == "state_op" and isinstance(out, dict) and isinstance(out.get("result"), list):
         values = out["result"]
@@ -162,7 +166,7 @@ def _fields(rows: list, keyed: bool) -> list:
                 names.append(key)
     if keyed:
         return ["item"] + names + (["error"] if has_error else [])
-    return names
+    return names or ["(values)"]
 
 
 def markable(step_id: object) -> bool:
@@ -217,19 +221,54 @@ def _hit_text(text: str, pos: int) -> str:
     return text[pos:min(stop, pos + _HIT_MAX)]
 
 
-def invalid_hits(text: str, steps: dict, quoted: list) -> list:
-    """Every loose hit in ``text`` that is not a strict marker naming a list
-    step, except a hit whose exact text appears in ``quoted`` (the operator
-    instruction, the stage results): that is data, left as text."""
+def quoted_hits(quoted: list) -> set:
+    """The hit texts found in quoted strings (decoded string leaves of the
+    operator instruction and the step outputs)."""
+    found: set = set()
+    for q in quoted or []:
+        if not isinstance(q, str):
+            continue
+        for loose in LOOSE.finditer(q):
+            found.add(_hit_text(q, loose.start()))
+    return found
+
+
+def _text_hits(text: str, steps: dict, quoted: set, placeable: bool) -> list:
     bad = []
-    for loose in LOOSE.finditer(text or ""):
-        m = STRICT.match(text, loose.start())
-        if m and m.group(2).strip() in steps:
+    for loose in LOOSE.finditer(text):
+        pos = loose.start()
+        if placeable:
+            m = STRICT.match(text, pos)
+            if m and m.group(2).strip() in steps:
+                continue
+        if any(qh and text.startswith(qh, pos) for qh in quoted):
             continue
-        hit = _hit_text(text, loose.start())
-        if any(hit and hit in (q or "") for q in quoted):
-            continue
-        bad.append(hit)
+        bad.append(_hit_text(text, pos))
+    return bad
+
+
+def invalid_hits(value, steps: dict, quoted: list) -> list:
+    """Every marker-like hit in an answer ``value`` (a string, or the decoded
+    object or list of an object answer) that ``place`` would not replace: a
+    hit that is not a strict marker naming a list step, and any hit in an
+    object key (keys are never placed). A hit whose text, from its start,
+    repeats a hit found in ``quoted`` is data and stays as text."""
+    qhits = quoted_hits(quoted) if not isinstance(quoted, set) else quoted
+    bad: list = []
+
+    def walk(v) -> None:
+        if isinstance(v, str):
+            bad.extend(_text_hits(v, steps, qhits, placeable=True))
+        elif isinstance(v, dict):
+            for k, item in v.items():
+                if isinstance(k, str):
+                    bad.extend(_text_hits(k, steps, qhits, placeable=False))
+                walk(item)
+        elif isinstance(v, list):
+            for item in v:
+                walk(item)
+
+    walk(value)
     return bad
 
 
@@ -264,13 +303,55 @@ def _table(step: ListStep) -> str:
     return "\n".join(lines)
 
 
-def _fence_state(before: str) -> Optional[str]:
-    """The opening fence line when ``before`` ends inside a fence, else None."""
-    opening = None
+_FENCE_OPEN = re.compile(r"(`{3,}|~{3,})(.*)$")
+_FENCE_CLOSE = re.compile(r"(`{3,}|~{3,})[ \t]*$")
+
+
+def _closes(line: str, fence: tuple) -> bool:
+    """True when ``line`` closes ``fence``: the same character, a run at
+    least as long, and nothing else on the line."""
+    m = _FENCE_CLOSE.match(line.lstrip())
+    return bool(m) and m.group(1)[0] == fence[0] and len(m.group(1)) >= fence[1]
+
+
+def _fence_state(before: str) -> Optional[tuple]:
+    """``(char, run length, opening line)`` when ``before`` ends inside a
+    fence (backticks or tildes, three or more), else None."""
+    opening: Optional[tuple] = None
     for line in before.split("\n")[:-1]:
-        if line.lstrip().startswith("```"):
-            opening = None if opening is not None else line.strip()
+        if opening is None:
+            m = _FENCE_OPEN.match(line.lstrip())
+            if m and not (m.group(1)[0] == "`" and "`" in m.group(2)):
+                opening = (m.group(1)[0], len(m.group(1)), line.strip())
+        elif _closes(line, opening):
+            opening = None
     return opening
+
+
+def _table_in_fence(b: str, a: str, at_start: bool, fence: tuple) -> tuple:
+    """(text before, text after) a table placed outside the fence it sat in:
+    the fence is closed before it and reopened after it, except that an
+    opener right before the marker or a closer right after it is dropped, so
+    no empty fence is left."""
+    char, length, opener = fence
+    if at_start:
+        lines = b.split("\n")
+        last = lines[-2] if len(lines) >= 2 else ""
+        if last.strip() == opener:
+            head = "\n".join(lines[:-2])
+        else:
+            head = b + char * length
+    else:
+        head = b + "\n" + char * length
+    rest = a[1:] if a.startswith("\n") else a
+    first, _, remainder = rest.partition("\n")
+    if _closes(first, fence):
+        tail = remainder
+    else:
+        tail = opener + "\n" + rest
+    head = head.rstrip("\n")
+    tail = tail.lstrip("\n")
+    return (head + "\n\n" if head else ""), ("\n\n" + tail if tail else "")
 
 
 def _place_in_text(text: str, steps: dict, placed: dict, guard) -> str:
@@ -303,8 +384,8 @@ def _place_in_text(text: str, steps: dict, placed: dict, guard) -> str:
         if table:
             body = _table(step)
             if fence is not None:
-                new = (b + ("" if at_start else "\n") + "```\n\n" + body + "\n\n" + fence
-                       + ("" if at_end else "\n"))
+                prefix, a = _table_in_fence(b, a, at_start, fence)
+                new = prefix + body
             else:
                 head = b.rstrip("\n")
                 new = (head + "\n\n" if head else "") + body + ("\n\n" if a.strip("\n") else "")
@@ -364,10 +445,8 @@ def _place_leaf(value, steps: dict, placed: dict, guard):
         if step_id not in steps:
             continue
         step = steps[step_id]
-        if m.group(1).upper() == "ROWS_TABLE":
-            body = _table(step)
-        else:
-            body = json.dumps(step.rows, ensure_ascii=False, default=str)
+        # Inside a longer leaf both forms are placed compact, on one line.
+        body = json.dumps(step.rows, ensure_ascii=False, default=str)
         if guard is not None:
             guard(step.rows, body)
         placed[step_id] = placed.get(step_id, 0) + 1

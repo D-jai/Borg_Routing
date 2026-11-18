@@ -286,6 +286,7 @@ When a run has a finished per-item step (`apply_to_each`) or a `state_op` that r
 
 - **A marker is never left in an answer.** A marker that names no list step, or a near-miss such as `@@Row:x@@`, gets the write-up asked once more with the valid ids (BRT-ORC-032). If the second reply is wrong too, the finished steps' results come back as in step 3 above, with BRT-ORC-032 as a warning and `"answer_kind": "salvaged"`. Text like a marker that you wrote in your own message, or that a step returned, is left alone.
 - **A write-up cut off by the token cap** while such a step exists is retried once (even at the 16,000-token ceiling), and the retry tells it to use the marker instead of typing the rows. If that retry is cut off too, the finished steps' results come back (salvaged).
+- A `@@ROWS:` marker inside a code block but not alone on its line is placed as one compact line, so the block stays intact; a `@@ROWS_TABLE:` marker inside a code block is moved out of it.
 - With no such step, nothing changes: the write-up's message is exactly as before.
 - **Limit:** a list inside a child run (an `orchestrate` step) reaches the parent run as text, so the parent's write-up has to retype it.
 

@@ -652,18 +652,21 @@ _FAILURE_CODE_FALLBACK = "BRT-ORC-004"
 _MODEL_FAILURE_CODE = "BRT-ANS-010"   # the model itself declined or reported failure
 
 
-def _without_private_keys(output: object) -> object:
-    """An aggregate's failure entries without ``_from_model`` (ruling 21:
-    recorded for the row markers, never shown in a prompt). Anything else is
-    returned unchanged, so prompts stay byte-identical."""
-    if not (isinstance(output, dict) and isinstance(output.get("failures"), list)):
-        return output
-    if not any(isinstance(f, dict) and "_from_model" in f for f in output["failures"]):
-        return output
-    return {**output, "failures": [
-        {k: v for k, v in f.items() if k != "_from_model"} if isinstance(f, dict) else f
-        for f in output["failures"]
-    ]}
+def _string_leaves(value: object) -> list:
+    """Every string (keys included) inside a step output, decoded: the
+    quoted text a row-marker hit may repeat (ruling 21)."""
+    found: list = []
+    if isinstance(value, str):
+        found.append(value)
+    elif isinstance(value, dict):
+        for k, v in value.items():
+            if isinstance(k, str):
+                found.append(k)
+            found.extend(_string_leaves(v))
+    elif isinstance(value, list):
+        for v in value:
+            found.extend(_string_leaves(v))
+    return found
 
 
 def _stage_output_for_prompt(env: InboundEnvelope, mode: str = "re_plan") -> dict:
@@ -685,7 +688,7 @@ def _stage_output_for_prompt(env: InboundEnvelope, mode: str = "re_plan") -> dic
     failure is shown by the non-raw rules above.
     """
     if env.status != "failed":
-        return _without_private_keys(env.output)
+        return env.output
     if env._data_scope == "raw":
         shown = (env.output or {}).get("failure")
         if env.lane_guarded is False and isinstance(shown, dict) and shown.get("code"):
@@ -2258,9 +2261,7 @@ def _build_task_from_node(
         for upstream_id in depends_on:
             if upstream_id in results:
                 env = results[upstream_id]
-                upstream_results[upstream_id] = _without_private_keys(
-                    getattr(env, "output", {}) or {}
-                )
+                upstream_results[upstream_id] = getattr(env, "output", {}) or {}
             else:
                 missing.append(upstream_id)
         if upstream_results:
@@ -3161,14 +3162,14 @@ class _RowContext:
         from src.orchestrator import row_markers  # noqa: PLC0415
 
         steps = row_markers.list_steps(results, lane)
-        quoted: list = []
+        quoted: set = set()
         if steps:
-            stage_text = json.dumps(
-                {str(k): _without_private_keys(getattr(v, "output", None))
-                 for k, v in results.items()},
-                ensure_ascii=False, default=str,
-            )
-            quoted = [user_instruction or "", governance_instruction or "", stage_text]
+            # The hits the operator or a step wrote (decoded string leaves,
+            # never the JSON dump): a reply that repeats one is quoting data.
+            texts = [user_instruction or "", governance_instruction or ""]
+            for env in results.values():
+                texts.extend(_string_leaves(getattr(env, "output", None)))
+            quoted = row_markers.quoted_hits(texts)
         return cls(steps, quoted, lane)
 
     def call_kwargs(self) -> dict:
@@ -3285,7 +3286,11 @@ async def _handle_compose_result(
             compose_result.get("rationale") or compose_result.get("msg") or "")
         from src.orchestrator import row_markers  # noqa: PLC0415
 
-        if row_markers.invalid_hits(candidate, rows.steps, rows.quoted):
+        # Checked on the decoded answer (an object's keys and leaves, never
+        # its JSON dump): every hit ``place`` would not replace, a key
+        # included, takes the BRT-ORC-032 path, so none is left.
+        value = compose_result[field] if text else candidate
+        if row_markers.invalid_hits(value, rows.steps, rows.quoted):
             if reask_invalid is not None:
                 await _log_decision(run_id, db_path, {
                     "code": "BRT-ORC-032",
