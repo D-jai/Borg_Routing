@@ -97,7 +97,8 @@ class WrappedTask(BaseModel):
     skill_args: Optional[dict] = None
     # Planner reading (2) under ruling 35: the names of the fields the step
     # added through ``skill_args.extra_fields`` (set by the skill library's
-    # render, copied to each apply_to_each child). A reply without one is
+    # render on apply_to_each skill steps only, copied to each child; a plain
+    # answerer step keeps them strict and leaves this empty). A reply without one is
     # retried where a failing item is retried today, then kept; the skill's
     # own fields stay strict (src/envelopes/validator.py).
     extra_fields: list[str] = []
@@ -184,3 +185,7 @@ class InboundEnvelope(BaseModel):
     # node as the plan wrote it (JSON, cut; built from the plan only), shown to
     # re_plan beside the failure, never to compose. Never serialised.
     _plan_node: Optional[str] = PrivateAttr(default=None)
+    # apply_to_each: the step's declared extra fields (WrappedTask.extra_fields),
+    # so compose counts them under "Rows with no value" even when no row holds
+    # one (ruling 35, reading 2). Never serialised.
+    _extra_fields: list = PrivateAttr(default_factory=list)

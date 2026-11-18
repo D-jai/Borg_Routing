@@ -265,7 +265,11 @@ class SkillLibrary:
             skill_id=skill_id,
             skill_version=version,
             skill_args=given_args,
-            extra_fields=list(added),
+            # Ruling 35, reading (2), review round 1: only a per-item step
+            # (apply_to_each) retries-then-keeps a missing extra field. A
+            # plain answerer step names none here, so the inbound check keeps
+            # its extra fields as strict as before (no retry exists there).
+            extra_fields=list(added) if env_type == "apply_to_each" else [],
         )
 
 

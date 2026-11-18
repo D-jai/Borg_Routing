@@ -245,7 +245,22 @@ async def submit_task(
 _PACK_OUTCOME_KEYS = (
     "mode", "step", "call", "items", "accepted", "declined", "missing", "duplicate",
     "unknown_id", "invalid", "alone", "cut", "timed_out", "raised", "error_code",
+    "extra_missing",
 )
+
+
+def _extra_fields_note(decision: dict) -> dict:
+    """Ruling 35, reading 2: what a redacted viewer keeps of an
+    ``extra_fields_missing`` plan note: the step id and each field name with
+    its count (names cut at 40, at most 10 fields; a count that is not an
+    integer is dropped)."""
+    fields = decision.get("fields")
+    counts: dict = {}
+    for name, count in list(fields.items() if isinstance(fields, dict) else [])[:10]:
+        if isinstance(count, int) and not isinstance(count, bool):
+            counts[str(name)[:40]] = count
+    return {"mode": "extra_fields_missing", "step": str(decision.get("step", ""))[:40],
+            "fields": counts}
 
 
 def _redact_events(events: list[dict]) -> list[dict]:
@@ -273,6 +288,10 @@ def _redact_events(events: list[dict]) -> list[dict]:
             if ev.get("event_type") == "orchestrator_decision" and decision.get("mode") == "pack_outcome":
                 counts = {k: decision[k] for k in _PACK_OUTCOME_KEYS if k in decision}
                 kept.append(dict(ev, decision_json=json.dumps(counts)))
+                continue
+            if (ev.get("event_type") == "orchestrator_decision"
+                    and decision.get("mode") == "extra_fields_missing"):
+                kept.append(dict(ev, decision_json=json.dumps(_extra_fields_note(decision))))
                 continue
             # Ruling 32c: the plan note for a skill field that was asked for and
             # not produced (BRT-ORC-035), and ruling 32d: a key no node or skill

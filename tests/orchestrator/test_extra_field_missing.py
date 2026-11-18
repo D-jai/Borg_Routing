@@ -171,23 +171,31 @@ async def test_a_deferred_unpacked_item_without_urgency_is_kept(pk):  # noqa: F8
 
 # (d) a present value -------------------------------------------------------------
 
-async def test_a_present_urgency_of_another_type_is_kept_unchanged(pk):  # noqa: F811
+async def test_a_present_urgency_of_another_type_is_kept_while_a_missing_one_is_retried(pk):  # noqa: F811
     # The inbound check tests presence only (validate_inbound checks no types),
-    # so a present value of any type is kept as given, with no retry.
-    stub, env = await _step(pk, {MISSING: {**NO_URGENCY, "urgency": "very high"}})
-    assert stub.of_kind("answerer") == []
+    # so a present value of any type is kept as given, with no retry; in the
+    # same pack, the item without urgency is retried alone and kept.
+    stub, env = await _step(pk, {MISSING: {**NO_URGENCY, "urgency": "very high"},
+                                 "note 005": NO_URGENCY})
+    singles = stub.of_kind("answerer")
+    assert len(singles) == 1 and "note 005" in singles[0].system
     assert _row(env, MISSING)["output"]["urgency"] == "very high"
-    assert _notes(pk["db"], env_run_id(stub, env)) == []
+    assert _row(env, "note 005")["output"] == NO_URGENCY
+    assert env.output["failures"] == []
+    assert [n["fields"] for n in _notes(pk["db"], env_run_id(stub, env))] == [{"urgency": 1}]
 
 
 # (e) the skill's own field -------------------------------------------------------
 
-async def test_a_missing_own_field_still_fails_the_item(pk):  # noqa: F811
-    stub, env = await _step(pk, {MISSING: {"bucket": "a", "urgency": 2}})
-    assert len(stub.of_kind("answerer")) == 1      # ruling 23's retry, as before
+async def test_a_missing_own_field_fails_while_a_missing_extra_field_is_kept(pk):  # noqa: F811
+    stub, env = await _step(pk, {MISSING: {"bucket": "a", "urgency": 2},
+                                 "note 005": NO_URGENCY})
+    assert len(stub.of_kind("answerer")) == 2      # ruling 23's retry, for each
     fails = env.output["failures"]
     assert [f["item"] for f in fails] == [MISSING]
     assert "BRT-ANS-005" in str(fails[0]["reason"]) and "confidence" in str(fails[0]["reason"])
+    assert _row(env, "note 005")["output"] == NO_URGENCY
+    assert env.output["success_count"] == 9
 
 
 def test_the_validator_still_requires_own_fields_and_only_if_stays_optional():
@@ -234,6 +242,115 @@ async def test_the_compose_block_counts_the_kept_item_under_no_value(pk):  # noq
     block = rm.block(steps, {}, len(model.no_result()), model.no_value_counts(), [])
     assert "Rows with no value (a step returned the item but left the field empty): urgency 1." \
         in block
+
+
+async def test_the_compose_block_counts_urgency_40_when_no_row_holds_it(pk):  # noqa: F811
+    stub, env = await _step(pk, {}, n=40, default=NO_URGENCY)
+    assert env._extra_fields == ["urgency"]
+    env._node_type = "apply_to_each"               # as the engine stamps it
+    results = {"n1": env}
+    steps = rm.list_steps(results, None)
+    assert steps["n1"].extra_fields == ["urgency"]
+    assert "urgency" not in steps["n1"].fields   # not offered for placing
+    model = cc.ItemModel.build(steps, results)
+    assert ("urgency", 40) in model.no_value_counts()
+    block = rm.block(steps, {}, len(model.no_result()), model.no_value_counts(), [])
+    assert "Rows with no value (a step returned the item but left the field empty): urgency 40." \
+        in block
+    # C4 (BRT-ORC-041) catches an urgency invented for those rows.
+    reply = '[{"item": "note 000", "bucket": "a", "urgency": 4}]'
+    case1, case2 = cc.invented_values(reply, model, [])
+    assert case1 == [model.match("note 000")] and case2 == {}
+    problems = cc.check(reply, steps, {}, model, [], set(), ["n1"])
+    assert [code for code, _ in problems] == ["BRT-ORC-041"]
+    # The stored bucket is not invented.
+    assert cc.invented_values('[{"item": "note 000", "bucket": "a"}]', model, []) == ([], {})
+
+
+# review round 1, item 1: what a deferral is ------------------------------------
+
+async def test_an_extra_field_holding_defer_is_not_a_deferral(pk):  # noqa: F811
+    node = _node(_items(10))
+    node["skill_args"]["extra_fields"] = {"urgency": "integer 1-5", "next_action": "string"}
+    reply = {**NO_URGENCY, "next_action": "defer"}
+    full = {**URGENT, "next_action": "call"}
+    stub, env = await _run(pk, _from_node(node),
+                           pack_item_for=lambda r, t: dict(reply if t == MISSING else full),
+                           answer_for=lambda r: dict(reply))
+    singles = stub.of_kind("answerer")
+    assert len(singles) == 1 and MISSING in singles[0].system   # still retried
+    assert _row(env, MISSING)["output"] == reply
+    assert [n["fields"] for n in _notes(pk["db"], env_run_id(stub, env))] == \
+        [{"urgency": 1, "next_action": 0}]
+
+
+def test_a_transform_style_text_of_defer_is_not_a_deferral():
+    from src.envelopes.validator import is_deferred
+    node = {"type": "apply_to_each", "id": "n1", "skill_id": "transform_style",
+            "skill_args": {"items_ref": ["x"], "target_style": "plain",
+                           "extra_fields": {"urgency": "integer 1-5"}}}
+    task = _from_node(node)
+    assert task.extra_fields == ["urgency"]
+    out = {"rewritten": "Defer", "meaning_preserved": True}
+    assert not is_deferred(out, task)
+    env = InboundEnvelope(envelope_id=uuid.uuid4(), subtask_id=uuid.uuid4(),
+                          status="resolved", confidence=0.9, output=out)
+    assert missing_extra_fields(env, task) == ["urgency"]
+
+
+def test_defer_and_collect_result_or_defer_is_a_deferral():
+    from src.envelopes.validator import is_deferred
+    node = {"type": "apply_to_each", "id": "n1", "skill_id": "defer_and_collect",
+            "skill_args": {"items_ref": ["x"], "instruction": "Label it.",
+                           "output_schema": {"label": "string"}, "confidence_threshold": 0.5,
+                           "extra_fields": {"urgency": "integer 1-5"}}}
+    task = _from_node(node)
+    assert task.extra_fields == ["urgency"]
+    assert is_deferred({"result_or_defer": "defer", "confidence": 0.2}, task)
+    assert not is_deferred({"result_or_defer": {"label": "defer"}, "confidence": 0.9}, task)
+
+
+# review round 1, item 2: a plain answerer step stays strict ---------------------
+
+def test_a_plain_answerer_skill_step_keeps_extra_fields_strict():
+    node = {"type": "answerer", "id": "v1", "skill_id": "verify_claim",
+            "skill_args": {"claim": "The sky is green.", "evidence_ref": ["It is blue."],
+                           "extra_fields": {"urgency": "integer 1-5"}}}
+    task = _from_node(node)
+    assert task.type == "answerer" and "urgency" in task.output_schema
+    assert task.extra_fields == []
+    out = {"verdict": "contradicted", "confidence": 0.9, "cited_evidence_ids": [],
+           "explanation": "blue"}
+    env = InboundEnvelope(envelope_id=uuid.uuid4(), subtask_id=uuid.uuid4(),
+                          status="resolved", confidence=0.9, output=out)
+    try:
+        validate_inbound(env, task)
+    except ValueError as exc:
+        assert "BRT-ENV-011" in str(exc) and "urgency" in str(exc)
+    else:
+        raise AssertionError("a plain answerer step must still require its extra field")
+    validate_inbound(env.model_copy(update={"output": {**out, "urgency": 2}}), task)
+
+
+# review round 1, item 5: redaction ---------------------------------------------
+
+def test_a_redacted_viewer_keeps_the_note_and_the_pack_count():
+    from src.api.tasks import _redact_events
+    long = "u" * 60
+    fields = {long: 2, **{f"f{i}": i for i in range(12)}, "bad": "x"}
+    events = [
+        {"event_type": "orchestrator_decision", "decision_json": json.dumps(
+            {"mode": "extra_fields_missing", "step": "s" * 50, "fields": fields,
+             "secret": "document text"})},
+        {"event_type": "orchestrator_decision", "decision_json": json.dumps(
+            {"mode": "pack_outcome", "step": "s", "items": 3, "invalid": 1,
+             "extra_missing": 1, "text": "document text"})},
+    ]
+    note, outcome = (json.loads(e["decision_json"]) for e in _redact_events(events))
+    assert note["mode"] == "extra_fields_missing" and note["step"] == "s" * 40
+    assert "secret" not in note and len(note["fields"]) <= 10
+    assert note["fields"]["u" * 40] == 2 and "bad" not in note["fields"]
+    assert outcome["extra_missing"] == 1 and "text" not in outcome
 
 
 def env_run_id(stub, env):

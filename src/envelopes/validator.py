@@ -65,13 +65,45 @@ def is_conditional_field(hint: object) -> bool:
 
 
 DEFER_VALUE = "defer"
+DEFER_FIELD = "result_or_defer"   # defer_and_collect's own field
 
 
-def is_deferred(output: object) -> bool:
-    """True when an item's output is the worker's deferral: a top-level value
-    of "defer" (``bucket: defer``, ``result_or_defer: defer``)."""
-    return isinstance(output, dict) and any(
-        isinstance(v, str) and v.strip().casefold() == DEFER_VALUE for v in output.values()
+def _schema_props(task: WrappedTask) -> tuple[dict, bool]:
+    """(field -> hint, explicit required list?) of the task's output schema."""
+    schema = task.output_schema if isinstance(task.output_schema, dict) else {}
+    if isinstance(schema.get("properties"), dict):
+        return schema["properties"], isinstance(schema.get("required"), list)
+    return schema, False
+
+
+def _allows_defer(name: str, hint: object) -> bool:
+    """A field whose hint offers "defer" as a value: an enum hint holding
+    ``|defer`` (classify_into_buckets' bucket), a property whose ``enum``
+    lists it, or defer_and_collect's ``result_or_defer``."""
+    if name == DEFER_FIELD:
+        return True
+    if isinstance(hint, dict):
+        enum = hint.get("enum")
+        if isinstance(enum, list) and any(str(e).casefold() == DEFER_VALUE for e in enum):
+            return True
+        hint = hint.get("description")
+    return isinstance(hint, str) and "|defer" in hint.casefold()
+
+
+def is_deferred(output: object, task: WrappedTask) -> bool:
+    """True when an item's output is the worker's deferral: one of the skill's
+    OWN fields whose hint allows "defer" (``_allows_defer``) holds "defer".
+    An extra field never makes an item a deferral, and neither does a
+    free-text field whose text happens to be "Defer"."""
+    if not isinstance(output, dict):
+        return False
+    props, _ = _schema_props(task)
+    extra = set(task.extra_fields or [])
+    return any(
+        name not in extra and _allows_defer(str(name), hint)
+        and isinstance(output.get(name), str)
+        and output[name].strip().casefold() == DEFER_VALUE
+        for name, hint in props.items()
     )
 
 
@@ -89,14 +121,9 @@ def missing_extra_fields(env: InboundEnvelope, task: WrappedTask) -> list[str]:
 def missing_extra_fields_in(output: object, task: WrappedTask) -> list[str]:
     """``missing_extra_fields`` for a stored item output."""
     extra = list(task.extra_fields or [])
-    if not extra or not isinstance(output, dict) or is_deferred(output):
+    if not extra or not isinstance(output, dict) or is_deferred(output, task):
         return []
-    schema = task.output_schema if isinstance(task.output_schema, dict) else {}
-    if isinstance(schema.get("properties"), dict):
-        props = schema["properties"]
-        explicit = isinstance(schema.get("required"), list)
-    else:
-        props, explicit = schema, False
+    props, explicit = _schema_props(task)
     return [
         f for f in extra
         if output.get(f) is None and (explicit or not is_conditional_field(props.get(f)))

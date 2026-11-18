@@ -3478,6 +3478,7 @@ async def _orchestrate_run(
             results[nid] = env
             env._data_scope = done_task.data_scope
             env._node_type = done_task.type
+            env._extra_fields = list(done_task.extra_fields)
             env._doc_label = doc_label(list(done_task.documents))
             if done_task.data_scope == "raw" and not env.lane_guarded:
                 raw_unstamped.add(nid)

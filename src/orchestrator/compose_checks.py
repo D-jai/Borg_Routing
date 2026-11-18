@@ -197,6 +197,7 @@ class ItemModel:
         self.items: dict = {}
         self.step_ids: list = []
         self.fields: dict = {}             # step id -> [field]
+        self.extra: dict = {}              # step id -> [declared extra field] (ruling 35)
         self.values: dict = {}             # key -> {field: {normalised values}}
         self.own: dict = {}                # key -> {normalised values, any field}
         self.vocab: dict = {}              # field -> {normalised strings}
@@ -212,6 +213,8 @@ class ItemModel:
                 continue
             model.step_ids.append(step.id)
             model.fields[step.id] = [f for f in step.fields if f not in ("item", "error")]
+            model.extra[step.id] = [f for f in getattr(step, "extra_fields", None) or []
+                                    if f not in ("item", "error")]
             for ident, row in zip(step.identities, step.rows):
                 if not isinstance(row, dict):
                     continue
@@ -302,17 +305,22 @@ class ItemModel:
     def no_value_counts(self) -> list:
         """``[(field, count)]`` in step order: for each field some resolved
         row holds a value for, the items resolved by a step that has the
-        field and given no value for it by any list step."""
+        field and given no value for it by any list step. A step's declared
+        extra field (ruling 35, reading 2) counts even when no row holds a
+        value for it."""
         order: list = []
+        declared: set = set()
         for sid in self.step_ids:
-            for f in self.fields[sid]:
+            for f in self.fields[sid] + self.extra.get(sid, []):
                 if f not in order:
                     order.append(f)
+            declared.update(self.extra.get(sid, []))
         counts = []
         for f in order:
-            if not any(f in vals for vals in self.values.values()):
+            if f not in declared and not any(f in vals for vals in self.values.values()):
                 continue
-            having = {sid for sid in self.step_ids if f in self.fields[sid]}
+            having = {sid for sid in self.step_ids
+                      if f in self.fields[sid] or f in self.extra.get(sid, [])}
             m = 0
             for key, item in self.items.items():
                 resolved = any(sid in having and st[0] == "ok" for sid, st in item.states.items())
@@ -607,6 +615,16 @@ def invented_values(own: object, model: ItemModel, asked: list) -> tuple:
         if isinstance(n, str) and p.key not in case1:
             for f, voc in model.vocab.items():
                 if n in voc and model.no_value(p.key, f):
+                    case1.append(p.key)
+                    break
+        if p.field is not None and p.form in ("a", "b") and p.key not in case1:
+            # Ruling 35, reading 2: a value under a step's declared extra
+            # field for an item that step left without one is invented,
+            # even when no row holds that field (so it has no vocabulary).
+            kc = p.field.strip().casefold()
+            for sid in model.items[p.key].states:
+                fld = next((f for f in model.extra.get(sid, []) if f.casefold() == kc), None)
+                if fld is not None and model.no_value(p.key, fld):
                     case1.append(p.key)
                     break
         if p.field is not None and p.form in ("a", "b"):

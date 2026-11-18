@@ -160,6 +160,10 @@ class ListStep:
     # "file name", "document id" or None: what the item label shows.
     item_kind: Optional[str] = None
     raw: bool = False
+    # The step's declared extra fields (ruling 35, reading 2): counted under
+    # "Rows with no value" even when no row holds one. Not added to ``fields``
+    # (a field no row holds is not offered for placing).
+    extra_fields: list = field(default_factory=list)
 
 
 @dataclass
@@ -398,6 +402,8 @@ def list_steps(results: dict, lane) -> dict:
             id=str(step_id), rows=rows, order=order,
             fields=_fields(rows, keyed=order == INPUT_ORDER),
             identities=identities, item_kind=kind, raw=_is_raw(env, lane),
+            extra_fields=[str(f) for f in (getattr(env, "_extra_fields", None) or [])
+                          if order == INPUT_ORDER],
         )
     return steps
 

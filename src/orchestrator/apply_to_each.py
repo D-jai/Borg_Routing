@@ -522,6 +522,7 @@ async def expand_and_run(
         ),
     )
     out_env._model_reason_indexes = model_reasons
+    out_env._extra_fields = list(task.extra_fields)   # the engine stamps it too
     return out_env
 
 
