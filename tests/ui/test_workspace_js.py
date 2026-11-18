@@ -425,3 +425,36 @@ def test_ruling_26a_raw_step_codes_show_code_and_document_only(tmp_path):
     data = _no_step_body("planner_only", codes=({"code": "BRT-LANE-002", "doc": "doc_001"},))
     note = js(tmp_path, f"return W.noStepNote({json.dumps(data)});")
     assert "BRT-LANE-002 (document doc_001)" in note and "(1 of 1)" in note
+
+
+# ---------- planner ruling 26e: failed steps (and items) on the receipt ----------
+
+def _agg_env(node_id, ok, bad, status="resolved"):
+    out = {"results": [{"index": i, "item": i, "output": {}} for i in range(ok)],
+           "failures": [{"index": ok + i, "item": ok + i, "reason": "BRT-ANS-005"} for i in range(bad)],
+           "total": ok + bad, "success_count": ok, "failure_count": bad}
+    return env(node_id, type_="apply_to_each",
+               inbound_payload=json.dumps({"status": status, "output": out}))
+
+
+def test_ruling_26e_receipt_line_k_of_n_steps_failed_only_when_k_above_zero(tmp_path):
+    def lines(envs):
+        data = run_body(envs)
+        return js(tmp_path, f"return W.failedLines(W.receiptFrom({json.dumps(data)}));")
+
+    # Nothing failed: no line.
+    assert lines([env("n1"), _agg_env("n2", 3, 0)]) == []
+    # A failed step, an apply_to_each whose every item failed (26f), and one
+    # with some failed items (not a failed step; its items are counted).
+    got = lines([env("n1", status="failed"), _agg_env("n2", 0, 2), _agg_env("n3", 3, 1),
+                 env("n4")])
+    assert got == ["2 of 4 steps failed", "1 of 4 items failed"]
+
+
+def test_ruling_26a_note_for_a_redacted_viewer_leaves_out_the_count(tmp_path):
+    """Lane on, non-admin: an event with no readable decision never says '0 of 0'."""
+    data = _no_step_body("planner_only")
+    data["events"][0]["decision_json"] = None
+    note = js(tmp_path, f"return W.noStepNote({json.dumps(data)});")
+    assert note.startswith("Every planned step failed, so the planning model wrote this answer alone")
+    assert "0 of 0" not in note and "codes" not in note

@@ -797,6 +797,10 @@ async def execute(task: WrappedTask, db_path: str = "data/borg_route.db") -> Inb
                 # Law 1 — the child plans its own step, but is governed by
                 # what the operator asked at the root.
                 root_instruction=task.governance_instruction or task.instruction,
+                # Ruling 26b edge: a child started by a step that reads the
+                # run's documents fails, rather than invents, when none of
+                # its document steps finish.
+                documents_step=task.data_scope == "raw",
             )
             await update_run_status(child_run_id, "completed", db_path=db_path)
         except Exception as exc:

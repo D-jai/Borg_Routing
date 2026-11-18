@@ -75,6 +75,9 @@ Borg.ready(function () {
     if (r.estimate) box.appendChild(h('p', { class: 'small muted' }, W.floorNote(r.estimate)));
     // Ruling 26a: an answer no step stands behind says so.
     if (r.noStep) box.appendChild(h('p', { class: 'small no-step' }, r.noStep));
+    // Ruling 26e: "k of N steps failed" (and "m of n items failed"), only when there are any.
+    var fl = W.failedLines(r);
+    if (fl.length) box.appendChild(h('p', { class: 'small muted' }, fl.join(' · ')));
     var row = h('div', { class: 'row' }, r.models.map(function (m) { return modelChip(m.model, m.calls); }));
     if (r.rawStayed) row.appendChild(h('span', { class: 'chip' }, [h('span', { class: 'dot gold' }), 'Raw documents stayed on this machine']));
     // Worked out by the server. Unknown is "not recorded", never a zero.

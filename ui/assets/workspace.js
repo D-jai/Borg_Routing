@@ -368,13 +368,41 @@
       if (x && x.code === 'BRT-ORC-033') d = x;
     });
     var codes = d && Array.isArray(d.step_codes) ? d.step_codes : [];
-    var n = d && typeof d.failed_steps === 'number' ? d.failed_steps : codes.length;
+    // A viewer whose events were redacted may read no count: leave it out, never "0 of 0".
+    var n = d && typeof d.failed_steps === 'number' && d.failed_steps > 0 ? d.failed_steps
+      : codes.length || null;
     var list = codes.map(function (c) {
       if (c && typeof c === 'object') return String(c.code) + (c.doc ? ' (document ' + c.doc + ')' : '');
       return String(c);
     }).join(', ');
-    return 'Every planned step failed (' + n + ' of ' + n + '), so the planning model wrote this answer alone, ' +
-      'with no step’s work behind it.' + (list ? ' Step failure codes: ' + list + '.' : '');
+    return 'Every planned step failed' + (n ? ' (' + n + ' of ' + n + ')' : '') +
+      ', so the planning model wrote this answer alone, with no step’s work behind it.' +
+      (list ? ' Step failure codes: ' + list + '.' : '');
+  }
+
+  /* Ruling 26e: {steps, stepsFailed, items, itemsFailed} from the steps' stored results. A step
+   * failed when its envelope failed, or (ruling 26f) it is an apply_to_each whose every item
+   * failed. An apply_to_each with some failed items is not a failed step: its items count. */
+  function failedCounts(data) {
+    var steps = stepsFromRun(data), out = { steps: steps.length, stepsFailed: 0, items: 0, itemsFailed: 0 };
+    steps.forEach(function (s) {
+      var inb = parseJSON(s.envelope && s.envelope.inbound_payload) || {};
+      var o = inb.output && typeof inb.output === 'object' ? inb.output : {};
+      var allItemsFailed = Array.isArray(o.results) && !o.results.length && Array.isArray(o.failures) && o.failures.length > 0;
+      if (s.status === 'failed' || allItemsFailed) { out.stepsFailed += 1; return; }
+      var bad = num(o.failure_count), total = num(o.total);
+      if (s.type === 'apply_to_each' && bad && total) { out.itemsFailed += bad; out.items += total; }
+    });
+    return out;
+  }
+  /* The receipt's failure lines: "k of N steps failed" only when k > 0, then "m of n items
+   * failed" only when m > 0. */
+  function failedLines(r) {
+    var f = r && r.failed, out = [];
+    if (!f) return out;
+    if (f.stepsFailed > 0) out.push(f.stepsFailed + ' of ' + f.steps + ' steps failed');
+    if (f.itemsFailed > 0) out.push(f.itemsFailed + ' of ' + f.items + ' items failed');
+    return out;
   }
 
   // ---------- what the run was run under, and what the pages show about it ----------
@@ -433,7 +461,8 @@
       laneMode: mode,
       rawStayed: !!(data.run && data.run.documents) && (mode === 'raw_local' || mode === 'all_local'),
       estimate: baselineEstimate(data),   // ruling 22: the floor, or null when none was stored
-      noStep: noStepNote(data)            // ruling 26a: the planner wrote the answer alone, or null
+      noStep: noStepNote(data),           // ruling 26a: the planner wrote the answer alone, or null
+      failed: failedCounts(data)          // ruling 26e: failed steps, and failed items of the steps that went on
     };
   }
   /* The receipt's stat boxes as [k, v] pairs. */
@@ -686,7 +715,7 @@
   window.BorgWork = {
     LANE_MODES: LANE_MODES, laneTag: laneTag, historyForMode: historyForMode, laneLine: laneLine,
     readLaneMode: readLaneMode, prepareSend: prepareSend, runLaneMode: runLaneMode, runLaneWords: runLaneWords, leftCard: leftCard,
-    headerTiles: headerTiles, receiptFrom: receiptFrom, noStepNote: noStepNote, receiptStats: receiptStats, leftChipText: leftChipText,
+    headerTiles: headerTiles, receiptFrom: receiptFrom, noStepNote: noStepNote, failedLines: failedLines, receiptStats: receiptStats, leftChipText: leftChipText,
     stripBaseline: stripBaseline, whyRows: whyRows, makeRefresher: makeRefresher, makeLiveStream: makeLiveStream,
     parseJSON: parseJSON, decisionOf: decisionOf, stageWords: stageWords, shortModel: shortModel, shortText: shortText,
     planNodesById: planNodesById, stepsFromRun: stepsFromRun, planLayout: planLayout,

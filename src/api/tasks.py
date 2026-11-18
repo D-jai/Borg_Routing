@@ -22,6 +22,7 @@ Error codes:
 """
 import asyncio
 import json
+import re
 from typing import Optional
 
 import aiosqlite
@@ -278,8 +279,50 @@ def _redact_events(events: list[dict]) -> list[dict]:
             if ev.get("event_type") == "model_call" and isinstance(decision.get("pack"), dict):
                 kept.append(dict(ev, decision_json=json.dumps({"pack": decision["pack"]})))
                 continue
+        if ev.get("event_type") == "error":
+            no_step = _no_step_counts(ev.get("decision_json"))
+            if no_step is not None:
+                kept.append(dict(ev, decision_json=json.dumps(no_step)))
+                continue
         kept.append(dict(ev, decision_json=None))
     return kept
+
+
+_CODE_RE = re.compile(r"^BRT-[A-Z]+-[0-9A-Z-]{1,24}$")
+_DOC_IDS_RE = re.compile(r"^[A-Za-z0-9_#.:-]+(,[A-Za-z0-9_#.:-]+)*$")
+
+
+def _no_step_counts(decision_json: object) -> Optional[dict]:
+    """Ruling 26a: what a redacted viewer keeps of a BRT-ORC-033 event, else None.
+
+    Only ``code``, ``failed_steps`` (a whole number) and ``step_codes``; each
+    step code is kept only when it is a bare code, and a document step only
+    as its code and document ids. Anything else is dropped, so no message or
+    document text can leave.
+    """
+    try:
+        decision = json.loads(decision_json or "null")
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(decision, dict) or decision.get("code") != "BRT-ORC-033":
+        return None
+    out: dict = {"code": "BRT-ORC-033"}
+    failed = decision.get("failed_steps")
+    if isinstance(failed, int) and not isinstance(failed, bool) and failed >= 0:
+        out["failed_steps"] = failed
+    codes: list = []
+    for entry in decision.get("step_codes") or []:
+        if isinstance(entry, str) and _CODE_RE.match(entry):
+            codes.append(entry)
+        elif isinstance(entry, dict) and isinstance(entry.get("code"), str) \
+                and _CODE_RE.match(entry["code"]):
+            item = {"code": entry["code"]}
+            doc = entry.get("doc")
+            if isinstance(doc, str) and _DOC_IDS_RE.match(doc):
+                item["doc"] = doc
+            codes.append(item)
+    out["step_codes"] = codes
+    return out
 
 
 async def _lane_is_on() -> bool:

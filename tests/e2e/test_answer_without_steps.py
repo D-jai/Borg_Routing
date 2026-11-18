@@ -125,3 +125,98 @@ async def test_b_a_document_step_finished_the_run_completes(lane):
     assert result["response"] == COMPOSED
     assert await _answer_kind(lane["db"], result["run_id"]) == "composed"
     assert _events(lane["db"], "BRT-ORC-034") == []
+
+
+# --- Planner ruling 26f: an apply_to_each with no successful item is not a
+# finished step; one successful item is. ----------------------------------------
+
+APE_ALL_FAIL = {"type": "apply_to_each", "id": "n1", "instruction": "Tag this row.",
+                "items": ["row one", "row two"], "output_schema": {"tag": "string"},
+                "tier": "light", "task_type": "extraction"}
+
+
+def _tag_only_row_one(req):
+    # A reply without "tag" fails the item (BRT-ANS-005, missing required key).
+    return {"tag": "one"} if "row one" in req.system else {"nothing": True}
+
+
+@pytest.mark.asyncio
+async def test_f_all_items_failed_no_documents_is_planner_only(env):
+    db_path, mp = env
+    StubModels(plan_nodes=[APE_ALL_FAIL], answer_for=lambda r: {"nothing": True},
+               compose_text=COMPOSED).install(mp)
+    result = await run_pipeline("Tag these rows.", db_path=db_path)
+    await drain_log_writes()
+    assert result["status"] == "completed", result.get("error")
+    assert await _answer_kind(db_path, result["run_id"]) == "planner_only"
+    events = _events(db_path, "BRT-ORC-033")
+    assert len(events) == 1 and events[0]["failed_steps"] == 1, events
+    assert events[0]["step_codes"], events
+
+
+@pytest.mark.asyncio
+async def test_f_one_successful_item_is_a_finished_step(env):
+    db_path, mp = env
+    StubModels(plan_nodes=[APE_ALL_FAIL], answer_for=_tag_only_row_one,
+               compose_text=COMPOSED).install(mp)
+    result = await run_pipeline("Tag these rows.", db_path=db_path)
+    await drain_log_writes()
+    assert await _answer_kind(db_path, result["run_id"]) == "composed"
+    assert _events(db_path, "BRT-ORC-033") == []
+
+
+async def test_f_all_items_failed_over_documents_is_brt_orc_034(lane):
+    # The local model answers every document item without the schema's keys.
+    stub, result = await _run(lane, "raw_local", lane_matrix(), compose_text=COMPOSED,
+                              answer_for=lambda r: {"nothing": True})
+    assert result["status"] == "failed", result
+    assert stub.of_kind("compose") == []
+    assert "BRT-ORC-034" in (result["error"] or "")
+    for canary in CANARIES:
+        assert canary not in (result["error"] or "")
+
+
+# --- Edge under 26b: a child run given documents in all_local ------------------
+
+CHILD_TEXT = "INVENTED BY THE CHILD PLANNER"
+
+
+async def test_child_with_documents_whose_steps_all_fail_hands_the_parent_a_failure(lane):
+    parent_plan = [{"type": "orchestrate", "id": "n1", "instruction": "Assess the notes.",
+                    "documents": ["doc_001"], "task_type": "reasoning", "tier": "light",
+                    "output_schema": {"result": "string"}}]
+    child_plan = [{"type": "state_op", "id": "c1", "op": "sort", "items": [{"a": 1}]}]
+
+    def plan_for(req):
+        return child_plan if "Your Assignment In This Run" in req.system else parent_plan
+
+    def compose_for(req):
+        if "Your Assignment In This Run" in req.system:
+            return {"response": CHILD_TEXT}
+        return {"response": COMPOSED}
+
+    stub, result = await _run(lane, "all_local", lane_matrix(), plan=parent_plan,
+                              plan_for=plan_for, compose_for=compose_for)
+    assert len(stub.of_kind("plan")) == 2, "the child planner should have run"
+    # The child's invented text never reaches the parent as a step result.
+    for req in stub.requests:
+        if "Your Assignment In This Run" not in req.system:
+            assert CHILD_TEXT not in req.system + req.user, req.kind
+    assert CHILD_TEXT not in (result["response"] or "")
+    # The child itself failed with BRT-ORC-034 (not some other error) ...
+    with sqlite3.connect(lane["db"]) as conn:
+        child = conn.execute(
+            "SELECT run_id, status FROM runs WHERE parent_run_id=?", (result["run_id"],)
+        ).fetchall()
+        child_events = [
+            json.loads(r[0]) for r in conn.execute(
+                "SELECT decision_json FROM logs WHERE event_type='error' AND run_id=?",
+                (child[0][0],),
+            ).fetchall()
+        ]
+    assert [c[1] for c in child] == ["failed"]
+    assert any(e.get("code") == "BRT-ORC-034" for e in child_events), child_events
+    # ... and the parent, with no document step that finished, fails too.
+    assert result["status"] == "failed", result
+    assert "BRT-ORC-034" in (result["error"] or "")
+    assert "not defined" not in json.dumps(child_events)

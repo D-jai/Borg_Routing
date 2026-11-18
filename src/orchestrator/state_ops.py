@@ -81,7 +81,8 @@ def field_value(row: Any, name: object) -> Any:
 
 def _group_field(op: str, params: dict) -> Optional[str]:
     """The grouping field, written as ``key`` or ``group_by``; None if absent."""
-    key, group_by = params.get("key"), params.get("group_by")
+    # An empty field name is a missing param (review of ac1c932).
+    key, group_by = (None if params.get(n) == "" else params.get(n) for n in ("key", "group_by"))
     if key is not None and group_by is not None and str(key) != str(group_by):
         raise ValueError(
             f"BRT-SOP-002: {op} got key '{str(key)[:30]}' and group_by "
@@ -122,8 +123,8 @@ async def op_filter(items: list[dict], params: dict) -> list[dict]:
         ValueError: BRT-SOP-004 if filter expression is invalid.
     """
     key = params.get("key")
-    if key is None or "value" not in params:
-        missing = "key" if key is None else "value"
+    if key in (None, "") or "value" not in params:
+        missing = "key" if key in (None, "") else "value"
         raise ValueError(
             f"BRT-SOP-002: filter requires '{missing}'. Its params: {_params_text('filter')}"
         )
@@ -231,6 +232,12 @@ def _check_params(op: str, params: object) -> dict:
         raise ValueError(
             f"BRT-SOP-006: {op} does not take {names}. Its params: {_params_text(op)}"
         )
+    for flag in ("count", "negate"):
+        # A real boolean only: "true", "false" or 1 is never taken loosely.
+        if flag in params and not isinstance(params[flag], bool):
+            raise ValueError(
+                f"BRT-SOP-002: {op} '{flag}' must be true or false. Its params: {_params_text(op)}"
+            )
     return params
 
 
@@ -265,7 +272,7 @@ async def dispatch_state_op(
         ValueError: BRT-SOP-001..006 on operator errors.
     """
     op_name = task.dependency_input.get("op")
-    if not op_name or op_name not in _OP_HANDLERS:
+    if not isinstance(op_name, str) or op_name not in _OP_HANDLERS:
         raise ValueError(
             f"BRT-SOP-001: unknown op '{str(op_name)[:20]}'. Ops and params: {_all_ops_text()}"
         )

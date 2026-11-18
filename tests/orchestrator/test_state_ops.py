@@ -249,3 +249,40 @@ def test_sample_result_is_a_row_marker_list_step():
                     {"item": "e2", "bucket": "bug", "topic": "sync"}]
     env.output = {"result": {"bug": 2, "billing": 1}}
     assert rm.rows_for(env, None) is None  # counts are not a list step
+
+
+# --- Review of ac1c932: params are taken strictly -----------------------------
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("op, params", [
+    ("group_by", {"key": "bucket", "count": "true"}),
+    ("group_by", {"key": "bucket", "count": 1}),
+    ("filter", {"key": "bucket", "value": "bug", "negate": "false"}),
+])
+async def test_count_and_negate_must_be_real_booleans(op, params):
+    task = _state_op_task(op, items=APE_ROWS, params=params)
+    with pytest.raises(ValueError, match=r"^BRT-SOP-002: .*Its params:"):
+        await dispatch_state_op(task)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("op, params", [
+    ("filter", {"key": "", "value": "bug"}),
+    ("group_by", {"key": ""}),
+    ("group_by", {"group_by": ""}),
+])
+async def test_an_empty_key_is_a_missing_param(op, params):
+    task = _state_op_task(op, items=APE_ROWS, params=params)
+    with pytest.raises(ValueError, match=r"^BRT-SOP-002: .*Its params:"):
+        await dispatch_state_op(task)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("op", [5, ["count"], {"op": "count"}])
+async def test_an_op_that_is_not_a_string_is_brt_sop_001(op):
+    task = _state_op_task("count", items=APE_ROWS)
+    task.dependency_input["op"] = op
+    with pytest.raises(ValueError) as info:
+        await dispatch_state_op(task)
+    text = str(info.value)
+    assert text.startswith("BRT-SOP-001") and "group_by(" in text and "sample(" in text
