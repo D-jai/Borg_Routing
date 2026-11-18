@@ -298,6 +298,12 @@ class _Post:
     kind: str                     # read | cut | timeout | raised | skipped
     tokens_out: int = 0
     items: int = 0
+    # The items this post really carried: items that left the pack when it was
+    # measured at send time have already run alone and are never halved again.
+    posted: list = field(default_factory=list)
+
+
+_CODE = re.compile(r"\bBRT-[A-Z]+-[0-9A-Z]+\b")
 
 
 @dataclass
@@ -443,7 +449,7 @@ class StepPacker:
                 key = bool(self.children[first[0]].documents)
                 for i in first:
                     groups[key].remove(i)
-                observed = await self._first_pack(first, groups[key])
+                observed = await self._first_pack(first, groups)
                 if self.off:
                     rest = sorted(i for k in groups for i in groups[k])
                     work = [self.run_single(i) for i in rest]
@@ -455,27 +461,52 @@ class StepPacker:
         finally:
             await asyncio.gather(*background)
 
-    async def _first_pack(self, pack: list[int], pool: list[int]) -> Optional[float]:
-        """Ruling 23f (c): post the first pack alone; on a cut, halve it, put
-        the second half back in ``pool`` and post the first half alone.
-        Returns the observed output tokens per item x2, or None."""
+    async def _first_pack(self, pack: list[int], groups: dict) -> Optional[float]:
+        """Ruling 23f (c): post the first pack alone; on a cut, halve what was
+        posted, put the second half back in its pool and post the first half
+        alone. If every item of the pack left it at send time (nothing was
+        posted), the next pack, formed from the estimate, is posted alone as
+        the first pack. Returns the observed output tokens per item x2, or None.
+        ``pack`` has already been taken out of ``groups``."""
         while True:
             post = await self._post(pack, phase_one=True)
             if post.kind == "read":
                 return _OBSERVED_FACTOR * post.tokens_out / max(1, post.items)
             if post.kind == "cut":
-                if len(pack) <= 2:
+                posted = post.posted
+                if len(posted) <= 2:
                     # No useful observation: packing stops for this step
                     # (planner, 18-Nov-2026). Its items run alone.
                     self.off = True
-                    await asyncio.gather(*[self.run_single(i) for i in pack])
+                    await asyncio.gather(*[self.run_single(i) for i in posted])
                     return None
-                half = (len(pack) + 1) // 2
-                pack, back = pack[:half], pack[half:]
+                half = (len(posted) + 1) // 2
+                pack, back = posted[:half], posted[half:]
+                pool = groups[bool(self.children[back[0]].documents)]
                 pool.extend(back)
                 pool.sort()
                 continue
+            if post.kind == "skipped" and not self.off:
+                nxt = self._next_first(groups)
+                if nxt is None:
+                    return None
+                pack = nxt
+                continue
             return None   # timeout (packing now off) or raised: items already ran alone
+
+    def _next_first(self, groups: dict) -> Optional[list[int]]:
+        """The next first pack: the lowest-index pack of two or more items the
+        estimate forms from what is left; taken out of its pool."""
+        packs = sorted(
+            (p for k in groups for p in self._form(groups[k], None) if len(p) > 1),
+            key=lambda p: p[0],
+        )
+        if not packs:
+            return None
+        pool = groups[bool(self.children[packs[0][0]].documents)]
+        for i in packs[0]:
+            pool.remove(i)
+        return packs[0]
 
     async def _post_tree(self, pack: list[int]) -> None:
         """Post a pack; on a cut, halve it until single items (section 5)."""
@@ -484,40 +515,42 @@ class StepPacker:
             return
         post = await self._post(pack)
         if post.kind == "cut":
-            half = (len(pack) + 1) // 2
-            await asyncio.gather(self._post_tree(pack[:half]), self._post_tree(pack[half:]))
+            posted = post.posted
+            half = (len(posted) + 1) // 2
+            await asyncio.gather(self._post_tree(posted[:half]), self._post_tree(posted[half:]))
 
     async def _post(self, pack: list[int], phase_one: bool = False) -> _Post:
-        """One packed post: build, send, split the cost, read and file. Items
-        that must run alone are run after the semaphore is released."""
+        """One packed post: build, send, split the cost, read and file. The
+        semaphore is held around the HTTP post only. Items that must run alone
+        are run after the post. The result names the items really posted."""
         from src.agents.executor import _post_chat_completion  # noqa: PLC0415
         from src.lane.outbound import call_scope  # noqa: PLC0415
         from src.prompts.base import build_system_prompt  # noqa: PLC0415
 
         alone: list[int] = []
-        result = _Post(kind="skipped", items=len(pack))
-        async with self.semaphore:
-            if self.off:
-                alone = list(pack)
-            else:
-                texts = {i: self._item_text(i) for i in pack}
-                serial = {i: serialise_item(texts[i]) for i in pack}
-                # Re-measure on the text as sent (document items were estimated
-                # before loading): an item over the limit leaves the pack.
+        result = _Post(kind="skipped", items=0)
+        if self.off:
+            alone = list(pack)
+        else:
+            texts = {i: self._item_text(i) for i in pack}
+            serial = {i: serialise_item(texts[i]) for i in pack}
+            # Re-measure on the text as sent (document items were estimated
+            # before loading): an item over the limit leaves the pack. Only
+            # the 400 and 4,000 limits are checked again here.
+            keep = []
+            for i in pack:
+                if len(serial[i]) // 4 > ITEM_ALONE_TOKENS:
+                    alone.append(i)
+                else:
+                    keep.append(i)
+            while keep and sum(len(serial[i]) // 4 for i in keep) > PACK_ITEM_TOKENS:
+                alone.append(keep.pop())
+            if len(keep) < 2:
+                alone.extend(keep)
                 keep = []
-                for i in pack:
-                    if len(serial[i]) // 4 > ITEM_ALONE_TOKENS:
-                        alone.append(i)
-                    else:
-                        keep.append(i)
-                while keep and sum(len(serial[i]) // 4 for i in keep) > PACK_ITEM_TOKENS:
-                    alone.append(keep.pop())
-                if len(keep) < 2:
-                    alone.extend(keep)
-                    keep = []
-                if keep:
-                    result = await self._send(keep, serial, phase_one, alone,
-                                              _post_chat_completion, call_scope, build_system_prompt)
+            if keep:
+                result = await self._send(keep, serial, phase_one, alone,
+                                          _post_chat_completion, call_scope, build_system_prompt)
         if alone:
             await asyncio.gather(*[self.run_single(i) for i in sorted(alone)])
         return result
@@ -556,24 +589,33 @@ class StepPacker:
             "unknown_id": 0, "invalid": 0, "alone": 0, "cut": False, "timed_out": False,
             "raised": False,
         }
-        t0 = time.monotonic()
         try:
-            with call_scope(task.run_id, task.envelope_id, documents=documents):
-                content, tokens_in, tokens_out, finish = await post_fn(
-                    ctx.url, ctx.headers, payload, **lane_kwargs
-                )
+            async with self.semaphore:
+                if self.off:
+                    # Packing stopped (a timeout) while this pack waited: it
+                    # is not posted; its items run alone.
+                    alone.extend(pack)
+                    return _Post(kind="skipped", items=0)
+                t0 = time.monotonic()
+                with call_scope(task.run_id, task.envelope_id, documents=documents):
+                    content, tokens_in, tokens_out, finish = await post_fn(
+                        ctx.url, ctx.headers, payload, **lane_kwargs
+                    )
+                latency_ms = int((time.monotonic() - t0) * 1000)
         except Exception as exc:
             timed_out = str(exc).startswith("BRT-ANS-006")
             if timed_out:
                 # Ruling 23c: one timeout, never scaled; this pack's items run
                 # alone and packing stops for the rest of the step.
                 self.off = True
+            # Counts and an error code only: the message can hold a URL or a
+            # provider's reply, and pack outcomes are shown to every viewer.
+            code = getattr(exc, "code", None) or (_CODE.search(str(exc)) or [None])[0]
             outcome.update({"timed_out": timed_out, "raised": not timed_out, "alone": len(pack),
-                            "error": str(exc)[:300]})
+                            "error_code": code})
             alone.extend(pack)
             await self._outcome(outcome)
-            return _Post(kind="timeout" if timed_out else "raised", items=len(pack))
-        latency_ms = int((time.monotonic() - t0) * 1000)
+            return _Post(kind="timeout" if timed_out else "raised", items=len(pack), posted=list(pack))
 
         cut = finish == "length"
         values: dict = {}
@@ -602,13 +644,16 @@ class StepPacker:
         pricing = getattr(ctx.model, "pricing", None)
         p_in = picos(pricing.input_per_token if pricing else 0.0)
         p_out = picos(pricing.output_per_token if pricing else 0.0)
-        b_pricing = getattr(self.baseline, "pricing", None) if self.baseline is not None else None
         shares = [t_in[k] * p_in + t_out[k] * p_out for k in range(n)]
-        b_shares = (
-            [t_in[k] * picos(b_pricing.input_per_token) + t_out[k] * picos(b_pricing.output_per_token)
-             for k in range(n)]
-            if b_pricing is not None else [None] * n
-        )
+        # As on the single path (cost.price_call): no baseline model gives
+        # None; a baseline model without prices gives 0.
+        if self.baseline is None:
+            b_shares = [None] * n
+        else:
+            b_pricing = getattr(self.baseline, "pricing", None)
+            b_in = picos(b_pricing.input_per_token if b_pricing else 0.0)
+            b_out = picos(b_pricing.output_per_token if b_pricing else 0.0)
+            b_shares = [t_in[k] * b_in + t_out[k] * b_out for k in range(n)]
 
         # Read the reply (section 5).
         to_alone: list[int] = []
@@ -683,8 +728,8 @@ class StepPacker:
         await self._outcome(outcome)
         alone.extend(to_alone)
         if cut:
-            return _Post(kind="cut", items=n)
-        return _Post(kind="read", tokens_out=int(tokens_out or 0), items=n)
+            return _Post(kind="cut", items=n, posted=list(pack))
+        return _Post(kind="read", tokens_out=int(tokens_out or 0), items=n, posted=list(pack))
 
     def _envelope(self, value, child, tin, tout, share, b_share, mark_model_reason, validate_inbound):
         """An item's envelope from its pack value, or None when it fails to

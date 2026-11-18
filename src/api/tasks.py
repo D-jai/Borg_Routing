@@ -241,6 +241,12 @@ async def submit_task(
     )
 
 
+_PACK_OUTCOME_KEYS = (
+    "mode", "step", "call", "items", "accepted", "declined", "missing", "duplicate",
+    "unknown_id", "invalid", "alone", "cut", "timed_out", "raised", "error_code",
+)
+
+
 def _redact_events(events: list[dict]) -> list[dict]:
     """Drop the free text of log events for a non-admin while the lane is on.
 
@@ -257,12 +263,15 @@ def _redact_events(events: list[dict]) -> list[dict]:
                 decision = None
             if not isinstance(decision, dict):
                 decision = {}
-            # A route decision, and a packed post's outcome (planner ruling
-            # 23: ids and counts only), are kept whole.
-            if ev.get("event_type") == "orchestrator_decision" and decision.get("mode") in (
-                "route", "pack_outcome",
-            ):
+            # A route decision is kept whole.
+            if ev.get("event_type") == "orchestrator_decision" and decision.get("mode") == "route":
                 kept.append(ev)
+                continue
+            # A packed post's outcome (planner ruling 23): its ids, counts,
+            # flags and error code only; any other field is dropped.
+            if ev.get("event_type") == "orchestrator_decision" and decision.get("mode") == "pack_outcome":
+                counts = {k: decision[k] for k in _PACK_OUTCOME_KEYS if k in decision}
+                kept.append(dict(ev, decision_json=json.dumps(counts)))
                 continue
             # A packed item's share (ids and numbers only) stays, so the page
             # counts each packed post once; anything else in it is dropped.

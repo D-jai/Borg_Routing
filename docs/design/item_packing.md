@@ -81,6 +81,8 @@ A step whose items fit one pack is unchanged.
 
 **Order and concurrency.** Packs and their items keep index order. The semaphore (`concurrency_limit`, capped at `MAX_CONCURRENCY`) is held around each HTTP post only, so no wait on another call ever holds it. A pack counts as one call in flight. Results are sorted by `index` at the end, as today.
 
+**Limit of the send-time check.** When the request is built, items are measured again on the text as sent, but only against the 400 and 4,000 limits; the context and output-cap fit is not checked again (a cut reply and halving catch a pack that no longer fits). An item that leaves the pack then runs alone and is never posted in a half of that pack.
+
 **Lane key.** A pack never mixes `(data_scope, has_documents)`. By 23b, only derived cloud steps (any mode) and `by_reference` raw steps reach this point.
 
 ## 4. The packed call

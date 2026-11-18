@@ -122,3 +122,43 @@ async def test_single_item_calls_of_a_step_record_the_steps_envelope_in_the_ledg
     assert len(rows) == 2
     assert {r["step_envelope_id"] for r in rows} == {step_env}
     assert all(r["documents"] is None for r in rows)
+
+
+async def test_a_backstop_hit_on_a_derived_cloud_pack_refuses_only_the_offending_item(lane, monkeypatch):
+    """Design test 6(c): in raw_local with documents, a derived step packed for a
+    cloud model carries one item holding a document passage. The backstop
+    refuses the packed post (BRT-LANE-006); the items then run alone and only
+    the offending item is refused."""
+    import uuid
+
+    from src.envelopes.schema import WrappedTask
+    from src.lane.context import lane_scope, prepare_lane
+    from src.orchestrator.apply_to_each import expand_and_run
+    from tests.e2e.test_privacy_lane import ACME_TEXT
+
+    monkeypatch.setenv("BORG_LANE_MODE", "raw_local")
+    monkeypatch.setenv("BORG_PACK_MAX_ITEMS", "20")
+    monkeypatch.setattr(engine, "_shared_matrix", three_tier_matrix())
+    passage = ACME_TEXT.split("\n", 1)[1][:200]
+    items = ["note one", "note two", passage, "note four"]
+    task = WrappedTask(
+        envelope_id=uuid.uuid4(), run_id=uuid.uuid4(), subtask_id=uuid.uuid4(),
+        type="apply_to_each", current_depth=1, max_depth=5, level_path="1",
+        instruction=TASK, governance_instruction=OPERATOR, output_schema={"kind": "a|b|c"},
+        dependency_input={"items": items, "concurrency_limit": 20},
+        model_endpoint="https://openrouter.ai/api", model_name="openrouter/stub/cheap",
+        data_scope="derived",
+    )
+    stub = StubModels(plan_nodes=[], answer_for=lambda r: {"kind": "a"},
+                      pack_item_for=lambda r, t: {"kind": "a"}).install(lane["mp"])
+    ctx = await prepare_lane({"folder": "."}, lane["db"])
+    with lane_scope(ctx):
+        env = await expand_and_run(task, db_path=lane["db"])
+    await drain_log_writes()
+
+    # The packed post never reached the stand-in; the three clean items went alone.
+    assert stub.of_kind("packed") == []
+    assert len(stub.of_kind("answerer")) == 3
+    assert sorted(r["index"] for r in env.output["results"]) == [0, 1, 3]
+    assert [f["index"] for f in env.output["failures"]] == [2]
+    assert "BRT-LANE-006" in json.dumps(env.output["failures"][0]["reason"])

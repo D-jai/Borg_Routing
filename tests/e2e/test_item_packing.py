@@ -543,3 +543,142 @@ def test_with_packing_off_request_bodies_match_the_tree_before_packing(tmp_path,
     pinned = json.loads((root / "tests" / "fixtures" / "packing_off_request_bodies.json")
                         .read_text(encoding="utf-8"))["sha256"]
     assert sorted(hashlib.sha256(b.encode("utf-8")).hexdigest() for b in bodies) == pinned
+
+
+# -- review round 1 of 40ee228 ------------------------------------------------------
+
+def _grow_at_send(pk, indexes, extra=1700):
+    """Item texts that measure small when packs are formed but over 400 tokens
+    when the request is built (as a document item can, once JSON-escaped)."""
+    from src.orchestrator import packing
+
+    real = packing.StepPacker._item_text
+
+    def grown(self, i):
+        text = real(self, i)
+        return text + " " + "q" * extra if i in indexes else text
+
+    pk["mp"].setattr(packing.StepPacker, "_item_text", grown)
+
+
+def _filed_indexes(env) -> list:
+    return sorted([r["index"] for r in env.output["results"]] + [f["index"] for f in env.output["failures"]])
+
+
+@pytest.mark.parametrize("n", [6, 25])
+async def test_an_item_that_leaves_at_send_time_is_never_posted_again_after_a_cut(pk, n):
+    _grow_at_send(pk, {1})
+    stub, env = await _run(pk, _task(_items(n)), packed_tokens_per_item=1000)
+    assert _filed_indexes(env) == list(range(n))
+    # Item 1 went alone exactly once (the single path sends its own text) and
+    # was never in a pack that was posted.
+    one = _items(n)[1]
+    assert len([r for r in stub.of_kind("answerer") if one in r.system]) == 1
+    assert not any(one in t for r in stub.of_kind("packed") for t in r.pack_items.values())
+    rows = _model_calls(pk["db"], env_run_id(stub, env))
+    assert len([r for r in rows if r["decision"] is None]) == len(stub.of_kind("answerer"))
+    assert env.dollars == pytest.approx(sum(r["dollars"] for r in rows), abs=1e-15)
+
+
+async def test_when_the_whole_first_pack_leaves_at_send_time_the_next_pack_goes_alone_first(pk):
+    # Estimate: 13 items per pack (free text, 149 tokens each, x2 under 4,000).
+    # Items 0-12 measure over 400 at send time, so the first pack is never
+    # posted. The next pack must be the first pack (posted alone, then the
+    # rest sized from its observation: 20), not packs formed from the estimate.
+    items = [f"{i:03d} " + "w" * 592 for i in range(60)]
+    _grow_at_send(pk, set(range(13)))
+    stub, env = await _run(
+        pk, _task(items, schema={"summary": "string"}),
+        pack_item_for=lambda r, t: {"summary": "short"},
+        answer_for=lambda r: {"summary": "short"},
+    )
+    assert [len(r.pack_ids) for r in stub.of_kind("packed")] == [13, 20, 14]
+    assert _filed_indexes(env) == list(range(60))
+
+
+async def test_a_post_that_raises_records_only_an_error_code(pk):
+    def reply(req):
+        return httpx.ConnectError("https://provider.example/v1 said: secret body text")
+
+    stub, env = await _run(pk, _task(_items(4)), pack_for=reply)
+    outcomes = _decisions(pk["db"], env_run_id(stub, env), "pack_outcome")
+    assert len(outcomes) == 1
+    assert outcomes[0]["error_code"] == "BRT-ANS-002"
+    assert "error" not in outcomes[0]
+    assert "secret body text" not in json.dumps(outcomes[0])
+
+
+async def test_retried_singles_carry_their_packing_off_bodies(pk):
+    import random
+
+    def seeded():
+        rng = random.Random(7)
+        pk["mp"].setattr(uuid, "uuid4", lambda: uuid.UUID(int=rng.getrandbits(128), version=4))
+
+    step = uuid.UUID(int=1, version=4)
+    items = _items(20)
+
+    def task():
+        t = _task(items)
+        return t.model_copy(update={"envelope_id": step, "run_id": step, "subtask_id": step})
+
+    seeded()
+    off_stub = StubModels(plan_nodes=[], answer_for=_answer).install(pk["mp"])
+    pk["mp"].setenv("BORG_PACK_MAX_ITEMS", "0")
+    await expand_and_run(task(), db_path=pk["db"])
+    off_bodies = {next(t for t in items if t in r.system): r.body for r in off_stub.of_kind("answerer")}
+
+    seeded()
+    pk["mp"].setenv("BORG_PACK_MAX_ITEMS", "20")
+    stub = StubModels(plan_nodes=[], answer_for=_answer, pack_item_for=_kind,
+                      pack_for=lambda r: _values(r, r.pack_ids[2:])).install(pk["mp"])
+    await expand_and_run(task(), db_path=pk["db"])
+    await drain_log_writes()
+    singles = stub.of_kind("answerer")
+    assert len(singles) == 2
+    for r in singles:
+        text = next(t for t in items if t in r.system)
+        assert r.body == off_bodies[text]
+
+
+async def test_a_baseline_without_prices_gives_zero_as_on_the_single_path(pk):
+    from src.registry import cost
+
+    no_price = ModelInfo(model_id="openrouter/stub/free", source="openrouter",
+                         endpoint="https://openrouter.ai/api", context_length=200_000,
+                         pricing=None, task_scores={"reasoning": 9.9}, checked=True)
+
+    async def baseline(*a, **k):
+        return no_price
+
+    pk["mp"].setattr(cost, "resolve_baseline_model", baseline)
+    stub, env = await _run(pk, _task(_items(5)))
+    rows = _model_calls(pk["db"], env_run_id(stub, env))
+    assert rows and all(r["baseline_dollars"] == 0.0 for r in rows)
+    assert all(r["decision"]["pack"]["share_baseline_picodollars"] == 0 for r in rows)
+
+
+async def test_the_semaphore_is_held_only_around_the_http_post(pk):
+    from src.logging import writer
+    from src.orchestrator import packing
+
+    seen = {}
+    real_run = packing.StepPacker.run
+
+    async def run(self):
+        seen["packer"] = self
+        return await real_run(self)
+
+    held = []
+    real_write = writer.write_event
+
+    async def write(event_type, *a, **k):
+        if event_type == "model_call" and "packer" in seen and isinstance(k.get("decision"), dict) \
+                and "pack" in k["decision"]:
+            held.append(seen["packer"].semaphore.locked())
+        return await real_write(event_type, *a, **k)
+
+    pk["mp"].setattr(packing.StepPacker, "run", run)
+    pk["mp"].setattr(writer, "write_event", write)
+    stub, env = await _run(pk, _task(_items(6), limit=1))
+    assert held and not any(held)
