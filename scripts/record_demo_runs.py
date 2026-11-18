@@ -21,9 +21,9 @@ The three jobs (data in demo/data/, all fictional):
 1. Bulk small items: 60 feedback lines, one classification and one field per line. Lane off.
 2. Mixed job: compare two short policies and draft a recommendation memo with a table. Lane off.
 3. Lane run: 10 internal notes, one holding a canary string, read as documents in ``raw_local``.
-   The notes are read only by models on this machine (the CPU model on Ollama); only the planner
+   The notes are read only by models on this machine (llama3.2:3b on Ollama, the bench's scored local row); only the planner
    and the write-up may be cloud models and they see the manifest and short checked outputs, never
-   the note text. ``all_local`` would also keep the notes home but would need the 4B local model to
+   the note text. ``all_local`` would also keep the notes home but would need the 3B local model to
    plan and write up, which it does not do reliably, and would show no cloud routing at all.
 """
 from __future__ import annotations
@@ -49,7 +49,7 @@ MATRIX_FILE = ROOT / "data" / "capability_matrix.yaml"
 CAP_DOLLARS = 1.00
 LABEL = "demo run"
 OLLAMA_HOST, OLLAMA_PORT = "localhost", 11434
-LOCAL_MODELS = ("qwen3:4b", "llama3.2:3b")
+LOCAL_MODELS = ("llama3.2:3b",)
 
 # Rough token use per job (planner, workers, write-up) for the dry-run estimate only. The
 # estimate prices them at the dearest ticked cloud model, so it is a ceiling, not a forecast.
@@ -114,11 +114,28 @@ def probe_ollama(timeout: float = 2.0) -> dict:
         return {"reachable": False, "error": type(exc).__name__, "models": {}}
 
 
-def load_matrix():
-    from src.registry.capability_matrix import CapabilityMatrix
+def _round1_routing_config() -> dict:
+    """The routing configuration the round-1 BORG cloud arm stored in its result file: the checked pool
+    and the receipts baseline. Read from there, not copied by hand."""
+    files = sorted((ROOT / "bench" / "results").glob("*/*_borg_cloud_*.json"))
+    for f in files:
+        rc = (json.loads(f.read_text(encoding="utf-8")) or {}).get("routing_config")
+        if rc and rc.get("pool"):
+            return {"pool": rc["pool"], "baseline_model_id": rc.get("baseline_model_id"),
+                    "source": f.relative_to(ROOT).as_posix()}
+    raise SystemExit("no round-1 BORG result file with a routing_config in bench/results/")
 
-    matrix = CapabilityMatrix(str(MATRIX_FILE))
-    matrix.load()
+
+def load_matrix():
+    """The bench's proof pool, checked in memory: ``bench/pool_matrix.yaml`` through run_bench's own
+    ``load_matrix`` (its ``save`` raises, so no matrix file is ever written), with the rows the
+    round-1 BORG arms checked."""
+    from bench import run_bench
+
+    rc = _round1_routing_config()
+    matrix = run_bench.load_matrix(rc["pool"], run_bench.DEFAULT_MATRIX)
+    matrix.demo_baseline_id = rc["baseline_model_id"]
+    matrix.demo_pool_source = rc["source"]
     return matrix
 
 
@@ -133,7 +150,8 @@ def matrix_report(matrix) -> dict:
     scored_local = [m for m in local if m.task_scores]
     top = max(((m.pricing.input_per_token, m.pricing.output_per_token) for m in cloud if m.pricing),
               default=(0.0, 0.0))
-    return {"models": len(matrix.all()), "ticked_cloud": [m.model_id for m in cloud],
+    return {"models": len(matrix.all()), "baseline": getattr(matrix, "demo_baseline_id", None),
+            "pool_source": getattr(matrix, "demo_pool_source", None), "ticked_cloud": [m.model_id for m in cloud],
             "ticked_local": [m.model_id for m in local],
             "scored_local": [m.model_id for m in scored_local], "dearest_price_per_token": top}
 
@@ -155,13 +173,12 @@ def keys_report() -> dict:
 def problems(job: str, report: dict, ollama: dict | None, keys: dict) -> list[str]:
     out = []
     if not report["ticked_cloud"]:
-        out.append("no ticked cloud model in the matrix (tick one in Admin > Models)")
+        out.append("no checked cloud model in the bench pool")
     if not keys["OPENROUTER_API_KEY"]:
         out.append("OPENROUTER_API_KEY is not set (.env)")
     if job == "3":
         if not report["scored_local"]:
-            out.append("no ticked, scored local model in the matrix: run Discover, Get Model Info "
-                       "and tick qwen3:4b or llama3.2:3b in Admin first")
+            out.append("no checked, scored local model in the bench pool")
         if ollama is not None:
             if not ollama["reachable"]:
                 out.append(f"Ollama is not reachable at {OLLAMA_HOST}:{OLLAMA_PORT}")
@@ -178,8 +195,13 @@ def dry_run(jobs: list[str], probe: bool) -> int:
     keys = keys_report()
     ollama = probe_ollama() if probe else None
     print(f"DRY RUN ({LABEL}s): no model call, nothing written, no money spent.")
-    print(f"matrix: {report['models']} models; ticked cloud {report['ticked_cloud']}; "
-          f"ticked local {report['ticked_local']}; scored local {report['scored_local']}")
+    print(f"matrix: bench/pool_matrix.yaml checked in memory (never written), {report['models']} rows; "
+          f"pool as stored in {report['pool_source']}")
+    print(f"checked pool, cloud ({len(report['ticked_cloud'])}): {report['ticked_cloud']}")
+    print(f"checked pool, local: {report['ticked_local']} (scored: {report['scored_local']})")
+    print(f"receipts baseline (BASELINE_MODEL_ID): {report['baseline']}")
+    print(f"dearest checked worker prices per million tokens: input US${report['dearest_price_per_token'][0]*1e6:.2f}, "
+          f"output US${report['dearest_price_per_token'][1]*1e6:.2f}")
     print(f"keys set: {keys}")
     print("ollama: " + ("not probed (--no-probe)" if ollama is None else json.dumps(ollama)))
     total, blocked = 0.0, False
@@ -254,13 +276,19 @@ async def record(jobs: list[str]) -> int:
         for r in requests:
             key = f"demo_run_{r['job']}"
             print(f"\n[{LABEL}] job {r['job']} ({JOB_TITLES[r['job']]}), lane_mode={r['lane_mode']}")
-            os.environ["BORG_LANE_MODE"] = r["lane_mode"]
-            if r["docs_root"]:
-                os.environ["BORG_DOCS_ROOT"] = r["docs_root"]
             entry = ledger.start(key, kind="demo", db_path=db)
             spend, run_id, status, note = 0.0, None, "failed", None
             try:
-                result = await run_pipeline(r["instruction"], db_path=db, documents=r["documents"])
+                # the same pinned environment, baseline, run time limit and web-search-off the bench uses
+                from bench import run_bench
+
+                env = dict(run_bench.PINNED_ENV)
+                env.update({"BORG_LANE_MODE": r["lane_mode"] if r["lane_mode"] != "off" else None,
+                            "BORG_MAX_RUN_SECONDS": str(run_bench.MAX_RUN_SECONDS),
+                            "BASELINE_MODEL_ID": report["baseline"],
+                            "BORG_DOCS_ROOT": r["docs_root"]})
+                with run_bench._Env(**env), run_bench.tools_off():
+                    result = await run_pipeline(r["instruction"], db_path=db, documents=r["documents"])
                 run_id, status = result.get("run_id"), result.get("status")
                 spend = float(result.get("cost_dollars") or 0.0)
                 note = result.get("error")
