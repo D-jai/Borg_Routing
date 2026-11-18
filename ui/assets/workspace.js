@@ -595,6 +595,7 @@
     'BRT-ANS-009': 'The model’s reply was cut off by the token limit.',
     'BRT-ANS-010': 'The model said it could not do the step.',
     'BRT-REG-020': 'No ticked model clears the quality bar for this kind of work.',
+    'BRT-REG-016': 'The speed of a model on this machine could not be measured, so it is priced as no faster than the slowest measured model.',
     'BRT-APE-005': 'The list this step should work through was empty or missing.',
     'BRT-APE-006': 'The list this step should work through could not be read.',
     'BRT-SKL-008': 'The skill was given data it cannot use.'

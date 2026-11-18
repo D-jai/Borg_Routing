@@ -248,3 +248,81 @@ async def test_a_ticked_local_model_still_without_a_figure_is_measured_at_the_st
     await engine._measure_local_speeds(m)
     assert m.get(OLLAMA.model_id).throughput_tps == pytest.approx(5.0)
     assert seen == ["http://localhost:11434/api/generate"]
+
+
+# --- ruling 28, round 2: single flight per row, one deadline per model ------------
+
+def test_tick_twice_discover_and_a_run_start_share_one_probe(monkeypatch):
+    import uuid
+    from unittest.mock import patch
+
+    from fastapi.testclient import TestClient
+
+    from main import app, matrix
+    from src.orchestrator import engine
+
+    gate, seen = _gated_probe(monkeypatch, figure=6.0)
+    events = []
+
+    async def write_event(event_type, **kw):
+        events.append((event_type, kw))
+
+    monkeypatch.setattr(engine, "write_event", write_event)
+
+    async def no_new_rows(mx, openrouter_key=None):
+        return 0
+
+    mid = "ollama/flight-test:1b"
+    with TestClient(app) as client, patch("src.api.models.discover_all", new=no_new_rows):
+        matrix.upsert(_row(mid, "ollama", "http://localhost:11434", checked=False))
+        assert client.patch(f"/models/{mid}/checked", json={"checked": True}).status_code == 200
+        assert client.patch(f"/models/{mid}/checked", json={"checked": True}).status_code == 200
+        assert client.post("/models/discover").status_code == 200
+        run_start = client.portal.start_task_soon(engine._measure_local_speeds, matrix, uuid.uuid4(), None)
+        assert _wait_for(lambda: len(seen) >= 1)
+        import time as _t
+        _t.sleep(0.3)                                             # give any second probe a chance to start
+        assert len(seen) == 1
+        assert _row_of(client, mid)["speed_status"] == "measuring"
+        assert not run_start.done()                               # the run start waits for the one probe
+        gate.set()
+        run_start.result(timeout=20)
+        assert matrix.get(mid).throughput_tps == pytest.approx(6.0)
+        assert _wait_for(lambda: _row_of(client, mid)["speed_status"] is None)
+    assert len(seen) == 1
+    assert not any((kw.get("decision") or {}).get("code") == "BRT-REG-016" for _t2, kw in events)
+
+
+@pytest.mark.asyncio
+async def test_a_failure_never_overwrites_a_figure_stored_meanwhile(monkeypatch):
+    m = _matrix(OLLAMA)
+
+    async def fails_after_a_figure_arrives(url, body, timeout):
+        m.update_throughput(OLLAMA.model_id, 9.0)                 # e.g. a hand edit or another source
+        raise ConnectionError("busy")
+
+    monkeypatch.setattr(throughput, "_post_json", fails_after_a_figure_arrives)
+    assert await throughput.measure_throughput(m, OLLAMA.model_id) == 9.0
+    assert m.get(OLLAMA.model_id).throughput_tps == 9.0
+    assert throughput.failure_of(OLLAMA.model_id) is None
+
+
+@pytest.mark.asyncio
+async def test_the_whole_probe_of_one_model_has_one_deadline(monkeypatch, caplog):
+    import asyncio
+
+    monkeypatch.setattr(throughput, "PROBE_TIMEOUT_S", 0.5)
+    calls = []
+
+    async def slow(url, body, timeout):                          # each call takes most of the limit
+        calls.append(url)
+        await asyncio.sleep(0.35)
+        return {"usage": {"completion_tokens": 30}}
+
+    monkeypatch.setattr(throughput, "_post_json", slow)
+    m = _matrix(LMSTUDIO)
+    with caplog.at_level(logging.WARNING):
+        assert await throughput.measure_throughput(m, LMSTUDIO.model_id) is None
+    assert len(calls) == 2                                       # the second call was cut off by the deadline
+    assert m.get(LMSTUDIO.model_id).throughput_tps is None
+    assert "BRT-REG-016" in caplog.text and "TimeoutError" in throughput.failure_of(LMSTUDIO.model_id)

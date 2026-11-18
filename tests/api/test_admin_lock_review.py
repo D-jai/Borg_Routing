@@ -134,3 +134,43 @@ def test_ascii_token_is_valid(monkeypatch):
     assert c.get("/keys/status").json()["admin_token_valid"] is True  # unset counts as valid
     monkeypatch.setenv("BORG_ADMIN_TOKEN", TOKEN)
     assert c.get("/keys/status").json()["admin_token_valid"] is True
+
+
+# ---------- ruling 28: a run-start speed-probe warning in a lane run ----------
+
+async def _seed_probe_warning(tmp_path, monkeypatch, model_id):
+    db = str(tmp_path / "probe.db")
+    await create_all(db)
+    run_id = str(uuid.uuid4())
+    warn = {"code": "BRT-REG-016", "severity": "warning", "model_id": model_id,
+            "msg": "Could not measure the speed of x (" + CANARY + ")", "extra": CANARY}
+    async with aiosqlite.connect(db) as conn:
+        await conn.execute("INSERT INTO runs (run_id, user_instruction, status) VALUES (?, ?, ?)",
+                           (run_id, "summarise", "completed"))
+        await conn.execute("INSERT INTO logs (run_id, event_type, model_id, decision_json) VALUES (?, 'error', ?, ?)",
+                           (run_id, model_id, json.dumps(warn)))
+        await conn.execute("INSERT INTO config (key, value) VALUES ('lane_mode', ?)", (json.dumps("raw_local"),))
+        await conn.commit()
+    monkeypatch.setattr(tasks_api, "DB_PATH", db)
+    return run_id
+
+
+@pytest.mark.asyncio
+async def test_a_speed_probe_warning_reaches_a_non_admin_as_code_model_and_severity_only(tmp_path, monkeypatch):
+    run_id = await _seed_probe_warning(tmp_path, monkeypatch, "ollama/llama3.2:3b")
+    monkeypatch.setenv("BORG_ADMIN_TOKEN", TOKEN)
+    r = _client().get(f"/runs/{run_id}")
+    assert r.status_code == 200 and CANARY not in r.text
+    err = next(e for e in r.json()["events"] if e["event_type"] == "error")
+    assert json.loads(err["decision_json"]) == {
+        "code": "BRT-REG-016", "severity": "warning", "model_id": "ollama/llama3.2:3b"}
+
+
+@pytest.mark.asyncio
+async def test_a_speed_probe_warning_drops_a_model_id_of_the_wrong_shape(tmp_path, monkeypatch):
+    run_id = await _seed_probe_warning(tmp_path, monkeypatch, "ollama/x " + CANARY)
+    monkeypatch.setenv("BORG_ADMIN_TOKEN", TOKEN)
+    r = _client().get(f"/runs/{run_id}")
+    err = next(e for e in r.json()["events"] if e["event_type"] == "error")
+    assert json.loads(err["decision_json"]) == {"code": "BRT-REG-016", "severity": "warning"}
+    assert "CONFIDENTIAL" not in err["decision_json"]

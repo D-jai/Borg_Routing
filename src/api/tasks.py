@@ -280,6 +280,10 @@ def _redact_events(events: list[dict]) -> list[dict]:
                 kept.append(dict(ev, decision_json=json.dumps({"pack": decision["pack"]})))
                 continue
         if ev.get("event_type") == "error":
+            probe = _speed_probe_warning(ev.get("decision_json"))
+            if probe is not None:
+                kept.append(dict(ev, decision_json=json.dumps(probe)))
+                continue
             no_step = _no_step_counts(ev.get("decision_json"))
             if no_step is not None:
                 kept.append(dict(ev, decision_json=json.dumps(no_step)))
@@ -299,6 +303,25 @@ _CODE_RE = re.compile(r"^BRT-[A-Z]{2,5}-\d{3}$")
 _DOC_ID = r"doc_\d{3,}(#\d+)?"
 _DOC_IDS_RE = re.compile(rf"^{_DOC_ID}(,{_DOC_ID})*$")
 _NODE_ID_RE = re.compile(r"^[A-Za-z0-9_.:-]{1,64}$")
+_MODEL_ID_RE = re.compile(r"^[A-Za-z0-9_.:/-]{1,128}$")
+
+
+def _speed_probe_warning(decision_json: object) -> Optional[dict]:
+    """Ruling 28: what a redacted viewer keeps of a BRT-REG-016 run-start
+    speed-probe warning, else None: ``code``, ``severity`` "warning" and
+    ``model_id`` only, and ``model_id`` only when it has the shape of a model
+    id. The message (it quotes the probe's error text) never leaves."""
+    try:
+        decision = json.loads(decision_json or "null")
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(decision, dict) or decision.get("code") != "BRT-REG-016":
+        return None
+    out: dict = {"code": "BRT-REG-016", "severity": "warning"}
+    model_id = decision.get("model_id")
+    if isinstance(model_id, str) and _MODEL_ID_RE.match(model_id):
+        out["model_id"] = model_id
+    return out
 
 
 def _step_failure_ids(decision_json: object) -> Optional[dict]:

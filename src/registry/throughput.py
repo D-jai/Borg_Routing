@@ -22,6 +22,7 @@ Error codes:
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from typing import Awaitable, Callable, Optional
@@ -125,10 +126,11 @@ async def probe_tps(
 # Process memory (ruling 28 4a): a model whose probe failed is not probed again by
 # run starts until Discover or a tick re-measures it, or the process restarts.
 _failed: dict[str, str] = {}
-# Rows a background probe (Discover, tick) is measuring now: the Models page
-# shows "speed: measuring" for them.
-_measuring: set[str] = set()
-_tasks: set = set()  # strong references, so a background probe is never garbage-collected
+# Single flight (ruling 28, round 2): at most one probe per model id at a time in
+# this process. The task that owns a row's probe is kept here until it ends; a
+# second trigger awaits it instead of probing. A row is "measuring" while it is here.
+_inflight: dict[str, asyncio.Task] = {}
+_tasks: set = set()  # strong references to background waiters
 
 
 def failure_of(model_id: str) -> Optional[str]:
@@ -137,9 +139,9 @@ def failure_of(model_id: str) -> Optional[str]:
 
 
 def speed_status(model_id: str) -> Optional[str]:
-    """``"measuring"`` while a background probe runs, ``"BRT-REG-016"`` after a
+    """``"measuring"`` while a probe of this row runs, ``"BRT-REG-016"`` after a
     failed one, else None."""
-    if model_id in _measuring:
+    if model_id in _inflight:
         return "measuring"
     if model_id in _failed:
         return "BRT-REG-016"
@@ -149,7 +151,7 @@ def speed_status(model_id: str) -> Optional[str]:
 def reset_state() -> None:
     """Forget failures and running probes (tests)."""
     _failed.clear()
-    _measuring.clear()
+    _inflight.clear()
 
 
 def _figure(tps: float) -> float:
@@ -157,31 +159,26 @@ def _figure(tps: float) -> float:
     return float(f"{tps:.4g}")
 
 
-async def measure_throughput(
-    matrix: CapabilityMatrix,
-    model_id: str,
-    post: Optional[PostJson] = None,
-    clock: Clock = time.perf_counter,
-    skip_failed: bool = False,
+async def _own_probe(
+    matrix: CapabilityMatrix, model_id: str, post: Optional[PostJson], clock: Clock
 ) -> Optional[float]:
-    """Probe one row and store its figure with ``update_throughput``.
-
-    Returns the figure, or None when the row needs no probe (not local, priced,
-    no endpoint, already measured), when ``skip_failed`` and its probe already
-    failed in this process, or when the probe failed (BRT-REG-016, logged and
-    remembered). Never raises. The caller saves the matrix.
-    """
+    """The one probe of a row: every HTTP call of it sits under one deadline of
+    ``PROBE_TIMEOUT_S`` (ruling 28, round 2). Stores the figure, or records the
+    failure, unless a figure arrived meanwhile: a failure never overwrites a
+    stored figure and never marks a row that has one as failed."""
     model = matrix.get(model_id)
-    if not needs_measuring(model):
-        return None
-    if skip_failed and model_id in _failed:
-        return None
     try:
-        tps = await probe_tps(model, post=post, clock=clock)
+        tps = await asyncio.wait_for(probe_tps(model, post=post, clock=clock), timeout=PROBE_TIMEOUT_S)
         if tps <= 0:
             raise ValueError(f"figure {tps} is not positive")
     except Exception as exc:  # noqa: BLE001 - a failed probe never stops the caller
-        reason = f"{type(exc).__name__}: {exc}"
+        current = matrix.get(model_id)
+        if current is not None and current.throughput_tps is not None:
+            return current.throughput_tps
+        if isinstance(exc, asyncio.TimeoutError):
+            reason = f"TimeoutError: no figure within {PROBE_TIMEOUT_S:g} s"
+        else:
+            reason = f"{type(exc).__name__}: {exc}"
         _failed[model_id] = reason
         logger.warning(
             "BRT-REG-016: could not measure the speed of '%s' at %s: %s. "
@@ -196,12 +193,62 @@ async def measure_throughput(
     return figure
 
 
+def _probe_task(
+    matrix: CapabilityMatrix, model_id: str, post: Optional[PostJson] = None, clock: Clock = time.perf_counter
+) -> asyncio.Task:
+    """The row's in-flight probe task, started if there is none. Only the
+    owning task removes the row from ``_inflight``, when it ends."""
+    task = _inflight.get(model_id)
+    if task is not None and not task.done():
+        return task
+    task = asyncio.get_running_loop().create_task(_own_probe(matrix, model_id, post, clock))
+    _inflight[model_id] = task
+
+    def _release(done: asyncio.Task, model_id: str = model_id) -> None:
+        if _inflight.get(model_id) is done:
+            del _inflight[model_id]
+
+    task.add_done_callback(_release)
+    return task
+
+
+async def measure_throughput(
+    matrix: CapabilityMatrix,
+    model_id: str,
+    post: Optional[PostJson] = None,
+    clock: Clock = time.perf_counter,
+    skip_failed: bool = False,
+) -> Optional[float]:
+    """Probe one row and store its figure with ``update_throughput``.
+
+    When a probe of the row is already running (a tick, Discover or a run start
+    began it), this awaits that probe's result and makes no HTTP call of its own.
+    Returns the figure, or None when the row needs no probe (not local, priced,
+    no endpoint, already measured), when ``skip_failed`` and its probe already
+    failed in this process, or when the probe failed (BRT-REG-016, logged and
+    remembered). Never raises. The caller saves the matrix.
+    """
+    model = matrix.get(model_id)
+    if not needs_measuring(model):
+        return None
+    running = _inflight.get(model_id)
+    if running is None or running.done():
+        if skip_failed and model_id in _failed:
+            return None
+        running = _probe_task(matrix, model_id, post, clock)
+    try:
+        return await asyncio.shield(running)
+    except Exception:  # noqa: BLE001 - e.g. the owner was cancelled
+        return None
+
+
 def to_measure(matrix: CapabilityMatrix, checked_only: bool = True, skip_failed: bool = False) -> list[str]:
-    """The ids ``measure_unmeasured`` would probe."""
+    """The ids ``measure_unmeasured`` would probe or wait for (a row whose probe
+    is running is always included, so a run start waits for its figure)."""
     return [
         row.model_id for row in matrix.all()
         if (row.checked or not checked_only) and needs_measuring(row)
-        and not (skip_failed and row.model_id in _failed)
+        and (row.model_id in _inflight or not (skip_failed and row.model_id in _failed))
     ]
 
 
@@ -214,9 +261,10 @@ async def measure_unmeasured(
 ) -> dict[str, Optional[float]]:
     """Probe every local row with no figure (ticked rows only, unless
     ``checked_only`` is False; rows whose probe already failed are left out
-    when ``skip_failed``). Returns ``{model_id: figure or None}``, one entry
-    per row probed. Rows are probed one at a time (a local host often serves
-    one call at a time). Never raises."""
+    when ``skip_failed``, unless a probe of them is running). Returns
+    ``{model_id: figure or None}``, one entry per row probed or waited for.
+    Rows are probed one at a time (a local host often serves one call at a
+    time). Never raises."""
     out: dict[str, Optional[float]] = {}
     for model_id in to_measure(matrix, checked_only, skip_failed):
         out[model_id] = await measure_throughput(matrix, model_id, post=post, clock=clock)
@@ -228,33 +276,30 @@ def measure_in_background(
     model_ids: list[str],
     on_done: Optional[Callable[[], None]] = None,
 ):
-    """Start probing ``model_ids`` as a background task in this event loop and
-    return the task at once (ruling 28 item 7: Discover and the tick return
-    without waiting). Each figure is stored with ``measure_throughput``;
-    ``on_done`` (save the matrix, share it with the engine) runs after. Rows
-    show ``speed_status == "measuring"`` until their probe ends."""
-    import asyncio  # noqa: PLC0415
-
+    """Start probing ``model_ids`` in the background and return at once
+    (ruling 28 item 7: Discover and the tick do not wait). A row whose probe is
+    already running is not probed again: this waits for that probe. Rows are
+    probed one after another; ``on_done`` (save the matrix, share it with the
+    engine) runs after all of them. Returns the waiting task, or None."""
     ids = [i for i in model_ids if needs_measuring(matrix.get(i))]
     if not ids:
         return None
-    _measuring.update(ids)
+    loop = asyncio.get_running_loop()
+    # Register every row now, so it shows "measuring" from this moment; the
+    # first row starts at once, later rows start when the one before ends.
+    first = _probe_task(matrix, ids[0])
 
     async def _run() -> None:
         try:
-            for model_id in ids:
-                try:
-                    await measure_throughput(matrix, model_id)
-                finally:
-                    _measuring.discard(model_id)
+            await asyncio.shield(first)
+            for model_id in ids[1:]:
+                await measure_throughput(matrix, model_id)
             if on_done is not None:
                 on_done()
         except Exception as exc:  # noqa: BLE001
             logger.warning("BRT-REG-016: background speed probe failed: %s", exc)
-        finally:
-            _measuring.difference_update(ids)
 
-    task = asyncio.get_running_loop().create_task(_run())
+    task = loop.create_task(_run())
     _tasks.add(task)
     task.add_done_callback(_tasks.discard)
     return task

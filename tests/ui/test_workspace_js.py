@@ -502,3 +502,14 @@ def test_why_rows_label_a_ranked_after_pick_when_no_priced_model_qualifies(tmp_p
     rows = js(tmp_path, f"return W.whyRows({json.dumps(routing)});")
     assert "ranked after priced models" in rows[0]["note"]
     assert "alias or strategy" not in rows[0]["note"] and "lowest effective cost" not in rows[0]["note"]
+
+
+def test_a_redacted_speed_probe_warning_reads_as_a_warning_with_its_code(tmp_path):
+    warn = {"event_type": "error", "envelope_id": None, "model_id": "ollama/llama3.2:3b",
+            "created_at": "2026-11-17 10:00:02",
+            "decision_json": json.dumps({"code": "BRT-REG-016", "severity": "warning", "model_id": "ollama/llama3.2:3b"})}
+    data = run_body([], [plan_event([]), warn])
+    texts = [o["text"] for o in js(tmp_path, f"return W.eventSentences({json.dumps(data)});")]
+    line = next(t for t in texts if "BRT-REG-016" in t)
+    assert line.startswith("Warning") and "speed" in line
+    assert not any("A problem was recorded" in t for t in texts)
