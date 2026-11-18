@@ -1,0 +1,2264 @@
+{
+ "source": "bench/results/2026_11_18/dbs/C_borg_cloud_1.db",
+ "instruction": "The folder holds fifteen long operations documents. Read all of them and answer the numbered\nquestions below, one numbered answer each, quoting the exact value the documents give. Be brief.\n\n1. On what date does the Tamarack pilot end?\n2. How many loading bays does the Kessler Falls depot have?\n3. Who is the group compliance contact for regulatory filings?\n4. What is the approved budget for Project Osprey?\n5. For how many days must audit logs be kept?\n6. Which vendor will supply the refrigeration units for the new cold store?\n7. What is the code word for an emergency shutdown?\n8. How often is the Pell Harbour crane inspected?\n9. Do the documents contradict each other anywhere? If so, name each topic and quote the two conflicting values.",
+ "lane": {
+  "mode": "by_reference",
+  "manifest": "names",
+  "documents": [
+   {
+    "id": "doc_001",
+    "name": "job_c/doc_01_quarterly_operations_report_q1.md",
+    "parts": [
+     "doc_001#1",
+     "doc_001#2",
+     "doc_001#3",
+     "doc_001#4",
+     "doc_001#5"
+    ]
+   },
+   {
+    "id": "doc_002",
+    "name": "job_c/doc_02_quarterly_operations_report_q2.md",
+    "parts": [
+     "doc_002#1",
+     "doc_002#2",
+     "doc_002#3",
+     "doc_002#4",
+     "doc_002#5",
+     "doc_002#6"
+    ]
+   },
+   {
+    "id": "doc_003",
+    "name": "job_c/doc_03_safety_and_compliance_handbook.md",
+    "parts": [
+     "doc_003#1",
+     "doc_003#2",
+     "doc_003#3",
+     "doc_003#4",
+     "doc_003#5",
+     "doc_003#6"
+    ]
+   },
+   {
+    "id": "doc_004",
+    "name": "job_c/doc_04_fleet_management_review.md",
+    "parts": [
+     "doc_004#1",
+     "doc_004#2",
+     "doc_004#3",
+     "doc_004#4",
+     "doc_004#5",
+     "doc_004#6"
+    ]
+   },
+   {
+    "id": "doc_005",
+    "name": "job_c/doc_05_warehouse_network_overview.md",
+    "parts": [
+     "doc_005#1",
+     "doc_005#2",
+     "doc_005#3",
+     "doc_005#4",
+     "doc_005#5",
+     "doc_005#6"
+    ]
+   },
+   {
+    "id": "doc_006",
+    "name": "job_c/doc_06_supplier_relations_memo.md",
+    "parts": [
+     "doc_006#1",
+     "doc_006#2",
+     "doc_006#3",
+     "doc_006#4",
+     "doc_006#5"
+    ]
+   },
+   {
+    "id": "doc_007",
+    "name": "job_c/doc_07_project_osprey_charter.md",
+    "parts": [
+     "doc_007#1",
+     "doc_007#2",
+     "doc_007#3",
+     "doc_007#4",
+     "doc_007#5"
+    ]
+   },
+   {
+    "id": "doc_008",
+    "name": "job_c/doc_08_finance_and_budget_notes.md",
+    "parts": [
+     "doc_008#1",
+     "doc_008#2",
+     "doc_008#3",
+     "doc_008#4",
+     "doc_008#5",
+     "doc_008#6"
+    ]
+   },
+   {
+    "id": "doc_009",
+    "name": "job_c/doc_09_training_and_staffing_plan.md",
+    "parts": [
+     "doc_009#1",
+     "doc_009#2",
+     "doc_009#3",
+     "doc_009#4",
+     "doc_009#5"
+    ]
+   },
+   {
+    "id": "doc_010",
+    "name": "job_c/doc_10_quality_audit_summary.md",
+    "parts": [
+     "doc_010#1",
+     "doc_010#2",
+     "doc_010#3",
+     "doc_010#4",
+     "doc_010#5"
+    ]
+   },
+   {
+    "id": "doc_011",
+    "name": "job_c/doc_11_facilities_maintenance_log.md",
+    "parts": [
+     "doc_011#1",
+     "doc_011#2",
+     "doc_011#3",
+     "doc_011#4",
+     "doc_011#5",
+     "doc_011#6"
+    ]
+   },
+   {
+    "id": "doc_012",
+    "name": "job_c/doc_12_customer_service_review.md",
+    "parts": [
+     "doc_012#1",
+     "doc_012#2",
+     "doc_012#3",
+     "doc_012#4",
+     "doc_012#5",
+     "doc_012#6"
+    ]
+   },
+   {
+    "id": "doc_013",
+    "name": "job_c/doc_13_expansion_planning_paper.md",
+    "parts": [
+     "doc_013#1",
+     "doc_013#2",
+     "doc_013#3",
+     "doc_013#4",
+     "doc_013#5"
+    ]
+   },
+   {
+    "id": "doc_014",
+    "name": "job_c/doc_14_risk_register_narrative.md",
+    "parts": [
+     "doc_014#1",
+     "doc_014#2",
+     "doc_014#3",
+     "doc_014#4",
+     "doc_014#5",
+     "doc_014#6"
+    ]
+   },
+   {
+    "id": "doc_015",
+    "name": "job_c/doc_15_annual_review_and_outlook.md",
+    "parts": [
+     "doc_015#1",
+     "doc_015#2",
+     "doc_015#3",
+     "doc_015#4",
+     "doc_015#5"
+    ]
+   }
+  ]
+ },
+ "steps": {
+  "extract_q1_to_q8": {
+   "node_type": "apply_to_each",
+   "data_scope": "raw",
+   "status": "resolved",
+   "output": {
+    "results": [
+     {
+      "index": 0,
+      "item": "doc_001#1",
+      "output": {
+       "tamarack_pilot_end_date": null,
+       "kessler_falls_loading_bays": null,
+       "group_compliance_contact": null,
+       "project_osprey_approved_budget": null,
+       "audit_logs_retention_days": null,
+       "refrigeration_units_vendor": null,
+       "emergency_shutdown_codeword": null,
+       "pell_harbour_crane_inspection_frequency": null
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 1,
+      "item": "doc_001#2",
+      "output": {
+       "tamarack_pilot_end_date": null,
+       "kessler_falls_loading_bays": null,
+       "group_compliance_contact": null,
+       "project_osprey_approved_budget": null,
+       "audit_logs_retention_days": null,
+       "refrigeration_units_vendor": null,
+       "emergency_shutdown_codeword": null,
+       "pell_harbour_crane_inspection_frequency": null
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 2,
+      "item": "doc_001#3",
+      "output": {
+       "tamarack_pilot_end_date": null,
+       "kessler_falls_loading_bays": null,
+       "group_compliance_contact": null,
+       "project_osprey_approved_budget": null,
+       "audit_logs_retention_days": null,
+       "refrigeration_units_vendor": null,
+       "emergency_shutdown_codeword": null,
+       "pell_harbour_crane_inspection_frequency": null
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 3,
+      "item": "doc_001#4",
+      "output": {
+       "tamarack_pilot_end_date": null,
+       "kessler_falls_loading_bays": null,
+       "group_compliance_contact": null,
+       "project_osprey_approved_budget": null,
+       "audit_logs_retention_days": null,
+       "refrigeration_units_vendor": null,
+       "emergency_shutdown_codeword": null,
+       "pell_harbour_crane_inspection_frequency": null
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 4,
+      "item": "doc_001#5",
+      "output": {
+       "tamarack_pilot_end_date": null,
+       "kessler_falls_loading_bays": null,
+       "group_compliance_contact": null,
+       "project_osprey_approved_budget": null,
+       "audit_logs_retention_days": null,
+       "refrigeration_units_vendor": null,
+       "emergency_shutdown_codeword": null,
+       "pell_harbour_crane_inspection_frequency": null
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 6,
+      "item": "doc_002#2",
+      "output": {
+       "tamarack_pilot_end_date": null,
+       "kessler_falls_loading_bays": null,
+       "group_compliance_contact": null,
+       "project_osprey_approved_budget": null,
+       "audit_logs_retention_days": null,
+       "refrigeration_units_vendor": null,
+       "emergency_shutdown_codeword": null,
+       "pell_harbour_crane_inspection_frequency": null
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 7,
+      "item": "doc_002#3",
+      "output": {
+       "tamarack_pilot_end_date": null,
+       "kessler_falls_loading_bays": null,
+       "group_compliance_contact": null,
+       "project_osprey_approved_budget": null,
+       "audit_logs_retention_days": null,
+       "refrigeration_units_vendor": null,
+       "emergency_shutdown_codeword": null,
+       "pell_harbour_crane_inspection_frequency": null
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 8,
+      "item": "doc_002#4",
+      "output": {
+       "tamarack_pilot_end_date": null,
+       "kessler_falls_loading_bays": null,
+       "group_compliance_contact": null,
+       "project_osprey_approved_budget": null,
+       "audit_logs_retention_days": null,
+       "refrigeration_units_vendor": null,
+       "emergency_shutdown_codeword": null,
+       "pell_harbour_crane_inspection_frequency": null
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 9,
+      "item": "doc_002#5",
+      "output": {
+       "tamarack_pilot_end_date": null,
+       "kessler_falls_loading_bays": null,
+       "group_compliance_contact": null,
+       "project_osprey_approved_budget": null,
+       "audit_logs_retention_days": null,
+       "refrigeration_units_vendor": null,
+       "emergency_shutdown_codeword": null,
+       "pell_harbour_crane_inspection_frequency": null
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 11,
+      "item": "doc_003#1",
+      "output": {
+       "tamarack_pilot_end_date": null,
+       "kessler_falls_loading_bays": null,
+       "group_compliance_contact": null,
+       "project_osprey_approved_budget": null,
+       "audit_logs_retention_days": null,
+       "refrigeration_units_vendor": null,
+       "emergency_shutdown_codeword": null,
+       "pell_harbour_crane_inspection_frequency": null
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 12,
+      "item": "doc_003#2",
+      "output": {
+       "tamarack_pilot_end_date": null,
+       "kessler_falls_loading_bays": null,
+       "group_compliance_contact": null,
+       "project_osprey_approved_budget": null,
+       "audit_logs_retention_days": null,
+       "refrigeration_units_vendor": null,
+       "emergency_shutdown_codeword": null,
+       "pell_harbour_crane_inspection_frequency": null
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 13,
+      "item": "doc_003#3",
+      "output": {
+       "tamarack_pilot_end_date": null,
+       "kessler_falls_loading_bays": null,
+       "group_compliance_contact": null,
+       "project_osprey_approved_budget": null,
+       "audit_logs_retention_days": null,
+       "refrigeration_units_vendor": null,
+       "emergency_shutdown_codeword": null,
+       "pell_harbour_crane_inspection_frequency": null
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 14,
+      "item": "doc_003#4",
+      "output": {
+       "tamarack_pilot_end_date": null,
+       "kessler_falls_loading_bays": null,
+       "group_compliance_contact": null,
+       "project_osprey_approved_budget": null,
+       "audit_logs_retention_days": null,
+       "refrigeration_units_vendor": null,
+       "emergency_shutdown_codeword": null,
+       "pell_harbour_crane_inspection_frequency": null
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 15,
+      "item": "doc_003#5",
+      "output": {
+       "tamarack_pilot_end_date": "14 March 2027",
+       "kessler_falls_loading_bays": null,
+       "group_compliance_contact": null,
+       "project_osprey_approved_budget": null,
+       "audit_logs_retention_days": null,
+       "refrigeration_units_vendor": null,
+       "emergency_shutdown_codeword": null,
+       "pell_harbour_crane_inspection_frequency": null
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 16,
+      "item": "doc_003#6",
+      "output": {
+       "tamarack_pilot_end_date": null,
+       "kessler_falls_loading_bays": null,
+       "group_compliance_contact": null,
+       "project_osprey_approved_budget": null,
+       "audit_logs_retention_days": null,
+       "refrigeration_units_vendor": null,
+       "emergency_shutdown_codeword": null,
+       "pell_harbour_crane_inspection_frequency": null
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 17,
+      "item": "doc_004#1",
+      "output": {
+       "tamarack_pilot_end_date": null,
+       "kessler_falls_loading_bays": null,
+       "group_compliance_contact": null,
+       "project_osprey_approved_budget": null,
+       "audit_logs_retention_days": null,
+       "refrigeration_units_vendor": null,
+       "emergency_shutdown_codeword": null,
+       "pell_harbour_crane_inspection_frequency": null
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 18,
+      "item": "doc_004#2",
+      "output": {
+       "tamarack_pilot_end_date": null,
+       "kessler_falls_loading_bays": null,
+       "group_compliance_contact": null,
+       "project_osprey_approved_budget": null,
+       "audit_logs_retention_days": null,
+       "refrigeration_units_vendor": null,
+       "emergency_shutdown_codeword": null,
+       "pell_harbour_crane_inspection_frequency": null
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 19,
+      "item": "doc_004#3",
+      "output": {
+       "tamarack_pilot_end_date": null,
+       "kessler_falls_loading_bays": null,
+       "group_compliance_contact": null,
+       "project_osprey_approved_budget": null,
+       "audit_logs_retention_days": null,
+       "refrigeration_units_vendor": null,
+       "emergency_shutdown_codeword": null,
+       "pell_harbour_crane_inspection_frequency": null
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 20,
+      "item": "doc_004#4",
+      "output": {
+       "tamarack_pilot_end_date": null,
+       "kessler_falls_loading_bays": null,
+       "group_compliance_contact": null,
+       "project_osprey_approved_budget": null,
+       "audit_logs_retention_days": null,
+       "refrigeration_units_vendor": null,
+       "emergency_shutdown_codeword": null,
+       "pell_harbour_crane_inspection_frequency": null
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 21,
+      "item": "doc_004#5",
+      "output": {
+       "tamarack_pilot_end_date": null,
+       "kessler_falls_loading_bays": null,
+       "group_compliance_contact": null,
+       "project_osprey_approved_budget": null,
+       "audit_logs_retention_days": null,
+       "refrigeration_units_vendor": null,
+       "emergency_shutdown_codeword": null,
+       "pell_harbour_crane_inspection_frequency": null
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 23,
+      "item": "doc_005#1",
+      "output": {
+       "tamarack_pilot_end_date": null,
+       "kessler_falls_loading_bays": null,
+       "group_compliance_contact": null,
+       "project_osprey_approved_budget": null,
+       "audit_logs_retention_days": null,
+       "refrigeration_units_vendor": null,
+       "emergency_shutdown_codeword": null,
+       "pell_harbour_crane_inspection_frequency": null
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 24,
+      "item": "doc_005#2",
+      "output": {
+       "tamarack_pilot_end_date": null,
+       "kessler_falls_loading_bays": null,
+       "group_compliance_contact": null,
+       "project_osprey_approved_budget": null,
+       "audit_logs_retention_days": null,
+       "refrigeration_units_vendor": null,
+       "emergency_shutdown_codeword": null,
+       "pell_harbour_crane_inspection_frequency": null
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 25,
+      "item": "doc_005#3",
+      "output": {
+       "tamarack_pilot_end_date": null,
+       "kessler_falls_loading_bays": "412",
+       "group_compliance_contact": null,
+       "project_osprey_approved_budget": null,
+       "audit_logs_retention_days": null,
+       "refrigeration_units_vendor": null,
+       "emergency_shutdown_codeword": null,
+       "pell_harbour_crane_inspection_frequency": null
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 26,
+      "item": "doc_005#4",
+      "output": {
+       "tamarack_pilot_end_date": null,
+       "kessler_falls_loading_bays": null,
+       "group_compliance_contact": null,
+       "project_osprey_approved_budget": null,
+       "audit_logs_retention_days": null,
+       "refrigeration_units_vendor": null,
+       "emergency_shutdown_codeword": null,
+       "pell_harbour_crane_inspection_frequency": null
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 27,
+      "item": "doc_005#5",
+      "output": {
+       "tamarack_pilot_end_date": null,
+       "kessler_falls_loading_bays": null,
+       "group_compliance_contact": null,
+       "project_osprey_approved_budget": null,
+       "audit_logs_retention_days": null,
+       "refrigeration_units_vendor": null,
+       "emergency_shutdown_codeword": null,
+       "pell_harbour_crane_inspection_frequency": null
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 29,
+      "item": "doc_006#1",
+      "output": {
+       "tamarack_pilot_end_date": null,
+       "kessler_falls_loading_bays": null,
+       "group_compliance_contact": null,
+       "project_osprey_approved_budget": null,
+       "audit_logs_retention_days": null,
+       "refrigeration_units_vendor": null,
+       "emergency_shutdown_codeword": null,
+       "pell_harbour_crane_inspection_frequency": null
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 30,
+      "item": "doc_006#2",
+      "output": {
+       "tamarack_pilot_end_date": null,
+       "kessler_falls_loading_bays": null,
+       "group_compliance_contact": null,
+       "project_osprey_approved_budget": null,
+       "audit_logs_retention_days": null,
+       "refrigeration_units_vendor": null,
+       "emergency_shutdown_codeword": null,
+       "pell_harbour_crane_inspection_frequency": null
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 31,
+      "item": "doc_006#3",
+      "output": {
+       "tamarack_pilot_end_date": null,
+       "kessler_falls_loading_bays": null,
+       "group_compliance_contact": null,
+       "project_osprey_approved_budget": null,
+       "audit_logs_retention_days": null,
+       "refrigeration_units_vendor": null,
+       "emergency_shutdown_codeword": null,
+       "pell_harbour_crane_inspection_frequency": null
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 32,
+      "item": "doc_006#4",
+      "output": {
+       "tamarack_pilot_end_date": null,
+       "kessler_falls_loading_bays": null,
+       "group_compliance_contact": "Ingrid Vassallo",
+       "project_osprey_approved_budget": null,
+       "audit_logs_retention_days": null,
+       "refrigeration_units_vendor": null,
+       "emergency_shutdown_codeword": null,
+       "pell_harbour_crane_inspection_frequency": null
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 33,
+      "item": "doc_006#5",
+      "output": {
+       "tamarack_pilot_end_date": null,
+       "kessler_falls_loading_bays": null,
+       "group_compliance_contact": null,
+       "project_osprey_approved_budget": null,
+       "audit_logs_retention_days": null,
+       "refrigeration_units_vendor": null,
+       "emergency_shutdown_codeword": null,
+       "pell_harbour_crane_inspection_frequency": null
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 34,
+      "item": "doc_007#1",
+      "output": {
+       "tamarack_pilot_end_date": null,
+       "kessler_falls_loading_bays": null,
+       "group_compliance_contact": null,
+       "project_osprey_approved_budget": null,
+       "audit_logs_retention_days": null,
+       "refrigeration_units_vendor": null,
+       "emergency_shutdown_codeword": null,
+       "pell_harbour_crane_inspection_frequency": null
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 35,
+      "item": "doc_007#2",
+      "output": {
+       "tamarack_pilot_end_date": null,
+       "kessler_falls_loading_bays": null,
+       "group_compliance_contact": null,
+       "project_osprey_approved_budget": "US$3.85 million",
+       "audit_logs_retention_days": null,
+       "refrigeration_units_vendor": null,
+       "emergency_shutdown_codeword": null,
+       "pell_harbour_crane_inspection_frequency": null
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 36,
+      "item": "doc_007#3",
+      "output": {
+       "tamarack_pilot_end_date": null,
+       "kessler_falls_loading_bays": null,
+       "group_compliance_contact": null,
+       "project_osprey_approved_budget": null,
+       "audit_logs_retention_days": null,
+       "refrigeration_units_vendor": null,
+       "emergency_shutdown_codeword": null,
+       "pell_harbour_crane_inspection_frequency": null
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 37,
+      "item": "doc_007#4",
+      "output": {
+       "tamarack_pilot_end_date": null,
+       "kessler_falls_loading_bays": null,
+       "group_compliance_contact": null,
+       "project_osprey_approved_budget": null,
+       "audit_logs_retention_days": null,
+       "refrigeration_units_vendor": null,
+       "emergency_shutdown_codeword": null,
+       "pell_harbour_crane_inspection_frequency": null
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 38,
+      "item": "doc_007#5",
+      "output": {
+       "tamarack_pilot_end_date": null,
+       "kessler_falls_loading_bays": null,
+       "group_compliance_contact": null,
+       "project_osprey_approved_budget": null,
+       "audit_logs_retention_days": null,
+       "refrigeration_units_vendor": null,
+       "emergency_shutdown_codeword": null,
+       "pell_harbour_crane_inspection_frequency": null
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 39,
+      "item": "doc_008#1",
+      "output": {
+       "tamarack_pilot_end_date": null,
+       "kessler_falls_loading_bays": null,
+       "group_compliance_contact": null,
+       "project_osprey_approved_budget": null,
+       "audit_logs_retention_days": null,
+       "refrigeration_units_vendor": null,
+       "emergency_shutdown_codeword": null,
+       "pell_harbour_crane_inspection_frequency": null
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 40,
+      "item": "doc_008#2",
+      "output": {
+       "tamarack_pilot_end_date": null,
+       "kessler_falls_loading_bays": null,
+       "group_compliance_contact": null,
+       "project_osprey_approved_budget": null,
+       "audit_logs_retention_days": null,
+       "refrigeration_units_vendor": null,
+       "emergency_shutdown_codeword": null,
+       "pell_harbour_crane_inspection_frequency": null
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 41,
+      "item": "doc_008#3",
+      "output": {
+       "tamarack_pilot_end_date": null,
+       "kessler_falls_loading_bays": null,
+       "group_compliance_contact": null,
+       "project_osprey_approved_budget": null,
+       "audit_logs_retention_days": null,
+       "refrigeration_units_vendor": null,
+       "emergency_shutdown_codeword": null,
+       "pell_harbour_crane_inspection_frequency": null
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 42,
+      "item": "doc_008#4",
+      "output": {
+       "tamarack_pilot_end_date": null,
+       "kessler_falls_loading_bays": null,
+       "group_compliance_contact": null,
+       "project_osprey_approved_budget": null,
+       "audit_logs_retention_days": null,
+       "refrigeration_units_vendor": null,
+       "emergency_shutdown_codeword": null,
+       "pell_harbour_crane_inspection_frequency": null
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 43,
+      "item": "doc_008#5",
+      "output": {
+       "tamarack_pilot_end_date": null,
+       "kessler_falls_loading_bays": null,
+       "group_compliance_contact": null,
+       "project_osprey_approved_budget": null,
+       "audit_logs_retention_days": null,
+       "refrigeration_units_vendor": null,
+       "emergency_shutdown_codeword": null,
+       "pell_harbour_crane_inspection_frequency": null
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 44,
+      "item": "doc_008#6",
+      "output": {
+       "tamarack_pilot_end_date": null,
+       "kessler_falls_loading_bays": null,
+       "group_compliance_contact": null,
+       "project_osprey_approved_budget": null,
+       "audit_logs_retention_days": null,
+       "refrigeration_units_vendor": null,
+       "emergency_shutdown_codeword": null,
+       "pell_harbour_crane_inspection_frequency": null
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 45,
+      "item": "doc_009#1",
+      "output": {
+       "tamarack_pilot_end_date": null,
+       "kessler_falls_loading_bays": null,
+       "group_compliance_contact": null,
+       "project_osprey_approved_budget": null,
+       "audit_logs_retention_days": null,
+       "refrigeration_units_vendor": null,
+       "emergency_shutdown_codeword": null,
+       "pell_harbour_crane_inspection_frequency": null
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 46,
+      "item": "doc_009#2",
+      "output": {
+       "tamarack_pilot_end_date": null,
+       "kessler_falls_loading_bays": null,
+       "group_compliance_contact": null,
+       "project_osprey_approved_budget": null,
+       "audit_logs_retention_days": "2,317",
+       "refrigeration_units_vendor": null,
+       "emergency_shutdown_codeword": null,
+       "pell_harbour_crane_inspection_frequency": null
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 47,
+      "item": "doc_009#3",
+      "output": {
+       "tamarack_pilot_end_date": null,
+       "kessler_falls_loading_bays": null,
+       "group_compliance_contact": null,
+       "project_osprey_approved_budget": null,
+       "audit_logs_retention_days": null,
+       "refrigeration_units_vendor": null,
+       "emergency_shutdown_codeword": null,
+       "pell_harbour_crane_inspection_frequency": null
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 48,
+      "item": "doc_009#4",
+      "output": {
+       "tamarack_pilot_end_date": null,
+       "kessler_falls_loading_bays": null,
+       "group_compliance_contact": null,
+       "project_osprey_approved_budget": null,
+       "audit_logs_retention_days": null,
+       "refrigeration_units_vendor": null,
+       "emergency_shutdown_codeword": null,
+       "pell_harbour_crane_inspection_frequency": null
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 49,
+      "item": "doc_009#5",
+      "output": {
+       "tamarack_pilot_end_date": null,
+       "kessler_falls_loading_bays": null,
+       "group_compliance_contact": null,
+       "project_osprey_approved_budget": null,
+       "audit_logs_retention_days": null,
+       "refrigeration_units_vendor": null,
+       "emergency_shutdown_codeword": null,
+       "pell_harbour_crane_inspection_frequency": null
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 50,
+      "item": "doc_010#1",
+      "output": {
+       "tamarack_pilot_end_date": null,
+       "kessler_falls_loading_bays": null,
+       "group_compliance_contact": null,
+       "project_osprey_approved_budget": null,
+       "audit_logs_retention_days": null,
+       "refrigeration_units_vendor": null,
+       "emergency_shutdown_codeword": null,
+       "pell_harbour_crane_inspection_frequency": null
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 51,
+      "item": "doc_010#2",
+      "output": {
+       "tamarack_pilot_end_date": null,
+       "kessler_falls_loading_bays": null,
+       "group_compliance_contact": null,
+       "project_osprey_approved_budget": null,
+       "audit_logs_retention_days": null,
+       "refrigeration_units_vendor": null,
+       "emergency_shutdown_codeword": null,
+       "pell_harbour_crane_inspection_frequency": null
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 52,
+      "item": "doc_010#3",
+      "output": {
+       "tamarack_pilot_end_date": null,
+       "kessler_falls_loading_bays": null,
+       "group_compliance_contact": null,
+       "project_osprey_approved_budget": null,
+       "audit_logs_retention_days": null,
+       "refrigeration_units_vendor": null,
+       "emergency_shutdown_codeword": null,
+       "pell_harbour_crane_inspection_frequency": null
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 53,
+      "item": "doc_010#4",
+      "output": {
+       "tamarack_pilot_end_date": null,
+       "kessler_falls_loading_bays": null,
+       "group_compliance_contact": null,
+       "project_osprey_approved_budget": null,
+       "audit_logs_retention_days": null,
+       "refrigeration_units_vendor": "Brannock Cryogenics",
+       "emergency_shutdown_codeword": null,
+       "pell_harbour_crane_inspection_frequency": null
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 54,
+      "item": "doc_010#5",
+      "output": {
+       "tamarack_pilot_end_date": null,
+       "kessler_falls_loading_bays": null,
+       "group_compliance_contact": null,
+       "project_osprey_approved_budget": null,
+       "audit_logs_retention_days": null,
+       "refrigeration_units_vendor": null,
+       "emergency_shutdown_codeword": null,
+       "pell_harbour_crane_inspection_frequency": null
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 55,
+      "item": "doc_011#1",
+      "output": {
+       "tamarack_pilot_end_date": null,
+       "kessler_falls_loading_bays": null,
+       "group_compliance_contact": null,
+       "project_osprey_approved_budget": null,
+       "audit_logs_retention_days": null,
+       "refrigeration_units_vendor": null,
+       "emergency_shutdown_codeword": null,
+       "pell_harbour_crane_inspection_frequency": null
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 56,
+      "item": "doc_011#2",
+      "output": {
+       "tamarack_pilot_end_date": null,
+       "kessler_falls_loading_bays": null,
+       "group_compliance_contact": null,
+       "project_osprey_approved_budget": null,
+       "audit_logs_retention_days": null,
+       "refrigeration_units_vendor": null,
+       "emergency_shutdown_codeword": null,
+       "pell_harbour_crane_inspection_frequency": null
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 57,
+      "item": "doc_011#3",
+      "output": {
+       "tamarack_pilot_end_date": null,
+       "kessler_falls_loading_bays": null,
+       "group_compliance_contact": null,
+       "project_osprey_approved_budget": null,
+       "audit_logs_retention_days": null,
+       "refrigeration_units_vendor": null,
+       "emergency_shutdown_codeword": null,
+       "pell_harbour_crane_inspection_frequency": null
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 58,
+      "item": "doc_011#4",
+      "output": {
+       "tamarack_pilot_end_date": null,
+       "kessler_falls_loading_bays": null,
+       "group_compliance_contact": null,
+       "project_osprey_approved_budget": null,
+       "audit_logs_retention_days": null,
+       "refrigeration_units_vendor": null,
+       "emergency_shutdown_codeword": null,
+       "pell_harbour_crane_inspection_frequency": null
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 59,
+      "item": "doc_011#5",
+      "output": {
+       "tamarack_pilot_end_date": null,
+       "kessler_falls_loading_bays": null,
+       "group_compliance_contact": null,
+       "project_osprey_approved_budget": null,
+       "audit_logs_retention_days": null,
+       "refrigeration_units_vendor": null,
+       "emergency_shutdown_codeword": null,
+       "pell_harbour_crane_inspection_frequency": null
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 61,
+      "item": "doc_012#1",
+      "output": {
+       "tamarack_pilot_end_date": null,
+       "kessler_falls_loading_bays": null,
+       "group_compliance_contact": null,
+       "project_osprey_approved_budget": null,
+       "audit_logs_retention_days": null,
+       "refrigeration_units_vendor": null,
+       "emergency_shutdown_codeword": null,
+       "pell_harbour_crane_inspection_frequency": null
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 62,
+      "item": "doc_012#2",
+      "output": {
+       "tamarack_pilot_end_date": null,
+       "kessler_falls_loading_bays": null,
+       "group_compliance_contact": null,
+       "project_osprey_approved_budget": null,
+       "audit_logs_retention_days": null,
+       "refrigeration_units_vendor": null,
+       "emergency_shutdown_codeword": null,
+       "pell_harbour_crane_inspection_frequency": null
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 63,
+      "item": "doc_012#3",
+      "output": {
+       "tamarack_pilot_end_date": null,
+       "kessler_falls_loading_bays": null,
+       "group_compliance_contact": null,
+       "project_osprey_approved_budget": null,
+       "audit_logs_retention_days": null,
+       "refrigeration_units_vendor": null,
+       "emergency_shutdown_codeword": null,
+       "pell_harbour_crane_inspection_frequency": null
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 64,
+      "item": "doc_012#4",
+      "output": {
+       "tamarack_pilot_end_date": null,
+       "kessler_falls_loading_bays": null,
+       "group_compliance_contact": null,
+       "project_osprey_approved_budget": null,
+       "audit_logs_retention_days": null,
+       "refrigeration_units_vendor": null,
+       "emergency_shutdown_codeword": null,
+       "pell_harbour_crane_inspection_frequency": null
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 65,
+      "item": "doc_012#5",
+      "output": {
+       "tamarack_pilot_end_date": null,
+       "kessler_falls_loading_bays": null,
+       "group_compliance_contact": null,
+       "project_osprey_approved_budget": null,
+       "audit_logs_retention_days": null,
+       "refrigeration_units_vendor": null,
+       "emergency_shutdown_codeword": "juniper-lantern",
+       "pell_harbour_crane_inspection_frequency": null
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 67,
+      "item": "doc_013#1",
+      "output": {
+       "tamarack_pilot_end_date": null,
+       "kessler_falls_loading_bays": null,
+       "group_compliance_contact": null,
+       "project_osprey_approved_budget": null,
+       "audit_logs_retention_days": null,
+       "refrigeration_units_vendor": null,
+       "emergency_shutdown_codeword": null,
+       "pell_harbour_crane_inspection_frequency": null
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 68,
+      "item": "doc_013#2",
+      "output": {
+       "tamarack_pilot_end_date": null,
+       "kessler_falls_loading_bays": null,
+       "group_compliance_contact": null,
+       "project_osprey_approved_budget": null,
+       "audit_logs_retention_days": null,
+       "refrigeration_units_vendor": null,
+       "emergency_shutdown_codeword": null,
+       "pell_harbour_crane_inspection_frequency": null
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 69,
+      "item": "doc_013#3",
+      "output": {
+       "tamarack_pilot_end_date": null,
+       "kessler_falls_loading_bays": null,
+       "group_compliance_contact": null,
+       "project_osprey_approved_budget": null,
+       "audit_logs_retention_days": null,
+       "refrigeration_units_vendor": null,
+       "emergency_shutdown_codeword": null,
+       "pell_harbour_crane_inspection_frequency": null
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 70,
+      "item": "doc_013#4",
+      "output": {
+       "tamarack_pilot_end_date": null,
+       "kessler_falls_loading_bays": null,
+       "group_compliance_contact": null,
+       "project_osprey_approved_budget": null,
+       "audit_logs_retention_days": null,
+       "refrigeration_units_vendor": null,
+       "emergency_shutdown_codeword": null,
+       "pell_harbour_crane_inspection_frequency": null
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 71,
+      "item": "doc_013#5",
+      "output": {
+       "tamarack_pilot_end_date": null,
+       "kessler_falls_loading_bays": null,
+       "group_compliance_contact": null,
+       "project_osprey_approved_budget": null,
+       "audit_logs_retention_days": null,
+       "refrigeration_units_vendor": null,
+       "emergency_shutdown_codeword": null,
+       "pell_harbour_crane_inspection_frequency": null
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 73,
+      "item": "doc_014#2",
+      "output": {
+       "tamarack_pilot_end_date": null,
+       "kessler_falls_loading_bays": null,
+       "group_compliance_contact": null,
+       "project_osprey_approved_budget": null,
+       "audit_logs_retention_days": null,
+       "refrigeration_units_vendor": null,
+       "emergency_shutdown_codeword": null,
+       "pell_harbour_crane_inspection_frequency": null
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 74,
+      "item": "doc_014#3",
+      "output": {
+       "tamarack_pilot_end_date": null,
+       "kessler_falls_loading_bays": null,
+       "group_compliance_contact": null,
+       "project_osprey_approved_budget": null,
+       "audit_logs_retention_days": null,
+       "refrigeration_units_vendor": null,
+       "emergency_shutdown_codeword": null,
+       "pell_harbour_crane_inspection_frequency": null
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 75,
+      "item": "doc_014#4",
+      "output": {
+       "tamarack_pilot_end_date": null,
+       "kessler_falls_loading_bays": null,
+       "group_compliance_contact": null,
+       "project_osprey_approved_budget": null,
+       "audit_logs_retention_days": null,
+       "refrigeration_units_vendor": null,
+       "emergency_shutdown_codeword": null,
+       "pell_harbour_crane_inspection_frequency": null
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 76,
+      "item": "doc_014#5",
+      "output": {
+       "tamarack_pilot_end_date": null,
+       "kessler_falls_loading_bays": null,
+       "group_compliance_contact": null,
+       "project_osprey_approved_budget": null,
+       "audit_logs_retention_days": null,
+       "refrigeration_units_vendor": null,
+       "emergency_shutdown_codeword": null,
+       "pell_harbour_crane_inspection_frequency": "19 days"
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 78,
+      "item": "doc_015#1",
+      "output": {
+       "tamarack_pilot_end_date": null,
+       "kessler_falls_loading_bays": null,
+       "group_compliance_contact": null,
+       "project_osprey_approved_budget": null,
+       "audit_logs_retention_days": null,
+       "refrigeration_units_vendor": null,
+       "emergency_shutdown_codeword": null,
+       "pell_harbour_crane_inspection_frequency": null
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 79,
+      "item": "doc_015#2",
+      "output": {
+       "tamarack_pilot_end_date": null,
+       "kessler_falls_loading_bays": null,
+       "group_compliance_contact": null,
+       "project_osprey_approved_budget": null,
+       "audit_logs_retention_days": null,
+       "refrigeration_units_vendor": null,
+       "emergency_shutdown_codeword": null,
+       "pell_harbour_crane_inspection_frequency": null
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 80,
+      "item": "doc_015#3",
+      "output": {
+       "tamarack_pilot_end_date": null,
+       "kessler_falls_loading_bays": null,
+       "group_compliance_contact": null,
+       "project_osprey_approved_budget": null,
+       "audit_logs_retention_days": null,
+       "refrigeration_units_vendor": null,
+       "emergency_shutdown_codeword": null,
+       "pell_harbour_crane_inspection_frequency": null
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 81,
+      "item": "doc_015#4",
+      "output": {
+       "tamarack_pilot_end_date": null,
+       "kessler_falls_loading_bays": null,
+       "group_compliance_contact": null,
+       "project_osprey_approved_budget": null,
+       "audit_logs_retention_days": null,
+       "refrigeration_units_vendor": null,
+       "emergency_shutdown_codeword": null,
+       "pell_harbour_crane_inspection_frequency": null
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 82,
+      "item": "doc_015#5",
+      "output": {
+       "tamarack_pilot_end_date": null,
+       "kessler_falls_loading_bays": null,
+       "group_compliance_contact": null,
+       "project_osprey_approved_budget": null,
+       "audit_logs_retention_days": null,
+       "refrigeration_units_vendor": null,
+       "emergency_shutdown_codeword": null,
+       "pell_harbour_crane_inspection_frequency": null
+      },
+      "confidence": 1.0
+     }
+    ],
+    "failures": [
+     {
+      "index": 5,
+      "item": "doc_002#1",
+      "reason": {
+       "code": "BRT-ANS-010",
+       "message": "insufficient context"
+      },
+      "model_id": "openrouter/google/gemini-3.1-flash-lite-preview"
+     },
+     {
+      "index": 10,
+      "item": "doc_002#6",
+      "reason": {
+       "code": "BRT-ANS-010",
+       "message": "insufficient context: The provided context (doc_002#6) does not contain the information requested for the fifteen operations documents mentioned in the prompt."
+      },
+      "model_id": "openrouter/google/gemini-3.1-flash-lite-preview"
+     },
+     {
+      "index": 22,
+      "item": "doc_004#6",
+      "reason": {
+       "code": "BRT-ANS-010",
+       "message": "insufficient context"
+      },
+      "model_id": "openrouter/google/gemini-3.1-flash-lite-preview"
+     },
+     {
+      "index": 28,
+      "item": "doc_005#6",
+      "reason": {
+       "code": "BRT-ANS-010",
+       "message": "insufficient context: The provided document (doc_005#6) does not contain the requested information."
+      },
+      "model_id": "openrouter/google/gemini-3.1-flash-lite-preview"
+     },
+     {
+      "index": 60,
+      "item": "doc_011#6",
+      "reason": {
+       "code": "BRT-ANS-010",
+       "message": "insufficient context"
+      },
+      "model_id": "openrouter/google/gemini-3.1-flash-lite-preview"
+     },
+     {
+      "index": 66,
+      "item": "doc_012#6",
+      "reason": {
+       "code": "BRT-ANS-010",
+       "message": "insufficient context"
+      },
+      "model_id": "openrouter/google/gemini-3.1-flash-lite-preview"
+     },
+     {
+      "index": 72,
+      "item": "doc_014#1",
+      "reason": {
+       "code": "BRT-ANS-010",
+       "message": "insufficient context"
+      },
+      "model_id": "openrouter/google/gemini-3.1-flash-lite-preview"
+     },
+     {
+      "index": 77,
+      "item": "doc_014#6",
+      "reason": {
+       "code": "BRT-ANS-010",
+       "message": "insufficient context"
+      },
+      "model_id": "openrouter/google/gemini-3.1-flash-lite-preview"
+     }
+    ],
+    "total": 83,
+    "success_count": 75,
+    "failure_count": 8
+   }
+  },
+  "extract_contradictions": {
+   "node_type": "apply_to_each",
+   "data_scope": "raw",
+   "status": "resolved",
+   "output": {
+    "results": [
+     {
+      "index": 0,
+      "item": "doc_001#1",
+      "output": {
+       "any_contradictions_or_inconsistencies": "Yes, the documents contain conflicting data regarding the budget for the packaging waste review at Fenwick.",
+       "contradiction_topics": "Packaging waste review budget at Fenwick",
+       "conflicting_values_quoted": "14 units of budget vs 154 units of budget"
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 1,
+      "item": "doc_001#2",
+      "output": {
+       "any_contradictions_or_inconsistencies": "Yes, the documents contain conflicting information regarding the monitoring of the insurance renewal at Millbrook.",
+       "contradiction_topics": "Insurance renewal monitoring responsibility at Millbrook",
+       "conflicting_values_quoted": "\"training will keep monitoring delays at Millbrook\" and \"customer service will keep monitoring delays at Millbrook\""
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 2,
+      "item": "doc_001#3",
+      "output": {
+       "any_contradictions_or_inconsistencies": "Yes, there is a contradiction regarding the Eastfield report data.",
+       "contradiction_topics": "Eastfield report metrics",
+       "conflicting_values_quoted": "\"313 work orders\" and \"313 delays\""
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 3,
+      "item": "doc_001#4",
+      "output": {
+       "any_contradictions_or_inconsistencies": null,
+       "contradiction_topics": null,
+       "conflicting_values_quoted": null
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 4,
+      "item": "doc_001#5",
+      "output": {
+       "any_contradictions_or_inconsistencies": null,
+       "contradiction_topics": null,
+       "conflicting_values_quoted": null
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 5,
+      "item": "doc_002#1",
+      "output": {
+       "any_contradictions_or_inconsistencies": "Yes, the documents contain multiple internal inconsistencies regarding budget allocations and operational metrics.",
+       "contradiction_topics": "Budget for dock scheduling tool at Millbrook; Budget for packaging waste review at Lakeshore; Budget for cold chain audit at Millbrook; Budget for overtime policy at Millbrook; Budget for dock scheduling tool at Oakmont; Budget for cold chain audit at Northgate.",
+       "conflicting_values_quoted": "Millbrook dock scheduling tool: '127 units of budget, compared with 68 planned'; Lakeshore packaging waste review: '293 units of budget, compared with 133 planned'; Millbrook cold chain audit: '46 units of budget, compared with 278 planned'; Millbrook overtime policy: '345 units of budget, compared with 308 planned'; Oakmont dock scheduling tool: '218 units of budget, compared with 183 planned'; Northgate cold chain audit: '67 units of budget, compared with 344 planned'."
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 6,
+      "item": "doc_002#2",
+      "output": {
+       "any_contradictions_or_inconsistencies": "Yes, the document contains conflicting reports regarding the status of the driver rest-break roster at the Millbrook site.",
+       "contradiction_topics": "Driver rest-break roster status at Millbrook",
+       "conflicting_values_quoted": "\"Staff at Millbrook reported that the driver rest-break roster was steady\" vs \"Staff at Millbrook reported that the driver rest-break roster was slower than hoped\""
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 7,
+      "item": "doc_002#3",
+      "output": {
+       "any_contradictions_or_inconsistencies": "Yes",
+       "contradiction_topics": "Costs for the loading dock lighting upgrade at Lakeshore",
+       "conflicting_values_quoted": "\"Costs for the loading dock lighting upgrade at Lakeshore came to 251 units of budget, compared with 213 planned.\" and \"Costs for the loading dock lighting upgrade at Lakeshore came to 359 units of budget, compared with 312 planned.\""
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 8,
+      "item": "doc_002#4",
+      "output": {
+       "any_contradictions_or_inconsistencies": "Yes, the document contains conflicting descriptions of the driver rest-break roster status at the Riverside site.",
+       "contradiction_topics": "Driver rest-break roster status at Riverside",
+       "conflicting_values_quoted": "\"the driver rest-break roster was uneven\" and \"the driver rest-break roster was slower than hoped\""
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 9,
+      "item": "doc_002#5",
+      "output": {
+       "any_contradictions_or_inconsistencies": null,
+       "contradiction_topics": null,
+       "conflicting_values_quoted": null
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 10,
+      "item": "doc_002#6",
+      "output": {
+       "any_contradictions_or_inconsistencies": "Yes",
+       "contradiction_topics": "Cold chain audit outcome",
+       "conflicting_values_quoted": "Eastfield report: 'the outcome was encouraging'; Millbrook report: 'the cold chain audit was mixed'"
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 11,
+      "item": "doc_003#1",
+      "output": {
+       "any_contradictions_or_inconsistencies": null,
+       "contradiction_topics": null,
+       "conflicting_values_quoted": null
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 12,
+      "item": "doc_003#2",
+      "output": {
+       "any_contradictions_or_inconsistencies": "Yes, the documents contain contradictions regarding the outcome of the 'spare parts catalogue' working group and the status of the 'pallet scanning rollout' at the Riverside site.",
+       "contradiction_topics": "Spare parts catalogue working group outcome; Pallet scanning rollout status at Riverside.",
+       "conflicting_values_quoted": "Spare parts catalogue: 'the outcome was better than the prior period' vs 'the outcome was uneven'. Pallet scanning rollout at Riverside: 'the pallet scanning rollout was encouraging' vs 'the pallet scanning rollout was mixed'."
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 13,
+      "item": "doc_003#3",
+      "output": {
+       "any_contradictions_or_inconsistencies": null,
+       "contradiction_topics": null,
+       "conflicting_values_quoted": null
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 14,
+      "item": "doc_003#4",
+      "output": {
+       "any_contradictions_or_inconsistencies": "Yes",
+       "contradiction_topics": "Costs for the returns process at Westbury",
+       "conflicting_values_quoted": "Costs for the returns process at Westbury came to 283 units of budget, compared with 107 planned. ... Costs for the returns process at Westbury came to 190 units of budget, compared with 280 planned."
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 15,
+      "item": "doc_003#5",
+      "output": {
+       "any_contradictions_or_inconsistencies": "Yes",
+       "contradiction_topics": "Costs for the driver rest-break roster at Ridgeway",
+       "conflicting_values_quoted": "\"351 units of budget, compared with 295 planned\" vs \"28 units of budget, compared with 332 planned\""
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 16,
+      "item": "doc_003#6",
+      "output": {
+       "any_contradictions_or_inconsistencies": null,
+       "contradiction_topics": null,
+       "conflicting_values_quoted": null
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 17,
+      "item": "doc_004#1",
+      "output": {
+       "any_contradictions_or_inconsistencies": "Yes, there is a contradiction regarding the progress of the spare parts catalogue at Southport.",
+       "contradiction_topics": "Progress status of the spare parts catalogue at Southport.",
+       "conflicting_values_quoted": "\"progress on the spare parts catalogue was better than the prior period\" vs \"progress on the spare parts catalogue was slower than hoped\""
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 18,
+      "item": "doc_004#2",
+      "output": {
+       "any_contradictions_or_inconsistencies": "Yes, the document contains conflicting descriptions of the status of the 'loading dock lighting upgrade' at the Eastfield site.",
+       "contradiction_topics": "Loading dock lighting upgrade status at Eastfield",
+       "conflicting_values_quoted": "\"Staff at Eastfield reported that the loading dock lighting upgrade was uneven\" vs \"Staff at Eastfield reported that the loading dock lighting upgrade was steady\""
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 19,
+      "item": "doc_004#3",
+      "output": {
+       "any_contradictions_or_inconsistencies": "Yes, the document contains conflicting descriptions regarding the outcome of the barcode label migration.",
+       "contradiction_topics": "Outcome of the barcode label migration",
+       "conflicting_values_quoted": "\"the outcome was mixed\" and \"the outcome was uneven\""
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 20,
+      "item": "doc_004#4",
+      "output": {
+       "any_contradictions_or_inconsistencies": "Yes, the document contains conflicting data regarding the costs for the returns process at Hillcrest.",
+       "contradiction_topics": "Costs for the returns process at Hillcrest",
+       "conflicting_values_quoted": "\"93 units of budget, compared with 92 planned\" and \"25 units of budget, compared with 184 planned\""
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 21,
+      "item": "doc_004#5",
+      "output": {
+       "any_contradictions_or_inconsistencies": "Yes, the document provides conflicting budget figures for the loading dock lighting upgrade at Fenwick.",
+       "contradiction_topics": "Loading dock lighting upgrade budget at Fenwick",
+       "conflicting_values_quoted": "\"40 units of budget, compared with 42 planned\" and \"56 units of budget, compared with 10 planned\""
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 22,
+      "item": "doc_004#6",
+      "output": {
+       "any_contradictions_or_inconsistencies": "Yes, the documents contain contradictory descriptions regarding the status of the packaging waste review at the Riverside site.",
+       "contradiction_topics": "Packaging waste review status at Riverside",
+       "conflicting_values_quoted": "\"Staff at Riverside reported that the packaging waste review was uneven\" vs \"Staff at Riverside reported that the packaging waste review was steady\""
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 23,
+      "item": "doc_005#1",
+      "output": {
+       "any_contradictions_or_inconsistencies": "Yes, the document contains conflicting data regarding the budget for the supplier scorecards at Riverside.",
+       "contradiction_topics": "Supplier scorecards budget at Riverside",
+       "conflicting_values_quoted": "\"340 units of budget\" and \"314 units of budget\""
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 24,
+      "item": "doc_005#2",
+      "output": {
+       "any_contradictions_or_inconsistencies": "Yes, the documents contain conflicting data regarding the budget for the forklift battery programme at the Northgate site.",
+       "contradiction_topics": "Forklift battery programme budget at Northgate",
+       "conflicting_values_quoted": "\"Costs for the forklift battery programme at Northgate came to 130 units of budget\" vs \"Costs for the forklift battery programme at Northgate came to 243 units of budget\""
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 25,
+      "item": "doc_005#3",
+      "output": {
+       "any_contradictions_or_inconsistencies": null,
+       "contradiction_topics": null,
+       "conflicting_values_quoted": null
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 26,
+      "item": "doc_005#4",
+      "output": {
+       "any_contradictions_or_inconsistencies": null,
+       "contradiction_topics": null,
+       "conflicting_values_quoted": null
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 27,
+      "item": "doc_005#5",
+      "output": {
+       "any_contradictions_or_inconsistencies": null,
+       "contradiction_topics": null,
+       "conflicting_values_quoted": null
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 29,
+      "item": "doc_006#1",
+      "output": {
+       "any_contradictions_or_inconsistencies": "Yes, the documents contain conflicting data regarding the costs for the barcode label migration at Eastfield.",
+       "contradiction_topics": "Costs for the barcode label migration at Eastfield",
+       "conflicting_values_quoted": "226 units of budget, compared with 150 planned vs 200 units of budget, compared with 100 planned"
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 30,
+      "item": "doc_006#2",
+      "output": {
+       "any_contradictions_or_inconsistencies": "Yes, the provided text contains internal inconsistencies regarding the status of the barcode label migration at the Oakmont site.",
+       "contradiction_topics": "Barcode label migration status at Oakmont",
+       "conflicting_values_quoted": "\"progress on the barcode label migration was better than the prior period\" vs \"progress on the barcode label migration was mixed\""
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 31,
+      "item": "doc_006#3",
+      "output": {
+       "any_contradictions_or_inconsistencies": "Yes, the documents contain conflicting information regarding the outcome of the winter staffing plan working groups.",
+       "contradiction_topics": "Outcome of the winter staffing plan working group.",
+       "conflicting_values_quoted": "One document states: 'A working group from fleet met 7 times to discuss the winter staffing plan; the outcome was slower than hoped.' Another document states: 'A working group from fleet met 9 times to discuss the winter staffing plan; the outcome was better than the prior period.'"
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 32,
+      "item": "doc_006#4",
+      "output": {
+       "any_contradictions_or_inconsistencies": null,
+       "contradiction_topics": null,
+       "conflicting_values_quoted": null
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 33,
+      "item": "doc_006#5",
+      "output": {
+       "any_contradictions_or_inconsistencies": "Yes, the documents contain conflicting information regarding the insurance renewal monitoring and the cold chain audit status.",
+       "contradiction_topics": "Insurance renewal monitoring; Cold chain audit status",
+       "conflicting_values_quoted": "Regarding insurance renewal: 'training will keep monitoring audit findings at Westbury' vs 'planning will keep monitoring complaints at Lakeshore' vs 'planning will keep monitoring late loads at Riverside'. Regarding cold chain audit: 'fleet will keep monitoring late loads at Oakmont' vs 'No major change was made to the cold chain audit'."
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 34,
+      "item": "doc_007#1",
+      "output": {
+       "any_contradictions_or_inconsistencies": null,
+       "contradiction_topics": null,
+       "conflicting_values_quoted": null
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 35,
+      "item": "doc_007#2",
+      "output": {
+       "any_contradictions_or_inconsistencies": "Yes",
+       "contradiction_topics": "Overtime policy monitoring responsibility",
+       "conflicting_values_quoted": "The document states: 'No major change was made to the overtime policy; safety will keep monitoring overtime hours at Eastfield.' and later states: 'No major change was made to the overtime policy; inventory will keep monitoring overtime hours at Eastfield.'"
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 36,
+      "item": "doc_007#3",
+      "output": {
+       "any_contradictions_or_inconsistencies": "Yes",
+       "contradiction_topics": "Overtime policy tracking responsibility",
+       "conflicting_values_quoted": "Section 5: 'customer service agreed to track overtime hours weekly' vs Section 4: 'dispatch agreed to track audit findings weekly' (referring to the same site, Oakmont, in the context of the overtime policy/audit findings)."
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 37,
+      "item": "doc_007#4",
+      "output": {
+       "any_contradictions_or_inconsistencies": "Yes, the documents contain contradictions regarding the spare parts catalogue progress at Lakeshore and the budget costs for the forklift battery programme at Fenwick.",
+       "contradiction_topics": "Spare parts catalogue progress at Lakeshore; Forklift battery programme budget at Fenwick.",
+       "conflicting_values_quoted": "Lakeshore spare parts catalogue: '272 late loads' vs '239 incidents'. Fenwick forklift battery programme budget: '77 units of budget, compared with 259 planned' vs '75 units of budget, compared with 271 planned'."
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 38,
+      "item": "doc_007#5",
+      "output": {
+       "any_contradictions_or_inconsistencies": null,
+       "contradiction_topics": null,
+       "conflicting_values_quoted": null
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 39,
+      "item": "doc_008#1",
+      "output": {
+       "any_contradictions_or_inconsistencies": null,
+       "contradiction_topics": null,
+       "conflicting_values_quoted": null
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 40,
+      "item": "doc_008#2",
+      "output": {
+       "any_contradictions_or_inconsistencies": null,
+       "contradiction_topics": null,
+       "conflicting_values_quoted": null
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 41,
+      "item": "doc_008#3",
+      "output": {
+       "any_contradictions_or_inconsistencies": "Yes",
+       "contradiction_topics": "Supplier scorecards status at Ridgeway; Lakeshore supplier scorecards status",
+       "conflicting_values_quoted": "Ridgeway: 'the supplier scorecards was mixed' vs 'Costs for the supplier scorecards at Ridgeway came to 299 units of budget, compared with 237 planned'; Lakeshore: 'the supplier scorecards was uneven' vs 'the supplier scorecards was steady'"
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 42,
+      "item": "doc_008#4",
+      "output": {
+       "any_contradictions_or_inconsistencies": null,
+       "contradiction_topics": null,
+       "conflicting_values_quoted": null
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 43,
+      "item": "doc_008#5",
+      "output": {
+       "any_contradictions_or_inconsistencies": "Yes, the provided document contains internal inconsistencies regarding the driver rest-break roster at Riverside.",
+       "contradiction_topics": "Driver rest-break roster budget at Riverside",
+       "conflicting_values_quoted": "\"Costs for the driver rest-break roster at Riverside came to 131 units of budget, compared with 263 planned.\" vs \"The facilities team costed the driver rest-break roster for the Riverside site and recorded 320 overtime hours against a plan of 254.\""
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 44,
+      "item": "doc_008#6",
+      "output": {
+       "any_contradictions_or_inconsistencies": "Yes",
+       "contradiction_topics": "Returns process for the Hillcrest site",
+       "conflicting_values_quoted": "Document doc_008#6 states: 'recorded 257 tickets against a plan of 333' and later 'recorded 90 tickets against a plan of 297'."
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 45,
+      "item": "doc_009#1",
+      "output": {
+       "any_contradictions_or_inconsistencies": "Yes, the documents contain contradictions regarding the progress and status of specific operational metrics.",
+       "contradiction_topics": "Barcode label migration progress at Lakeshore; Winter staffing plan re-planning justification at Greystone.",
+       "conflicting_values_quoted": "For Lakeshore barcode label migration: 'steady' (Section 1) vs 'slower than hoped' (Section 2). For Greystone winter staffing plan re-planning: '377 open audit findings' (Section 1) vs '165 open late loads' (Section 2)."
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 46,
+      "item": "doc_009#2",
+      "output": {
+       "any_contradictions_or_inconsistencies": null,
+       "contradiction_topics": null,
+       "conflicting_values_quoted": null
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 47,
+      "item": "doc_009#3",
+      "output": {
+       "any_contradictions_or_inconsistencies": "Yes, the document contains conflicting descriptions regarding the status of late loads at the Northgate site.",
+       "contradiction_topics": "Northgate late loads status",
+       "conflicting_values_quoted": "\"36 late loads, which it described as encouraging\" vs \"297 delays, which it described as within tolerance\""
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 48,
+      "item": "doc_009#4",
+      "output": {
+       "any_contradictions_or_inconsistencies": "Yes, the document contains conflicting data regarding the costs for the packaging waste review at Eastfield.",
+       "contradiction_topics": "Costs for the packaging waste review at Eastfield",
+       "conflicting_values_quoted": "51 units of budget, compared with 55 planned vs 259 units of budget, compared with 64 planned"
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 49,
+      "item": "doc_009#5",
+      "output": {
+       "any_contradictions_or_inconsistencies": "Yes",
+       "contradiction_topics": "Insurance renewal outcome",
+       "conflicting_values_quoted": "The documents state the insurance renewal outcome was \"within tolerance\" for customer service, \"better than the prior period\" for facilities, and \"mixed\" for procurement."
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 50,
+      "item": "doc_010#1",
+      "output": {
+       "any_contradictions_or_inconsistencies": "Yes, the documents contain conflicting data regarding the barcode label migration costs at Riverside and the winter staffing plan costs at Westbury.",
+       "contradiction_topics": "Barcode label migration costs at Riverside; Winter staffing plan costs at Westbury.",
+       "conflicting_values_quoted": "Riverside barcode label migration: '310 units of budget, compared with 42 planned' vs '80 units of budget, compared with 241 planned'. Westbury winter staffing plan: '159 units of budget, compared with 241 planned' vs '294 units of budget, compared with 327 planned'."
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 51,
+      "item": "doc_010#2",
+      "output": {
+       "any_contradictions_or_inconsistencies": "Yes",
+       "contradiction_topics": "Costs for the supplier scorecards at Oakmont",
+       "conflicting_values_quoted": "The document states: 'Costs for the supplier scorecards at Oakmont came to 321 units of budget, compared with 28 planned.' However, it also records: 'The fleet team costed the supplier scorecards for the Oakmont site and recorded 70 delays against a plan of 114.' (Note: While these metrics differ, the document presents conflicting budget/plan data for the same project at the same site)."
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 52,
+      "item": "doc_010#3",
+      "output": {
+       "any_contradictions_or_inconsistencies": null,
+       "contradiction_topics": null,
+       "conflicting_values_quoted": null
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 53,
+      "item": "doc_010#4",
+      "output": {
+       "any_contradictions_or_inconsistencies": "Yes",
+       "contradiction_topics": "The outcome of the pallet scanning rollout working group.",
+       "conflicting_values_quoted": "The outcome was 'encouraging' in the fourth paragraph and 'steady' in the sixth paragraph of the second section."
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 54,
+      "item": "doc_010#5",
+      "output": {
+       "any_contradictions_or_inconsistencies": "Yes, the document contains conflicting budget figures for the same projects.",
+       "contradiction_topics": "Packaging waste review costs at Oakmont; Winter staffing plan costs at Westbury.",
+       "conflicting_values_quoted": "Packaging waste review at Oakmont: '298 units of budget, compared with 142 planned' vs '377 units of budget, compared with 6 planned'. Winter staffing plan at Westbury: '288 units of budget, compared with 65 planned' vs '148 units of budget, compared with 296 planned'."
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 55,
+      "item": "doc_011#1",
+      "output": {
+       "any_contradictions_or_inconsistencies": null,
+       "contradiction_topics": null,
+       "conflicting_values_quoted": null
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 56,
+      "item": "doc_011#2",
+      "output": {
+       "any_contradictions_or_inconsistencies": null,
+       "contradiction_topics": null,
+       "conflicting_values_quoted": null
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 57,
+      "item": "doc_011#3",
+      "output": {
+       "any_contradictions_or_inconsistencies": "Yes, the documents contain conflicting descriptions of the outcome of the cold chain audit working group meetings.",
+       "contradiction_topics": "Cold chain audit working group outcome",
+       "conflicting_values_quoted": "The documents state the outcome was \"encouraging\" in one instance and \"better than the prior period\" in another."
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 58,
+      "item": "doc_011#4",
+      "output": {
+       "any_contradictions_or_inconsistencies": "Yes, the provided document contains conflicting information regarding the status of the cold chain audit at Oakmont.",
+       "contradiction_topics": "Cold chain audit progress at Oakmont",
+       "conflicting_values_quoted": "The document states: 'At Oakmont, progress on the cold chain audit was mixed, with 210 audit findings logged over the period.' and later states: 'At Oakmont, progress on the cold chain audit was steady, with 177 incidents logged over the period.'"
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 59,
+      "item": "doc_011#5",
+      "output": {
+       "any_contradictions_or_inconsistencies": "Yes, the document contains contradictory reports regarding the status of the pallet scanning rollout at Hillcrest.",
+       "contradiction_topics": "Pallet scanning rollout status at Hillcrest",
+       "conflicting_values_quoted": "\"better than the prior period\" and \"within tolerance\""
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 61,
+      "item": "doc_012#1",
+      "output": {
+       "any_contradictions_or_inconsistencies": "Yes, the document contains internal contradictions regarding the status of the cold chain audit at Lakeshore and the budget for the dock scheduling tool at Greystone.",
+       "contradiction_topics": "Cold chain audit status at Lakeshore; Dock scheduling tool budget at Greystone",
+       "conflicting_values_quoted": "Cold chain audit: 'Staff at Lakeshore reported that the cold chain audit was steady' vs 'Staff at Lakeshore reported that the cold chain audit was encouraging'. Dock scheduling tool budget: 'Costs for the dock scheduling tool at Greystone came to 156 units of budget, compared with 53 planned' vs 'Costs for the dock scheduling tool at Greystone came to 9 units of budget, compared with 103 planned'."
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 62,
+      "item": "doc_012#2",
+      "output": {
+       "any_contradictions_or_inconsistencies": "Yes, the documents contain conflicting reports regarding the status and tracking metrics for the returns process at Hillcrest.",
+       "contradiction_topics": "Returns process status and tracking metric at Hillcrest",
+       "conflicting_values_quoted": "1. 'Staff at Hillcrest reported that the returns process was slower than hoped, and fleet agreed to track late loads weekly.' 2. 'Staff at Hillcrest reported that the returns process was encouraging, and fleet agreed to track incidents weekly.'"
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 63,
+      "item": "doc_012#3",
+      "output": {
+       "any_contradictions_or_inconsistencies": "Yes, the documents contain conflicting data regarding the budget for the spare parts catalogue at the Hillcrest site.",
+       "contradiction_topics": "Budget for the spare parts catalogue at Hillcrest",
+       "conflicting_values_quoted": "374 units of budget vs 187 units of budget"
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 64,
+      "item": "doc_012#4",
+      "output": {
+       "any_contradictions_or_inconsistencies": "Yes, the document contains contradictory information regarding the overtime hours logged at the Northgate site.",
+       "contradiction_topics": "Northgate overtime hours",
+       "conflicting_values_quoted": "\"163 overtime hours\" and \"349 overtime hours\""
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 65,
+      "item": "doc_012#5",
+      "output": {
+       "any_contradictions_or_inconsistencies": null,
+       "contradiction_topics": null,
+       "conflicting_values_quoted": null
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 66,
+      "item": "doc_012#6",
+      "output": {
+       "any_contradictions_or_inconsistencies": null,
+       "contradiction_topics": null,
+       "conflicting_values_quoted": null
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 67,
+      "item": "doc_013#1",
+      "output": {
+       "any_contradictions_or_inconsistencies": null,
+       "contradiction_topics": null,
+       "conflicting_values_quoted": null
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 68,
+      "item": "doc_013#2",
+      "output": {
+       "any_contradictions_or_inconsistencies": "Yes",
+       "contradiction_topics": "Costs for the packaging waste review at Hillcrest",
+       "conflicting_values_quoted": "\"68 units of budget\" and \"308 units of budget\""
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 69,
+      "item": "doc_013#3",
+      "output": {
+       "any_contradictions_or_inconsistencies": "Yes, the document contains conflicting information regarding the progress and status of the spare parts catalogue at Millbrook.",
+       "contradiction_topics": "Spare parts catalogue progress at Millbrook",
+       "conflicting_values_quoted": "One section states: 'Staff at Millbrook reported that the spare parts catalogue was encouraging'; another section states: 'At Millbrook, progress on the spare parts catalogue was steady, with 280 delays logged over the period.'"
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 70,
+      "item": "doc_013#4",
+      "output": {
+       "any_contradictions_or_inconsistencies": "Yes, the documents contain conflicting data regarding the budget for the pallet scanning rollout at Ridgeway.",
+       "contradiction_topics": "Budget for pallet scanning rollout at Ridgeway",
+       "conflicting_values_quoted": "\"Costs for the pallet scanning rollout at Ridgeway came to 376 units of budget, compared with 151 planned.\" vs \"Costs for the pallet scanning rollout at Ridgeway came to 104 units of budget, compared with 360 planned.\""
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 71,
+      "item": "doc_013#5",
+      "output": {
+       "any_contradictions_or_inconsistencies": "Yes, the document contains conflicting data regarding the budget for the dock scheduling tool at the Ridgeway site.",
+       "contradiction_topics": "Dock scheduling tool budget at Ridgeway",
+       "conflicting_values_quoted": "The facilities team costed the dock scheduling tool for the Ridgeway site and recorded 20 late loads against a plan of 184. Costs for the dock scheduling tool at Ridgeway came to 380 units of budget, compared with 249 planned."
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 72,
+      "item": "doc_014#1",
+      "output": {
+       "any_contradictions_or_inconsistencies": "Yes",
+       "contradiction_topics": "Costs for the overtime policy at Southport",
+       "conflicting_values_quoted": "171 units of budget vs 162 planned; 167 units of budget vs 70 planned"
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 73,
+      "item": "doc_014#2",
+      "output": {
+       "any_contradictions_or_inconsistencies": "Yes, the document contains conflicting data regarding the number of open tickets/findings for the Hillcrest site's cold chain audit.",
+       "contradiction_topics": "Cold chain audit open tickets at Hillcrest",
+       "conflicting_values_quoted": "\"288 open tickets\" vs \"214 tickets\""
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 74,
+      "item": "doc_014#3",
+      "output": {
+       "any_contradictions_or_inconsistencies": "Yes, the document contains conflicting data regarding the budget for the driver rest-break roster at Southport.",
+       "contradiction_topics": "Southport driver rest-break roster budget",
+       "conflicting_values_quoted": "325 units of budget vs 57 units of budget"
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 75,
+      "item": "doc_014#4",
+      "output": {
+       "any_contradictions_or_inconsistencies": "Yes, the documents contain contradictions regarding the status and progress of specific operational projects.",
+       "contradiction_topics": "Pallet scanning rollout status at Ridgeway",
+       "conflicting_values_quoted": "In the first section: 'No major change was made to the pallet scanning rollout'. In the final section: 'At Ridgeway, progress on the pallet scanning rollout was uneven'."
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 76,
+      "item": "doc_014#5",
+      "output": {
+       "any_contradictions_or_inconsistencies": "No",
+       "contradiction_topics": null,
+       "conflicting_values_quoted": null
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 77,
+      "item": "doc_014#6",
+      "output": {
+       "any_contradictions_or_inconsistencies": null,
+       "contradiction_topics": null,
+       "conflicting_values_quoted": null
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 78,
+      "item": "doc_015#1",
+      "output": {
+       "any_contradictions_or_inconsistencies": "Yes, the document contains conflicting data regarding the insurance renewal costs for the Lakeshore site.",
+       "contradiction_topics": "Insurance renewal costs at Lakeshore",
+       "conflicting_values_quoted": "Value 1: '21 units of budget'; Value 2: '265 units of budget'"
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 79,
+      "item": "doc_015#2",
+      "output": {
+       "any_contradictions_or_inconsistencies": "Yes, the documents contain conflicting information regarding the outcome of the overtime policy working group meetings.",
+       "contradiction_topics": "Overtime policy working group outcome",
+       "conflicting_values_quoted": "\"the outcome was better than the prior period\" vs \"the outcome was steady\" vs \"the outcome was mixed\""
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 80,
+      "item": "doc_015#3",
+      "output": {
+       "any_contradictions_or_inconsistencies": "Yes, the document contains conflicting data regarding the costs for the returns process at Fenwick.",
+       "contradiction_topics": "Costs for the returns process at Fenwick",
+       "conflicting_values_quoted": "\"Costs for the returns process at Fenwick came to 38 units of budget, compared with 81 planned.\" and \"Costs for the returns process at Fenwick came to 321 units of budget, compared with 172 planned.\""
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 81,
+      "item": "doc_015#4",
+      "output": {
+       "any_contradictions_or_inconsistencies": "Yes, the document contains conflicting information regarding the costs for the cold chain audit at Westbury.",
+       "contradiction_topics": "Costs for the cold chain audit at Westbury",
+       "conflicting_values_quoted": "\"Costs for the cold chain audit at Westbury came to 40 units of budget\" and \"Costs for the cold chain audit at Westbury came to 207 units of budget\""
+      },
+      "confidence": 1.0
+     },
+     {
+      "index": 82,
+      "item": "doc_015#5",
+      "output": {
+       "any_contradictions_or_inconsistencies": "Yes, the document contains conflicting descriptions of progress for the 'overtime policy' at the Northgate site.",
+       "contradiction_topics": "Overtime policy progress at Northgate",
+       "conflicting_values_quoted": "At Northgate, progress on the overtime policy was mixed, with 245 incidents logged over the period. ... At Northgate, progress on the overtime policy was better than the prior period, with 308 incidents logged over the period."
+      },
+      "confidence": 1.0
+     }
+    ],
+    "failures": [
+     {
+      "index": 28,
+      "item": "doc_005#6",
+      "reason": {
+       "code": "BRT-ANS-010",
+       "message": "insufficient context: The provided context contains only one document (doc_005#6) and does not contain the information required to answer the nine numbered questions regarding the Tamarack pilot, Kess"
+      },
+      "model_id": "openrouter/google/gemini-3.1-flash-lite-preview"
+     },
+     {
+      "index": 60,
+      "item": "doc_011#6",
+      "reason": {
+       "code": "BRT-ANS-010",
+       "message": "insufficient context: The provided context contains only one document (doc_011#6), whereas the instruction requires reading fifteen documents to answer the numbered questions and identify contradictio"
+      },
+      "model_id": "openrouter/google/gemini-3.1-flash-lite-preview"
+     }
+    ],
+    "total": 83,
+    "success_count": 81,
+    "failure_count": 2
+   }
+  }
+ },
+ "recorded_replies": [
+  {},
+  {
+   "response": "1. 14 March 2027\n2. 412\n3. Ingrid Vassallo\n4. US$3.85 million\n5. 2,317\n6. Brannock Cryogenics\n7. juniper-lantern\n8. 19 days\n9. Yes — many topics across documents (e.g. packaging waste review budget at Fenwick: \"14 units of budget\" vs \"154 units of budget\"; driver rest-break roster status at Millbrook: \"steady\" vs \"slower than hoped\"; cold chain audit outcome: \"encouraging\" vs \"mixed\"; spare parts catalogue outcome: \"better than the prior period\" vs \"uneven\"; and dozens of similar budget, status, and metric contradictions quoted in the extract_contradictions results)."
+  }
+ ],
+ "recorded_quality": {
+  "informational_fact_score": {
+   "facts_found": 6,
+   "facts_total": 8,
+   "contradictions_found": 0,
+   "contradictions_total": 2,
+   "facts_matched": [
+    "On what date does the Tamarack pilot end?",
+    "Who is the group compliance contact for regulatory filings?",
+    "What is the approved budget for Project Osprey?",
+    "Which vendor will supply the refrigeration units for the new cold store?",
+    "What is the code word for an emergency shutdown?",
+    "How often is the Pell Harbour crane inspected?"
+   ],
+   "contradictions_matched": []
+  },
+  "informational_only": true,
+  "note": "informational only, never quoted: the pairwise judge decides job C"
+ },
+ "asked_but_not_produced": []
+}

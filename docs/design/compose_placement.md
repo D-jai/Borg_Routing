@@ -1,6 +1,6 @@
 # Compose places, it does not retype (planner ruling 32e, design note)
 
-Status: revised 18-Nov-2026 after a fresh adversarial review in two rounds and the lead's rulings on it. No code yet; next it goes to the planner. It extends ruling 21 (docs/design/compose_row_markers.md). Everything in that note stands unless a section below says otherwise.
+Status: revised 18-Nov-2026 after a fresh adversarial review in two rounds and the lead's rulings on it, then accepted by the planner (BUILD.md section 8, "Planner readings under ruling 32 (4)") with one cut: check C2 (BRT-ORC-039) is dropped. 039 stays unused and the other codes keep their numbers. This revision follows that reading; C2's analysis stays in 2.4.2 as history. It extends ruling 21 (docs/design/compose_row_markers.md). Everything in that note stands unless a section below says otherwise.
 
 **Wording.** The BUILD.md 32e row reads: "seven requirements: chosen fields and names with file names for documents; a whole-output marker; the code-side compose block wording; four post-compose checks with one re-ask then salvage; what invented values a check can catch; compose token change on A, B, D; replay tests on the four stored compose inputs". Every threshold, every definition of "usable" and every change to salvage below is my own choice and is marked as such. None of them is the ruling's.
 
@@ -46,7 +46,7 @@ From docs/design/bench_round2_measurements.md and the stored run DBs (bench/resu
   - A: items_answered 200, category 0.925 (185 of 200), urgency 0.0.
   - D: items_answered 60, risk 0.4167 (25 of 60).
 - B's stored output placed verbatim passes the six checks that run without Docker.
-- **D falls from 0.60 to 0.42 once nothing is guessed.** All 11 extra hits in round 2 were guesses. The planner should know this before 32g.
+- **D falls from 0.60 to 0.42 once nothing is guessed.** All 11 extra hits in round 2 were guesses. The planner should know this before 32g. How it is reported (planner): no grader change; the win rule reads the grader's figure over all items. The trial report gives, for any list job, items with a result / all items, accuracy over all items, and accuracy over items with a result. Round 2's D is stated as 0.60 as scored, of which 11 correct labels were guesses for notes with no result; 25 of 60 (0.42) without them; 25 of the 29 with a result.
 
 ## 2. Design per requirement
 
@@ -163,6 +163,7 @@ Examples: `@@ROWS:classify_emails | file=item, category=bucket@@` and `@@ROWS:cl
   3. any mix of these with list steps (those already got a block).
 - **Worst case for those runs goes from 6 to 9 compose posts.** With a block the cut-off pointer retry always runs (ruling 21), so up to 3 posts in each of up to 3 invocations: the first, the 029 re-ask and the repair re-ask. Without a block it was 2 posts each.
 - The block adds about 130 tokens per compose call, about US$0.00016 on grok-4.20, and C3 can fire on these runs (2.4.3).
+- The sentence "Do not retype rows or long outputs yourself" and the cut-off pointer stay although C2 is dropped (planner): they are the only guard left against a retype, which now costs tokens but no re-ask.
 - I keep the 2,000 gate: B needs it, and the cost is the extra posts and that token line.
 - No existing test has a step output over 2,000 characters feeding compose while asserting compose's user message. I searched every `* <n>` string builder in tests/ and every `.user ==` and `.user.startswith` assertion. The one 50,000-character text, in test_privacy_lane_by_reference_review.py, is a document, not a step output.
 
@@ -237,31 +238,31 @@ Inside any string (the answer, or a leaf), JSON values are found with a `raw_dec
 **Pairs** (`compose_checks.pairs`). An identity-value pair is:
 - (a) the identity as a scalar value in a JSON object, paired with each other scalar value of that object (key kept);
 - (b) the identity as one cell of a table row, paired with each other cell (key = the column header);
-- (c) the identity in a line of at most 160 characters outside (a) and (b), paired with each other cell of the line once the leading bullet is dropped and the line is split on `|`, `,`, `:`, `;`, tab and ` - ` (no key);
-- (d) for C4 only: the identity as an element of a JSON list that is the value of a key, paired with that key (the grouped form `{"medium": [...]}`).
+- (c) the identity in a line of at most 160 characters outside (a) and (b), paired with the one cell left once the leading bullet is dropped, the identity removed and the line split on `|`, `,`, `:`, `;`, tab and ` - ` (no key; see 2.4.4 for "single");
+- (d) the identity as an element of a JSON list that is the value of a key, paired with that key (the grouped form `{"medium": [...]}`).
 
-C2 reads (a) to (c), and C4 reads (a) to (d).
+C4 reads (a) to (d). (C2, dropped, read (a) to (c).)
 
 **Order inside `_handle_compose_result`**, only when the block was sent:
 1. Pick the answer (`_compose_text`).
 2. Validate markers: BRT-ORC-032 and BRT-ORC-037 (2.4.6).
 3. Run C1.
 4. Build the own text.
-5. Run C2, C3 and C4.
+5. Run C3 and C4.
 6. Collect every problem.
 7. None: place (with the guards) and return.
 8. Some, with the repair re-ask unused: send it.
 9. Otherwise salvage (2.4.5).
 
-**One repair re-ask per run** covers 032, 037 and 038 to 041 together, so the worst case stays at 3 invocations and 9 posts. A lane refusal (BRT-LANE-009) is not a check: it fails closed.
+**One repair re-ask per run** covers 032, 037, 038, 040 and 041 together, so the worst case stays at 3 invocations and 9 posts. A lane refusal (BRT-LANE-009) is not a check: it fails closed.
 
-**`action: fail`** (lead ruling 16). On a declined rationale, steps 2 and 3 and placement run, as ruling 21 does today. C2, C3 and C4 do not run: a decline is not an answer, and a repair message asking for one would overrule compose's choice. The run stays "declined".
+**`action: fail`** (lead ruling 16). On a declined rationale, steps 2 and 3 and placement run, as ruling 21 does today. C3 and C4 do not run: a decline is not an answer, and a repair message asking for one would overrule compose's choice. The run stays "declined".
 
 **Repair message (exact).** After the problem lines and the "Fix these" line, it repeats the block sent with the first compose call, from its second line ("The reader sees only your answer...") to its last line, byte for byte. The `Mode: compose. Reply with the final answer.` line is not repeated.
 
 ```
 Mode: compose. Your last reply cannot be used as it is:
-- <one sentence per problem, in the order 032, 037, 038, 039, 040, 041>
+- <one sentence per problem, in the order 032, 037, 038, 040, 041>
 Fix these and reply with {"response": "<the final answer>"} only.
 <the block, from its second line to its last line>
 ```
@@ -287,9 +288,11 @@ Lead ruling 3.
 
 **False positives:** closed prose brackets ("[see below]", Markdown links, "[1]") close before the marker. An unclosed `[` in prose followed by text is a hit; I judge that rare, and it costs one re-ask.
 
-#### 2.4.2 C2: compose retyped stored data (BRT-ORC-039)
+#### 2.4.2 C2: compose retyped stored data (BRT-ORC-039): DROPPED by the planner
 
-Lead ruling 1b. **Fires** when, for a list step S with at least 10 resolved items, more than half of S's resolved items appear in compose's own text in a pair of form (a), (b) or (c) whose value equals one of that item's own stored values.
+**Dropped (planner reading (4), 18-Nov-2026).** C2 is not built and BRT-ORC-039 stays unused; 037, 038, 040 and 041 keep their numbers. The planner's reasons: a faithful retype is not a wrong answer; firing costs a compose call (about US$0.022 to 0.029) to save about US$0.01; values with no source are C4's job, and a cut-off reply is the pointer retry's (ruling 21); C2 had the most false-positive forms. What stays: the block sentence "Do not retype rows or long outputs yourself", the cut-off pointer, and the join-marker hint, which moves into C4's case-1 sentence (2.4.4). Job D is caught by C4 alone (2.7). The analysis below is kept as history only; nothing in it is built.
+
+Lead ruling 1b. **Fired** (as designed) when, for a list step S with at least 10 resolved items, more than half of S's resolved items appear in compose's own text in a pair of form (a), (b) or (c) whose value equals one of that item's own stored values.
 - "Stored value" means any field value some list step resolved for that item, so a typed join counts for both steps.
 - Equality is case-insensitive and trimmed; numbers compare as numbers; booleans and the identity itself are never values.
 - A reformatted answer with no stored values next to identities does not fire. The grouped form (d) is not read.
@@ -336,14 +339,14 @@ Lead ruling 1b. **Fires** when, for a list step S with at least 10 resolved item
 
 #### 2.4.3 C3: a long output neither placed nor present while the answer points at it (BRT-ORC-040)
 
-**Fires** for a listed long output L when all three hold:
+**Kept narrow (planner).** It fires for a listed long output L when all three hold:
 1. no OUTPUT marker placed L;
-2. fewer than 50% of L's distinct normalised word 8-grams appear in the answer;
-3. the own text points at a step: `stage result(s)`, `step result(s)`, `stage output(s)`, `step output(s)` or `stage_results`, or L's id as `(id)` or `` `id` ``, or after `step `, `stage ` or `node `.
+2. L is not present: fewer than 50% of L's distinct normalised word 8-grams appear in compose's own text (a faithful retype is not a wrong answer, the planner's reason for dropping C2);
+3. compose's own text points at a step: it says `step result(s)` or `stage result(s)` (also `step_result(s)` and `stage_results`), or names a step id of the run as `(id)`, as `` `id` ``, or after `step `, `stage ` or `node `.
 
 - **B:** not placed, coverage 0.000, pointer "the stage result (n1)". It fires.
-- The 50% coverage figure is my own choice.
-- Precision is acceptable only because of condition 3. **Recall is low:** a summary that drops L without pointing at a step passes, and only the 2.3 wording covers that case.
+- The 50% coverage figure is my own choice. Condition 2 is my reading of "not placed" in the planner's wording: without it a faithful retype that also says "(n1)" would fire.
+- Precision is acceptable only because of condition 3. **Recall is low, a stated limit (user guide):** C3 does not catch a long output dropped without such a pointer; only the 2.3 wording covers that case.
 - **Known false positive:** a deliberate summary that says "Based on the stage results". The re-ask lets compose keep its summary and drop the pointer.
 
 #### 2.4.4 C4 (requirement 5): a value with no source (BRT-ORC-041)
@@ -366,7 +369,8 @@ Lead ruling 1b. **Fires** when, for a list step S with at least 10 resolved item
 **Empty-like values** (never a hit): null, "", "-", "n/a", "none", "unknown", "no result", "no label", "no value", "missing", "error", "failed", "not produced", or a code matching `BRT-[A-Z]+-\d{3}`.
 
 **Sentences** (in this order, under 041):
-- Case 1: `You gave values to <k> items that no step gave a value for that field (for example <id1>, <id2>, <id3>). Do not give them values: in placed rows they show their error or stay empty, and in your own text say they have no result or no value.`
+- Case 1: `You gave values to <k> items that no step gave a value for that field (for example <id1>, <id2>, <id3>). Do not give them values: in placed rows they show their error or stay empty, and in your own text say they have no result or no value. To show the stored values, place the rows instead of typing them: @@ROWS:<steps> | <name>=<field>, <field>@@.`
+  - `<steps>` is the run's list steps in run order joined with ` + ` (one step: its id alone). This is the join-marker hint that was C2's (planner); for D it reads `@@ROWS:classify_notes + retry_failed_notes | <name>=<field>, <field>@@`.
 - Case 2: `You gave values for <field> to <k> items (for example <id1>, <id2>, <id3>), but no step produced <field>. Leave the field out, or tell the reader it was not produced.`
 
 Identities are written in the form compose was shown, the first three in input order.
@@ -399,7 +403,8 @@ Neither change touches the other salvage paths: 030, 029 twice, a compose call t
 - The one behaviour change against ruling 21: a 032 second reply holding one valid and one invalid marker now keeps the valid block. No current test covers that case.
 
 **Run record:**
-- The run is "salvaged". The warning event carries every problem code of the second reply; its headline code is the first in the order 032, 037, 038, 040, 041. (039 alone never salvages, 2.4.2.)
+- The run is "salvaged". The warning event carries every problem code of the second reply; its headline code is the first in the order 032, 037, 038, 040, 041.
+- **List steps with no usable marker (planner).** In this salvage a finished list step that no marker placed is written in the plain marker's form (`@@ROWS:<id>@@`: flat fields, file-name labels, failed rows as item and `error`), not the nested index/item/output shape, under `## <step id>`, with the 21b guard. The other salvage paths (030, 029 twice, a raising compose call, a cut pointer retry) keep today's form.
 - Bench scoring of salvaged runs is unchanged.
 - Placed blocks in salvage now get the 21b guard. That narrows, but does not close, 21b's open question.
 
@@ -428,12 +433,12 @@ The `\|` in the last two sentences is table escaping only; the sentences carry a
 - a single stored-vocabulary value next to an item with no value for that field, in JSON, a table, a short line or a group key (C4 case 1; D's 31);
 - a value under an asked-but-not-produced field name in JSON or a table (C4 case 2; A's 9 urgencies once the 32c list exists);
 - a marker naming a field no step produced (037);
-- bulk retyping of stored values (C2);
 - typed rows around a marker (C1).
 
 **Not caught:**
-- values under a new key name that is neither stored nor asked for, in typed rows below the C2 threshold;
-- altered values for items that have results, below the threshold;
+- values under a new key name that is neither stored nor asked for (C2 is dropped);
+- altered values for items that have results;
+- bulk retyping of stored values: it costs tokens only, and no check fires (C2 dropped);
 - an asked-for field in line or group form (no key);
 - prose inventions;
 - C's filler contradictions (selection, not invention) and its missing units (copied from the worker);
@@ -488,7 +493,7 @@ The `\|` in the last two sentences is table escaping only; the sentences carry a
 
 A
 1. Block golden text (2.3).
-2. The recorded reply gives BRT-ORC-038 and BRT-ORC-041 (9 hits, case 2), but not 039 (9 of 196). The repair message is exact, with both sentences.
+2. The recorded reply gives BRT-ORC-038 and BRT-ORC-041 (9 hits, case 2). The repair message is exact, with both sentences.
 3. Compliant re-ask (`Here are all 200 emails. No step produced an urgency, so none is given.\n\n@@ROWS:classify_emails | file=item, category=bucket@@`): composed, usable (A).
 4. Nested again but with that spec: salvaged (S2), same score as test 3, no typed row left.
 5. First reply `@@ROWS:classify_emails | file=item, category=bucket, urgency@@`: BRT-ORC-037 with the exact unknown-field sentence; a compliant second reply is composed.
@@ -509,21 +514,21 @@ C
 
 D
 1. Block golden text.
-2. The recorded reply gives 039 and 041 in one exact message. The 039 sentence names both steps and the join marker; the 041 examples are note_04.txt, note_07.txt and note_09.txt.
-3. Compliant re-ask `@@ROWS:classify_notes + retry_failed_notes | file=item, risk=bucket@@`, the marker the 039 sentence suggests: composed, usable (D).
-4. Typed again plus that marker: C2 alone would be accepted, but C4 also fires (31), so the run is salvaged. S2 is usable (D) and gives no "medium" to a no-result note.
-5. Typed again with no marker and no invented values (the 29 stored rows only): accepted with a 039 warning, composed.
-6. Typed again with no marker and the 31 "medium": salvaged in the old form. No row of a no-result note has a risk; the grader gives items_answered 0 (stated limit).
-7. D after 32d, constructed: the retry over the 31 resolves 4. The block says "Items with no result ...: 27". A line naming 3 of the 4 with their labels fires no 039 (2.4.2 x).
+2. The recorded reply gives 041 alone (C4, 31 hits, case 1) in one exact message: D is caught by C4 alone. The 041 sentence carries the join-marker hint naming both steps (`@@ROWS:classify_notes + retry_failed_notes | <name>=<field>, <field>@@`); its examples are the first three no-result notes in input order (job_d/note_04.txt, job_d/note_07.txt, job_d/note_09.txt, the labels compose was shown).
+3. Compliant re-ask `@@ROWS:classify_notes + retry_failed_notes | file=item, risk=bucket@@`, the marker the 041 sentence suggests: composed, usable (D).
+4. Typed again plus that marker: C4 fires again (31), so the run is salvaged. S2 is usable (D) and gives no "medium" to a no-result note.
+5. Typed again with no marker and no invented values (the 29 stored rows only): no check fires, composed (a faithful retype is accepted).
+6. Typed again with no marker and the 31 "medium": salvaged; the list steps are written in the plain marker's form. No row of a no-result note has a risk; the grader gives items_answered 0 (stated limit).
+7. D after 32d, constructed: the retry over the 31 resolves 4. The block says "Items with no result ...: 27". A line naming 3 of the 4 with their labels fires nothing.
 
 Round-1 A (from stage1_job_a_replay.json)
-1. A stand-in typed join reply fires 039 (classify_emails 189 of 189, extract_urgency 200 of 200), not 041.
+1. A stand-in typed join reply fires nothing: every typed value is one of the item's own stored values (no 041), and C2 is dropped.
 2. Compliant `@@ROWS:classify_emails + extract_urgency | file=item, category, urgency@@`:
    - 200 rows in document order;
    - `category` and `urgency` equal extract_urgency's stored values (the later step wins);
    - the 11 items classify_emails failed have no `error`, because extract_urgency resolved them.
-3. Grouped reply: no 039.
-4. CSV reply twice: accepted with a 039 warning.
+3. Grouped reply: nothing fires.
+4. CSV reply: nothing fires, composed.
 5. Join error code in a field: `@@ROWS:classify_emails + extract_urgency | file=item, bucket, urgency@@`.
    - The 11 items classify_emails failed carry `"bucket": "BRT-ANS-005"` (their stored failure code), not `null`, and their urgency from extract_urgency.
    - The row has no row-level `error`, because extract_urgency resolved them.
@@ -535,9 +540,9 @@ Round-1 A (from stage1_job_a_replay.json)
 - **Labels:** names, ids mode, `name#k`, a nested entry, and a document id never matching a part of a multi-part document.
 - **C1 placements:** `{"results": @@ROWS:x@@}` gives valid JSON; the quoted value; `[ @@ROWS:x@@ ]` absorbed; the nested list in an object answer.
 - **OUTPUT rendering:** all four positions.
-- **False-positive cases** of 2.4.1 to 2.4.4, each pinned to fire or not as stated, including C2 at exactly half (no) and just over half (yes) of the resolved items, a step with 9 resolved items (no), and case (x).
+- **False-positive cases** of 2.4.1, 2.4.3 and 2.4.4, each pinned to fire or not as stated. C2's cases are not built.
 - **"No result" and "rows with no value"** on hand-built steps: a failed item resolved by another list step leaves the no-result count; an item failed by both steps stays; an answerer pairing the item with a value removes it; a field with no value in any row is left out of the "Rows with no value" line.
-- **`action: fail`** with typed rows: placed, no C2, C3 or C4, declined.
+- **`action: fail`** with typed rows: placed, no C3 or C4, declined.
 - **Post counts:** the worst case of 9 posts, and 6 to 9 posts for an answerer run with a 2,500-character output.
 
 **Lane:**
@@ -583,13 +588,13 @@ Only focused tests run on the ThinkPad. The full suite runs in CI at PR time, in
 
 The registry's next free number when this note was first drafted was BRT-ORC-035; 32c took it (`dc97aa8`). 32d(ii) is expected to take BRT-ORC-036; if it takes another number, the builder shifts these and keeps their order.
 
-Each code is logged on the re-ask event (`orchestrator_decision`, `"reask": true`). After a salvage, or for 039 an acceptance, it is recorded on the run as a warning, at the level of 029 to 032.
+Each code is logged on the re-ask event (`orchestrator_decision`, `"reask": true`). After a salvage it is recorded on the run as a warning, at the level of 029 to 032.
 
 | Code | Meaning | Where |
 |---|---|---|
 | BRT-ORC-037 | A rows marker's spec cannot be used (unknown field, duplicate name, empty, in brackets, unreadable entry, over 600 characters) | row_markers.parse_target |
 | BRT-ORC-038 | A rows marker is an element of a list, or sits below table rows, that compose wrote | compose_checks.nested_markers |
-| BRT-ORC-039 | Compose retyped more than half of a list step's resolved items with their stored values | compose_checks.typed_rows |
+| BRT-ORC-039 | Unused: reserved for C2, which the planner dropped | none |
 | BRT-ORC-040 | A long step output is neither placed nor present, and the answer points at a step | compose_checks.unplaced_long_outputs |
 | BRT-ORC-041 | Compose gave a value no step produced: for an item with no value for that field, or for an asked-but-not-produced field | compose_checks.invented_values |
 
@@ -599,8 +604,8 @@ BRT-ORC-032 widens to cover a target of the wrong kind and misspellings (2.4.6).
 
 - An answerer's list (A's `fix_and_complete_classifications.classifications`) is not a list step. It cannot be placed or joined; its values only exempt C4 hits and remove items from the no-result count.
 - A child run's rows cannot be field-chosen by the parent.
-- The rows marker cannot filter: C2's subset false positive (2.4.2 iii) costs one re-ask.
-- No marker writes CSV. A CSV of stored data costs one re-ask and is accepted on the second reply.
+- The rows marker cannot filter: a subset is typed by compose, at its token cost.
+- No marker writes CSV. A CSV of stored data is typed by compose and accepted.
 - Section 2.5's "not caught" list, and C3's recall.
 - A double failure with no usable marker salvages in a form the grader cannot score (A test 6, D test 6).
 - Compose input is not trimmed.
@@ -618,12 +623,16 @@ BRT-ORC-032 widens to cover a target of the wrong kind and misspellings (2.4.6).
 
 ## 6. Open questions for the planner
 
-1. Settled by the lead: S2 yes; S1 only after 038 to 041, with the text guard.
-2. **C2 on the second reply:** accept it with a 039 warning when it is the only problem left, rather than salvage (my own choice; reason in 2.4.2). Yes means that design. No means a faithful CSV answer is replaced by a salvage.
-3. **C2's denominator and floor:** the step's resolved items (at least 10), not all its items. The lead's text says "the step's items". With all items, stored D's classify_notes gives 29 of 60 and does not fire; C4 still catches D.
-4. **C3:** keep the narrow test, or drop it and rely on the wording.
-5. **The D score** falls from 0.60 to 0.42 on the stored data once guesses are refused. How should the trial report state it?
-6. **Not proposed:** deriving a spec from typed rows so that a no-marker double failure stays gradeable. I recommend no.
+Answered by the planner (BUILD.md section 8, "Planner readings under ruling 32 (4)"):
+
+1. Settled by the lead: S2 yes; S1 only after 038, 040 or 041, with the text guard. The planner let the lead rulings stand.
+2. **C2 on the second reply:** moot. C2 is dropped.
+3. **C2's denominator and floor:** moot. C2 is dropped; C4 catches D alone.
+4. **C3:** kept, narrow (2.4.3). The user guide says it does not catch a long output dropped without a pointer.
+5. **The D score:** no grader change. The win rule reads the grader's figure over all items. The trial report gives, for any list job, items with a result / all items, accuracy over all items, and accuracy over items with a result. Round 2's D is stated as 0.60 as scored, of which 11 correct labels were guesses for notes with no result; 25 of 60 (0.42) without them; 25 of the 29 with a result.
+6. **Deriving a spec from typed rows:** no. Salvage with no usable marker writes a list step's rows in the plain marker's form (2.4.5).
+
+Still to come, after the code review (planner, before the 32g trial): a replay of C1, C3 and C4 over every stored compose reply with every fire listed here, and the dollars of a run of jobs A to D with zero, one and the worst-case number of compose posts.
 
 ## 7. Changes after review
 
@@ -657,3 +666,10 @@ Round 2 (four points):
 19. **C2's floor (2.4.2)** is at least 10 resolved items, matching the denominator. The D-after-32d case (retry resolves 4 of 31; one line naming 3 of them with values does not fire) is added as false-positive case (x) and D test 7.
 20. **Tests (2.7):** the three further changed tests added (`test_table_form_on_its_own_lines`, `test_marker_as_a_dict_key_takes_the_032_path`, `test_fields_and_block_line`); the count is now twelve. Noted that `test_replayed_stage1_job_a_completes_with_full_rows` is being changed for 32c and that the 32e change builds on that version.
 21. **Join (2.1).** A chosen field whose source step failed the item while another listed step resolved it now carries the source step's error code (for example "BRT-ANS-005") instead of null. Added to the row rules, round-1 A test 5 and the unit tests.
+
+Planner reading (4), 18-Nov-2026 (applied by the builder before any code):
+
+22. **C2 dropped.** BRT-ORC-039 stays unused; the other codes keep their numbers. 2.4.2 is kept as history. The order of checks, the repair-message order and every C2 test are revised; D is shown caught by C4 alone, and the join-marker hint moves into C4's case-1 sentence.
+23. **C3 kept narrow** (2.4.3): a listed long output, not placed, not present, and a pointer to a step result or a step id. The user guide states the recall limit.
+24. **Salvage with no usable marker** writes a list step's rows in the plain marker's form (2.4.5).
+25. **Section 6 answered**, including how the trial report states the D score (section 1).
