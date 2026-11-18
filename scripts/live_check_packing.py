@@ -157,7 +157,9 @@ async def main() -> int:
     db_dir.mkdir(parents=True, exist_ok=True)
     db = str(db_dir / f"{LEDGER_KEY}.db")
     await create_all(db)
-    engine._shared_matrix = CapabilityMatrix()
+    matrix = CapabilityMatrix(str(ROOT / "data" / "capability_matrix.yaml"))
+    matrix.load()
+    engine._shared_matrix = matrix
     if engine._shared_matrix.get(WORKER) is None:
         raise SystemExit(f"{WORKER} is not in the matrix")
 
