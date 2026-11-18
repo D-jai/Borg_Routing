@@ -36,9 +36,9 @@ Every SQLite write has an owner. Children self-clean before returning; parents v
 |---|---|
 | **Wrapper-as-Compression Contract** | The inbound schema IS the compression spec. "Return me this shape" ≡ "compress to fit this shape." |
 | **Progressive Distillation** | Compression is a by-product of work, not a separate step. Every answerer emits already-compressed structured output. |
-| **Cascading Distillation** | If one pass isn't enough, cascade another. Bounded by `MAX_RECURSION_DEPTH = 5`. |
+| **Cascading Distillation** | If one pass isn't enough, cascade another. Bounded by `MAX_DEPTH = 5`. |
 | **Context Bucket** | Multi-resolution context assembled at Composer time: high-res (governance + question) + structured evidence + compact history + state snapshots. |
-| **Orchestrator = Composer** | Same prompt, different `current_mode` flag (`plan \| dispatch \| re_plan \| compose`). No handover → no information loss. |
+| **Orchestrator = Composer** | Same prompt, different `current_mode` flag (the engine uses `plan \| re_plan \| compose`). No handover → no information loss. |
 
 ---
 
@@ -51,6 +51,9 @@ Every SQLite write has an owner. Children self-clean before returning; parents v
 - `state_op` — deterministic (no-model) operator: `filter`, `count`, `group_by`, `sample`.
 
 ### Four Shared-State Mechanisms (enable emergent patterns)
+
+**Status (17-Nov-2026).** Mechanisms 1 and 2 are declared in the envelope schema but not executed by the current runtime: the engine never runs a `state_query`, and `side_effects` are passed along but never written. Mechanisms 3 and 4 are live.
+
 1. `state_query` on envelope inputs — parameterised SQL executed before dispatch, injected as context.
 2. `side_effects` on envelope outputs — declared, structured writes to named tables.
 3. Orchestrator re-invocation mid-run — invoked with current state digest whenever re-planning is needed.
@@ -74,8 +77,8 @@ effective_cost =
 ```
 
 - External: first term dominates; rates from OpenRouter `/api/v1/models`.
-- Local: first term = 0; throughput_tps measured during benchmark.
-- `time_cost_per_sec` is an Admin UI knob (default ≈ $30/hr).
+- Local: first term = 0; throughput_tps is hand-set in `data/capability_matrix.yaml`; nothing measures it.
+- `time_cost_per_sec` is an Admin UI knob (default 0.0001 per second, about $0.36/hr).
 
 ---
 
@@ -87,8 +90,8 @@ effective_cost =
 | `trigger_reason` on envelopes | causal graph via one WHERE clause (`initial_plan`, `escalation_from:X`, `retry:X`, ...) |
 | `orchestrator_decision` event | verbatim reasoning + plan per invocation |
 | `child_residue` event | fold-in sweep hit → misbehaviour signal per model |
-| `run_digests` | one row per finished run: cost, latency, token-by-model, counts, rating |
-| `user_rating` on runs | ground-truth signal from thumbs-up/down |
+| `run_digests` | one row per finished run: `summary`, `cost_dollars`, `token_count`, `baseline_dollars`, `tokens_input`, `tokens_output` |
+| `user_rating` on runs (`runs.user_rating`) | ground-truth signal from thumbs-up/down |
 | NER worker (optional) | spaCy entity + SVO extraction over log_payloads — parked, enable on demand |
 
 **Rejected (do not reintroduce):** a scheduled Coach/critic model. The system self-regulates via Direct-mode bias + quality-by-floor lineup.
