@@ -719,95 +719,125 @@ async def test_the_semaphore_is_held_only_around_the_http_post(pk):
 # A deferral is carried entirely in the item's own answer (bucket 'defer' plus
 # defer_reason). No code in src/ writes a deferral row: write_scratch has no
 # caller, an item's scratch_writes are parsed and not stored, and a child is
-# built without side_effects (apply_to_each._make_child_task).
+# built without side_effects (apply_to_each._make_child_task). The step's
+# output is the only place a deferral lives, so that is what is compared.
 
 BUCKETS = ["billing", "tech_support", "sales"]
 DEFERRED = {"note 007", "note 031"}
+DEFER_OUT = {"bucket": "defer", "confidence": 0.3, "defer_reason": "no bucket fits"}
 
 
-def _bucket_task(items, model="openrouter/stub/cheap", endpoint="https://openrouter.ai/api",
-                 side_effects=None, tool_requests=None) -> WrappedTask:
-    """A classify_into_buckets step built as the engine builds it: the real
-    skill from data/skills.yaml rendered, then the routed model stamped."""
-    from src.skills.library import SkillLibrary
-
-    lib = SkillLibrary()
-    lib.load()
-    rendered = lib.render(
-        skill_id="classify_into_buckets", version=1,
-        args={"buckets": BUCKETS, "items_ref": ""}, level_path="1",
+def _from_node(node, model="openrouter/stub/cheap", endpoint="https://openrouter.ai/api",
+               data_scope="derived", lane=None) -> WrappedTask:
+    """A step built by the engine's own plan-node builder."""
+    return engine._build_task_from_node(
+        node, run_id=uuid.uuid4(), current_depth=1, max_depth=5, level_path="1",
+        model_endpoint=endpoint, model_name=model, user_instruction=OPERATOR,
+        results={}, data_scope=data_scope, lane=lane,
     )
-    update = {
-        "model_endpoint": endpoint, "model_name": model,
-        "governance_instruction": OPERATOR,
-        "dependency_input": {**rendered.dependency_input, "items": items},
-    }
-    if side_effects is not None:
-        update["side_effects"] = side_effects
-    if tool_requests is not None:
-        update["tool_requests"] = tool_requests
-    return rendered.model_copy(update=update)
+
+
+def _skill_node(items_ref) -> dict:
+    return {"type": "apply_to_each", "id": "n1", "skill_id": "classify_into_buckets",
+            "skill_args": {"buckets": BUCKETS, "items_ref": items_ref}}
+
+
+def _plan_node(items, side_effects=("deferrals",), schema=None) -> dict:
+    return {"type": "apply_to_each", "id": "n1", "instruction": "Summarise this note.",
+            "items": items, "output_schema": schema or {"summary": "string"},
+            "side_effects": list(side_effects)}
 
 
 def _bucket_for(text) -> dict:
     if text in DEFERRED:
-        return {"bucket": "defer", "confidence": 0.3, "defer_reason": "no bucket fits"}
+        return dict(DEFER_OUT)
     return {"bucket": "billing", "confidence": 0.9}
 
 
-def _bucket_packed(req, text):
-    return _bucket_for(text)
-
-
-def _bucket_single(req):
+def _single_text(req) -> str:
     found = [t for t in _items(40) if t in req.system or t in (req.user or "")]
-    return _bucket_for(found[-1])
+    return found[-1]
 
 
 async def _bucket_run(pk, task):
-    return await _run(pk, task, pack_item_for=_bucket_packed, answer_for=_bucket_single)
+    return await _run(pk, task, pack_item_for=lambda r, t: _bucket_for(t),
+                      answer_for=lambda r: _bucket_for(_single_text(r)))
 
 
-async def test_the_bucket_skill_carries_only_the_deferrals_side_effect():
-    task = _bucket_task(_items(2))
+def _deferred_entries(env) -> list:
+    return [r for r in env.output["results"] if r["output"].get("bucket") == "defer"]
+
+
+async def _packed_and_single(pk, build, runner):
+    """The same step run packed, then with packing off: (packed stub, env, single env)."""
+    stub, packed_env = await runner(pk, build())
+    pk["mp"].setenv("BORG_PACK_MAX_ITEMS", "0")
+    single_stub, single_env = await runner(pk, build())
+    assert single_stub.of_kind("packed") == []
+    return stub, packed_env, single_env
+
+
+async def test_the_bucket_skill_step_carries_only_the_deferrals_side_effect():
+    task = _from_node(_skill_node(_items(2)))
     assert task.side_effects == ["deferrals"]
-    assert task.type == "apply_to_each" and not task.tool_requests
+    assert task.type == "apply_to_each" and task.skill_id == "classify_into_buckets"
+    assert not task.tool_requests
 
 
 async def test_a_classify_into_buckets_step_over_40_cloud_items_posts_two_packs_of_20(pk):
-    stub, env = await _bucket_run(pk, _bucket_task(_items(40)))
-    packed = stub.of_kind("packed")
-    assert [len(r.pack_ids) for r in packed] == [20, 20]
+    stub, env = await _bucket_run(pk, _from_node(_skill_node(_items(40))))
+    assert [len(r.pack_ids) for r in stub.of_kind("packed")] == [20, 20]
     assert stub.of_kind("answerer") == []
     assert env.output["total"] == 40 and env.output["success_count"] == 40
 
 
-async def test_a_deferred_item_in_a_pack_ends_up_as_an_unpacked_deferred_item_does(pk):
-    items = _items(40)
-    stub, packed_env = await _bucket_run(pk, _bucket_task(items))
+async def test_a_deferred_item_in_a_packed_skill_step_reaches_re_plan_as_an_unpacked_one(pk):
+    stub, packed_env, single_env = await _packed_and_single(
+        pk, lambda: _from_node(_skill_node(_items(40))), _bucket_run)
     assert len(stub.of_kind("packed")) == 2
-
-    pk["mp"].setenv("BORG_PACK_MAX_ITEMS", "0")
-    stub, single_env = await _bucket_run(pk, _bucket_task(items))
-    assert stub.of_kind("packed") == [] and len(stub.of_kind("answerer")) == 40
-
-    # The step's envelope output is what re_plan and the write-up read; it is
-    # the same either way, deferred items included.
+    # The step's output is what re_plan and the write-up read.
     assert packed_env.output == single_env.output
-    deferred = [r for r in packed_env.output["results"] if r["output"]["bucket"] == "defer"]
+    deferred = _deferred_entries(packed_env)
+    assert deferred == _deferred_entries(single_env)
     assert [r["item"] for r in deferred] == sorted(DEFERRED)
-    assert all(r["output"]["defer_reason"] == "no bucket fits" for r in deferred)
+    assert all(r["output"] == DEFER_OUT for r in deferred)
     assert packed_env.output["failures"] == []
 
 
+async def test_a_plan_written_deferrals_step_over_40_items_posts_packs(pk):
+    task = _from_node(_plan_node(_items(40)))
+    assert task.side_effects == ["deferrals"] and task.skill_id is None
+    stub, env = await _run(pk, task, pack_item_for=lambda r, t: {"summary": t},
+                           answer_for=lambda r: {"summary": "x"})
+    assert [len(r.pack_ids) for r in stub.of_kind("packed")] == [20, 20]
+    assert stub.of_kind("answerer") == []
+    assert env.output["success_count"] == 40
+
+
+async def test_a_deferred_item_in_a_packed_plan_written_step_reaches_re_plan_as_an_unpacked_one(pk):
+    schema = {"bucket": "billing|defer", "confidence": "float 0.0-1.0",
+              "defer_reason": "string<=50 (only if bucket='defer')"}
+    stub, packed_env, single_env = await _packed_and_single(
+        pk, lambda: _from_node(_plan_node(_items(40), schema=schema)), _bucket_run)
+    assert len(stub.of_kind("packed")) == 2
+    assert packed_env.output == single_env.output
+    deferred = _deferred_entries(packed_env)
+    assert deferred == _deferred_entries(single_env)
+    assert [r["item"] for r in deferred] == sorted(DEFERRED)
+    assert all(r["output"] == DEFER_OUT for r in deferred)
+
+
 async def test_deferrals_beside_any_other_side_effect_still_do_not_pack(pk):
-    stub, env = await _bucket_run(pk, _bucket_task(_items(25), side_effects=["deferrals", "notes"]))
+    task = _from_node(_plan_node(_items(25), side_effects=("deferrals", "notes")))
+    assert task.side_effects == ["deferrals", "notes"]
+    stub, env = await _run(pk, task, answer_for=lambda r: {"summary": "x"})
     assert stub.of_kind("packed") == []
     assert len(stub.of_kind("answerer")) == 25
 
 
 async def test_a_side_effect_other_than_deferrals_still_does_not_pack(pk):
-    stub, env = await _bucket_run(pk, _bucket_task(_items(25), side_effects=["notes"]))
+    stub, env = await _run(pk, _from_node(_plan_node(_items(25), side_effects=("notes",))),
+                           answer_for=lambda r: {"summary": "x"})
     assert stub.of_kind("packed") == []
 
 
@@ -815,17 +845,20 @@ async def test_a_deferrals_step_with_tool_requests_still_does_not_pack(pk):
     from src.envelopes.schema import ToolRequest
     from src.orchestrator.packing import packing_context
 
-    task = _bucket_task(_items(25), tool_requests=[ToolRequest(tool="web_search", args={"q": "x"})])
+    # A plan-written apply_to_each node carries no tool_requests through the
+    # builder, so they are set on the built step.
+    built = _from_node(_skill_node(_items(25)))
+    task = built.model_copy(update={"tool_requests": [ToolRequest(tool="web_search", args={"q": "x"})]})
     assert await packing_context(task, 25, 20, pk["db"]) is None
-    # The same step without the tool request is packable.
-    assert await packing_context(_bucket_task(_items(25)), 25, 20, pk["db"]) is not None
+    assert await packing_context(built, 25, 20, pk["db"]) is not None
 
 
 async def test_a_deferrals_step_bound_for_a_local_host_never_packs(pk):
     matrix = three_tier_matrix()
     matrix.upsert(stub_model("local", 7.0, 0.0, 0.0, source="ollama"))
     pk["mp"].setattr(engine, "_shared_matrix", matrix)
-    stub, env = await _bucket_run(pk, _bucket_task(_items(25), model="ollama/stub/local",
-                                                   endpoint="http://127.0.0.1:11434"))
+    task = _from_node(_skill_node(_items(25)), model="ollama/stub/local",
+                      endpoint="http://127.0.0.1:11434")
+    stub, env = await _bucket_run(pk, task)
     assert stub.of_kind("packed") == []
     assert len(stub.of_kind("answerer")) == 25

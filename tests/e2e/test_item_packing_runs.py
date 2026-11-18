@@ -162,3 +162,70 @@ async def test_a_backstop_hit_on_a_derived_cloud_pack_refuses_only_the_offending
     assert sorted(r["index"] for r in env.output["results"]) == [0, 1, 3]
     assert [f["index"] for f in env.output["failures"]] == [2]
     assert "BRT-LANE-006" in json.dumps(env.output["failures"][0]["reason"])
+
+
+# -- ruling 32a: bench round 2 job A's shape, a deferrals step over raw documents ----
+
+async def _raw_bucket_step(lane):
+    """classify_into_buckets over the run's documents (data_scope raw) under the
+    by_reference lane, built by the engine's own plan-node builder, then run."""
+    import uuid
+
+    from src.lane.context import lane_scope, prepare_lane
+    from src.orchestrator.apply_to_each import expand_and_run
+    from tests.e2e.test_privacy_lane import BIRCH_TEXT
+
+    def bucket(text):
+        if "Birch Logistics" in text:
+            return {"bucket": "defer", "confidence": 0.3, "defer_reason": "no bucket fits"}
+        return {"bucket": "billing", "confidence": 0.9}
+
+    def single(req):
+        return bucket(BIRCH_TEXT if "Birch Logistics" in req.system else "")
+
+    lane["mp"].setenv("BORG_LANE_MODE", "by_reference")
+    lane["mp"].setattr(engine, "_shared_matrix", three_tier_matrix())
+    stub = StubModels(plan_nodes=[], answer_for=single,
+                      pack_item_for=lambda r, t: bucket(t)).install(lane["mp"])
+    ctx = await prepare_lane({"folder": "."}, lane["db"])
+    node = {"type": "apply_to_each", "id": "n1", "skill_id": "classify_into_buckets",
+            "skill_args": {"buckets": ["billing", "tech_support", "sales"],
+                           "items_ref": "documents"}}
+    with lane_scope(ctx):
+        task = engine._build_task_from_node(
+            node, run_id=uuid.uuid4(), current_depth=1, max_depth=5, level_path="1",
+            model_endpoint="https://openrouter.ai/api", model_name="openrouter/stub/cheap",
+            user_instruction=OPERATOR, results={}, data_scope="raw", lane=ctx,
+        )
+        assert task.side_effects == ["deferrals"] and task.data_scope == "raw"
+        env = await expand_and_run(task, db_path=lane["db"])
+    await drain_log_writes()
+    return stub, env
+
+
+async def test_a_deferrals_step_over_raw_documents_by_reference_posts_packs_and_files_deferrals_alike(lane):
+    for i in range(3):
+        (lane["docs"] / f"extra_note_{i}.txt").write_text(
+            f"Client note {i}: Oak Supplies {i} pays monthly by card. Nothing open.",
+            encoding="utf-8",
+        )
+    lane["mp"].setenv("BORG_PACK_MAX_ITEMS", "20")
+    stub, packed_env = await _raw_bucket_step(lane)
+    packed = stub.of_kind("packed")
+    assert len(packed) == 1 and not packed[0].is_local
+    assert len(packed[0].pack_ids) == packed_env.output["total"] == 5
+    assert stub.of_kind("answerer") == []
+
+    lane["mp"].setenv("BORG_PACK_MAX_ITEMS", "0")
+    single_stub, single_env = await _raw_bucket_step(lane)
+    assert single_stub.of_kind("packed") == []
+    assert len(single_stub.of_kind("answerer")) == 5
+
+    # The step output, the only place a deferral lives, is what re_plan reads.
+    assert packed_env.output == single_env.output
+    deferred = [r for r in packed_env.output["results"] if r["output"]["bucket"] == "defer"]
+    assert deferred == [r for r in single_env.output["results"] if r["output"]["bucket"] == "defer"]
+    assert len(deferred) == 1 and deferred[0]["item"].startswith("doc_")
+    assert deferred[0]["output"] == {"bucket": "defer", "confidence": 0.3,
+                                     "defer_reason": "no bucket fits"}
+    assert packed_env.output["failures"] == []

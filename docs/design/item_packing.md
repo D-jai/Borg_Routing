@@ -36,6 +36,8 @@ Packing happens inside `expand_and_run`, after the step's one route decision, wh
 
 Everything else is never packed, in any lane mode: `ollama`, `lmstudio`, an unknown id (which the executor infers as `lmstudio`), and any URL judged local. The rule fails toward not packing. So raw steps in `raw_local` and `all_local`, which are routed local, are never packed.
 
+**Side effects and tools (ruling 32a).** A step with `tool_requests` is never packed. A step with any side effect other than `deferrals` is never packed. A step whose only side effect is `deferrals` (the `classify_into_buckets` skill, or a plan-written `apply_to_each` with `"side_effects": ["deferrals"]`) is packed like any other: a deferral is carried entirely in the item's own answer (`bucket: defer` plus `defer_reason`), no code writes a deferral row, and a child never carries the parent's side effects, so a deferred packed item is filed into `results` exactly as a single call's is. Before 32a any side effect blocked packing, which sent bench round 2 job A's 200 items one per call.
+
 ## 3. How packs are formed
 
 **Setting.** `BORG_PACK_MAX_ITEMS` is read when the step starts. The default is 20; 0 or 1 turns packing off; a value that is not an integer turns it off and logs warning BRT-APE-007. With packing off, today's `_run_one` runs for every item.
@@ -336,3 +338,4 @@ With the setting at 0 or 1, `expand_and_run` runs today's `_run_one`, and no pac
 
 1. **Observed output.** In 23f (c), I read "observed tokens per item × 2" as already carrying the headroom, so the factor 2 is not applied again to it. Confirm.
 2. **First pack cut down to two items.** If the first pack is cut all the way to two items, this note switches packing off for the step instead of forming more packs from no observation. Confirm.
+3. **A deferrals table that no code fills (ruling 32a).** The comment at `data/skills.yaml:60` ("items with bucket='defer' get rows here for orchestrator re_plan") and the `deferral_batch:table` trigger reason at `src/prompts/orchestrator.py:197` point at a deferrals table that no code fills: `write_scratch` has no caller in `src/`, and the `deferral` log event is never written. Both are protected files, left unchanged; raised with the planner.
