@@ -420,6 +420,17 @@ def _strip_reasoning_wrappers(text: str) -> str:
     return _REASONING_TAG_RE.sub("", text).strip()
 
 
+# Planner reading (1) under ruling 35: a plan or re_plan reply that is valid
+# JSON but not an object (a list, a bare string) is treated as unparseable:
+# the JSON-only retry, then BRT-ORC-002. Compose keeps its own handling.
+_OBJECT_MODES = ("plan", "re_plan")
+_NOT_AN_OBJECT = "BRT-ORC-002: orchestrator reply is JSON but not an object ({kind})"
+
+
+def _not_an_object(mode: str, parsed: object) -> bool:
+    return mode in _OBJECT_MODES and parsed is not None and not isinstance(parsed, dict)
+
+
 def _extract_json(text: str) -> dict:
     """Extract first JSON object from ``text`` — tolerant of reasoning-model prose.
 
@@ -1129,6 +1140,10 @@ async def _invoke_orchestrator_model(
         # Logging must never mask the real failure; fall through.
         pass
 
+    if _not_an_object(mode, parsed):
+        parse_error = ValueError(_NOT_AN_OBJECT.format(kind=type(parsed).__name__))
+        parsed = None
+
     if parsed is not None:
         return parsed
 
@@ -1190,6 +1205,10 @@ async def _invoke_orchestrator_model(
         )
     except Exception:
         pass
+
+    if _not_an_object(mode, parsed_retry):
+        retry_error = ValueError(_NOT_AN_OBJECT.format(kind=type(parsed_retry).__name__))
+        parsed_retry = None
 
     if parsed_retry is not None:
         return parsed_retry
