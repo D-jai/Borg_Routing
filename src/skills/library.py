@@ -266,21 +266,51 @@ class SkillLibrary:
         )
 
 
+    def field_names(self, value: object) -> Optional[list[str]]:
+        """The field names an output_schema value names (see schema_field_names)."""
+        return schema_field_names(value)
+
     def return_fields(self, skill_id: str, version: Optional[int], args: object) -> Optional[list[str]]:
-        """The field names a skill step returns per item: the skill's own
-        output_schema keys plus the step's ``extra_fields``; None when they
-        cannot be told without rendering (a schema derived from an arg, a
-        skill not found, extra_fields that do not parse).
+        """The field names a skill step's rows hold: the skill's own
+        output_schema keys, the fields its schema takes from an arg
+        (``result_or_defer``'s ``{output_schema}``, ``{expected_return_schema}``,
+        ``{original_output_schema}``, a schema "derived from fields"), the
+        step's ``extra_fields``, and ``item`` and ``error`` (every row has
+        them). None when the fields cannot be read (a skill not found, an arg
+        that should hold a schema and does not): the step is then not checked.
         """
         try:
             skill = self.get(skill_id, version)
             raw = (skill.get("outbound_template") or {}).get("output_schema")
-            if not isinstance(raw, dict) or not raw:
+            a = args if isinstance(args, dict) else {}
+            if isinstance(raw, str):
+                text = raw.strip()
+                whole = _PLACEHOLDER.fullmatch(text)
+                if whole:
+                    names = schema_field_names(a.get(whole.group(1)))
+                elif _DERIVED_SCHEMA.fullmatch(text):
+                    src = _DERIVED_SCHEMA.fullmatch(text).group(1)
+                    names = [f["name"] for f in _normalise_fields(skill_id, src, a.get(src))]
+                else:
+                    names = None
+                if names is None:
+                    return None
+                base: list = list(names)
+            elif isinstance(raw, dict) and raw:
+                base = list(raw["properties"] if isinstance(raw.get("properties"), dict) else raw)
+                for value in raw.values():
+                    for ph in _PLACEHOLDER.findall(value) if isinstance(value, str) else []:
+                        got = a.get(ph)
+                        if isinstance(got, dict):
+                            base += schema_field_names(got) or []
+                        elif "schema" in ph:
+                            return None
+            else:
                 return None
-            names = list(raw["properties"] if isinstance(raw.get("properties"), dict) else raw)
-            extra = args.get("extra_fields") if isinstance(args, dict) else None
-            names += [n for n in _step_fields(skill_id, extra, raw) if n not in names]
-            return [str(n) for n in names]
+            names = list(dict.fromkeys(str(n) for n in base))
+            extra = _step_fields(skill_id, a.get("extra_fields"), {n: "" for n in names})
+            names += [n for n in extra if n not in names]
+            return names + [n for n in ("item", "error") if n not in names]
         except Exception:
             return None
 
@@ -747,3 +777,32 @@ async def log_usage(
             await db.commit()
     except Exception as exc:
         raise RuntimeError(f"BRT-SKL-007: skill_usage_log write failed: {exc}") from exc
+
+
+def schema_field_names(value: object) -> Optional[list[str]]:
+    """The field names an output_schema names, read like a step's
+    ``extra_fields``: a flat map, a JSON-Schema object (its ``properties``),
+    an array schema (its ``items``), a bare typed schema, a JSON string of
+    these, a list of names or ``{name, ...}`` entries. None when it is none
+    of these.
+    """
+    if isinstance(value, str):
+        text = value.strip()
+        if not text.startswith(("[", "{")):
+            return None
+        try:
+            value = json.loads(text)
+        except ValueError:
+            return None
+    value = _unwrap_json_schema(value)
+    if isinstance(value, dict):
+        return [str(k) for k in value if str(k).strip() not in _JSON_SCHEMA_KEYWORDS]
+    if isinstance(value, list):
+        out = []
+        for v in value:
+            name = v.get("name") if isinstance(v, dict) else v
+            if not isinstance(name, str) or not name.strip():
+                return None
+            out.append(name.strip())
+        return out
+    return None

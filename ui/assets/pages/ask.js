@@ -78,6 +78,7 @@ Borg.ready(function () {
     // Ruling 26e: "k of N steps failed" (and "m of n items failed"), only when there are any.
     var fl = W.failedLines(r);
     if (fl.length) box.appendChild(h('p', { class: 'small muted' }, fl.join(' · ')));
+    (r.notProduced || []).forEach(function (line) { box.appendChild(h('p', { class: 'small muted' }, line)); });
     var row = h('div', { class: 'row' }, r.models.map(function (m) { return modelChip(m.model, m.calls); }));
     if (r.rawStayed) row.appendChild(h('span', { class: 'chip' }, [h('span', { class: 'dot gold' }), 'Raw documents stayed on this machine']));
     // Worked out by the server. Unknown is "not recorded", never a zero.

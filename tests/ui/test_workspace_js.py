@@ -513,3 +513,17 @@ def test_a_redacted_speed_probe_warning_reads_as_a_warning_with_its_code(tmp_pat
     line = next(t for t in texts if "BRT-REG-016" in t)
     assert line.startswith("Warning") and "speed" in line
     assert not any("A problem was recorded" in t for t in texts)
+
+
+def test_receipt_has_one_line_per_field_a_plan_asked_for_and_the_skill_did_not_return(tmp_path):
+    """Ruling 32c: the BRT-ORC-035 plan note (second hit) becomes receipt lines."""
+    note = {"event_type": "orchestrator_decision", "decision_json": json.dumps({
+        "code": "BRT-ORC-035", "action": "ran_without_fields", "node_id": "n1",
+        "skill_id": "classify_into_buckets", "fields": ["file", "urgency"]})}
+    other = {"event_type": "orchestrator_decision", "decision_json": json.dumps({"mode": "route"})}
+    got = js(tmp_path, f"return W.notProducedLines({json.dumps({'events': [other, note]})});")
+    assert got == [
+        "the plan asked for file from classify_into_buckets, which does not return it; not produced",
+        "the plan asked for urgency from classify_into_buckets, which does not return it; not produced",
+    ]
+    assert js(tmp_path, f"return W.notProducedLines({json.dumps({'events': [other]})});") == []

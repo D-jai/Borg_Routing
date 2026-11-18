@@ -603,7 +603,7 @@ def _classify_step():
             "skill_version": 1, "task_type": "extraction", "tier": "light",
             "skill_args": {"buckets": ["good", "bad"], "items_ref": REVIEWS,
                            "extra_fields": {"urgency": "integer from 1 to 5"}},
-            "output_schema": {"category": "string", "urgency": "integer"}}
+            "output_schema": {"urgency": "integer"}}   # ruling 32c: only fields the step returns
 
 
 @pytest.mark.parametrize("answer, resolved", [
@@ -647,29 +647,24 @@ def _job_a_step(**args):
 
 @pytest.mark.asyncio
 async def test_r4_job_a_node_asks_for_skill_keys_and_urgency_only(env):
-    """TC-SKL-038: the recorded worker outputs (bucket, confidence,
-    defer_reason, plus urgency) resolve without file or category; an item
-    missing defer_reason still fails, as 11 of 200 did in job A."""
+    """TC-SKL-038 (superseded by ruling 32c): the job A node names file,
+    category and urgency; the skill returns none of file and category, so the
+    plan is refused with BRT-ORC-035 before any call, and re_plan is shown the
+    skill's fields and the hint. (R4's old reading, that a skill node's
+    output_schema describes the final answer's rows, is withdrawn.)"""
     db_path, mp = env
-
-    def answer(req):
-        out = {"bucket": "good", "confidence": 1.0, "urgency": 3}
-        if "Toaster" not in req.system:
-            out["defer_reason"] = ""
-        return out
-
     stub = StubModels(plan_nodes=[_job_a_step(extra_fields={
         "urgency": "integer from 1 (lowest) to 5 (highest)"})],
-        answer_for=answer).install(mp)
-    result = await run_pipeline("Classify each review.", db_path=db_path)
+        answer_for=lambda r: {"bucket": "good", "confidence": 1.0, "urgency": 3,
+                              "defer_reason": ""}).install(mp)
+    await run_pipeline("Classify each review.", db_path=db_path)
     await drain_log_writes()
-    assert result["status"] == "completed", result.get("error")
-    for req in stub.of_kind("answerer"):
-        line = req.system.split("Also return these fields:")[-1].split("\n")[0]
-        assert line == " urgency (integer from 1 (lowest) to 5 (highest))."
-        assert '"file"' not in req.system and '"category"' not in req.system
-    compose = stub.of_kind("compose")[-1].system
-    assert '"success_count": 2' in compose
+    assert not stub.of_kind("answerer"), "the refused step made a model call"
+    replan = stub.of_kind("re_plan")[0]
+    body = replan.system + replan.user
+    assert "BRT-ORC-035" in body
+    assert "for other fields use apply_to_each with your own output_schema" in body
+    assert "to rename fields, do it when composing" in body
 
 
 @pytest.mark.asyncio

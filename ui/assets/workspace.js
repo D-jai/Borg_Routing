@@ -407,6 +407,20 @@
     out.steps = out.stepsFailed + Object.keys(ok).filter(function (k) { return !failed[k]; }).length;
     return out;
   }
+  /* Ruling 32c: one receipt line per field a plan asked of a skill step that the skill does not
+   * return, after the plan repeated the fault (the step ran without it). Read from the run's
+   * BRT-ORC-035 plan note (an orchestrator_decision event). */
+  function notProducedLines(data) {
+    var out = [];
+    (data && data.events || []).forEach(function (ev) {
+      var d = ev && ev.event_type === 'orchestrator_decision' ? decisionOf(ev) : null;
+      if (!d || d.code !== 'BRT-ORC-035' || d.action !== 'ran_without_fields' || !Array.isArray(d.fields)) return;
+      d.fields.forEach(function (f) {
+        out.push('the plan asked for ' + f + ' from ' + d.skill_id + ', which does not return it; not produced');
+      });
+    });
+    return out;
+  }
   /* The receipt's failure lines: "k of N steps failed" only when k > 0, then "m of n items
    * failed" only when m > 0. */
   function failedLines(r) {
@@ -474,6 +488,7 @@
       rawStayed: !!(data.run && data.run.documents) && (mode === 'raw_local' || mode === 'all_local'),
       estimate: baselineEstimate(data),   // ruling 22: the floor, or null when none was stored
       noStep: noStepNote(data),           // ruling 26a: the planner wrote the answer alone, or null
+      notProduced: notProducedLines(data), // ruling 32c: fields asked for and not produced
       failed: failedCounts(data)          // ruling 26e: failed steps, and failed items of the steps that went on
     };
   }
@@ -732,7 +747,7 @@
   window.BorgWork = {
     LANE_MODES: LANE_MODES, laneTag: laneTag, historyForMode: historyForMode, laneLine: laneLine,
     readLaneMode: readLaneMode, prepareSend: prepareSend, runLaneMode: runLaneMode, runLaneWords: runLaneWords, leftCard: leftCard,
-    headerTiles: headerTiles, receiptFrom: receiptFrom, noStepNote: noStepNote, failedLines: failedLines, receiptStats: receiptStats, leftChipText: leftChipText,
+    headerTiles: headerTiles, receiptFrom: receiptFrom, noStepNote: noStepNote, failedLines: failedLines, notProducedLines: notProducedLines, receiptStats: receiptStats, leftChipText: leftChipText,
     stripBaseline: stripBaseline, whyRows: whyRows, makeRefresher: makeRefresher, makeLiveStream: makeLiveStream,
     parseJSON: parseJSON, decisionOf: decisionOf, stageWords: stageWords, shortModel: shortModel, shortText: shortText,
     planNodesById: planNodesById, stepsFromRun: stepsFromRun, planLayout: planLayout,

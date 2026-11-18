@@ -37,9 +37,12 @@ Error codes:
                step fails before any model call and the message names the
                failed step (an item ref to it keeps BRT-APE-005)
 - BRT-ORC-035: a skill step's output_schema names a field the skill does not
-               return (planner ruling 32c); it fails before any model call and
-               the message names the skill's fields, so re_plan can choose an
-               apply_to_each with its own output_schema
+               return (planner ruling 32c); found by plan validation
+               (plan_validation.py) before the plan's steps run. First time
+               in a run: the step fails, re_plan is shown the message, in
+               every lane. Second time: the step runs as the skill step it
+               is; the fault is a plan note, a receipt line and an entry in
+               asked_but_not_produced()
 - BRT-ORC-026: a re_plan step reused the id of a step that already ran; it
                was renamed <id>_2 (_3 ...) and the batch's refs to it follow
                (warning; the step runs)
@@ -131,6 +134,7 @@ from src.registry.node_router import (
     tokens_needed,
 )
 from src.registry.router import select_model
+from src.orchestrator.plan_validation import validate_plan
 from src.skills.library import SkillLibrary
 
 MAX_LOOPS = 10
@@ -1870,46 +1874,61 @@ def _failed_dependency(node: dict, results: dict, documents_reserved: bool) -> O
     return None
 
 
-_SKILL_SCHEMA_HINT = "for other fields use apply_to_each with your own output_schema"
+_NOT_PRODUCED: dict = {}     # str(run_id) -> [{"step", "skill", "field"}], newest 64 runs
 
 
-def _clip(text: str, limit: int) -> str:
-    return text if len(text) <= limit else text[: limit - 3] + "..."
+def asked_but_not_produced(run_id: object) -> list:
+    """The run's "asked for but not produced" list (ruling 32c): one entry per
+    field a plan asked of a skill step that the skill does not return, after
+    the plan repeated the fault. Entries: ``{"step", "skill", "field"}``.
+    Empty when there is none. Compose's code-side block reads it (32e)."""
+    return list(_NOT_PRODUCED.get(str(run_id), []))
 
 
-def skill_schema_message(node: dict) -> Optional[str]:
-    """BRT-ORC-035 text when a skill step's ``output_schema`` names a field
-    the skill does not return (its own fields plus the step's
-    ``extra_fields``); None when the step is fine, has no ``output_schema``,
-    or the skill's fields cannot be told. At most 200 characters, the hint
-    last (planner ruling 32c).
+async def _check_plan(
+    nodes: list, results: dict, run_id: UUID, db_path: str, state: dict,
+) -> bool:
+    """Plan validation (BRT-ORC-035) on a plan or re_plan batch, before any of
+    its steps is dispatched. True when a step was refused (re_plan is due).
+
+    First time in a run: each offending step fails with the full message, in
+    every lane (it is built from the plan and the skill list only), and
+    re_plan is shown it. Second time: the step runs as the skill step it is;
+    the run stops re-planning on this code; the fault is recorded as a plan
+    note (orchestrator_decision), in the run's not-produced list and, by the
+    receipt, as one line.
     """
-    skill_id = node.get("skill_id")
-    named = node.get("output_schema")
-    if not skill_id or not named:
-        return None
-    if isinstance(named, dict):
-        names = list(named["properties"] if isinstance(named.get("properties"), dict) else named)
-    elif isinstance(named, list):
-        names = [n if isinstance(n, str) else str((n or {}).get("name", "")) if isinstance(n, dict) else str(n)
-                 for n in named]
-    else:
-        return None
-    args = node.get("skill_args")
-    fields = _get_skill_lib().return_fields(
-        str(skill_id), node.get("skill_version", 1), args if isinstance(args, dict) else {}
-    )
-    if fields is None:
-        return None
-    unknown = [str(n) for n in names if n and str(n) not in fields]
-    if not unknown:
-        return None
-    tail = f"; {_SKILL_SCHEMA_HINT}"
-    head = (
-        f"BRT-ORC-035: skill '{_clip(str(skill_id), 24)}' returns only "
-        f"{_clip(', '.join(fields), 70)}, not {_clip(', '.join(unknown), 30)}"
-    )
-    return _clip(head, 200 - len(tail)) + tail
+    issues = validate_plan(nodes, _get_skill_lib())
+    if not issues:
+        return False
+    second = state["seen"]
+    state["seen"] = True
+    for issue in issues:
+        if second:
+            state["stop"] = True
+            kept = _NOT_PRODUCED.setdefault(str(run_id), [])
+            for field in issue.fields:
+                kept.append({"step": issue.node_id, "skill": issue.skill_id, "field": field})
+            while len(_NOT_PRODUCED) > 64:
+                _NOT_PRODUCED.pop(next(iter(_NOT_PRODUCED)))
+            event, decision = "orchestrator_decision", {
+                "code": issue.code, "msg": issue.message, "node_id": issue.node_id,
+                "skill_id": issue.skill_id, "fields": list(issue.fields),
+                "action": "ran_without_fields",
+            }
+        else:
+            results[issue.node_id] = InboundEnvelope(
+                envelope_id=uuid4(), subtask_id=uuid4(), status="failed",
+                output={}, failure_reason=issue.message,
+            )
+            event, decision = "error", {
+                "code": issue.code, "msg": issue.message, "node_id": issue.node_id,
+            }
+        try:
+            await write_event(event, run_id=run_id, decision=decision, db_path=db_path)
+        except Exception:
+            pass
+    return not second
 
 
 def ref_cycle_message(node_id: str, cycle: Optional[list[str]]) -> str:
@@ -2771,10 +2790,10 @@ async def _orchestrate_run(
     # True once a wave ran (or a step was failed) since the last re_plan.
     ran_since_replan = False
     # Ruling 32c: BRT-ORC-035 goes to re_plan once per run; the second time
-    # the step fails and re_plan is not called again (local to this check).
-    schema_error_seen = False
-    schema_replanned = False   # a re_plan ran after the first one
-    stop_replan = False
+    # the step runs as the skill step it is and re_plan is not called again.
+    plan_check = {"seen": False, "stop": False}
+    if await _check_plan(current_nodes, results, run_id, db_path, plan_check):
+        ran_since_replan = True
     # Ruling 26b: True once this run planned a step that reads the documents.
     doc_step_planned = False
 
@@ -2817,11 +2836,10 @@ async def _orchestrate_run(
                 # re_plan sent nothing new to run (e.g. only steps that
                 # already ran): compose.
                 break
-            if stop_replan:
+            if plan_check["stop"]:
                 break   # BRT-ORC-035 a second time: not re-planned (ruling 32c)
             ran_since_replan = False
             loop_count += 1
-            schema_replanned = schema_error_seen
 
             # --- RE_PLAN MODE ---
             replan_result = await _invoke_orchestrator_model(
@@ -2866,6 +2884,8 @@ async def _orchestrate_run(
                     except Exception:
                         pass
                 current_nodes = _with_ids(next_nodes, run_ids)
+                if await _check_plan(current_nodes, results, run_id, db_path, plan_check):
+                    ran_since_replan = True
                 continue
             elif action == "fail":
                 rationale = replan_result.get("rationale", "No rationale provided.")
@@ -2928,22 +2948,6 @@ async def _orchestrate_run(
                     )
                 except Exception:
                     pass
-                continue
-
-            # A skill step whose output_schema names a field the skill does
-            # not return fails now (BRT-ORC-035, ruling 32c): the engine does
-            # not pick another step; re_plan is shown the skill's fields.
-            schema_msg = skill_schema_message(node)
-            if schema_msg is not None:
-                if schema_replanned:
-                    schema_msg = schema_msg.replace(
-                        ": ", ": (second time; not re-planned) ", 1)[:200]
-                    stop_replan = True
-                schema_error_seen = True
-                await _fail_step_before_call(
-                    results, raw_unstamped if raw else None, run_id, node_id,
-                    "BRT-ORC-035", schema_msg, node_docs, db_path, raw,
-                )
                 continue
 
             # A state_op whose source step failed has no items: it fails
