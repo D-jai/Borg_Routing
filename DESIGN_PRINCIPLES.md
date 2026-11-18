@@ -102,7 +102,7 @@ The orchestrator's core skill is **designing good inbound schemas.** The Skill L
 - Catalogue: `data/skills.yaml` (versioned)
 - Loader: `src/skills/library.py`
 - Telemetry: `skill_usage_log` (outcome, tokens, latency, composer_accepted, residue_count)
-- UI: `/ui/skills.html` — per-skill stats + "Edit → New Version" bumps version; old stats preserved.
+- UI: `/ui/skills.html` — read-only list of skills; a new version is created through `POST /skills/{skill_id}/version` (admin), old stats preserved.
 
 **This is not the Coach.** The Coach policed decisions; the Skill Library sharpens tools.
 

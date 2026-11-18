@@ -45,7 +45,7 @@ _MAX_RESULTS_CAP = 20
 _URL_RE = re.compile(r"https?://[^\s\])>,\"']+")
 
 # Module-level flag so we only log BRT-TOOL-DEGRADED once per process
-# (same pattern as BRT-ORC-007-DEGRADED in engine.py).
+# (same pattern as BRT-ORC-NO-FRONTIER in engine.py).
 _degraded_logged = False
 
 

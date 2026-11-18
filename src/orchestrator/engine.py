@@ -11,7 +11,7 @@ Error codes:
 - BRT-ORC-005: maximum loop count exceeded (safety ceiling)
 - BRT-ORC-006: orchestrator returned action=fail
 - BRT-ORC-007: no orchestrator model available
-- BRT-ORC-007-DEGRADED: quality bar relaxed below the default because no model qualified
+- BRT-ORC-NO-FRONTIER: quality bar relaxed below the default because no model qualified (warning)
 - BRT-ORC-008: node builder failed for a plan node
 - BRT-ORC-009: compose mode returned no response (and no step finished)
 - BRT-ORC-015: default answerer selection failed; fell back to orchestrator
