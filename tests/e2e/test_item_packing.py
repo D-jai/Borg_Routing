@@ -525,8 +525,12 @@ def test_item_ids_are_opaque_unique_and_stable():
 def test_with_packing_off_request_bodies_match_the_tree_before_packing(tmp_path, value):
     """The two-tree proof, pinned: the fixed job of scripts/compare_request_bodies.py,
     run in this tree with packing off, sends exactly the bodies the tree before
-    packing sent (their sha256, recorded from 773bae1)."""
+    packing sent (their sha256, recorded from 773bae1 plus the ruling 13 prompt
+    lines, which change every planner body). The engine stamps today's UTC date
+    into planner bodies, so the date is replaced by a fixed token before hashing;
+    nothing else is touched."""
     import hashlib
+    import re
     import subprocess
     import sys
     from pathlib import Path
@@ -542,7 +546,9 @@ def test_with_packing_off_request_bodies_match_the_tree_before_packing(tmp_path,
     bodies = json.loads(out.read_text(encoding="utf-8"))
     pinned = json.loads((root / "tests" / "fixtures" / "packing_off_request_bodies.json")
                         .read_text(encoding="utf-8"))["sha256"]
-    assert sorted(hashlib.sha256(b.encode("utf-8")).hexdigest() for b in bodies) == pinned
+    date = re.compile(r"Today's date is \d{4}-\d{2}-\d{2} \(UTC\)")
+    undated = [date.sub("Today's date is <DATE> (UTC)", b) for b in bodies]
+    assert sorted(hashlib.sha256(b.encode("utf-8")).hexdigest() for b in undated) == pinned
 
 
 # -- review round 1 of 40ee228 ------------------------------------------------------
