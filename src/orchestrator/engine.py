@@ -158,6 +158,20 @@ def _get_matrix() -> CapabilityMatrix:
     return _shared_matrix
 
 
+async def _measure_local_speeds(matrix: CapabilityMatrix) -> None:
+    """Planner ruling 28: a ticked local model still without a speed figure is
+    measured at the start of a run, before anything is routed. The figure is
+    kept in memory (the matrix file is saved by Discover and the checkbox).
+    Never raises; a failed probe is logged BRT-REG-016 and the router prices
+    the model as no faster than the slowest measured one."""
+    try:
+        from src.registry.throughput import measure_unmeasured  # noqa: PLC0415
+
+        await measure_unmeasured(matrix, checked_only=True)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("BRT-REG-016: speed probe at run start failed: %s", exc)
+
+
 def reload_matrix(matrix: Optional[CapabilityMatrix] = None) -> None:
     """Make the engine see the API's capability matrix (R2).
 
@@ -2436,6 +2450,8 @@ async def _orchestrate_run(
         configured_quality if configured_quality is not None
         else os.getenv("ORCHESTRATOR_QUALITY_REQUIREMENT", "9.0")
     )
+    if current_depth == 0:
+        await _measure_local_speeds(_get_matrix())
     configured_time_cost = await get_config("time_cost_per_sec", db_path=db_path)
     time_cost = float(
         configured_time_cost if configured_time_cost is not None
@@ -2888,6 +2904,7 @@ async def _orchestrate_run(
                         time_cost_per_sec=time_cost,
                         default_model=default_model,
                         run_options=_route_options.get(),
+                        pool=matrix.all(),
                         **lane_kwargs,
                     )
                 except LaneError as exc:

@@ -93,11 +93,12 @@ async def test_local_model_call_logs_zero_dollars_not_null(tmp_path, monkeypatch
     local = ModelInfo(
         model_id="ollama/stub_local", source="ollama", endpoint="http://127.0.0.1:11434",
         context_length=8192, task_scores={t: 6.5 for t in engine_task_types()},
-        throughput_tps=None, checked=True,
+        throughput_tps=1e6, checked=True,
     )
     matrix.upsert(local)
     # Make the local row the only model clearing the light floor cheaply: the
-    # router sorts by effective cost, and a free model beats the cheap one.
+    # router sorts by effective cost, and a fast measured local model with no
+    # price beats the cheap one. (An unmeasured one is never free: ruling 28.)
     _stub, result, db = await _run(tmp_path, monkeypatch, matrix=matrix)
     rows = _rows(db, result["run_id"], "AND event_type='model_call'")
     local_rows = [r for r in rows if r[1] == "ollama/stub_local"]

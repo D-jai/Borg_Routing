@@ -77,7 +77,7 @@ effective_cost =
 ```
 
 - External: first term dominates; rates from OpenRouter `/api/v1/models`.
-- Local: first term = 0; throughput_tps is hand-set in `data/capability_matrix.yaml`; nothing measures it.
+- Local: first term = 0; throughput_tps is measured by one short generation on Discover, on ticking, and at run start (`src/registry/throughput.py`, planner ruling 28). An unmeasured local model is never free: it is priced at the slowest figure in the pool, or, with none, ranked after every priced model (ruling 28h).
 - `time_cost_per_sec` is an Admin UI knob (default 0.0001 per second, about $0.36/hr).
 
 ---

@@ -218,7 +218,8 @@ async def test_local_chosen_step_estimates_zero_dollars_but_the_baseline_is_posi
     tmp_path, monkeypatch
 ):
     matrix = three_tier_matrix()
-    matrix.upsert(stub_model("localbest", 9.0, 0, 0, source="ollama"))
+    # A measured, fast local model (an unmeasured one is never free: ruling 28).
+    matrix.upsert(stub_model("localbest", 9.0, 0, 0, source="ollama").model_copy(update={"throughput_tps": 1e6}))
     db = await _setup(tmp_path, monkeypatch, matrix=matrix)
     plan = [{"type": "answerer", "id": "n1", "instruction": "Do it.",
              "task_type": "extraction", "tier": "light", "output_schema": {"result": "string"}}]

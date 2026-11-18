@@ -1452,6 +1452,28 @@ def local_skipped(job: dict, arm: str, cfg: Config, matrix) -> bool:
     return local and (cfg.skip_local or not local_model_available(matrix))
 
 
+def _speed(model) -> str:
+    return f"{model.throughput_tps:g} tok/s" if model.throughput_tps else "speed not measured"
+
+
+def measure_local_speeds(matrix, log=print) -> dict:
+    """Planner ruling 28 (f): at the start of a paid stage, the product's own measuring function
+    (``src/registry/throughput.py::measure_unmeasured``) times each checked local model that has no
+    figure: one short local generation, free. The figure stays in memory (the bench matrix is never
+    written) and is printed. A failed probe prints "not measured" and the router prices the model as
+    no faster than the slowest measured model in the pool."""
+    from src.registry.throughput import measure_unmeasured
+
+    figures = asyncio.run(measure_unmeasured(matrix, checked_only=True))
+    for model_id, tps in figures.items():
+        log(f"local speed          : {model_id} "
+            + (f"{tps:g} tok/s (measured at start)" if tps else "not measured (probe failed, BRT-REG-016)"))
+    for m in matrix.all():
+        if m.checked and m.model_id not in figures and m.source in ("ollama", "lmstudio", "custom_key")                 and not m.remote and m.pricing is None:
+            log(f"local speed          : {m.model_id} {_speed(m)} (figure already in the matrix)")
+    return figures
+
+
 def _header(out, cfg, matrix, baseline, jms, title):
     out(f"BORG_ROUTE bench: {title} (date {cfg.date}; nothing is sent, nothing is spent)")
     out(f"matrix               : {matrix._path}  (read only; checks are in memory)")
@@ -1460,7 +1482,7 @@ def _header(out, cfg, matrix, baseline, jms, title):
         out(f"judge, job C         : {jm.model_id}  ({_per_mtok(jm)})  [in neither arm; vendor '{vendor_of(jm.model_id)}']")
     checked = [m.model_id for m in matrix.all() if m.checked]
     out(f"checked models ({len(checked)}): {', '.join(checked)}")
-    local_models = [m.model_id for m in matrix.all()
+    local_models = [f"{m.model_id} ({_speed(m)})" for m in matrix.all()
                     if m.checked and m.source in ("ollama", "lmstudio", "custom_key") and not m.remote]
     if cfg.skip_local:
         out("local arms           : NOT RUN (--skip-local); no numbers")
@@ -1669,6 +1691,8 @@ def main(argv: Optional[list[str]] = None) -> int:
     rc = 0
     judge_jobs = {n: j for n, j in jobs.items() if (j.get("quality") or {}).get("kind") == "pairwise_judge"}
     if args.stage and not args.judge_only:
+        if not cfg.skip_local and local_model_available(matrix):
+            measure_local_speeds(matrix)
         res = asyncio.run(run_stage(args.stage, jobs, cfg, matrix, baseline, only=only, arms=arms, jms=jms))
         rc = res["rc"]
         judge_jobs = {n: jobs[n] for n in res["judge_jobs"]}

@@ -86,6 +86,26 @@ def _isolated_data(tmp_path_factory):
 
 
 @pytest.fixture(autouse=True)
+def _no_real_speed_probe():
+    """Planner ruling 28: Discover, the checkbox and the start of a run probe a
+    local model's speed. No test may reach a real model server (an Ollama may
+    be running on the developer's machine), so the probe's transport raises
+    for every test; a probe test replaces it with its own fake. A blocked
+    probe is a failed probe: logged BRT-REG-016, figure left unset."""
+    from src.registry import throughput
+
+    async def _blocked(url, body, timeout):
+        raise RuntimeError(f"no real model call in tests ({url})")
+
+    mp = pytest.MonkeyPatch()
+    mp.setattr(throughput, "_post_json", _blocked)
+    try:
+        yield
+    finally:
+        mp.undo()
+
+
+@pytest.fixture(autouse=True)
 def _packing_off_by_default():
     """Planner ruling 23: tests written before packing keep one call per item.
 

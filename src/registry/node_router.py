@@ -29,7 +29,15 @@ from typing import Any, Callable, Optional
 from src.lane.errors import LaneError
 
 from .capability_matrix import CapabilityMatrix
-from .cost import call_dollars, effective_cost
+from .cost import (
+    UNMEASURED_RANKED_AFTER_PRICED,
+    call_dollars,
+    effective_cost,
+    route_rank,
+    slowest_measured_tps,
+    speed_unmeasured,
+    time_cost,
+)
 from .models import ModelInfo
 from .router import select_model
 
@@ -167,6 +175,7 @@ def select_model_for_node(
     run_options: Optional[dict] = None,
     local_filter: Optional[Callable[[ModelInfo], bool]] = None,
     extra_input_tokens: int = 0,
+    pool: Optional[list[ModelInfo]] = None,
 ) -> tuple[ModelInfo, dict]:
     """Return ``(model, decision)`` for one plan node.
 
@@ -186,6 +195,11 @@ def select_model_for_node(
             the filter accepts are offered, and a miss raises BRT-LANE-002.
         extra_input_tokens: added to the token estimate (the size of the
             documents a raw step reads, which are not in its text).
+        pool: the ticked models an unmeasured model's speed is judged
+            against (ruling 28): it is priced at the slowest figure among
+            them, or, when none has a figure, ranked after every priced model
+            (ruling 28h). Default: every row of ``matrix`` (before the lane
+            filter).
 
     Never raises for a routing miss, except a step that must stay local
     (``LaneError`` BRT-LANE-002). Any other miss is reported in the decision
@@ -202,12 +216,38 @@ def select_model_for_node(
     floor = float(floors.get(tier, DEFAULT_FLOORS[tier]))
     est_in = _estimate_input_tokens(node, extra_input_tokens)
     est_out = _EST_OUTPUT_TOKENS
+    pool_rows = list(pool) if pool is not None else matrix.all()
+    unmeasured_tps = slowest_measured_tps(pool_rows)
     if local_filter is not None:
         notes.append("on-premise lane: this step may use local models only")
         matrix = local_view(matrix, local_filter)
 
     def cost_of(model: ModelInfo) -> float:
-        return effective_cost(model, est_in, est_out, time_cost_per_sec)
+        return effective_cost(
+            model, est_in, est_out, time_cost_per_sec, unmeasured_tps=unmeasured_tps
+        )
+
+    def time_of(model: ModelInfo) -> float:
+        return time_cost(model, est_in, est_out, time_cost_per_sec, unmeasured_tps=unmeasured_tps)
+
+    def rank_of(model: ModelInfo) -> tuple[bool, float]:
+        return route_rank(model, est_in, est_out, time_cost_per_sec, unmeasured_tps=unmeasured_tps)
+
+    def speed_notes(models: list[ModelInfo]) -> None:
+        # Ruling 28 (b) and 28h: say in words how a model with no speed figure was priced.
+        seen: set[str] = set()
+        for m in models:
+            if m is None or m.model_id in seen or not speed_unmeasured(m):
+                continue
+            seen.add(m.model_id)
+            if unmeasured_tps is None:
+                if UNMEASURED_RANKED_AFTER_PRICED not in notes:
+                    notes.append(UNMEASURED_RANKED_AFTER_PRICED)
+            else:
+                notes.append(
+                    f"speed not measured for {m.model_id}: priced at the slowest measured "
+                    f"speed in the pool ({unmeasured_tps:g} tok/s)"
+                )
 
     def dollars_of(model: ModelInfo) -> float:
         return call_dollars(model, est_in, est_out)
@@ -217,15 +257,18 @@ def select_model_for_node(
         # floor and fits the input, cheapest first. est_cost is what the
         # router ranks by (dollars plus time); est_dollars is dollars only.
         offered = matrix.query_by_task(task_type, min_score=floor, min_context_length=est_in)
-        offered.sort(key=cost_of)
+        offered.sort(key=rank_of)
+        kept = offered[:_MAX_CANDIDATES_RECORDED]
+        speed_notes(kept)
         return [
             {
                 "model_id": m.model_id,
                 "score": m.task_scores.get(task_type),
                 "est_cost": cost_of(m),
                 "est_dollars": dollars_of(m),
+                "est_time_cost": time_of(m),
             }
-            for m in offered[:_MAX_CANDIDATES_RECORDED]
+            for m in kept
         ]
 
     decision: dict = {
@@ -250,11 +293,13 @@ def select_model_for_node(
         except Exception:
             decision["candidates"] = []
             decision["candidates_reason"] = "candidate list could not be built"
+        speed_notes([picked])
         decision.update(
             reason="planner_pick",
             chosen=picked.model_id,
             est_cost=cost_of(picked),
             est_dollars=dollars_of(picked),
+            est_time_cost=time_of(picked),
         )
         return picked, decision
 
@@ -267,6 +312,7 @@ def select_model_for_node(
             quality_requirement=floor,
             strategy=strategy,
             time_cost_per_sec=time_cost_per_sec,
+            pool=pool_rows,
         )
     except ValueError as exc:
         if local_filter is not None:
@@ -281,17 +327,20 @@ def select_model_for_node(
             chosen=default_model.model_id,
             est_cost=None,
             est_dollars=dollars_of(default_model),
+            est_time_cost=None,
             candidates_reason="no model cleared the floor, so there is no candidate list",
             error=str(exc),
         )
         return default_model, decision
 
     decision["candidates"] = candidates_for()
+    speed_notes([chosen])
     decision.update(
         reason="routed",
         chosen=chosen.model_id,
         est_cost=cost_of(chosen),
         est_dollars=dollars_of(chosen),
+        est_time_cost=time_of(chosen),
     )
     return chosen, decision
 
@@ -344,6 +393,7 @@ def fallback_decision(
         "chosen": default_model.model_id,
         "est_cost": None,
         "est_dollars": est_dollars,
+        "est_time_cost": None,
         "candidates": [],
         "candidates_reason": "routing failed, so there is no candidate list",
         "notes": notes,

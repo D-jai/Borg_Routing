@@ -26,6 +26,7 @@ from src.registry.capability_matrix import CapabilityMatrix
 from src.registry.discovery import discover_all
 from src.registry.models import ModelInfo
 from src.registry.scorer import research_and_apply
+from src.registry.throughput import measure_throughput, measure_unmeasured
 
 logger = logging.getLogger(__name__)
 
@@ -143,12 +144,16 @@ async def _refuse_in_all_local(action: str) -> None:
 async def discover_models(matrix: CapabilityMatrix = Depends(get_matrix)):
     """Probe LM Studio, Ollama, and the curated OpenRouter list; upsert results.
 
-    Refused (BRT-LANE-005) while lane_mode is all_local.
+    Each local model found with no speed figure is then measured by one short
+    generation (planner ruling 28; a failed probe is logged BRT-REG-016 and
+    the figure stays unset). Refused (BRT-LANE-005) while lane_mode is
+    all_local.
     """
     await _refuse_in_all_local("Discover")
     openrouter_key: Optional[str] = os.getenv("OPENROUTER_API_KEY")
     try:
         count = await discover_all(matrix, openrouter_key=openrouter_key)
+        await measure_unmeasured(matrix, checked_only=False)
         matrix.save()
         _share_with_engine(matrix)
         return DiscoverResponse(upserted=count)
@@ -208,6 +213,10 @@ async def set_model_checked(
             detail=f"BRT-API-002: model '{model_id}' not found in capability matrix.",
         )
     matrix.set_checked(model_id, body.checked)
+    if body.checked:
+        # Ruling 28: a ticked local model with no speed figure is measured now
+        # (never raises; a failed probe is logged BRT-REG-016).
+        await measure_throughput(matrix, model_id)
     matrix.save()
 
     # Point the engine at this matrix so the next route sees it.
