@@ -115,9 +115,11 @@ The orchestrator's core skill is **designing good inbound schemas.** The Skill L
 | **Primary** | `POST /v1/chat/completions` | OpenAI-compatible gateway (Cursor, Continue, Droid, custom scripts). Streaming via SSE. |
 | **Secondary** | `POST /v1/task` → `GET /runs/{id}/stream` | Long-running async jobs; 202 + poll/SSE. |
 | **Tertiary** | `/mcp` JSON-RPC | MCP tools for Claude Desktop, Continue. |
-| **Reference client** | browser UI (`/chat`, `/models`, `/admin`, `/dashboard`, `/run/{id}`, `/logs`, `/skills`) | Dogfoods the public API — no privileged backdoor. |
+| **Reference client** | browser UI at `/` (redirects to Ask): Ask `/ui/ask.html`, Run `/ui/run.html?id=<run_id>`, Runs `/ui/runs.html`; Admin pages `/ui/admin_overview.html`, `/ui/models.html`, `/ui/keys.html`, `/ui/rules.html`, `/ui/settings.html`, `/ui/skills.html`, `/ui/logs.html` | Dogfoods the public API: the pages call `/v1/chat/completions`, `/runs`, `/runs/{id}`, `/runs/{id}/stream`, `/models`, `/config`, `/skills`, `/logs` and `/keys/status`, with no privileged backdoor. Admin routes sit behind `BORG_ADMIN_TOKEN` (or loopback). |
 
-Gateway model aliases: `borg_route`, `borg_route:{tier}`, `borg_route:{specialty}`, `borg_route:local`, or any raw `model_id` (bypass).
+Gateway model aliases: `borg_route`, `borg_route:{tier}` (light, mid, heavy), `borg_route:{kind of work}` (coding, creative, reasoning, extraction), `borg_route:local`, or any raw `model_id` (bypass).
+
+Other routes: `GET /runs` (history), `POST /runs/{id}/resume`, `POST /runs/{id}/rating`, `GET/POST /config` (settings, rules), `GET /health`.
 
 ---
 
