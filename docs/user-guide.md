@@ -86,7 +86,7 @@ the operator opts models into the pool explicitly.
 5. Discover Models, Get Model Info and the checkboxes all change the one matrix the router uses, so the next run sees them with no restart.
 
 ### If something goes wrong
-- **"BRT-REG-020: no model found"** — No row is checked, or none meets the quality bar. Tick at least one row that has been researched.
+- **"BRT-ORC-007: no orchestrator model available"** — No row is checked, or none can plan the run. Tick at least one row that has been researched. (`BRT-REG-020` reaches you only when a `compare_and_rank` or `verify_claim` step has more data than any ticked model can hold.)
 
 ### Tuning the quality bar and time-cost knobs (BRT-RT-01)
 The router only picks models whose `task_scores` for the current task meet
@@ -95,7 +95,7 @@ cost**: the row's estimated dollars plus a **time cost per second** for the
 waiting, so faster models are preferred when latency matters. (A chat alias
 such as `borg_route:local` can change the order; the step's route notes say so.)
 
-Fresh installs ship with these defaults (the quality bar of 9.0 means a frontier-class model plans each run; if no ticked model reaches it, the planner falls back to the best ticked model and the trace shows `BRT-ORC-NO-FRONTIER`):
+Fresh installs ship with these defaults (the quality bar of 9.0 means a frontier-class model plans each run; if no ticked model reaches it, the planner retries at a bar of 5.1 and picks the cheapest ticked model, by effective cost, that scores at least 5.1; the trace shows `BRT-ORC-NO-FRONTIER`):
 
 | Knob | Default | Where it lives |
 |---|---|---|
@@ -103,9 +103,11 @@ Fresh installs ship with these defaults (the quality bar of 9.0 means a frontier
 | `time_cost_per_sec` | `0.0001` (~$0.36/hr) | `.env` or Admin UI |
 
 Lower the quality bar to let weaker local models orchestrate (useful while
-you're still running Get Model Info; models not yet researched score a flat 5.0). Raise it to force frontier-only
-orchestration. Lower the time cost toward 0 to strongly prefer local
-(free) models; raise it toward `0.0083` ($30/hr) if you're running a SaaS
+you're still running Get Model Info; a model not yet researched has no scores and is not routed until Get Model Info runs, while the 12 curated rows ship with scores). Raise it to force frontier-only
+orchestration. Lower the time cost toward 0 and speed counts for less, so
+price decides; this only makes cloud rows cheaper, because local rows added
+by Discover have no price and no measured speed, so they already carry no time cost.
+Raise it toward `0.0083` ($30/hr) if you're running a SaaS
 where every second of latency costs you real money. Both settings can be
 changed live from **Admin UI → Settings** — the next run reads the new
 value with no restart.
@@ -328,9 +330,10 @@ For unambiguously conversational short prompts — greetings, factual lookups, s
 The pre-classifier is deterministic and rule-based:
 - prompt length < 500 characters, AND
 - no list markers (`-`, `*`, `•`, `1.`, `1)` on a line start), AND
-- none of these phrases: `for each`, `list of`, `classify these`, `analyse these`, `analyze these`, `summarise each`, `summarize each`, `process each`, `compare these`, `compare all`, `for every`.
+- none of these phrases: `for each`, `list of`, `classify these`, `analyse these`, `analyze these`, `summarise each`, `summarize each`, `process each`, `compare these`, `compare all`, `for every`, AND
+- none of these live-data words (the prompt needs a web search, so it takes the full path): `latest`, `current`, `today's`, `this week`, `this month`, `this year`, `news`, `price of`, `stock`, `weather`, `score`, `who won`, `breaking`, `right now`, `as of`.
 
-If all three checks pass, the orchestrator goes straight to compose mode. An `orchestrator_decision` event with `mode=rule_zero_shortcut` is written to the run trace, so you can tell the shortcut fired vs. a normal direct-mode decision.
+If all four checks pass, the orchestrator goes straight to compose mode. An `orchestrator_decision` event with `mode=rule_zero_shortcut` is written to the run trace, so you can tell the shortcut fired vs. a normal direct-mode decision.
 
 ### Disabling the shortcut
 - **Per-install:** set `BORG_RULE_ZERO_SHORTCUT=false` in `.env`.
@@ -347,7 +350,7 @@ Turn it off when you want to compare costs / latency before and after, or when d
 Keepalive lines are ignored by SSE consumers but reset their idle timers. The real response is word-streamed after the pipeline resolves, and the chunks add back up to the exact answer: line breaks, indents and code blocks arrive intact. Stage updates shown while a chat streams belong to that chat's own run only; other runs going on at the same time no longer leak in.
 
 ### Tuning
-`BORG_STREAM_HEARTBEAT_SEC` (default `5`). Set to `0` to disable heartbeats entirely. Non-streaming (`stream: false`) requests are unaffected.
+`BORG_STREAM_HEARTBEAT_SEC` (default `5`). The value must be positive; `0` does not turn heartbeats off. Non-streaming (`stream: false`) requests are unaffected.
 
 ---
 
@@ -396,7 +399,7 @@ The Admin pages sit in the left menu under **Admin**, starting at `http://localh
 - **Models** — tick the models the router may use. **Discover** finds local models and adds the curated cloud list; **Get Model Info** researches each model and updates its scores. Each row is marked as running on this machine or in the cloud.
 - **Keys** — says whether the OpenRouter key is saved (the running server has it); a key that is only written in `.env` shows as "In .env, restart needed". It never shows a key. Paste a new key to replace the saved one.
 - **Rules** — global rules (free text) and the rules ledger. Both are sent with every model call. A retired rule stops being sent but stays in the ledger.
-- **Settings** — every setting the engine reads: the quality floors for light, mid and heavy steps, the orchestrator quality requirement, time cost per second, the reference (baseline) model the router prices each step on, which the pages do not show as a comparison, a pinned planner, the run time limit, Rule Zero, and the on-premise lane keys. A bad value is refused with `BRT-ADM-006`. **Reset** (or saving an empty value) forgets the saved value, so the `.env` value, or the built-in default, applies again. Baseline model empty means `BASELINE_MODEL_ID` from `.env` if set, else the ticked model with the highest reasoning score. The pinned planner endpoint must be an `http://` or `https://` address. `POST /config` also refuses a key that is not a setting (`global_rules` and `admin_rules_ledger` excepted) and a rules ledger that is not a list of rule objects, both with `BRT-ADM-006`. The two max-token settings are read from `.env` only and are shown read-only.
+- **Settings** — every setting the engine reads: the quality floors for light, mid and heavy steps, the orchestrator quality requirement, time cost per second, the reference (baseline) model the router prices each step on, which the pages do not show as a comparison, a pinned planner, the run time limit, Rule Zero, and the on-premise lane keys. A bad value is refused with `BRT-ADM-006` (lane keys: `BRT-LANE-005`). **Reset** (or saving an empty value) forgets the saved value, so the `.env` value, or the built-in default, applies again. Baseline model empty means `BASELINE_MODEL_ID` from `.env` if set, else the ticked model with the highest reasoning score. The pinned planner endpoint must be an `http://` or `https://` address. `POST /config` also refuses a key that is not a setting (`global_rules` and `admin_rules_ledger` excepted) and a rules ledger that is not a list of rule objects, both with `BRT-ADM-006`. The two max-token settings are read from `.env` only and are shown read-only.
 - **Skills** — the skill library with each skill's usage.
 - **Logs** — events, the cost summary, and Stats: run outcomes, tokens by model, feedback and the outlier runs. Outlier runs are ranked by what they cost or how long they took, never by prompt length.
 
@@ -580,7 +583,7 @@ The planner never sees the text. It gets a list: an id per document (`doc_001`),
 
 ## Multi-turn Conversations (Threads)
 
-The engine can keep conversation history in **threads** (database tables `threads` and `messages`). When a run is started with a `thread_id`, the last turns of that thread are passed to the orchestrator as `thread_window`, and the run is linked to its thread through the `thread_id` field on the run record.
+The engine can keep conversation history in **threads** (database tables `threads` and `messages`). When a run is started with a `thread_id`, the system loads that thread's rolling summary (`rolling_summary:{thread_id}`) and links the run to its thread through the `thread_id` field on the run record. It does not pass the last turns for you: the caller must pass `thread_window` itself.
 
 ### What is and is not connected
 1. No page and no API route creates a thread or passes a `thread_id` today. The Ask page keeps its conversation in the browser and resends earlier turns with each question (see "Workspace"); `POST /v1/chat/completions` uses the `messages` the client sends.
@@ -604,7 +607,7 @@ The Logs page at `http://localhost:8000/ui/logs.html` has three tabs:
 - **Cost Summary** — aggregate token counts and dollar cost grouped by model (`model_call` plus priced `orchestrator_decision` rows)
 - **Stats** — run outcomes, tokens by model, feedback and outlier runs (see "Logs and Stats")
 
-Click **Export JSONL** to download a full log snapshot for offline analysis.
+Click **Export JSONL** to download up to 1000 `logs` rows, oldest first, for offline analysis. The export has no entities.
 
 ### NER Worker (Optional, Currently Parked)
 
@@ -623,7 +626,7 @@ structured facts:
 - **Subject-verb-object relations** — simple `(subject, verb, object)` triples
   extracted from sentences via dependency parsing.
 
-Results land in the `log_entities` and `log_relations` tables and are available through `GET /logs/entities` (admin) and in the JSONL export. The Logs page has no NER tab.
+Results land in the `log_entities` and `log_relations` tables and are available only through `GET /logs/entities` (admin); the JSONL export does not include them. The Logs page has no NER tab.
 
 #### What it was meant to be useful for
 1. **Search across runs** — "show me every run that mentioned customer X" or
@@ -632,8 +635,7 @@ Results land in the `log_entities` and `log_relations` tables and are available 
    terms leaking into prompts or outputs.
 3. **Skill-improvement signal** — see which entity types a skill reliably
    handles vs. drops, feeding the Skills Library continuous-improvement loop.
-4. **Offline exploration** — export JSONL from the Logs page and join
-   entities to runs for ad-hoc analysis.
+4. **Offline exploration** — export JSONL from the Logs page for the log rows, and fetch entities from `GET /logs/entities` to join them to runs for ad-hoc analysis.
 
 #### How to turn it on (when you decide you want it)
 1. Download the spaCy model once:

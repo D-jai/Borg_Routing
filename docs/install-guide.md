@@ -19,11 +19,11 @@ Detect the platform before running any shell command:
 
 ### Known pitfalls (in order of frequency)
 1. **Running tests before starting LM Studio/Ollama.** Tests pass, but then `POST /models/discover` returns 0 local models. This is expected — tests do not probe live providers. Start your local model server *before* calling discover.
-2. **Calling `POST /models/research` before `POST /models/discover`.** Scorer runs against the matrix, which is empty on a fresh install. Order is: (1) start local model servers, (2) discover, (3) research.
+2. **Calling `POST /models/research` before `POST /models/discover`.** Scorer runs against the matrix, which ships with 12 curated cloud rows; local rows appear only after Discover. Order is: (1) start local model servers, (2) discover, (3) research.
 3. **Forgetting `OPENROUTER_API_KEY`.** Without it, OpenRouter discovery AND the scorer (default `perplexity/sonar-pro-search`, routed via OpenRouter) both fail. Set the key in `.env` before discover/research.
 4. **Using `copy` on Linux or `cp` in raw PowerShell.** See "Platform detection" above; prefer the Python one-liner.
-5. **Assuming every row in the matrix has real scores.** After discover, every row has `task_scores` at a flat 5.0 until `POST /models/research` is run (the two cold-start rows ship with scores). The router will either use that flat score or fall back with a `BRT-ORC-NO-FRONTIER` trace event. This is normal; running research is what fills it in.
-6. **Skipping the checkbox step.** On a fresh install only the two cold-start OpenRouter rows are checked (see "Cold-start defaults"); every other row is `checked: false`. If the operator unticks them all, then until the operator (or you, via `PATCH /models/{id}/checked`) ticks at least one model, the router returns `BRT-REG-020 no model found`.
+5. **Assuming every row in the matrix has real scores.** A model that Discover has just found has no scores and is not routed until `POST /models/research` (Get Model Info) runs; the 12 curated rows ship with scores, and Discover keeps existing scores. If no ticked model meets the planner's quality bar, the planner falls back with a `BRT-ORC-NO-FRONTIER` trace event. This is normal; running research is what fills the scores in.
+6. **Skipping the checkbox step.** On a fresh install only the two cold-start OpenRouter rows are checked (see "Cold-start defaults"); every other row is `checked: false`. If the operator unticks them all, then until the operator (or you, via `PATCH /models/{id}/checked`) ticks at least one model, the run fails with `BRT-ORC-007 no orchestrator model available`.
 7. **Trying to benchmark.** There is no `POST /models/benchmark` any more. It was replaced by `POST /models/research`. If you see stale docs mentioning benchmark, they are wrong.
 
 ### Skip spaCy for now
@@ -280,7 +280,7 @@ your own pool.
 A cheap,
 deterministic pre-classifier now bypasses plan → re_plan entirely for
 unambiguously conversational short prompts (`< 500 chars`, no list
-markers, no "for each"/"classify these" phrases). One compose call
+markers, no "for each"/"classify these" phrases, no live-data words such as "latest" or "news"). One compose call
 instead of three — a greeting costs a single compose-mode call.
 
 The shortcut is on by default. To force the full plan path (useful for
@@ -292,7 +292,7 @@ debugging), set `BORG_RULE_ZERO_SHORTCUT=false` in `.env` or write
 ## Troubleshooting
 See `docs/errors/error-registry.md` for the full error-code reference.
 Most common on a fresh install:
-- `BRT-REG-020` — no row checked. Tick at least one on the Models UI.
+- `BRT-ORC-007` — no row checked. Tick at least one on the Models UI.
 - `BRT-REG-030` — scorer endpoint unreachable. Check `OPENROUTER_API_KEY` and network.
 - `BRT-REG-032` — `data/curated_models.yaml` missing. Restore from source tree.
 - `BRT-ORC-NO-FRONTIER` — warning only (trace event); no ticked model met the quality bar, so the planner fell back to quality 5.1. Run Get Model Info to refresh scores.
