@@ -240,6 +240,10 @@ class PackContext:
     must_stay_local: bool
 
 
+# A side effect carried entirely in each item's own answer (ruling 32a).
+_PACKABLE_SIDE_EFFECTS = frozenset({"deferrals"})
+
+
 def _is_local_url(url: str, lane) -> bool:
     if lane is not None:
         return lane.is_local_url(url)
@@ -255,12 +259,18 @@ async def packing_context(task: WrappedTask, item_count: int, max_items: int,
     Never packed: packing off, fewer than two items, a call bound for a local
     host in any lane mode (23b: only ``openrouter``/``custom_key`` rows whose
     resolved URL is not local), a raw step whose lane keeps raw text local,
-    ``all_local``, a step with side effects or tool requests, or anything that
-    fails here (governance, the model's URL). Uses no uuid and sends nothing.
+    ``all_local``, a step with tool requests or with any side effect other
+    than ``deferrals``, or anything that fails here (governance, the model's
+    URL). Uses no uuid and sends nothing.
+
+    ``deferrals`` alone does not block (ruling 32a): a deferral is carried
+    entirely in the item's own answer (``bucket: defer`` plus its reason), and
+    a child never carries the parent's side effects, so a packed item defers
+    exactly as a single call does.
     """
     if max_items < 2 or item_count < 2:
         return None
-    if task.side_effects or task.tool_requests:
+    if set(task.side_effects or []) - _PACKABLE_SIDE_EFFECTS or task.tool_requests:
         return None
     from src.lane.context import current_lane  # noqa: PLC0415
 
