@@ -319,7 +319,103 @@
    "started_at": "2026-11-18T19:11:37+00:00",
    "dollars": 0.0058254,
    "ended_at": "2026-11-18T19:11:47+00:00"
+  },
+  {
+   "id": "2b0a661dfa4c",
+   "key": "B_borg_cloud_1",
+   "kind": "run",
+   "date": "trial32g_r2data",
+   "db_path": "bench/results/trial32g_r2data/dbs/B_borg_cloud_1.db",
+   "calls_log": null,
+   "status": "ended",
+   "started_at": "2026-11-18T21:22:18+00:00",
+   "dollars": 0.12875175,
+   "ended_at": "2026-11-18T21:23:38+00:00"
+  },
+  {
+   "id": "99d83f44ea49",
+   "key": "D_borg_cloud_1",
+   "kind": "run",
+   "date": "trial32g_r2data",
+   "db_path": "bench/results/trial32g_r2data/dbs/D_borg_cloud_1.db",
+   "calls_log": null,
+   "status": "ended",
+   "started_at": "2026-11-18T21:23:43+00:00",
+   "dollars": 0.06047085,
+   "ended_at": "2026-11-18T21:24:12+00:00"
+  },
+  {
+   "id": "08b4e7bbda00",
+   "key": "C_borg_cloud_1",
+   "kind": "run",
+   "date": "trial32g_r2data",
+   "db_path": "bench/results/trial32g_r2data/dbs/C_borg_cloud_1.db",
+   "calls_log": null,
+   "status": "ended",
+   "started_at": "2026-11-18T21:24:12+00:00",
+   "dollars": 0.24915,
+   "ended_at": "2026-11-18T21:24:34+00:00"
+  },
+  {
+   "id": "aa2c2e3ab586",
+   "key": "A_borg_cloud_1",
+   "kind": "run",
+   "date": "trial32g_r2data",
+   "db_path": "bench/results/trial32g_r2data/dbs/A_borg_cloud_1.db",
+   "calls_log": null,
+   "status": "ended",
+   "started_at": "2026-11-18T21:24:34+00:00",
+   "dollars": 0.3315671,
+   "ended_at": "2026-11-18T21:27:01+00:00"
+  },
+  {
+   "id": "78a9f32359d4",
+   "key": "judge_C",
+   "kind": "judge",
+   "date": "trial32g_r2data",
+   "db_path": null,
+   "calls_log": "bench/results/trial32g_r2data/dbs/judge_C.calls.jsonl",
+   "status": "ended",
+   "started_at": "2026-11-18T21:27:01+00:00",
+   "dollars": 0.00905445,
+   "ended_at": "2026-11-18T21:27:12+00:00"
+  },
+  {
+   "id": "45c36ebaae85",
+   "key": "C_borg_cloud_1",
+   "kind": "run",
+   "date": "trial32g_r1data",
+   "db_path": "bench/results/trial32g_r1data/dbs/C_borg_cloud_1.db",
+   "calls_log": null,
+   "status": "ended",
+   "started_at": "2026-11-18T21:27:38+00:00",
+   "dollars": 0.2416609,
+   "ended_at": "2026-11-18T21:28:07+00:00"
+  },
+  {
+   "id": "bdc904a7a135",
+   "key": "A_borg_cloud_1",
+   "kind": "run",
+   "date": "trial32g_r1data",
+   "db_path": "bench/results/trial32g_r1data/dbs/A_borg_cloud_1.db",
+   "calls_log": null,
+   "status": "ended",
+   "started_at": "2026-11-18T21:28:07+00:00",
+   "dollars": 0.1027477,
+   "ended_at": "2026-11-18T21:28:30+00:00"
+  },
+  {
+   "id": "63d9cbdeae69",
+   "key": "judge_C",
+   "kind": "judge",
+   "date": "trial32g_r1data",
+   "db_path": null,
+   "calls_log": "bench/results/trial32g_r1data/dbs/judge_C.calls.jsonl",
+   "status": "ended",
+   "started_at": "2026-11-18T21:28:30+00:00",
+   "dollars": 0.005757,
+   "ended_at": "2026-11-18T21:28:39+00:00"
   }
  ],
- "total_dollars": 5.47811135
+ "total_dollars": 6.6072711
 }

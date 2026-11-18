@@ -1,0 +1,122 @@
+{
+ "job": "C",
+ "arm": "borg_cloud",
+ "repeat": 1,
+ "date": "trial32g_r2data",
+ "status": "completed",
+ "error": null,
+ "lane_mode": "by_reference",
+ "routing_config": {
+  "leaf_floors": {
+   "light": 6.0,
+   "mid": 7.5,
+   "heavy": 9.0
+  },
+  "time_cost_per_sec": 0.0001,
+  "pool": [
+   "ollama/llama3.2:3b",
+   "openrouter/anthropic/claude-opus-4.7",
+   "openrouter/anthropic/claude-sonnet-4.6",
+   "openrouter/deepseek/deepseek-v3.2",
+   "openrouter/google/gemini-3.1-flash-lite-preview",
+   "openrouter/google/gemini-3.1-pro-preview",
+   "openrouter/moonshotai/kimi-k2-thinking",
+   "openrouter/openai/gpt-5.3-codex",
+   "openrouter/openai/gpt-5.4-nano",
+   "openrouter/x-ai/grok-4.20"
+  ],
+  "lane_mode": "by_reference",
+  "max_run_seconds": 7200,
+  "direct_timeout_seconds": 7200.0,
+  "answerer_call_timeout_seconds": 7200.0,
+  "orchestrator_call_timeout_seconds": 7200.0,
+  "tools_enabled": false,
+  "env": {
+   "ANSWERER_MAX_TOKENS": "6000",
+   "ORCHESTRATOR_MAX_TOKENS": "6000",
+   "ORCHESTRATOR_QUALITY_REQUIREMENT": "9.0",
+   "BORG_RULE_ZERO_SHORTCUT": "true",
+   "LEAF_QUALITY_LIGHT": "6.0",
+   "LEAF_QUALITY_MID": "7.5",
+   "LEAF_QUALITY_HEAVY": "9.0",
+   "TIME_COST_PER_SEC": "0.0001",
+   "BORG_LANE_MAX_OUTPUT_CHARS": "1500",
+   "BORG_LANE_MAX_VERBATIM_CHARS": "120",
+   "BORG_LANE_MAX_NGRAM_SHARE": "0.10",
+   "BORG_LANE_MANIFEST": "names",
+   "BORG_LANE_PART_CHARS": "8000",
+   "BORG_LANE_LOCAL_ALLOWLIST": null,
+   "BORG_LOCAL_HOSTS": null,
+   "BORG_ANSWERER_CALL_TIMEOUT": "7200",
+   "BORG_ORCHESTRATOR_CALL_TIMEOUT": "7200",
+   "BORG_LANE_MODE": "by_reference",
+   "BORG_MAX_RUN_SECONDS": "7200",
+   "BASELINE_MODEL_ID": "openrouter/anthropic/claude-opus-5.5"
+  },
+  "baseline_model_id": "openrouter/anthropic/claude-opus-5.5",
+  "baseline_resolved_by_engine": true,
+  "baseline_note": "the bench baseline; the engine resolves it from the matrix it is given"
+ },
+ "run_id": "72e765c2-37ab-4695-950f-43cc967f4ebf",
+ "cost_dollars": 0.24914999999999998,
+ "digest_cost_dollars": 0.24914999999999998,
+ "baseline_dollars": 2.847896,
+ "wall_seconds": 22.12,
+ "tokens": {
+  "prompt_tokens": 592624,
+  "completion_tokens": 23870,
+  "total_tokens": 616494
+ },
+ "models": [
+  "openrouter/google/gemini-3.1-flash-lite-preview"
+ ],
+ "models_per_step": [
+  {
+   "step": "extract_q1_to_q8",
+   "task_type": "extraction",
+   "tier": "light",
+   "chosen": "openrouter/google/gemini-3.1-flash-lite-preview",
+   "reason": "planner_pick",
+   "dollars": 0.0
+  },
+  {
+   "step": "extract_contradictions",
+   "task_type": "extraction",
+   "tier": "light",
+   "chosen": "openrouter/google/gemini-3.1-flash-lite-preview",
+   "reason": "planner_pick",
+   "dollars": 0.0
+  }
+ ],
+ "model_calls": 164,
+ "answer": "1. 14 March 2027\n\n2. 412\n\n3. Ingrid Vassallo\n\n4. US$3.85 million\n\n5. 2,317\n\n6. Brannock Cryogenics\n\n7. juniper-lantern\n\n8. 19 days\n\n9. Yes. The documents contradict each other on many topics including:\n\n- Packaging waste review budget at Fenwick (\"14 units of budget, compared with 147 planned\" vs \"154 units of budget, compared with 204 planned\")\n- Returns process status at Southport (\"uneven\" vs \"mixed\")\n- Driver rest-break roster at Millbrook (\"steady\" vs \"slower than hoped\")\n- Loading dock lighting upgrade budget at Lakeshore (\"251 units of budget, compared with 213 planned\" vs \"359 units of budget, compared with 312 planned\")\n- Spare parts catalogue working group outcome (\"better than the prior period\" vs \"uneven\")\n- Returns process budget at Westbury (\"283 units of budget\" vs \"190 units of budget\")\n- Driver rest-break roster at Ridgeway (\"351 units of budget\" vs \"28 units of budget\")\n- Spare parts catalogue progress at Southport (\"361 delays\" vs \"3 delays\")\n- Winter staffing plan at Ridgeway (\"steady, with 167 incidents\" vs \"better than the prior period, with 241 work orders\")\n- Forklift battery programme late loads at Hillcrest (\"54 late loads\" vs \"11 incidents\")\n- Returns process budget at Hillcrest (\"93 units of budget, compared with 92 planned\" vs \"25 units of budget, compared with 184 planned\")\n- Loading dock lighting upgrade at Fenwick (\"40 units of budget, compared with 42 planned\" vs \"56 units of budget, compared with 10 planned\")\n- Packaging waste review at Riverside (\"uneven\" vs \"steady\")\n- Supplier scorecards budget at Riverside (\"340 units of budget\" vs \"314 units of budget\")\n- Forklift battery programme at Northgate (\"130 units of budget\" vs \"243 units of budget\")\n- Barcode label migration budget at Eastfield (\"226 units of budget, compared with 150 planned\" vs \"200 units of budget, compared with 100 planned\")\n- Winter staffing plan working group outcome (\"slower than hoped\", \"steady\", \"encouraging\", \"uneven\", \"better than the prior period\")\n- Insurance renewal monitoring and cold chain audit planning (multiple conflicting assignments)\n- Overtime policy at Oakmont (repeated but contextually inconsistent reporting)\n- Forklift battery programme budget at Fenwick (\"77 units...259 planned\" vs \"75 units...271 planned\")\n- Spare parts catalogue at Lakeshore (\"272 late loads\" vs \"239 incidents\")\n- Supplier scorecards at Lakeshore (\"uneven\" vs \"steady\")\n- Hillcrest returns process and winter staffing plan (multiple conflicting ticket and progress figures)\n- Packaging waste review budget at Eastfield (\"51 units...55 planned\" vs \"259 units...64 planned\")\n- Pallet scanning rollout tracking at Lakeshore (\"quality agreed...incidents\" vs \"training agreed...complaints\")\n- Barcode label migration at Riverside and winter staffing at Westbury (multiple conflicting budget figures)\n- Packaging waste review at Oakmont and winter staffing at Westbury (multiple conflicting budget figures)\n- Cold chain audit working group and Eastfield report (\"within tolerance\" vs \"uneven\"; \"256 tickets\" vs \"371 incidents\")\n- Pallet scanning rollout at Hillcrest (\"better than the prior period\" vs \"within tolerance\")\n- Cold chain audit at Lakeshore and dock scheduling tool at Greystone (\"steady\" vs \"encouraging\"; multiple budget conflicts)\n- Hillcrest returns process (\"slower than hoped...late loads\" vs \"encouraging...incidents\")\n- Spare parts catalogue budget at Hillcrest (\"374 units\" vs \"187 units\")\n- Northgate overtime hours (\"163\" vs \"349\")\n- Packaging waste review at Hillcrest (\"68 units\" vs \"308 units\")\n- Spare parts catalogue and barcode label migration at Millbrook (multiple conflicting metrics)\n- Pallet scanning rollout budget at Ridgeway (\"376 units...151 planned\" vs \"104 units...360 planned\")\n- Overtime policy budget at Southport (multiple conflicting figures)\n- Cold chain audit tickets at Hillcrest (\"288 open tickets\" vs \"214 tickets\")\n- Driver rest-break roster budget at Southport (multiple conflicting figures)\n- Pallet scanning rollout / barcode label migration at Ridgeway (multiple conflicting progress and budget statements)\n- Insurance renewal at Fenwick (\"within tolerance\" vs \"slower than hoped\")\n- Insurance renewal costs at Lakeshore (\"21 units\" vs \"265 units\")\n- Overtime policy working group outcome (\"better than the prior period\", \"steady\", \"mixed\")\n- Returns process at Fenwick (\"38 units\" vs \"321 units\")\n- Cold chain audit at Westbury (\"40 units...195 planned\" vs \"207 units...157 planned\")\n- Overtime policy at Northgate (\"mixed, with 245 incidents\" vs \"better than the prior period, with 308 incidents\")\n\n(The contradictions appear to be deliberately inserted across the fifteen documents. Items with no result: doc_002#6, doc_005#6, doc_010#3.)",
+ "db_path": "bench/results/trial32g_r2data/dbs/C_borg_cloud_1.db",
+ "calls_log": null,
+ "attempt": 1,
+ "ledger_dollars": 0.24914999999999998,
+ "aborted_attempts": [],
+ "estimate_dollars": 1.8472550000000003,
+ "quality": {
+  "informational_fact_score": {
+   "facts_found": 6,
+   "facts_total": 8,
+   "contradictions_found": 0,
+   "contradictions_total": 2,
+   "facts_matched": [
+    "On what date does the Tamarack pilot end?",
+    "Who is the group compliance contact for regulatory filings?",
+    "What is the approved budget for Project Osprey?",
+    "Which vendor will supply the refrigeration units for the new cold store?",
+    "What is the code word for an emergency shutdown?",
+    "How often is the Pell Harbour crane inspected?"
+   ],
+   "contradictions_matched": []
+  },
+  "informational_only": true,
+  "note": "informational only, never quoted: the pairwise judge decides job C"
+ },
+ "data_root": "C:\\Stage\\BORG_ROUTE\\bench\\data",
+ "local_speed": {
+  "ollama/llama3.2:3b": 5.389
+ }
+}

@@ -1,0 +1,183 @@
+{
+ "job": "B",
+ "arm": "borg_cloud",
+ "repeat": 1,
+ "date": "trial32g_r2data",
+ "status": "completed",
+ "error": null,
+ "lane_mode": "off",
+ "routing_config": {
+  "leaf_floors": {
+   "light": 6.0,
+   "mid": 7.5,
+   "heavy": 9.0
+  },
+  "time_cost_per_sec": 0.0001,
+  "pool": [
+   "ollama/llama3.2:3b",
+   "openrouter/anthropic/claude-opus-4.7",
+   "openrouter/anthropic/claude-sonnet-4.6",
+   "openrouter/deepseek/deepseek-v3.2",
+   "openrouter/google/gemini-3.1-flash-lite-preview",
+   "openrouter/google/gemini-3.1-pro-preview",
+   "openrouter/moonshotai/kimi-k2-thinking",
+   "openrouter/openai/gpt-5.3-codex",
+   "openrouter/openai/gpt-5.4-nano",
+   "openrouter/x-ai/grok-4.20"
+  ],
+  "lane_mode": "off",
+  "max_run_seconds": 7200,
+  "direct_timeout_seconds": 7200.0,
+  "answerer_call_timeout_seconds": 7200.0,
+  "orchestrator_call_timeout_seconds": 7200.0,
+  "tools_enabled": false,
+  "env": {
+   "ANSWERER_MAX_TOKENS": "6000",
+   "ORCHESTRATOR_MAX_TOKENS": "6000",
+   "ORCHESTRATOR_QUALITY_REQUIREMENT": "9.0",
+   "BORG_RULE_ZERO_SHORTCUT": "true",
+   "LEAF_QUALITY_LIGHT": "6.0",
+   "LEAF_QUALITY_MID": "7.5",
+   "LEAF_QUALITY_HEAVY": "9.0",
+   "TIME_COST_PER_SEC": "0.0001",
+   "BORG_LANE_MAX_OUTPUT_CHARS": "1500",
+   "BORG_LANE_MAX_VERBATIM_CHARS": "120",
+   "BORG_LANE_MAX_NGRAM_SHARE": "0.10",
+   "BORG_LANE_MANIFEST": "names",
+   "BORG_LANE_PART_CHARS": "8000",
+   "BORG_LANE_LOCAL_ALLOWLIST": null,
+   "BORG_LOCAL_HOSTS": null,
+   "BORG_ANSWERER_CALL_TIMEOUT": "7200",
+   "BORG_ORCHESTRATOR_CALL_TIMEOUT": "7200",
+   "BORG_LANE_MODE": null,
+   "BORG_MAX_RUN_SECONDS": "7200",
+   "BASELINE_MODEL_ID": "openrouter/anthropic/claude-opus-5.5"
+  },
+  "baseline_model_id": "openrouter/anthropic/claude-opus-5.5",
+  "baseline_resolved_by_engine": true,
+  "baseline_note": "the bench baseline; the engine resolves it from the matrix it is given"
+ },
+ "run_id": "4e0fc474-9c72-4303-aeda-cc4e03cdaeff",
+ "cost_dollars": 0.12875175,
+ "digest_cost_dollars": 0.12875175,
+ "baseline_dollars": 0.310724,
+ "wall_seconds": 79.585,
+ "tokens": {
+  "prompt_tokens": 31811,
+  "completion_tokens": 9174,
+  "total_tokens": 40985
+ },
+ "models": [
+  "openrouter/openai/gpt-5.3-codex"
+ ],
+ "models_per_step": [
+  {
+   "step": "n1",
+   "task_type": "coding",
+   "tier": "heavy",
+   "chosen": "openrouter/openai/gpt-5.3-codex",
+   "reason": "planner_pick",
+   "dollars": 0.082558
+  }
+ ],
+ "model_calls": 1,
+ "answer": "=== FILE: schema.sql ===\n```sql\nPRAGMA foreign_keys = ON;\n\nCREATE TABLE IF NOT EXISTS notes (\n    id INTEGER PRIMARY KEY AUTOINCREMENT,\n    title TEXT NOT NULL CHECK (length(title) BETWEEN 1 AND 120),\n    body TEXT NOT NULL DEFAULT '',\n    created_at TEXT NOT NULL\n);\n\nCREATE TABLE IF NOT EXISTS tags (\n    id INTEGER PRIMARY KEY AUTOINCREMENT,\n    name TEXT NOT NULL UNIQUE\n        CHECK (\n            length(name) BETWEEN 1 AND 30\n            AND name NOT GLOB '*[^a-z0-9]*'\n        )\n);\n\nCREATE TABLE IF NOT EXISTS note_tags (\n    note_id INTEGER NOT NULL,\n    tag_id INTEGER NOT NULL,\n    PRIMARY KEY (note_id, tag_id),\n    FOREIGN KEY (note_id) REFERENCES notes(id) ON DELETE CASCADE,\n    FOREIGN KEY (tag_id) REFERENCES tags(id) ON DELETE CASCADE\n);\n```\n=== FILE: app.py ===\n```python\nimport os\nimport re\nimport sqlite3\nfrom datetime import datetime, timezone\nfrom pathlib import Path\nfrom typing import List, Optional\n\nfrom fastapi import FastAPI, HTTPException, Query, Response\nfrom pydantic import BaseModel, Field\n\napp = FastAPI()\n\nTAG_RE = re.compile(r\"^[a-z0-9]{1,30}$\")\n\n\nclass NoteCreate(BaseModel):\n    title: str\n    body: str = \"\"\n    tags: List[str] = Field(default_factory=list)\n\n\ndef get_db_path() -> str:\n    return os.getenv(\"NOTES_DB\", \"notes.db\")\n\n\ndef get_connection() -> sqlite3.Connection:\n    conn = sqlite3.connect(get_db_path())\n    conn.row_factory = sqlite3.Row\n    conn.execute(\"PRAGMA foreign_keys = ON\")\n    return conn\n\n\ndef normalize_tags(tags: List[str]) -> List[str]:\n    normalized: List[str] = []\n    seen = set()\n\n    for raw in tags:\n        tag = raw.lower()\n        if not TAG_RE.fullmatch(tag):\n            raise HTTPException(status_code=422, detail=\"Invalid tag format\")\n        if tag not in seen:\n            seen.add(tag)\n            normalized.append(tag)\n\n    return normalized\n\n\ndef current_utc_iso() -> str:\n    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace(\"+00:00\", \"Z\")\n\n\ndef fetch_note(conn: sqlite3.Connection, note_id: int):\n    note_row = conn.execute(\n        \"SELECT id, title, body, created_at FROM notes WHERE id = ?\",\n        (note_id,),\n    ).fetchone()\n    if note_row is None:\n        return None\n\n    tag_rows = conn.execute(\n        \"\"\"\n        SELECT t.name\n        FROM tags t\n        JOIN note_tags nt ON nt.tag_id = t.id\n        WHERE nt.note_id = ?\n        ORDER BY t.name\n        \"\"\",\n        (note_id,),\n    ).fetchall()\n\n    return {\n        \"id\": note_row[\"id\"],\n        \"title\": note_row[\"title\"],\n        \"body\": note_row[\"body\"],\n        \"created_at\": note_row[\"created_at\"],\n        \"tags\": [r[\"name\"] for r in tag_rows],\n    }\n\n\n@app.on_event(\"startup\")\ndef startup() -> None:\n    schema_path = Path(__file__).with_name(\"schema.sql\")\n    schema_sql = schema_path.read_text(encoding=\"utf-8\")\n\n    conn = get_connection()\n    try:\n        conn.executescript(schema_sql)\n        conn.commit()\n    finally:\n        conn.close()\n\n\n@app.post(\"/notes\", status_code=201)\ndef create_note(payload: NoteCreate):\n    if len(payload.title) < 1 or len(payload.title) > 120:\n        raise HTTPException(status_code=422, detail=\"Title must be 1 to 120 characters\")\n\n    tags = normalize_tags(payload.tags)\n    created_at = current_utc_iso()\n\n    conn = get_connection()\n    try:\n        cur = conn.execute(\n            \"INSERT INTO notes (title, body, created_at) VALUES (?, ?, ?)\",\n            (payload.title, payload.body, created_at),\n        )\n        note_id = cur.lastrowid\n\n        for tag in tags:\n            conn.execute(\n                \"INSERT INTO tags (name) VALUES (?) ON CONFLICT(name) DO NOTHING\",\n                (tag,),\n            )\n            tag_row = conn.execute(\"SELECT id FROM tags WHERE name = ?\", (tag,)).fetchone()\n            conn.execute(\n                \"INSERT OR IGNORE INTO note_tags (note_id, tag_id) VALUES (?, ?)\",\n                (note_id, tag_row[\"id\"]),\n            )\n\n        conn.commit()\n        return fetch_note(conn, note_id)\n    finally:\n        conn.close()\n\n\n@app.get(\"/notes/{note_id}\")\ndef get_note(note_id: int):\n    conn = get_connection()\n    try:\n        note = fetch_note(conn, note_id)\n        if note is None:\n            raise HTTPException(status_code=404, detail=\"Note not found\")\n        return note\n    finally:\n        conn.close()\n\n\n@app.get(\"/notes\")\ndef list_notes(tag: Optional[str] = Query(default=None)):\n    conn = get_connection()\n    try:\n        params = []\n        if tag is None:\n            rows = conn.execute(\n                \"SELECT id FROM notes ORDER BY created_at DESC, id DESC\"\n            ).fetchall()\n        else:\n            normalized_tag = tag.lower()\n            if not TAG_RE.fullmatch(normalized_tag):\n                raise HTTPException(status_code=422, detail=\"Invalid tag format\")\n            rows = conn.execute(\n                \"\"\"\n                SELECT n.id\n                FROM notes n\n                JOIN note_tags nt ON nt.note_id = n.id\n                JOIN tags t ON t.id = nt.tag_id\n                WHERE t.name = ?\n                ORDER BY n.created_at DESC, n.id DESC\n                \"\"\",\n                (normalized_tag,),\n            ).fetchall()\n\n        return [fetch_note(conn, row[\"id\"]) for row in rows]\n    finally:\n        conn.close()\n\n\n@app.delete(\"/notes/{note_id}\", status_code=204)\ndef delete_note(note_id: int):\n    conn = get_connection()\n    try:\n        cur = conn.execute(\"DELETE FROM notes WHERE id = ?\", (note_id,))\n        conn.commit()\n        if cur.rowcount == 0:\n            raise HTTPException(status_code=404, detail=\"Note not found\")\n        return Response(status_code=204)\n    finally:\n        conn.close()\n```\n=== FILE: openapi.yaml ===\n```yaml\nopenapi: 3.0.3\ninfo:\n  title: Notes Service API\n  version: 1.0.0\npaths:\n  /notes:\n    post:\n      summary: Create a note\n      requestBody:\n        required: true\n        content:\n          application/json:\n            schema:\n              type: object\n              required:\n                - title\n              properties:\n                title:\n                  type: string\n                  minLength: 1\n                  maxLength: 120\n                body:\n                  type: string\n                tags:\n                  type: array\n                  items:\n                    type: string\n      responses:\n        '201':\n          description: Note created\n          content:\n            application/json:\n              schema:\n                type: object\n                properties:\n                  id:\n                    type: integer\n                  title:\n                    type: string\n                  body:\n                    type: string\n                  created_at:\n                    type: string\n                  tags:\n                    type: array\n                    items:\n                      type: string\n        '422':\n          description: Validation error\n    get:\n      summary: List notes\n      parameters:\n        - in: query\n          name: tag\n          schema:\n            type: string\n          required: false\n          description: Filter notes by tag\n      responses:\n        '200':\n          description: List of notes\n          content:\n            application/json:\n              schema:\n                type: array\n                items:\n                  type: object\n                  properties:\n                    id:\n                      type: integer\n                    title:\n                      type: string\n                    body:\n                      type: string\n                    created_at:\n                      type: string\n                    tags:\n                      type: array\n                      items:\n                        type: string\n        '422':\n          description: Validation error\n  /notes/{id}:\n    get:\n      summary: Get a note by ID\n      parameters:\n        - in: path\n          name: id\n          required: true\n          schema:\n            type: integer\n      responses:\n        '200':\n          description: A note\n          content:\n            application/json:\n              schema:\n                type: object\n                properties:\n                  id:\n                    type: integer\n                  title:\n                    type: string\n                  body:\n                    type: string\n                  created_at:\n                    type: string\n                  tags:\n                    type: array\n                    items:\n                      type: string\n        '404':\n          description: Note not found\n    delete:\n      summary: Delete a note by ID\n      parameters:\n        - in: path\n          name: id\n          required: true\n          schema:\n            type: integer\n      responses:\n        '204':\n          description: Note deleted\n        '404':\n          description: Note not found\n```\n=== FILE: test_app.py ===\n```python\nimport importlib\n\nimport pytest\nfrom fastapi.testclient import TestClient\n\n\n@pytest.fixture\ndef client(tmp_path, monkeypatch):\n    db_path = tmp_path / \"notes_test.db\"\n    monkeypatch.setenv(\"NOTES_DB\", str(db_path))\n\n    import app as app_module\n\n    app_module = importlib.reload(app_module)\n\n    with TestClient(app_module.app) as test_client:\n        yield test_client\n\n\ndef test_create_and_get_note(client):\n    create_resp = client.post(\n        \"/notes\",\n        json={\n            \"title\": \"First note\",\n            \"body\": \"Hello\",\n            \"tags\": [\"Work\", \"todo\"],\n        },\n    )\n    assert create_resp.status_code == 201\n    created = create_resp.json()\n\n    assert created[\"id\"] > 0\n    assert created[\"title\"] == \"First note\"\n    assert created[\"body\"] == \"Hello\"\n    assert created[\"created_at\"].endswith(\"Z\")\n    assert sorted(created[\"tags\"]) == [\"todo\", \"work\"]\n\n    get_resp = client.get(f\"/notes/{created['id']}\")\n    assert get_resp.status_code == 200\n    fetched = get_resp.json()\n    assert fetched == created\n\n\ndef test_list_notes_and_filter_by_tag(client):\n    n1 = client.post(\n        \"/notes\",\n        json={\"title\": \"Older\", \"body\": \"one\", \"tags\": [\"work\"]},\n    )\n    assert n1.status_code == 201\n\n    n2 = client.post(\n        \"/notes\",\n        json={\"title\": \"Newer\", \"body\": \"two\", \"tags\": [\"personal\"]},\n    )\n    assert n2.status_code == 201\n\n    all_resp = client.get(\"/notes\")\n    assert all_resp.status_code == 200\n    all_notes = all_resp.json()\n    assert len(all_notes) == 2\n    assert all_notes[0][\"title\"] == \"Newer\"\n    assert all_notes[1][\"title\"] == \"Older\"\n\n    filtered = client.get(\"/notes\", params={\"tag\": \"WORK\"})\n    assert filtered.status_code == 200\n    filtered_notes = filtered.json()\n    assert len(filtered_notes) == 1\n    assert filtered_notes[0][\"title\"] == \"Older\"\n\n\ndef test_delete_and_404(client):\n    created = client.post(\n        \"/notes\",\n        json={\"title\": \"To delete\", \"body\": \"\", \"tags\": []},\n    )\n    assert created.status_code == 201\n    note_id = created.json()[\"id\"]\n\n    delete_resp = client.delete(f\"/notes/{note_id}\")\n    assert delete_resp.status_code == 204\n    assert delete_resp.text == \"\"\n\n    get_after_delete = client.get(f\"/notes/{note_id}\")\n    assert get_after_delete.status_code == 404\n\n    delete_missing = client.delete(\"/notes/999999\")\n    assert delete_missing.status_code == 404\n\n\ndef test_get_missing_returns_404(client):\n    resp = client.get(\"/notes/123456\")\n    assert resp.status_code == 404\n\n\ndef test_invalid_title_returns_422(client):\n    resp_empty = client.post(\"/notes\", json={\"title\": \"\", \"body\": \"\", \"tags\": []})\n    assert resp_empty.status_code == 422\n\n    resp_long = client.post(\n        \"/notes\",\n        json={\"title\": \"x\" * 121, \"body\": \"\", \"tags\": []},\n    )\n    assert resp_long.status_code == 422\n\n\ndef test_invalid_tag_returns_422(client):\n    resp = client.post(\n        \"/notes\",\n        json={\"title\": \"Bad tag\", \"body\": \"\", \"tags\": [\"not-valid!\"]},\n    )\n    assert resp.status_code == 422\n\n    resp_query = client.get(\"/notes\", params={\"tag\": \"bad-tag\"})\n    assert resp_query.status_code == 422\n```\n",
+ "db_path": "bench/results/trial32g_r2data/dbs/B_borg_cloud_1.db",
+ "calls_log": null,
+ "attempt": 1,
+ "ledger_dollars": 0.12875175,
+ "aborted_attempts": [],
+ "estimate_dollars": 1.03823,
+ "quality": {
+  "files": [
+   "app.py",
+   "openapi.yaml",
+   "schema.sql",
+   "test_app.py"
+  ],
+  "checks": {
+   "files_present": {
+    "status": "pass",
+    "detail": "all four files"
+   },
+   "sql_executes": {
+    "status": "pass",
+    "detail": "1 sql file(s) executed in SQLite"
+   },
+   "python_parses": {
+    "status": "pass",
+    "detail": "2 python file(s) parse"
+   },
+   "openapi_loads": {
+    "status": "pass",
+    "detail": "1 yaml file(s) load with openapi and paths"
+   },
+   "spec_tables": {
+    "status": "pass",
+    "detail": "all required tables"
+   },
+   "spec_openapi_paths": {
+    "status": "pass",
+    "detail": "every required path and method"
+   },
+   "tests_pass_in_container": {
+    "status": "pass",
+    "detail": "more about it in the |           [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/). |            |     return self.router.on_event(event_type)  # ty: ignore[deprecated] |  | -- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html | 6 passed, 15 warnings in 0.74s"
+   },
+   "ref_test_create_returns_201_and_the_note": {
+    "status": "pass",
+    "detail": "passed"
+   },
+   "ref_test_get_returns_the_note_with_its_tags": {
+    "status": "pass",
+    "detail": "passed"
+   },
+   "ref_test_get_missing_note_is_404": {
+    "status": "pass",
+    "detail": "passed"
+   },
+   "ref_test_list_by_tag_returns_only_tagged_notes": {
+    "status": "pass",
+    "detail": "passed"
+   },
+   "ref_test_list_without_tag_returns_all_newest_first": {
+    "status": "pass",
+    "detail": "passed"
+   },
+   "ref_test_a_tag_shared_by_two_notes_is_stored_once_and_lists_both": {
+    "status": "pass",
+    "detail": "passed"
+   },
+   "ref_test_delete_returns_204_then_the_note_is_gone": {
+    "status": "pass",
+    "detail": "passed"
+   },
+   "ref_test_delete_missing_note_is_404": {
+    "status": "pass",
+    "detail": "passed"
+   },
+   "ref_test_empty_title_is_422": {
+    "status": "pass",
+    "detail": "passed"
+   },
+   "ref_test_title_over_120_characters_is_422": {
+    "status": "pass",
+    "detail": "passed"
+   },
+   "ref_test_bad_tag_is_422": {
+    "status": "fail",
+    "detail": "failed: s_422 | PASSED ../ref/test_reference.py::test_title_over_120_characters_is_422 | FAILED ../ref/test_reference.py::test_bad_tag_is_422 - AssertionError: ('UPPE... | 1 failed, 10 passed, 23 warnings in 1.80s"
+   }
+  },
+  "passed": 17,
+  "failed": 1,
+  "skipped": 0,
+  "machine_checks_passed": 17,
+  "void": false,
+  "void_reason": null
+ },
+ "data_root": "C:\\Stage\\BORG_ROUTE\\bench\\data",
+ "local_speed": {
+  "ollama/llama3.2:3b": 5.389
+ }
+}
