@@ -257,7 +257,9 @@ async def test_invalid_marker_twice_is_salvaged_with_032(env):
     assert "@@" not in text.lower()
     decisions = [d for d in await _decisions(db_path, result["run_id"])
                  if d.get("code") == "BRT-ORC-032"]
-    assert len(decisions) == 2 and decisions[-1].get("severity") == "warning"
+    # The two events are fire-and-forget log writes, so their row order is not
+    # guaranteed: assert one re-ask event and one warning, in either order.
+    assert sorted(d.get("severity") or "" for d in decisions) == ["", "warning"]
     assert await _answer_kind(db_path, result["run_id"]) == "salvaged"
 
 
