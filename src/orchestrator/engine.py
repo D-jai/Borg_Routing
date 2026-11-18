@@ -2058,8 +2058,10 @@ def _build_task_from_node(
                     if str(k).endswith("_ref") and isinstance(v, list)
                 }
                 if inline_items is not None:
+                    # A *_ref written as null beside inline items is the ref
+                    # left out, as the plan prompt asks (demo run 19f56430).
                     for arg in skill_def.get("required_args", {}) or {}:
-                        if str(arg).endswith("_ref") and arg not in skill_args:
+                        if str(arg).endswith("_ref") and skill_args.get(arg) is None:
                             fill[arg] = ""
                 if fill:
                     render_args = {**skill_args, **fill}
@@ -2781,6 +2783,18 @@ async def _orchestrate_run(
                     pass
                 continue
 
+            # A state_op whose source step failed has no items: it fails
+            # here with BRT-APE-005 instead of running empty (BRT-SOP-003).
+            if node.get("type") == "state_op" and not node.get("items"):
+                source = node.get("source") or node.get("source_ref")
+                if _failed_step(source, results):
+                    await _fail_step_before_call(
+                        results, raw_unstamped if raw else None, run_id, node_id,
+                        "BRT-APE-005", failed_ref_message(source), node_docs,
+                        db_path, raw,
+                    )
+                    continue
+
             if lane is not None:
                 if raw and node.get("type") == "orchestrate" and not all_local:
                     # Its child planner would read the content (design note 5.8).
@@ -2936,12 +2950,11 @@ async def _orchestrate_run(
                         f"node build failed: {exc}", node_docs, db_path,
                     )
                     continue
-                results[node_id] = InboundEnvelope(
-                    envelope_id=uuid4(),
-                    subtask_id=uuid4(),
-                    status="failed",
-                    output={},
-                    failure_reason=str(exc),
+                # Never silent: the failure is logged with its node id, and
+                # re_plan sees the reason (demo run 19f56430).
+                await _fail_step_before_call(
+                    results, None, run_id, node_id, "BRT-ORC-008",
+                    str(exc), node_docs, db_path, False,
                 )
 
         # Save and execute in parallel. BRT-ORC-02 — envelope persistence
