@@ -1951,7 +1951,8 @@ async def _check_plan(
     The two codes share one re_plan per run ("plan-validation re_plan used",
     ruling 32d). First time in a run: each offending step fails with the full
     message, in every lane (it is built from the plan and the skill list
-    only), and re_plan is shown it. Second time: the run stops re-planning;
+    only), and re_plan is shown it. Second time (and every later time): no
+    plan-validation re_plan is sent for it, while ordinary re_plans go on;
     a BRT-ORC-035 step runs as the skill step it is, a BRT-ORC-036 step runs
     without the keys nothing takes (dropped from the batch before the build),
     and each is recorded as a plan note (orchestrator_decision, action
@@ -1977,8 +1978,6 @@ async def _check_plan(
     state["seen"] = True
     for issue in issues:
         fails = not second or issue.where == "type"
-        if second:
-            state["stop"] = True
         if fails:
             # First time in the run, or an unknown type (nothing sensible to
             # run): the step fails. A node's first issue is its message.
@@ -2903,8 +2902,8 @@ async def _orchestrate_run(
     # True once a wave ran (or a step was failed) since the last re_plan.
     ran_since_replan = False
     # Ruling 32c: BRT-ORC-035 goes to re_plan once per run; the second time
-    # the step runs as the skill step it is and re_plan is not called again.
-    plan_check = {"seen": False, "stop": False}
+    # the step runs as the skill step it is; no plan-validation re_plan follows.
+    plan_check = {"seen": False}
     if await _check_plan(current_nodes, results, run_id, db_path, plan_check):
         ran_since_replan = True
     # Ruling 26b: True once this run planned a step that reads the documents.
@@ -2949,8 +2948,6 @@ async def _orchestrate_run(
                 # re_plan sent nothing new to run (e.g. only steps that
                 # already ran): compose.
                 break
-            if plan_check["stop"]:
-                break   # BRT-ORC-035 a second time: not re-planned (ruling 32c)
             ran_since_replan = False
             loop_count += 1
 

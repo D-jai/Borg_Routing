@@ -252,7 +252,15 @@ def _answer(req):
 
 
 def _again(node):
-    return lambda req: {"action": "continue", "rationale": "same again", "next_nodes": [node]}
+    """The re_plan answer: the same plan once, then compose (ordinary re_plans go on)."""
+    calls: list = []
+
+    def reply(req):
+        calls.append(1)
+        if len(calls) > 1:
+            return {"action": "compose", "rationale": "done"}
+        return {"action": "continue", "rationale": "same again", "next_nodes": [node]}
+    return reply
 
 
 @pytest.mark.asyncio
@@ -285,7 +293,8 @@ async def test_second_hit_runs_without_the_keys_and_records_them_three_ways(env)
                       answer_for=_answer).install(mp)
     result = await run_pipeline("Sort these.", db_path=db_path)
     await drain_log_writes()
-    assert len(stub.of_kind("re_plan")) == 1
+    # one plan-validation re_plan, then the ordinary one after the step ran
+    assert len(stub.of_kind("re_plan")) == 2
     assert stub.of_kind("answerer"), "the second-hit step did not run"
     ran = [n for n in built if n.get("id") == "n2"]
     assert ran and "colour" not in ran[0] and "instruction" not in ran[0]["skill_args"]
@@ -308,7 +317,7 @@ async def test_035_and_036_share_one_re_plan(env):
                       answer_for=_answer).install(mp)
     await run_pipeline("Sort these.", db_path=db_path)
     await drain_log_writes()
-    assert len(stub.of_kind("re_plan")) == 1
+    assert len(stub.of_kind("re_plan")) == 2   # the shared refusal, then the ordinary one
     assert stub.of_kind("answerer"), "the 036 fault after a 035 re_plan is a second hit"
 
 

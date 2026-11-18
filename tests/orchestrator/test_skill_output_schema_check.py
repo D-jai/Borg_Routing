@@ -215,6 +215,17 @@ def _answer(req):
     return {"bucket": "billing", "confidence": 0.9, "defer_reason": ""}
 
 
+def _replies(*batches):
+    """re_plan answers in order: each batch of nodes, then compose."""
+    left = list(batches)
+
+    def reply(req):
+        if left:
+            return {"action": "continue", "rationale": "next", "next_nodes": [left.pop(0)]}
+        return {"action": "compose", "rationale": "done"}
+    return reply
+
+
 @pytest.mark.asyncio
 async def test_first_hit_fails_the_step_before_any_call_and_re_plan_gets_the_message(env):
     db_path, mp = env
@@ -230,12 +241,11 @@ async def test_first_hit_fails_the_step_before_any_call_and_re_plan_gets_the_mes
 @pytest.mark.asyncio
 async def test_second_hit_runs_the_step_and_records_it_three_ways(env):
     db_path, mp = env
-    again = {"action": "continue", "rationale": "same again", "next_nodes": [_node(JOB_A, id="n2")]}
-    stub = StubModels(plan_nodes=[_node(JOB_A)], replan_for=lambda req: again,
+    stub = StubModels(plan_nodes=[_node(JOB_A)], replan_for=_replies(_node(JOB_A, id="n2")),
                       answer_for=_answer).install(mp)
     result = await run_pipeline("Sort these.", db_path=db_path)
     await drain_log_writes()
-    assert len(stub.of_kind("re_plan")) == 1
+    assert len(stub.of_kind("re_plan")) == 2   # the refusal, then the ordinary one after the wave
     assert stub.of_kind("answerer"), "the second-hit step did not run"
     # 1. the plan note
     notes = [d for d in _events(db_path, "orchestrator_decision") if d.get("code") == "BRT-ORC-035"]
@@ -318,3 +328,52 @@ async def test_lane_a_step_that_fails_while_running_still_gives_code_and_ids_onl
     assert "BRT-LANE-002" in body and "BRT-ORC-035" not in body
     for canary in CANARIES:
         assert canary not in body
+
+
+# --- after a second hit only plan-validation re_plans stop (ruling 32c/32d) ---------
+
+def _answerer(id_):
+    return {"type": "answerer", "id": id_, "instruction": "Say hi.", "tier": "light"}
+
+
+@pytest.mark.asyncio
+async def test_after_a_second_035_hit_an_ordinary_re_plan_still_happens_and_runs(env):
+    db_path, mp = env
+    stub = StubModels(plan_nodes=[_node(JOB_A)],
+                      replan_for=_replies(_node(JOB_A, id="n2"), _answerer("n3")),
+                      answer_for=lambda r: _answer(r) if "bucket" in r.system else {"result": "hi"}
+                      ).install(mp)
+    await run_pipeline("Sort these.", db_path=db_path)
+    await drain_log_writes()
+    assert len(stub.of_kind("re_plan")) == 3, "the ordinary re_plan after the second hit did not happen"
+    assert any("Say hi." in r.system for r in stub.of_kind("answerer")), "the new step did not run"
+
+
+@pytest.mark.asyncio
+async def test_a_third_035_fault_in_a_later_batch_runs_and_is_not_sent_back(env):
+    db_path, mp = env
+    stub = StubModels(plan_nodes=[_node(JOB_A)],
+                      replan_for=_replies(_node(JOB_A, id="n2"), _node(JOB_A, id="n3")),
+                      answer_for=_answer).install(mp)
+    result = await run_pipeline("Sort these.", db_path=db_path)
+    await drain_log_writes()
+    assert len(stub.of_kind("re_plan")) == 3
+    assert len(stub.of_kind("answerer")) == 4   # n2 and n3 (2 items each) ran
+    steps = {e["step"] for e in engine.asked_but_not_produced(result["run_id"])}
+    assert steps == {"n2", "n3"}
+    for r in stub.of_kind("re_plan")[1:]:
+        assert '"n3": {"failure"' not in r.system + r.user
+
+
+@pytest.mark.asyncio
+async def test_a_third_036_fault_in_a_later_batch_runs_without_the_key(env):
+    db_path, mp = env
+    bad = {"colour": "blue"}
+    stub = StubModels(plan_nodes=[_node(**bad)],
+                      replan_for=_replies(_node(id="n2", **bad), _node(id="n3", **bad)),
+                      answer_for=_answer).install(mp)
+    result = await run_pipeline("Sort these.", db_path=db_path)
+    await drain_log_writes()
+    assert len(stub.of_kind("re_plan")) == 3
+    assert len(stub.of_kind("answerer")) == 4
+    assert {e["step"] for e in engine.asked_but_not_produced(result["run_id"])} == {"n2", "n3"}

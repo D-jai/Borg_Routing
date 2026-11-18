@@ -623,13 +623,11 @@ async def test_replayed_stage1_job_a_completes_with_full_rows(tmp_path, monkeypa
     recorded_compose = rec["orchestrator_replies"]["compose"][0]
     stub = ReplayStub(rec, _seq(recorded_compose,
                                 {"response": "@@ROWS:extract_urgency@@"})).install(monkeypatch)
-    # Ruling 32c: the first plan is refused; the scripted re_plan repeats the
-    # recorded plan and adds the steps the recording's first re_plan added.
-    # The second hit runs classify_emails (renamed _2) and stops re-planning,
-    # so the recorded later re_plans are never asked for.
-    first = rec["orchestrator_replies"]["re_plan"][0]
-    stub.replans[:] = [dict(first, next_nodes=(
-        rec["orchestrator_replies"]["plan"][0]["plan"]["nodes"] + first["next_nodes"]))]
+    # Ruling 32c: the first plan is refused; a scripted first re_plan repeats
+    # the recorded plan, so the second hit runs classify_emails (renamed _2)
+    # without the fields. The recording's re_plans then follow as recorded.
+    stub.replans.insert(0, {"action": "continue", "rationale": "same plan again",
+                            "next_nodes": rec["orchestrator_replies"]["plan"][0]["plan"]["nodes"]})
     result = await run_pipeline(rec["instruction"], db_path=db_path,
                                 documents={"folder": rec["folder"]})
     await drain_log_writes()
@@ -649,7 +647,7 @@ async def test_replayed_stage1_job_a_completes_with_full_rows(tmp_path, monkeypa
     for _, nid, _ in stored:
         if nid is not None:
             assert re.sub(r"_\d+$", "", nid) in recorded, nid
-    assert not stub.replans, "the scripted re_plan reply was not used"
+    assert not stub.replans, "a re_plan reply was not used"
     composes = stub.of_kind("compose")
     assert len(composes) == 2 and composes[1].user.startswith(REASK + "\n" + HEADER)
     assert "- extract_urgency: 200 rows, input order; fields: item, urgency, category" in composes[1].user
