@@ -411,6 +411,22 @@
     return found ? STOPPED_EARLY_NOTE : null;
   }
 
+  /* Planner ruling 39c: the write-up asked for columns that do not exist, so a step's rows were
+   * placed with all their columns (a BRT-ORC-037 warning event, action "rows_placed_plain").
+   * This line (the event's receipt text, written as a sentence), or null. */
+  var PLAIN_ROWS_NOTE = 'The write-up asked for columns that do not exist; all columns are shown.';
+  function plainRowsNote(data) {
+    var note = null;
+    (data && data.events || []).forEach(function (ev) {
+      if (!ev || ev.event_type !== 'error') return;
+      var d = decisionOf(ev);
+      if (d && d.code === 'BRT-ORC-037' && d.action === 'rows_placed_plain') {
+        note = PLAIN_ROWS_NOTE;
+      }
+    });
+    return note;
+  }
+
   /* Ruling 26e: {steps, stepsFailed, items, itemsFailed}. A step failed when its envelope failed,
    * when (ruling 26f) it is an apply_to_each whose every item failed, or when it failed before any
    * call and so has no envelope (BRT-LANE-002, -ORC-025, -APE-005, -ORC-008, -ORC-024, -REG-020):
@@ -528,7 +544,7 @@
       rawStayed: !!(data.run && data.run.documents) && (mode === 'raw_local' || mode === 'all_local'),
       estimate: baselineEstimate(data),   // ruling 22: the floor, or null when none was stored
       noStep: noStepNote(data),           // ruling 26a: the planner wrote the answer alone, or null
-      stoppedEarly: stoppedEarlyNote(data), // reading (2) under ruling 35: planning stopped early, or null
+      stoppedEarly: stoppedEarlyNote(data), plainRows: plainRowsNote(data), // reading (2) under ruling 35: planning stopped early, or null
       notProduced: notProducedLines(data), // ruling 32c: fields asked for and not produced
       failed: failedCounts(data)          // ruling 26e: failed steps, and failed items of the steps that went on
     };
@@ -794,7 +810,7 @@
   window.BorgWork = {
     LANE_MODES: LANE_MODES, laneTag: laneTag, historyForMode: historyForMode, laneLine: laneLine,
     readLaneMode: readLaneMode, prepareSend: prepareSend, runLaneMode: runLaneMode, runLaneWords: runLaneWords, leftCard: leftCard,
-    headerTiles: headerTiles, receiptFrom: receiptFrom, noStepNote: noStepNote, stoppedEarlyNote: stoppedEarlyNote, failedLines: failedLines, notProducedLines: notProducedLines, receiptStats: receiptStats, leftChipText: leftChipText,
+    headerTiles: headerTiles, receiptFrom: receiptFrom, noStepNote: noStepNote, stoppedEarlyNote: stoppedEarlyNote, plainRowsNote: plainRowsNote, failedLines: failedLines, notProducedLines: notProducedLines, receiptStats: receiptStats, leftChipText: leftChipText,
     stripBaseline: stripBaseline, whyRows: whyRows, makeRefresher: makeRefresher, makeLiveStream: makeLiveStream,
     parseJSON: parseJSON, decisionOf: decisionOf, stageWords: stageWords, shortModel: shortModel, shortText: shortText,
     fitText: fitText, planNodesById: planNodesById, stepsFromRun: stepsFromRun, planLayout: planLayout,

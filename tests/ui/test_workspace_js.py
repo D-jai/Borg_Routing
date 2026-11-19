@@ -588,3 +588,18 @@ def test_receipt_says_planning_stopped_early_after_a_failed_re_plan_call(tmp_pat
         "code": "BRT-ORC-001", "severity": "warning", "action": "planning_stopped"})}
     note = js(tmp_path, f"return W.stoppedEarlyNote({json.dumps({'events': [warn]})});")
     assert note and note.startswith("Planning stopped early")
+
+
+def test_receipt_says_all_columns_are_shown_when_rows_were_placed_plain(tmp_path):
+    """Planner ruling 39c: one receipt line from the BRT-ORC-037 warning, action rows_placed_plain."""
+    warn = {"event_type": "error", "decision_json": json.dumps({
+        "code": "BRT-ORC-037", "severity": "warning", "action": "rows_placed_plain"})}
+    data = {"run": {"status": "completed"}, "events": [warn]}
+    assert js(tmp_path, f"return W.receiptFrom({json.dumps(data)}).plainRows;") == (
+        "The write-up asked for columns that do not exist; all columns are shown.")
+
+
+def test_no_all_columns_line_for_a_plain_037_or_a_salvage(tmp_path):
+    for d in ({"code": "BRT-ORC-037"}, {"code": "BRT-ORC-037", "severity": "warning", "action": "salvaged"}):
+        ev = {"event_type": "error", "decision_json": json.dumps(d)}
+        assert js(tmp_path, f"return W.plainRowsNote({json.dumps({'events': [ev]})});") is None
