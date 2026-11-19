@@ -188,6 +188,18 @@ def recorded_ms_at(knots: list, play_s: float) -> float:
     return knots[-1][0] + (play_s - knots[-1][1]) * 1000.0 + 1.0
 
 
+def stage_durations(stages: list, end_ms: float) -> list:
+    """Each stage's recorded duration (ms): the time until the next stage at a later moment, or
+    the end. Of stages recorded at the same moment only the last carries the wait; a stage with
+    no wait after it gets None, so the page never shows "recorded: 0 s"."""
+    out = []
+    for i, st in enumerate(stages):
+        t = float(st.get("t_ms") or 0)
+        nxt = float(stages[i + 1].get("t_ms") or 0) if i + 1 < len(stages) else end_ms
+        out.append(int(nxt - t) if nxt - t >= 1 else None)
+    return out
+
+
 def start_session(run_id: str, speed: Optional[float] = None) -> str:
     """Start one playback of a recorded run; returns its own run id."""
     sid = str(uuid.uuid4())
@@ -468,13 +480,20 @@ async def replay_chat(request: Request):
 
     async def play():
         t0 = _now()
-        for i, st in enumerate(stages):
+        first = float(stages[0].get("t_ms") or 0) if stages else end_ms
+        if first >= 1:
+            # The wait before the first recorded stage is shortened too, so it is labelled too.
+            lead = {"event": "stage", "stage": "starting", "detail": "", "elapsed_ms": 0,
+                    "recorded_ms": int(first)}
+            yield f"data: {json.dumps(lead)}\n\n"
+        for st, rec in zip(stages, stage_durations(stages, end_ms)):
             t_ms = float(st.get("t_ms") or 0)
             async for beat in wait_until(t0 + play_seconds_at(knots, t_ms)):
                 yield beat
-            nxt = float(stages[i + 1].get("t_ms") or 0) if i + 1 < len(stages) else end_ms
             payload = {"event": "stage", "stage": st.get("stage"), "detail": st.get("detail") or "",
-                       "elapsed_ms": int(t_ms), "recorded_ms": int(max(0.0, nxt - t_ms))}
+                       "elapsed_ms": int(t_ms)}
+            if rec is not None:
+                payload["recorded_ms"] = rec
             yield f"data: {json.dumps(payload)}\n\n"
         async for beat in wait_until(t0 + end_s):
             yield beat

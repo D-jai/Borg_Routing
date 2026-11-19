@@ -104,7 +104,9 @@ def test_the_committed_exports_are_the_ruling_24_runs():
 def test_a_replay_plays_stages_then_the_answer_with_no_outbound_call(client, outbound, path):
     export = json.loads(path.read_text(encoding="utf-8"))
     stages, text, run_id = _play(client, export)
-    assert stages == [s["stage"] for s in export["timeline"]["stages"]]
+    recorded = [s["stage"] for s in export["timeline"]["stages"]]
+    lead = ["starting"] if (export["timeline"]["stages"][0].get("t_ms") or 0) >= 1 else []
+    assert stages == lead + recorded       # the labelled wait before the first stage, then as recorded
     assert text == export["answer"]
     view = client.get(f"/runs/{run_id}").json()
     assert view["run"]["status"] == export["view"]["run"]["status"]
@@ -463,3 +465,27 @@ def test_each_stage_carries_its_recorded_duration(client, tmp_path, monkeypatch)
     assert [(g["stage"], g["recorded_ms"]) for g in got] == [("plan", 1000), ("route", 600000), ("compose", 1000)]
     st = client.get("/replay/status").json()["runs"][0]
     assert st["seconds"] == 602.0 and st["play_seconds"] <= 4 + 2 * 60 / 602 * 1.01
+
+
+def test_same_moment_stages_and_the_last_stage_show_no_zero():
+    stages = [{"stage": "plan", "t_ms": 71000}, {"stage": "route", "t_ms": 71000},
+              {"stage": "re_plan", "t_ms": 80000}, {"stage": "compose", "t_ms": 91000}]
+    assert replay.stage_durations(stages, 91000) == [None, 9000, 11000, None]
+
+
+def test_the_wait_before_the_first_stage_is_labelled(client, tmp_path, monkeypatch):
+    export = _exports()[0]
+    doc = dict(export, timeline={"end_ms": 90000, "stages": [
+        {"stage": "plan", "t_ms": 71000}, {"stage": "route", "t_ms": 71000}, {"stage": "compose", "t_ms": 90000}]})
+    (tmp_path / "lead.json").write_text(json.dumps(doc), encoding="utf-8")
+    monkeypatch.setenv("BORG_REPLAY_DIR", str(tmp_path))
+    replay.reset()
+    body = {"model": "borg_route", "stream": True, "replay_speed": FAST,
+            "messages": [{"role": "user", "content": doc["prompt"]}]}
+    got = []
+    with client.stream("POST", "/v1/chat/completions", json=body) as r:
+        for line in r.iter_lines():
+            if line.startswith("data:") and '"event": "stage"' in line:
+                got.append(json.loads(line[5:]))
+    assert [(g["stage"], g.get("recorded_ms")) for g in got] == [
+        ("starting", 71000), ("plan", None), ("route", 19000), ("compose", None)]

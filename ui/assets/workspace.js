@@ -670,7 +670,7 @@
   var STAGE_WORDS = {
     plan: 'Planning the steps', re_plan: 'Reading the results', compose: 'Writing the answer',
     route: 'Choosing a model for a step', rule_zero_shortcut: 'Answering in one call', bypass: 'Answering directly',
-    orchestrator: 'Working',
+    orchestrator: 'Working', starting: 'Starting',
     'BRT-ORC-018': 'Retrying a reply that was cut off', 'BRT-ORC-028': 'Writing the answer',
     'BRT-ORC-029': 'Asking for the answer once more', 'BRT-ORC-030': 'Putting the finished steps together',
     'BRT-ORC-031': 'The planner declined to answer', 'BRT-ORC-032': 'A marker named no step the code can place', 'BRT-ZERO-01-ESCALATED': 'Moving from one call to a plan',
