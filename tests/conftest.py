@@ -83,6 +83,37 @@ def _isolated_data(tmp_path_factory):
         yield
     finally:
         mp.undo()
+        _unbind_leaked_db_path(tmp_db)
+
+
+def _unbind_leaked_db_path(tmp_db: str) -> None:
+    """A module first imported during a test copies the repointed path:
+    ``from src.db.schema import DB_PATH`` (src.api.logs, src.logging.writer)
+    and ``db_path: str = DB_PATH`` defaults then hold this test's temp file
+    for good. ``mp.undo`` cannot restore what it never set, and the next
+    test's repointing skips them (they no longer equal the repo path), so a
+    later test read the first test's database (test_cost_summary_counts_posts
+    after tests/api/test_run_page_fields.py). Put the repo path back; the
+    next test repoints it to its own temp file."""
+    for name, mod in list(sys.modules.items()):
+        if mod is None or not (name == "main" or name.startswith("src.")):
+            continue
+        if getattr(mod, "DB_PATH", None) == tmp_db:
+            mod.DB_PATH = _REPO_DB
+        for obj in list(vars(mod).values()):
+            funcs = [obj]
+            if isinstance(obj, type) and obj.__module__ == name:
+                funcs = [v.__func__ if isinstance(v, (staticmethod, classmethod)) else v
+                         for v in vars(obj).values()]
+            for fn in funcs:
+                if not callable(fn) or getattr(fn, "__module__", None) != name:
+                    continue
+                defaults = getattr(fn, "__defaults__", None)
+                if defaults and tmp_db in defaults:
+                    fn.__defaults__ = tuple(_REPO_DB if d == tmp_db else d for d in defaults)
+                kw = getattr(fn, "__kwdefaults__", None)
+                if kw and tmp_db in kw.values():
+                    fn.__kwdefaults__ = {k: (_REPO_DB if v == tmp_db else v) for k, v in kw.items()}
 
 
 @pytest.fixture(autouse=True)
