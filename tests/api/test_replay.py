@@ -142,17 +142,37 @@ def test_mid_play_the_run_is_running_and_shows_only_what_had_happened(client, mo
     assert done["digest"] == dict(export["view"]["digest"], direct_floor_ratio=None)
 
 
+def _all_routes(routes, prefix=""):
+    """Every route the app serves, on any FastAPI version. Since FastAPI 0.16x,
+    include_router keeps a wrapper (_IncludedRouter, holding original_router and an
+    include_context with the prefix) in app.routes instead of copying the routes in."""
+    for route in routes:
+        inner = getattr(route, "original_router", None)
+        if inner is not None:
+            ctx = getattr(route, "include_context", None)
+            yield from _all_routes(inner.routes, prefix + (getattr(ctx, "prefix", "") or ""))
+        else:
+            yield prefix, route
+
+
+def test_the_route_walk_finds_the_included_routes():
+    """Guard for the walk itself: it must reach the routers main.py includes."""
+    found = {(p + r.path) for p, r in _all_routes(app.routes) if getattr(r, "methods", None)}
+    assert {"/v1/task", "/keys", "/models/discover"} <= found
+
+
 def test_every_state_changing_route_returns_403(client, outbound):
     tried = set()
-    for route in app.routes:
+    for prefix, route in _all_routes(app.routes):
         methods = getattr(route, "methods", None) or set()
         for method in sorted(methods & MUTATING):
-            path = route.path.replace("{", "").replace("}", "")
+            full = prefix + route.path
+            path = full.replace("{", "").replace("}", "")
             r = client.request(method, path, json={})
-            assert r.status_code == 403, (method, route.path, r.status_code)
+            assert r.status_code == 403, (method, full, r.status_code)
             code = r.json()["detail"]["error"]
-            assert code in ("BRT-RPL-001", "BRT-RPL-002"), (method, route.path)
-            tried.add((method, route.path))
+            assert code in ("BRT-RPL-001", "BRT-RPL-002"), (method, full)
+            tried.add((method, full))
     for must in (("POST", "/v1/task"), ("POST", "/v1/chat/completions"), ("POST", "/keys"),
                  ("POST", "/config"), ("POST", "/runs/{run_id}/resume"), ("POST", "/runs/{run_id}/rating"),
                  ("POST", "/models/discover"), ("PATCH", "/models/{model_id:path}/checked")):
