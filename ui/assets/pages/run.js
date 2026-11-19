@@ -77,6 +77,11 @@ Borg.ready(function () {
       role: 'img', 'aria-label': 'Plan diagram: plan, ' + steps.length + ' steps, compose' });
     lay.edges.forEach(function (e) { svg.appendChild(W.svgEl('path', { class: 'edge', d: e.d })); });
     var plan = coreFigures(['plan', 're_plan']), compose = coreFigures(['compose']);
+    /* Lead ruling (plan-node text): text in a node is cut to the room it has, measured once the drawing is on the page,
+     * so a model name never runs into the cost and a long title stays inside its box. */
+    var fits = [];
+    function fitLater(el, right) { fits.push(function () { fitEl(el, right()); }); return el; }
+    function room(el, left, cost) { return function () { var cw = cost ? measure(cost) : 0; return (cost ? Number(cost.getAttribute('x')) - cw - 6 : left) - Number(el.getAttribute('x')); }; }
     lay.nodes.forEach(function (n) {
       var cls = 'node' + (n.kind !== 'step' ? ' core' : '') + (selected === n.key ? ' sel' : '');
       var s = n.step;
@@ -95,28 +100,32 @@ Borg.ready(function () {
         g.appendChild(W.svgEl('text', { class: 't', x: x, y: y + 24 }, n.kind === 'plan' ? 'Plan' : 'Compose answer'));
         if (f.model) {
           dotFor(f.model, x + 4, y + 42);
-          g.appendChild(W.svgEl('text', { class: 'm', x: x + 14, y: y + 46 }, W.shortText(W.shortModel(f.model), 14)));
-          g.appendChild(W.svgEl('text', { class: 'c', x: n.x + n.w - 8, y: y + 46, 'text-anchor': 'end' }, B.money(f.dollars)));
+          var cm = g.appendChild(W.svgEl('text', { class: 'm', x: x + 14, y: y + 46 }, W.shortText(W.shortModel(f.model), 24)));
+          var cc = g.appendChild(W.svgEl('text', { class: 'c', x: n.x + n.w - 8, y: y + 46, 'text-anchor': 'end' }, B.money(f.dollars)));
+          fitLater(cm, room(cm, 0, cc));
         } else {
           g.appendChild(W.svgEl('text', { class: 'm', x: x, y: y + 46 }, running ? 'waiting' : 'no call recorded'));
         }
       } else {
-        g.appendChild(W.svgEl('text', { class: 't', x: x, y: y + 22 }, s.label));
+        var st = g.appendChild(W.svgEl('text', { class: 't', x: x, y: y + 22 }, s.label));
+        fitLater(st, room(st, n.x + n.w - 8));
         var meta = [];
         if (s.items) meta.push(s.items + ' items');
         if (s.type === 'state_op') meta.push('no model needed');
         else if (s.childRunId || (s.routing && s.routing.served_by === 'child_run')) meta.push('its own run');
         if (s.task_type) meta.push(s.task_type);
         if (s.tier) meta.push(s.tier);
-        g.appendChild(W.svgEl('text', { class: 'm', x: x, y: y + 39 }, W.shortText(meta.join(' · ') || s.type, 30)));
+        var sm = g.appendChild(W.svgEl('text', { class: 'm', x: x, y: y + 39 }, W.shortText(meta.join(' · ') || s.type, 40)));
+        fitLater(sm, room(sm, n.x + n.w - 8));
         if (s.status === 'failed') {
           g.appendChild(W.svgEl('text', { class: 'm bad', x: x, y: y + 63 }, 'Failed'));
         } else if (s.model && s.type !== 'state_op') {
           dotFor(s.model, x + 4, y + 59);
-          g.appendChild(W.svgEl('text', { class: 'm', x: x + 14, y: y + 63 }, W.shortText(W.shortModel(s.model), 13)));
+          var smod = g.appendChild(W.svgEl('text', { class: 'm', x: x + 14, y: y + 63 }, W.shortText(W.shortModel(s.model), 24)));
         }
         var cost = s.status === 'in_flight' ? 'running' : B.money(s.dollars) + (s.latency_ms !== null ? ' · ' + B.duration(s.latency_ms / 1000) : '');
-        g.appendChild(W.svgEl('text', { class: 'c', x: n.x + n.w - 8, y: y + 63, 'text-anchor': 'end' }, cost));
+        var sc = g.appendChild(W.svgEl('text', { class: 'c', x: n.x + n.w - 8, y: y + 63, 'text-anchor': 'end' }, cost));
+        if (smod) fitLater(smod, room(smod, 0, sc));
       }
       function pick() { selected = n.key; showRaw = false; renderPlan(); renderPanel(); }
       g.addEventListener('click', pick);
@@ -124,6 +133,14 @@ Borg.ready(function () {
       svg.appendChild(g);
     });
     A.clear(A.$('plan-box')).appendChild(svg);
+    fits.forEach(function (f) { f(); });
+  }
+  function measure(el) { try { return el.getComputedTextLength ? el.getComputedTextLength() : 0; } catch (e) { return 0; } }
+  function fitEl(el, maxPx) {
+    var full = el.textContent;
+    var cut = W.fitText(full, maxPx, function (t) { el.textContent = t; return measure(el); });
+    el.textContent = cut;
+    if (cut !== full) el.appendChild(W.svgEl('title', {}, full));
   }
 
   // ---------- side panel ----------

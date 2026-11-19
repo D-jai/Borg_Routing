@@ -26,6 +26,21 @@
     s = String(s === null || s === undefined ? '' : s).replace(/\s+/g, ' ').trim();
     return s.length > n ? s.slice(0, n - 1) + '…' : s;
   }
+  /* fitText(full, maxPx, measure) -> the longest start of full, with '…', whose measured width
+   * fits maxPx. measure(text) returns a pixel width; when it cannot measure (0, no layout) the
+   * text is returned whole, so the character limits set by shortText still hold. */
+  function fitText(full, maxPx, measure) {
+    full = String(full === null || full === undefined ? '' : full);
+    if (typeof measure !== 'function' || !(maxPx > 0)) return full;
+    var w = measure(full);
+    if (!(w > 0) || w <= maxPx) return full;
+    var lo = 0, hi = full.length - 1;
+    while (lo < hi) {
+      var mid = Math.ceil((lo + hi) / 2);
+      if (measure(full.slice(0, mid).replace(/\s+$/, '') + '…') <= maxPx) lo = mid; else hi = mid - 1;
+    }
+    return full.slice(0, lo).replace(/\s+$/, '') + '…';
+  }
   // "openrouter/deepseek/deepseek-v3.2" -> "deepseek-v3.2"
   function shortModel(id) {
     var s = String(id || '');
@@ -781,7 +796,7 @@
     headerTiles: headerTiles, receiptFrom: receiptFrom, noStepNote: noStepNote, stoppedEarlyNote: stoppedEarlyNote, failedLines: failedLines, notProducedLines: notProducedLines, receiptStats: receiptStats, leftChipText: leftChipText,
     stripBaseline: stripBaseline, whyRows: whyRows, makeRefresher: makeRefresher, makeLiveStream: makeLiveStream,
     parseJSON: parseJSON, decisionOf: decisionOf, stageWords: stageWords, shortModel: shortModel, shortText: shortText,
-    planNodesById: planNodesById, stepsFromRun: stepsFromRun, planLayout: planLayout,
+    fitText: fitText, planNodesById: planNodesById, stepsFromRun: stepsFromRun, planLayout: planLayout,
     callsByModel: callsByModel, runTotals: runTotals, baselineEstimate: baselineEstimate, floorNote: floorNote, floorMoney: floorMoney,
     failureWords: failureWords, eventSentences: eventSentences, clock: clock, REASONS: REASONS,
     itemsLine: itemsLine, packShare: packShare,
