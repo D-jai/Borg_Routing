@@ -21,7 +21,21 @@ Lead session `borg-route-f1` (Opus 5.5) since 02:20 on 16-Nov-2026. Every work o
 
 If this session stopped abruptly: `git log` and `git status` show what landed; any uncommitted changes belong to an in-progress builder: read the diff, finish or stash it, record which in the build log.
 
-## Where I left off (18-Nov-2026, about 20:55)
+## Where I left off (19-Nov-2026, about 00:10): round-3 freeze
+
+- **This commit is the round-3 freeze** (Deej's ruling 15, planner ruling 40, BUILD.md section 8). It sits on `d8cf3b3`, which CI run 44458986061 passed in full: the suite on Python 3.11 and 3.13, compose replay install, interface check.
+- **The showcase batch is pushed.** It holds `constraints.txt`, the README's non-Docker demo, plan-node text, the stale model removed, playback (4 s gap cap, recorded times), ruling 39 (reversed marker pairs, filter attempts refused, plain rows on a bad spec), and the final demo set (job 1 `c882e3c9`, job 2 `6c83c9c7`, job 3 `e31a5330`; demo spend US$0.7145 of US$1).
+- **Next:**
+  1. The data-only commit: the SEED line set to int(this hash[:8], 16), bench/data regenerated for A, C and D.
+  2. tests/bench locally.
+  3. Push both with [skip ci] (ruling 40b.3).
+  4. Paste the invariant into BUILD.md.
+  5. Pre-checks: Docker serving, the borg_bench_py image, the ledger total.
+  6. Stage 1, cloud side only (`direct` and `borg_cloud`, plus one `direct` run of D), cap US$6.
+  7. Stop and report stage 1 to the planner. No stage 2 without the planner.
+- **After the round:** the README screenshot (from CI run 44458986061's ui-check artifact), the STAGE_MEMORY row, remove the borg_pack worktree.
+
+## Earlier waypoint (18-Nov-2026, about 20:55)
 
 - **The ruling 32 to 36 fix cycle is pushed and CI is green.** Head `e97bd70` on `showcase`; CI run 44437792274 passed on Python 3.11 and 3.13 (the full suite, run once).
 - **Trial 32g is closed** at US$1.358 of US$5 (`bench/results/trial32g_report.md`). No job won by the rule. Job A on the fixed path runs at 50 to 55% of direct's cost, with category 0.98 to 1.00 and light-tier urgency about 0.73.
