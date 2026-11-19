@@ -1,0 +1,23 @@
+# One command: `docker compose up -d --build`, then open http://localhost:8000
+# Default: replay mode. Plays recorded demo runs; no key, no model, no .env needed.
+# Live mode: see compose.live.yaml and docs/install-guide.md.
+services:
+  borg:
+    build: .
+    image: borg_route:local
+    environment:
+      BORG_DEMO_MODE: replay
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - borg_data:/app/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    restart: unless-stopped
+
+volumes:
+  borg_data:

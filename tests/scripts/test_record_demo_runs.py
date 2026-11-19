@@ -56,3 +56,18 @@ def test_demo_data_has_header_and_canary_only_in_job_3():
     assert len(with_canary) == 1 and all(n.startswith("job3_notes/") for n in with_canary)
     feedback = (ROOT / "demo" / "data" / "job1_feedback.txt").read_text(encoding="utf-8").splitlines()
     assert len(feedback) - 1 == 60
+
+
+def test_the_answer_is_kept_beside_the_database_byte_for_byte(tmp_path):
+    """Work order 4.5: the run database does not store the final answer; the export reads it here."""
+    mod = _load()
+    text = "Line one\r\nline two\n| a | b |\n"
+    path = mod.save_answer("d04e0d8a-0000", text, folder=tmp_path / "answers")
+    assert path.name == "d04e0d8a-0000.md" and path.read_bytes() == text.encode("utf-8")
+
+
+def test_no_answer_file_without_a_run_or_a_text(tmp_path):
+    mod = _load()
+    assert mod.save_answer(None, "x", folder=tmp_path) is None
+    assert mod.save_answer("r1", None, folder=tmp_path) is None
+    assert list(tmp_path.iterdir()) == []

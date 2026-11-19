@@ -1,4 +1,4 @@
-"""Deej's ruling 12: classify_into_buckets is extraction work, read from the real data/skills.yaml.
+"""the owner's ruling 12: classify_into_buckets is extraction work, read from the real data/skills.yaml.
 
 The round-1 job A local case: a model at extraction 6.8 and reasoning 4.6 must clear
 the light floor (6.0) on a classify_into_buckets step whose node names no task_type.

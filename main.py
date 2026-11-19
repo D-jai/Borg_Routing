@@ -10,9 +10,15 @@ from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
-from src.registry.capability_matrix import CapabilityMatrix
+from src.paths import PROJECT_ROOT, UI_DIR, use_project_root
 
-load_dotenv()
+# Work order 5.2: the app starts from any working directory. The relative paths in src
+# (data/..., ui/) resolve from the project folder, found from this file.
+use_project_root()
+
+from src.registry.capability_matrix import CapabilityMatrix  # noqa: E402
+
+load_dotenv(PROJECT_ROOT / ".env")
 
 # Shared capability matrix — loaded at startup, reused by all API handlers.
 matrix = CapabilityMatrix()
@@ -37,11 +43,13 @@ async def lifespan(app: FastAPI):
         matrix.load()
     except FileNotFoundError:
         pass  # Matrix will be empty until discovery runs; non-fatal.
+    from src.api.replay import demo_mode
     from src.db.schema import create_all
-    try:
-        await create_all()
-    except Exception:
-        pass  # DB init failure is non-fatal on startup; logged by caller.
+    if demo_mode() is None:  # replay mode (work order 4.5) touches no database
+        try:
+            await create_all()
+        except Exception:
+            pass  # DB init failure is non-fatal on startup; logged by caller.
     yield
     # Shutdown: nothing to clean up yet.
 
@@ -86,6 +94,11 @@ class CSPHeaderMiddleware:
         return await self.inner(scope, receive, send_with_csp)
 
 
+# Replay mode (work order 4.5, BORG_DEMO_MODE=replay): recorded runs only, every other route
+# 403. Added before the CSP middleware, so the CSP header wraps its answers too.
+from src.api.replay import ReplayMiddleware, live_router as replay_status_router  # noqa: E402
+
+app.add_middleware(ReplayMiddleware)
 app.add_middleware(CSPHeaderMiddleware)
 
 # Serve static UI files if the ui/ directory exists. The Ask page is the front
@@ -102,7 +115,7 @@ async def site_root():
     return RedirectResponse(ASK_PAGE)
 
 
-if os.path.isdir("ui"):
+if UI_DIR.is_dir():
 
     @app.get("/ui", include_in_schema=False)
     @app.get("/ui/", include_in_schema=False)
@@ -110,7 +123,7 @@ if os.path.isdir("ui"):
     async def ui_root():
         return RedirectResponse(ASK_PAGE)
 
-    app.mount("/ui", StaticFiles(directory="ui", html=True), name="ui")
+    app.mount("/ui", StaticFiles(directory=str(UI_DIR), html=True), name="ui")
 
 # Register routers
 from src.api.models import router as models_router  # noqa: E402
@@ -130,6 +143,7 @@ app.include_router(admin_router)
 app.include_router(logs_router)
 app.include_router(skills_router)
 app.include_router(status_router)
+app.include_router(replay_status_router)
 
 
 @app.get("/health")

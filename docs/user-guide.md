@@ -44,6 +44,7 @@ To use external AI models (like those on OpenRouter), you need to add an API key
 
 ### If something goes wrong
 - **The page says "In .env, restart needed"** — the key is written in `.env` but the running server does not have it yet. Restart the server.
+- **"BRT-API-054: the key could not be saved"** — the server cannot write `.env` (this is how Docker live mode runs). Put the key in the `.env` file on the host that `compose.live.yaml` reads, then restart the container.
 - Only the OpenRouter key is saved from this page. The Tavily key (web search) is set by adding `TAVILY_API_KEY` to `.env` and restarting.
 
 ---
@@ -472,6 +473,36 @@ Besides the `runs` page (`limit`, newest first), the response carries `counts`: 
 
 ---
 
+## Routes at a glance
+
+Read from the app's own route list on 18-Nov-2026. "Admin" means the admin lock above; every route that changes state returns 403 in replay mode, and so do the four read routes marked "closed in replay" (see "Replay demo").
+
+| Route | What it does | Who |
+|---|---|---|
+| `GET /health` | Liveness check | open |
+| `GET /`, `/ui`, `/ui/`, `/ui/chat.html` | Redirect to the Ask page | open |
+| `POST /v1/chat/completions` | OpenAI-compatible chat; streams | open |
+| `POST /v1/task` | Submit a task and get the run id | open |
+| `POST /mcp` | MCP tools: submit a task, read a run | open |
+| `GET /runs`, `GET /runs/{id}` | List runs; one run with its digest | open |
+| `GET /runs/{id}/stream` | Live events of a run | open |
+| `POST /runs/{id}/rating` | Rate a run | open |
+| `POST /runs/{id}/resume` | Run a failed run again | open |
+| `GET /models`, `GET /models/matrix` | The model pool | open |
+| `POST /models/discover`, `POST /models/research`, `PATCH /models/{id}/checked` | Discover, Get Model Info, tick a model | admin |
+| `POST /keys` | Save the OpenRouter key | admin |
+| `GET /keys/status`, `GET /status/local` | Key and local-server status for the Admin pages | open; closed (403) in replay |
+| `GET /config`, `GET /config/effective`, `GET /config/rules` | Settings and rules, read (`/config/effective` is closed in replay) | open |
+| `POST /config`, `POST /config/rules`, `POST /config/rules/{id}/retire` | Settings and rules, write | admin |
+| `GET /skills`, `GET /skills/{id}` | Skills library | open |
+| `POST /skills/{id}/version` | Add a skill version | admin |
+| `GET /logs`, `GET /logs/entities`, `GET /logs/export` | Events, entities, JSONL export | admin |
+| `GET /logs/cost-summary`, `GET /logs/outlier-runs` | Cost summary (closed in replay); outlier runs | open |
+| `GET /replay/status` | Whether replay mode is on | open |
+| `GET /openapi.json` | The app's own route description | open |
+
+---
+
 ## Running a Failed Run Again
 
 If a run fails partway through (network error, model timeout, etc.), you can run it again from the Admin Overview.
@@ -593,6 +624,10 @@ The planner never sees the text. It gets a list: an id per document (`doc_001`),
 - While the lane is `raw_local` or `all_local` and the run has documents, every request headed off the machine (planner, final answer, cloud steps, web search, direct-to-model) is compared with the documents first. If it holds a passage of 120 characters, more than 10% of a document's 8-word sequences (`lane_max_ngram_share`), or a short document whole, it is blocked (**BRT-LANE-006**). <!-- claim C16 --> Case, punctuation, line breaks, repeated JSON escaping, invisible characters (zero-width space, soft hyphen) and a copy split one word per field do not hide a match. What it does not catch is listed under "What is not promised".
 - Every request a run makes while the lane is on is written to the `outbound_requests` table before it is sent, with its exact body (secret fields such as `api_key` are blanked in the stored copy), and whether it left the machine. If that write fails, the request is not sent (**BRT-LANE-007**). <!-- claim C14 --> A retry is its own row. Many steps sending at once (a document in dozens of parts) take turns writing: each write waits for the database (up to 30 seconds) and is tried up to 5 times, so only a write that truly fails blocks a request.
 - Local calls ignore proxy settings (`HTTP_PROXY` and the like), so a proxy cannot carry them off the machine.
+
+### What you will see on screen
+
+The short fields a local step derives from your documents (such as a topic or an owner name) appear in the run view, because they passed the output check. An output that the check refused appears only as a code and the document ids (for example `BRT-LANE-004` and `doc_003`), never as text. While the lane is on, a viewer who is not the admin sees the same text for each stage in the Ask page's progress line as on the Run page: both hide the planner's notes and messages the same way.
 
 ### Using the lane from the API
 
@@ -858,3 +893,41 @@ Open `http://localhost:8000/` (or `/ui/`); it goes to the Ask page. The old chat
 ### Runs (`/ui/runs.html`)
 
 The history of runs, newest first, with status and rating. Direct-to-model questions (bypass runs) are left out unless **Include direct-to-model questions** is ticked.
+
+---
+
+## Replay demo (work order 4.5)
+
+Replay mode shows what BORG_ROUTE does without a key, a model or a network: the server plays back runs that were recorded earlier. The runs it ships with are **demo runs** (planner ruling 24): fictional data, and they back no claim or benchmark number.
+
+### How to use it
+
+1. Set `BORG_DEMO_MODE=replay` in `.env` (or the environment) and start the server as usual. No key is needed.
+2. Every page shows a notice in the top bar: "Replay of a recorded run on 18-Nov-2026 · demo run, not a benchmark result. The documents and notes in these runs are made-up demo data; in the private-notes run, the point is what was not sent to a cloud model." The date is the day the run was recorded, in Toronto time.
+3. On **Ask** the text box is gone. Each recorded run is a button ("Play Job 1: bulk small items (demo run, 1:31 as recorded)"). Choosing one plays the run as it was recorded: the progress line shows each stage at the moment it happened, then the recorded answer arrives with its receipt (steps, models, time, cost, the one-pass floor, calls that left the machine). The receipt totals are the recorded ones; the sentence comparing the floor with the round-1 benchmark is left out in replay, because a demo run backs no benchmark result. **See how it was done** opens the Run page, which fills in step by step while the playback runs and ends with the recorded totals.
+4. Playback speed: unless a speed is set, each run plays in at most 60 seconds (speed = the larger of 1 and the recorded duration divided by 60), so a run shorter than a minute plays at recorded speed and the lane run (job 3, about 14 minutes when recorded) plays in one minute. `BORG_REPLAY_SPEED` sets the speed for every run (it divides the recorded times: 1 is recorded speed, 2 twice as fast), and a client may send its own `replay_speed` with the request; a speed that is set always wins over the 60-second rule. The buttons say how long each run took and how long it will play.
+5. **Runs** lists the recorded runs; each opens finished.
+
+While replay mode is on, every route that changes state (new tasks, resume, ratings, keys, settings, rules, models, skills, MCP) and every route that could read a key or call out (local status probes, Discover, the admin pages' data) returns 403 with BRT-RPL-001. The Admin pages therefore show that their data is not available. Nothing is written to any database.
+
+### Making the replay files
+
+`python scripts/export_run.py <run_id> --db <run database> [--out demo/runs] [--docs-root <documents folder>] [--canary <text>]` writes one file per run. It never writes to the run database (it works on a copy).
+
+**What the file holds:** the run view exactly as a viewer who is not the admin sees it on the Run page (for a run with the lane on, as that viewer sees it while the lane is on): the run record, every step (envelope) with its routing decision and its stored payloads (the step's own instruction and its output, which for a step that read documents are the short fields it derived, or a code and document ids when the output check refused it), the events with times relative to the run's start, the costs, what left the machine (destination and status), the stage timeline the Ask page shows, the models used (id and whether each is on this machine), and the final answer.
+
+**What is removed:** the text of every request sent to a model (the "What left this machine" bodies, shown to the admin only), keys (replaced by `[key]`), absolute local paths (`[local path]`), the machine id, and the round-1 benchmark ratio (no benchmark figure travels with a demo run).
+
+**The check before anything is written:** the script refuses, and writes no file, when any exported string, JSON held as text included, holds a canary however it is written: canaries are compared on letters and digits only (after Unicode normalisation, any letter case, so spaces, underscores or other hyphens do not hide one), the whole body or any part of it of 6 or more characters in one string, or the whole body split across strings in the order they are exported (BRT-RPL-010); any run of 24 characters from one of the run's documents, ignoring letter case and spacing, or a document it cannot read to check against (BRT-RPL-011); a key or path left after stripping (BRT-RPL-012); an answer it cannot check (BRT-RPL-013); or a run that is missing or not finished (BRT-RPL-014). The answer is not stored in the run database: the demo recorder keeps it in `answers/<run_id>.md` beside the database, and otherwise the script rebuilds it from the run's last compose reply. Either way its length must equal the one the run's stored floor was priced on; a run with no priced floor is refused. The committed demo files are checked the same way by the tests (`tests/scripts/test_demo_exports.py`), so a file edited by hand cannot pass either.
+
+### If something goes wrong
+
+- **The Ask page says no recorded run was found:** check `BORG_REPLAY_DIR` (default `demo/runs`); the server log names any file it skipped (BRT-RPL-003).
+- **403 with BRT-RPL-002:** the prompt was not one of the recorded ones. Use the buttons.
+- **A mistyped `BORG_DEMO_MODE`:** any value other than empty, `off` or `replay` is treated as replay (BRT-RPL-005 in the log), so a typo never opens the live app. Set it to `off` or remove it to run for real.
+
+---
+
+## Interface check (work order 4.6, CI only)
+
+`scripts/check_ui.py` opens every page (10 pages) in a real browser against the app in replay mode, at 390 and 1280 pixels wide, in light and dark. It fails on console errors, failed requests nobody expected and required parts that are missing. It saves screenshots and a report, uploaded as the CI artifact `ui-check`. It runs only in CI, on GitHub's hosted runner; it is never run on the development laptop.

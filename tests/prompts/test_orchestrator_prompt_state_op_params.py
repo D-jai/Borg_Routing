@@ -1,4 +1,4 @@
-"""The planner is told each state_op's params (Deej's ruling 13, 18-Nov-2026:
+"""The planner is told each state_op's params (the owner's ruling 13, 18-Nov-2026:
 an additive edit to the planner prompt, state_op section only), and the prompt
 cannot drift from the code's OP_PARAMS.
 """

@@ -7,6 +7,7 @@ Borg.ready(function () {
   var modelLocal = {};          // model_id -> true (this machine) / false (cloud)
   var turns = [];
   var pending = null;           // {stage, live, shown} while a question is running
+  var replay = null;            // GET /replay/status while this server only plays recorded runs (work order 4.5)
 
   // ---------- history (localStorage, every access guarded) ----------
   function load() {
@@ -16,6 +17,7 @@ Borg.ready(function () {
     } catch (_) { return []; }
   }
   function save() {
+    if (replay) return;         // a playback's run id lives only as long as the server keeps it
     try { B.storage.set('localStorage', KEY, JSON.stringify(turns.slice(-MAX_TURNS))); } catch (_) {}
   }
 
@@ -112,7 +114,8 @@ Borg.ready(function () {
     var foot = h('div', { class: 'row', style: 'margin-top:8px' });
     if (turn.runId) {
       foot.appendChild(h('a', { href: 'run.html?id=' + encodeURIComponent(turn.runId) }, 'See how it was done'));
-      foot.appendChild(thumbs(turn));
+      if (!replay) foot.appendChild(thumbs(turn));
+      else foot.appendChild(h('span', { class: 'chip replay' }, 'demo run'));
     }
     if (turn.lane === 'all_local' && laneMode !== 'all_local') {
       foot.appendChild(h('span', { class: 'small muted' }, 'Answered while nothing could leave this machine; not resent now.'));
@@ -122,7 +125,9 @@ Borg.ready(function () {
   }
   function render() {
     A.clear(thread);
-    if (!turns.length) thread.appendChild(h('p', { class: 'muted small' }, 'Ask for a job. Each answer shows which models did the steps, how long it took and what it cost.'));
+    if (!turns.length) thread.appendChild(h('p', { class: 'muted small' }, replay
+      ? 'Choose a recorded demo run below to watch it play back: its steps, the models chosen, the cost and the answer, as they were recorded. Nothing is sent to any model.'
+      : 'Ask for a job. Each answer shows which models did the steps, how long it took and what it cost.'));
     turns.forEach(function (t) {
       thread.appendChild(t.role === 'user' ? userBubble(t.content, t.lane) : answerCard(t));
     });
@@ -245,18 +250,56 @@ Borg.ready(function () {
   });
   A.$('clear').addEventListener('click', function () { turns = []; save(); render(); });
 
-  // ---------- start ----------
-  turns = load();
-  render();
-  Promise.all([
-    W.readLaneMode(B.api),
-    B.api('/models/matrix', { quiet: true }).catch(function () { return null; })
-  ]).then(function (r) {
-    laneMode = r[0];
-    (r[1] || []).forEach(function (m) { modelLocal[m.model_id] = A.isLocalModel(m); });
-    showLane();
+  // ---------- replay mode (work order 4.5): recorded prompts as buttons, no free text ----------
+  function enterReplay(st) {
+    replay = st;
+    turns = [];
+    ['q', 'docs-btn', 'docs-box', 'lane-line', 'alias', 'send'].forEach(function (id) { A.$(id).classList.add('hidden'); });
+    var composer = q.parentNode;
+    Array.prototype.forEach.call(composer.querySelectorAll('label'), function (l) { l.classList.add('hidden'); });
+    var box = h('div', { class: 'stack', id: 'replay-runs' }, h('p', { class: 'small muted', style: 'margin:0' },
+      'Recorded demo runs. Choose one to play it back; it backs no claim.'));
+    var runs = Array.isArray(st.runs) ? st.runs : [];
+    if (!runs.length) box.appendChild(h('p', { class: 'small muted' }, 'No recorded run was found on this server.'));
+    runs.forEach(function (r) {
+      var name = (r.job ? 'Job ' + r.job + ': ' : '') + (r.title || 'recorded run');
+      var btn = h('button', { class: 'btn', type: 'button', title: W.shortText(r.prompt, 300) },
+        'Play ' + name + ' (' + (r.label || 'demo run') + ', ' + W.clock(r.seconds) + ' as recorded' +
+        (r.play_seconds && r.play_seconds < r.seconds - 0.5 ? ', plays in ' + W.clock(r.play_seconds) : '') + ')');
+      btn.addEventListener('click', function () {
+        if (send.disabled) return;
+        send.disabled = true;
+        var tag = W.LANE_MODES.indexOf(r.lane_mode) >= 0 ? r.lane_mode : 'off';
+        doSend(r.prompt, { tag: tag, history: [], docs: false });
+      });
+      box.appendChild(btn);
+    });
+    composer.insertBefore(box, composer.firstChild);
     render();
-    // Refresh receipts that were still loading when the page was left.
-    turns.forEach(function (t) { if (t.role === 'assistant' && t.runId && !t.receipt) fetchReceipt(t); });
+    return B.api('/models/matrix', { quiet: true }).then(function (rows) {
+      (rows || []).forEach(function (m) { modelLocal[m.model_id] = A.isLocalModel(m); });
+      render();
+    }, function () {});
+  }
+
+  // ---------- start ----------
+  B.replayStatus().then(function (st) {
+    if (st && st.mode === 'replay') return enterReplay(st);
+    startLive();
   });
+  function startLive() {
+    turns = load();
+    render();
+    Promise.all([
+      W.readLaneMode(B.api),
+      B.api('/models/matrix', { quiet: true }).catch(function () { return null; })
+    ]).then(function (r) {
+      laneMode = r[0];
+      (r[1] || []).forEach(function (m) { modelLocal[m.model_id] = A.isLocalModel(m); });
+      showLane();
+      render();
+      // Refresh receipts that were still loading when the page was left.
+      turns.forEach(function (t) { if (t.role === 'assistant' && t.runId && !t.receipt) fetchReceipt(t); });
+    });
+  }
 });

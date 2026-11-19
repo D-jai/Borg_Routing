@@ -6,7 +6,7 @@
 
 ## Project Status
 
-BORG_ROUTE is an Adaptive Recursive Agent Router. The core build is complete and the project is in its showcase phase. The full suite runs in CI (GitHub's hosted runner); the last green run is recorded in `BUILD.md` (CI run 44437792274 on `e97bd70`, 18-Nov-2026). Sessions are maintenance, polish, or new features, not original-design work.
+BORG_ROUTE is an Adaptive Recursive Agent Router. The core build is complete and the project is in its showcase phase. The full suite runs in CI (GitHub's hosted runner); the last green run is recorded in `BUILD.md` (CI run 44437792274 on `e97bd70`, 18-Nov-2026). `python -m pytest --collect-only -q` counted 2415 tests on 18-Nov-2026 (collection only, not a pass count). Sessions are maintenance, polish, or new features, not original-design work.
 
 The web pages live in `ui/`: `ask.html`, `run.html`, `runs.html`, `admin_overview.html`, `models.html`, `keys.html`, `rules.html`, `settings.html`, `skills.html`, `logs.html`.
 
@@ -47,6 +47,6 @@ Do not delete files or data. Move them to an archive folder outside the reposito
 
 ## Session End Hygiene
 
-1. Run only the tests for what you changed, locally (planner ruling 30d, Deej's machine rule of 18-Nov-2026). The full suite is the CI run, once per ready batch of changes, never a local run. Docker tests and Playwright never run on the ThinkPad. Say which tests do not pass.
+1. Run only the tests for what you changed, locally (planner ruling 30d, the owner's machine rule of 18-Nov-2026). The full suite is the CI run, once per ready batch of changes, never a local run. Docker tests and Playwright never run on the development laptop. Say which tests do not pass.
 2. Commit scoped, descriptive changes. One logical change per commit.
 3. Do not push unless asked.
