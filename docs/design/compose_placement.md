@@ -624,7 +624,7 @@ Block, repair and pointer wording:
 - `tests/orchestrator/test_state_ops.py::test_counts_are_not_rows_for_the_next_op`;
 - `tests/e2e/test_privacy_lane*.py` (none of them uses row markers).
 
-Only focused tests run on the ThinkPad. The full suite runs in CI at PR time, in the one push shared with 32c.
+Only focused tests run on the development laptop. The full suite runs in CI at PR time, in the one push shared with 32c.
 
 ## 3. Error codes
 

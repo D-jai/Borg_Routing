@@ -320,7 +320,7 @@ async def record_end(
 # -- shared HTTP clients (work order 1.12) ------------------------------------
 #
 # Building an httpx.AsyncClient loads the CA bundle, which blocks the event
-# loop (about 1.5 s on the ThinkPad). Every model and tool send therefore
+# loop (about 1.5 s on the development laptop). Every model and tool send therefore
 # reuses one client per kind, (trust_env, timeout), created lazily per event
 # loop and kept on the loop object (no module-level reference to a loop).
 # Lifecycle: the clients are closed when their loop ends, by an async

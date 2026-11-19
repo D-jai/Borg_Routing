@@ -1,6 +1,6 @@
 # BORG_ROUTE
 
-BORG_ROUTE: Brokered Orchestration, Retrieval and Generation. Breaks a job into steps and sends each step to the cheapest model that can do it, on your machines first.
+Breaks a job into steps and sends each step to the cheapest model that can do it, local or cloud. <!-- claim C01 --> With the private lane on, the steps that read your documents run only on your own machines. <!-- claim C11 --> <!-- claim C13 -->
 
 <!-- TODO (planner): add the Run-view screenshot here. docs/design/screens/ does not exist yet; the CI interface check (work order 4.6) produces the images. Do not invent an image path before then. -->
 
@@ -31,7 +31,7 @@ The two published benchmark rounds are in `bench/results/` (`2026_11_17` and `20
 ## How it works
 
 1. You send a job through an OpenAI-style chat call, a task call or an MCP tool. <!-- claim C29 --> <!-- claim C33 --> <!-- claim C30 -->
-2. A planning model breaks the job into steps. For each step the router picks the ticked model with the lowest effective cost whose score clears the step's floor and whose context fits. The exceptions: the planner names a ticked model, or the run uses `borg_route:local`, which prefers a local model that clears the floor. If no ticked model clears the floor, the step runs on the run's default model and the trace warns BRT-ORC-019. <!-- claim C01 --> <!-- claim C02 --> The run records why each model was chosen, with up to eight models that cleared the floor. <!-- claim C03 -->
+2. A planning model breaks the job into steps. For each step the router picks the ticked model with the lowest effective cost whose score clears the step's floor and whose context fits. The exceptions: the planner names a ticked model, or the run uses `borg_route:local`, which prefers a local model that clears the floor. If no ticked model clears the floor, the step runs on the run's default model and the trace warns BRT-ORC-019. <!-- claim C01 --> <!-- claim C02 --> "Cheapest" means the lowest cost counting both dollars and waiting time, among the models that clear the step's quality floor. A slow local model can lose to a fast cheap cloud model unless the private lane or the local-first setting (`borg_route:local`) is on. The run records why each model was chosen, with up to eight models that cleared the floor. <!-- claim C03 -->
 3. Every model call that reports its usage is priced and logged, planner calls included. <!-- claim C04 --> The run total is the sum of the logged calls. <!-- claim C06 --> The operator's own words reach every step, item and call unchanged. <!-- claim C08 -->
 4. A short conversational message with no documents is usually answered in one call, without a plan (the Rule Zero shortcut). <!-- claim C34 -->
 5. The planning model writes the final answer. A long list in the answer is written by code from the stored rows, in input order. <!-- claim C24 -->
