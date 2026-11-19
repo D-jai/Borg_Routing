@@ -658,9 +658,10 @@
     'BRT-ORC-018': 'Retrying a reply that was cut off', 'BRT-ORC-028': 'Writing the answer',
     'BRT-ORC-029': 'Asking for the answer once more', 'BRT-ORC-030': 'Putting the finished steps together',
     'BRT-ORC-031': 'The planner declined to answer', 'BRT-ORC-032': 'A marker named no step the code can place', 'BRT-ZERO-01-ESCALATED': 'Moving from one call to a plan',
-    /* Ruling 32e: the checks after compose (039 is unused: the planner dropped C2). */
+    /* Rulings 32e and 36a: the checks after compose (039 is the cut-short list of 36a). */
     'BRT-ORC-037': 'A row marker asked for fields it cannot use',
     'BRT-ORC-038': 'Rows were typed around a row marker',
+    'BRT-ORC-039': 'The answer cut a list short instead of placing it',
     'BRT-ORC-040': 'The answer pointed to a step result instead of placing it',
     'BRT-ORC-041': 'The answer gave a value no step produced',
     'BRT-APE-CAPPED': 'Limiting a long list', 'BRT-ORC-NO-FRONTIER': 'Choosing a model for a step'

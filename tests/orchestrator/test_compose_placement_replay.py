@@ -6,8 +6,9 @@ fixture (``tests/fixtures/round2_compose_{a,b,c,d}.json``, written by
 ``extract_round2_compose.py``), a LaneContext built from the fixture's
 manifest (documents with placeholder text), scripted re-asks, and
 ``asked_but_not_produced`` patched to the fixture's list. Scoring uses the
-bench grader as it stands. C2 (BRT-ORC-039) was dropped by the planner: D is
-caught by C4 (BRT-ORC-041) alone.
+bench grader as it stands. C2 was dropped by the planner: D is caught by C4
+(BRT-ORC-041) alone. C5 (BRT-ORC-039, ruling 36a) is tested in
+test_compose_placement_elided.py.
 """
 import json
 import re

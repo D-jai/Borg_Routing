@@ -5,12 +5,16 @@ sent, on the reply's chosen answer:
 
 - ``nested_markers`` (C1, BRT-ORC-038): a rows marker that is an element of a
   list compose wrote holding other elements, or sits below table rows.
+- ``elided_lists`` (C5, BRT-ORC-039, planner ruling 36a): a listed list step
+  no marker placed whose rows compose typed and cut short with an explicit
+  elision ("...", "// ... the rest follows").
 - ``unplaced_long_outputs`` (C3, BRT-ORC-040): a listed long output that is
   neither placed nor present while compose's own text points at a step.
 - ``invented_values`` (C4, BRT-ORC-041): a value no step produced, for an item
   with no value for that field, or under an asked-but-not-produced field.
 
-C2 (BRT-ORC-039) was dropped by the planner and is not built.
+C2 (compose retyped stored data) was dropped by the planner and is not
+built; its code BRT-ORC-039 is reused by C5 (ruling 36a).
 
 ``ItemModel`` holds each list step item's identity, labels, stored values and
 failures once per compose; it also gives the block's "no result" and "no
@@ -26,13 +30,16 @@ from typing import Optional
 from src.orchestrator import row_markers as rm
 
 CODE_NESTED = "BRT-ORC-038"
+CODE_ELIDED = "BRT-ORC-039"
 CODE_UNPLACED = "BRT-ORC-040"
 CODE_INVENTED = "BRT-ORC-041"
-ORDER = ("BRT-ORC-032", "BRT-ORC-037", CODE_NESTED, CODE_UNPLACED, CODE_INVENTED)
+ORDER = ("BRT-ORC-032", "BRT-ORC-037", CODE_NESTED, CODE_ELIDED, CODE_UNPLACED, CODE_INVENTED)
 
 S_NESTED = ("@@{kw}:{target}@@ sits inside a list or table you wrote that holds other rows. "
             "Put the marker on its own line, outside any brackets, and do not type its rows "
             "yourself.")
+S_ELIDED = ("The reader sees only this answer, and a shortened list is not the answer: put "
+            "@@ROWS:{id}@@ where the list belongs, and the code writes all {n} of its rows.")
 S_UNPLACED = ("Your answer points the reader to a step result they cannot see. Put "
               "@@OUTPUT:{id}@@ where that step's output belongs instead of pointing to it.")
 S_CASE1 = ("You gave values to {k} items that no step gave a value for that field (for example "
@@ -440,6 +447,131 @@ def placed_targets(value: object, resolver: rm.Resolver) -> list:
     return keys
 
 
+# --- C5 -------------------------------------------------------------------------------
+
+# Planner ruling 36a: the words that say the rest of a list follows or was
+# left out ("N more" is a number then "more"). One list, read only here.
+ELISION_WORDS = ("follows", "remaining", "and so on", "etc", "omitted", "truncated", "N more")
+_REST = re.compile(r"(?i)(?<![\w-])(?:" + "|".join(
+    r"\d[\d,]*\s+more" if w == "N more" else re.escape(w).replace(r"\ ", r"\s+")
+    for w in ELISION_WORDS) + r")(?![\w-])")
+_DOTS = r"(?:\.{3,}|…)"
+_ELLIPSIS = re.compile(_DOTS)
+# An ellipsis standing alone as a list element: bare, quoted or in braces,
+# optionally bulleted, with a trailing comma.
+_ALONE = re.compile(rf"^(?:[-*+•]\s+)?[\"'`{{\[(]?\s*{_DOTS}\s*[\"'`}}\])]?\s*,?$")
+# An ellipsis as one element of a list on the line, after a separator
+# (a lone "[...]" is an excerpt's cut mark, not a list element).
+_INLINE = re.compile(rf"[,;]\s*[\"'{{]?\s*{_DOTS}\s*[\"'}}]?\s*(?=[,;\]]|$)"
+                     rf"|\[\s*[\"'{{]?\s*{_DOTS}\s*[\"'}}]?\s*[,;]")
+_COMMENT = re.compile(r"^(?://|/\*|<!--|--\s)")
+_QUOTED = re.compile(r"\"[^\"\n]*\"|“[^”\n]*”")
+_FENCE = re.compile(r"^\s*(?:```|~~~)")
+_FILLER = re.compile(r"^[\s\[\]{}(),;]*$")
+
+
+def _dequote(line: str) -> str:
+    """The line with every quoted span blanked unless the span holds only an
+    ellipsis (a quoted excerpt is not compose eliding its rows)."""
+    return _QUOTED.sub(lambda m: m.group(0) if _ELLIPSIS.fullmatch(m.group(0)[1:-1].strip())
+                       else " " * len(m.group(0)), line)
+
+
+def _elision(line: str, in_fence: bool, row_line: bool = False) -> bool:
+    """One line is an explicit elision: an ellipsis as a list element, in a
+    code comment line, or in a line that says the rest follows. On a line
+    that itself names items only the list-element form counts (an ellipsis
+    in a typed row's own words is prose)."""
+    stripped = line.strip()
+    if not stripped or stripped.startswith(">"):
+        return False
+    if stripped.startswith("|"):
+        cells = [c for c in _cells(stripped) if c]
+        return bool(cells) and all(_ELLIPSIS.fullmatch(c) for c in cells)
+    body = _dequote(stripped)
+    if not _ELLIPSIS.search(body):
+        return False
+    if _ALONE.match(body) or _INLINE.search(body):
+        return True
+    if row_line:
+        return False
+    if _COMMENT.match(body) or (in_fence and body.startswith("# ")):
+        return True
+    return bool(_REST.search(body))
+
+
+def _rows_line(line: str, model: ItemModel, keys: set) -> bool:
+    return any(key in keys for _, key in model.line_tokens(line))
+
+
+def _text_elided(text: str, model: ItemModel, keys: set) -> bool:
+    """An elision line in, or directly after, lines that name the step's
+    items (lines of brackets and commas, and fences, in between are skipped)."""
+    in_fence = False
+    last = False
+    for line in text.split("\n"):
+        if _FENCE.match(line):
+            in_fence = not in_fence
+            continue
+        if _FILLER.match(line):
+            continue
+        rows_here = _rows_line(line, model, keys)
+        if (rows_here or last) and _elision(line, in_fence, row_line=rows_here):
+            return True
+        last = rows_here
+    return False
+
+
+def _holds_item(value: object, model: ItemModel, keys: set) -> bool:
+    if isinstance(value, str):
+        return model.match(value) in keys or _rows_line(value, model, keys)
+    if isinstance(value, dict):
+        return any(_holds_item(v, model, keys) for v in value.values())
+    if isinstance(value, list):
+        return any(_holds_item(v, model, keys) for v in value)
+    return False
+
+
+def _tree_elided(value: object, model: ItemModel, keys: set) -> bool:
+    """An object or list answer: a list holding an elision element next to
+    elements that name the step's items."""
+    if isinstance(value, dict):
+        return any(_tree_elided(v, model, keys) for v in value.values())
+    if isinstance(value, list):
+        cut = [i for i, v in enumerate(value) if isinstance(v, str) and "\n" not in v
+               and not _rows_line(v, model, keys) and _elision(v, False)]
+        if cut and any(_holds_item(v, model, keys) for i, v in enumerate(value) if i not in cut):
+            return True
+        return any(_tree_elided(v, model, keys) for v in value)
+    return False
+
+
+def elided_lists(value: object, own: object, model: Optional[ItemModel], steps: dict,
+                 resolver: rm.Resolver) -> list:
+    """C5 (BRT-ORC-039, planner ruling 36a): the listed list steps no marker
+    placed whose rows compose typed and cut short with an explicit elision,
+    in or directly after those rows. An ellipsis in prose, in a quoted
+    excerpt or a block quote, or in placed rows does not count, and nothing
+    fires when every listed list step is placed."""
+    if model is None or not model.items or not steps:
+        return []
+    placed: set = set()
+    for target in placed_targets(value, resolver):
+        if target.kind != "output":
+            placed.update(target.ids)
+    out = []
+    for sid in steps:
+        if sid in placed or sid not in model.step_ids:
+            continue
+        keys = {k for k, item in model.items.items() if sid in item.states}
+        if not keys:
+            continue
+        if (isinstance(own, (dict, list)) and _tree_elided(own, model, keys)) or any(
+                _text_elided(t, model, keys) for t in _strings(own)):
+            out.append(sid)
+    return out
+
+
 # --- C3 -------------------------------------------------------------------------------
 
 def _grams(text: str) -> set:
@@ -651,7 +783,7 @@ def _examples(keys: list, model: ItemModel) -> str:
 def check(value: object, steps: dict, outputs: dict, model: Optional[ItemModel], asked: list,
           quoted, step_ids, declined: bool = False) -> list:
     """``[(code, sentence)]`` for a reply's chosen answer (or a declined
-    rationale), in the order 032, 037, 038, 040, 041. On a decline only the
+    rationale), in the order 032, 037, 038, 039, 040, 041. On a decline only the
     marker checks and C1 run (lead ruling 16)."""
     problems = list(rm.marker_problems(value, steps, outputs, quoted))
     resolver = rm.Resolver(steps, outputs)
@@ -659,6 +791,8 @@ def check(value: object, steps: dict, outputs: dict, model: Optional[ItemModel],
         problems.append((CODE_NESTED, S_NESTED.format(kw=_kw(kind), target=key)))
     if not declined:
         own = own_text(value, resolver)
+        for sid in elided_lists(value, own, model, steps, resolver):
+            problems.append((CODE_ELIDED, S_ELIDED.format(id=sid, n=len(steps[sid].rows))))
         placed = {t.key for t in placed_targets(value, resolver) if t.kind == "output"}
         for oid in unplaced_long_outputs(own, outputs, placed, step_ids):
             problems.append((CODE_UNPLACED, S_UNPLACED.format(id=oid)))

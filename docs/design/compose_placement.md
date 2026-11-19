@@ -1,6 +1,6 @@
 # Compose places, it does not retype (planner ruling 32e, design note)
 
-Status: revised 18-Nov-2026 after a fresh adversarial review in two rounds and the lead's rulings on it, then accepted by the planner (BUILD.md section 8, "Planner readings under ruling 32 (4)") with one cut: check C2 (BRT-ORC-039) is dropped. 039 stays unused and the other codes keep their numbers. This revision follows that reading; C2's analysis stays in 2.4.2 as history. It extends ruling 21 (docs/design/compose_row_markers.md). Everything in that note stands unless a section below says otherwise.
+Status: revised 18-Nov-2026 after a fresh adversarial review in two rounds and the lead's rulings on it, then accepted by the planner (BUILD.md section 8, "Planner readings under ruling 32 (4)") with one cut: check C2 (BRT-ORC-039) is dropped. 039 stays unused and the other codes keep their numbers. This revision follows that reading; C2's analysis stays in 2.4.2 as history. **Planner ruling 36a (18-Nov-2026)** adds one narrow check, C5, under the free code BRT-ORC-039: a list typed and cut short with an explicit elision instead of placed (2.4.7). C2 stays dropped; 039 is now C5's. It extends ruling 21 (docs/design/compose_row_markers.md). Everything in that note stands unless a section below says otherwise.
 
 **Wording.** The BUILD.md 32e row reads: "seven requirements: chosen fields and names with file names for documents; a whole-output marker; the code-side compose block wording; four post-compose checks with one re-ask then salvage; what invented values a check can catch; compose token change on A, B, D; replay tests on the four stored compose inputs". Every threshold, every definition of "usable" and every change to salvage below is my own choice and is marked as such. None of them is the ruling's.
 
@@ -257,13 +257,13 @@ C4 reads (a) to (d). (C2, dropped, read (a) to (c).)
 2. Validate markers: BRT-ORC-032 and BRT-ORC-037 (2.4.6).
 3. Run C1.
 4. Build the own text.
-5. Run C3 and C4.
+5. Run C5 (2.4.7), C3 and C4.
 6. Collect every problem.
 7. None: place (with the guards) and return.
 8. Some, with the repair re-ask unused: send it.
 9. Otherwise salvage (2.4.5).
 
-**One repair re-ask per run** covers 032, 037, 038, 040 and 041 together, so the worst case stays at 3 invocations and 9 posts. A lane refusal (BRT-LANE-009) is not a check: it fails closed.
+**One repair re-ask per run** covers 032, 037, 038, 039, 040 and 041 together, so the worst case stays at 3 invocations and 9 posts. A lane refusal (BRT-LANE-009) is not a check: it fails closed.
 
 **`action: fail`** (lead ruling 16). On a declined rationale, steps 2 and 3 and placement run, as ruling 21 does today. C3 and C4 do not run: a decline is not an answer, and a repair message asking for one would overrule compose's choice. The run stays "declined".
 
@@ -271,7 +271,7 @@ C4 reads (a) to (d). (C2, dropped, read (a) to (c).)
 
 ```
 Mode: compose. Your last reply cannot be used as it is:
-- <one sentence per problem, in the order 032, 037, 038, 040, 041>
+- <one sentence per problem, in the order 032, 037, 038, 039, 040, 041>
 Fix these and reply with {"response": "<the final answer>"} only.
 <the block, from its second line to its last line>
 ```
@@ -299,7 +299,7 @@ Lead ruling 3.
 
 #### 2.4.2 C2: compose retyped stored data (BRT-ORC-039): DROPPED by the planner
 
-**Dropped (planner reading (4), 18-Nov-2026).** C2 is not built and BRT-ORC-039 stays unused; 037, 038, 040 and 041 keep their numbers. The planner's reasons: a faithful retype is not a wrong answer; firing costs a compose call (about US$0.022 to 0.029) to save about US$0.01; values with no source are C4's job, and a cut-off reply is the pointer retry's (ruling 21); C2 had the most false-positive forms. What stays: the block sentence "Do not retype rows or long outputs yourself", the cut-off pointer, and the join-marker hint, which moves into C4's case-1 sentence (2.4.4). Job D is caught by C4 alone (2.7). The analysis below is kept as history only; nothing in it is built.
+**Dropped (planner reading (4), 18-Nov-2026).** C2 is not built. (Ruling 36a later gave the unused BRT-ORC-039 to C5, 2.4.7; nothing below is C5.) At the time BRT-ORC-039 stayed unused; 037, 038, 040 and 041 keep their numbers. The planner's reasons: a faithful retype is not a wrong answer; firing costs a compose call (about US$0.022 to 0.029) to save about US$0.01; values with no source are C4's job, and a cut-off reply is the pointer retry's (ruling 21); C2 had the most false-positive forms. What stays: the block sentence "Do not retype rows or long outputs yourself", the cut-off pointer, and the join-marker hint, which moves into C4's case-1 sentence (2.4.4). Job D is caught by C4 alone (2.7). The analysis below is kept as history only; nothing in it is built.
 
 Lead ruling 1b. **Fired** (as designed) when, for a list step S with at least 10 resolved items, more than half of S's resolved items appear in compose's own text in a pair of form (a), (b) or (c) whose value equals one of that item's own stored values.
 - "Stored value" means any field value some list step resolved for that item, so a typed join counts for both steps.
@@ -412,7 +412,7 @@ Neither change touches the other salvage paths: 030, 029 twice, a compose call t
 - The one behaviour change against ruling 21: a 032 second reply holding one valid and one invalid marker now keeps the valid block. No current test covers that case.
 
 **Run record:**
-- The run is "salvaged". The warning event carries every problem code of the second reply; its headline code is the first in the order 032, 037, 038, 040, 041.
+- The run is "salvaged". The warning event carries every problem code of the second reply; its headline code is the first in the order 032, 037, 038, 039, 040, 041.
 - **List steps with no usable marker (planner).** In this salvage a finished list step that no marker placed is written in the plain marker's form (`@@ROWS:<id>@@`: flat fields, file-name labels, failed rows as item and `error`), not the nested index/item/output shape, under `## <step id>`, with the 21b guard. The other salvage paths (030, 029 twice, a raising compose call, a cut pointer retry) keep today's form.
 - Bench scoring of salvaged runs is unchanged.
 - Placed blocks in salvage now get the 21b guard. That narrows, but does not close, 21b's open question.
@@ -435,6 +435,36 @@ Two codes, an exact sentence per case. The re-ask echoes only listed step ids an
 | an entry over 64 characters or holding a forbidden character | 037 | `The marker for <target> has a field entry the code cannot read (<entry>): use plain names with no , = \| @ brackets or line break.` |
 
 The `\|` in the last two sentences is table escaping only; the sentences carry a plain `|`. BRT-ORC-032's registry meaning widens to "a marker names no step, or the wrong kind of step, the code can place".
+
+#### 2.4.7 C5: a list typed and cut short (BRT-ORC-039, planner ruling 36a)
+
+Motivating reply: trial 35h, round-1 data, job A (`bench/results/trial35h_r1data`). Compose typed 10 rows of `{file, category, urgency}` in a ```` ```json ```` fence, then `  // ... (full list of all 200 entries follows the exact pattern above)` and `]`. No marker; nothing else fired (every typed value is stored, so not 041); the grader scored items_answered 0.
+
+**Fires** (`compose_checks.elided_lists`, run on the reply's chosen answer before C3) for each list step listed in the block when both hold:
+1. no valid rows marker places it (a join counts for each of its steps);
+2. compose's own text (markers removed) holds an explicit elision in, or directly after, rows it typed. A typed row is a line naming one of that step's items (an identity token of the item model, as C4 reads it). "Directly after" is the next line that is not blank, not a fence and not only brackets and commas.
+
+**An elision** is a line with an ellipsis ("..." or "…") that is:
+- a list element: the line is only the ellipsis (bare, quoted, in braces or brackets, bulleted, with a trailing comma), a table row whose cells are all ellipses, or `, ...` / `; ...` / `[..., ` inside a line of rows;
+- a code comment line: it starts with `//`, `/*`, `<!--` or `-- `, or with `# ` inside a code fence;
+- a line that says the rest follows, holding one word of `compose_checks.ELISION_WORDS`: "follows", "remaining", "and so on", "etc", "omitted", "truncated", "N more" (a number then "more"). One list, in one place.
+
+On a line that itself names items, only the list-element form counts: an ellipsis in a typed row's own words is prose. In an object or list answer, a list holding an element that is an elision next to elements naming the step's items also fires.
+
+**Does not fire:**
+- an ellipsis in ordinary prose ("The notes cover billing, shipping, ... and feedback.");
+- a quoted excerpt: text inside double quotes (straight or curly) is blanked before the test unless the quotes hold only an ellipsis, and a `>` block quote line never counts;
+- an ellipsis inside a placed block (compose's own text has the markers removed, so placed rows are never read);
+- every listed list step placed;
+- a decline (`action: fail`), as for C3 and C4.
+
+**Sentence (exact):** `The reader sees only this answer, and a shortened list is not the answer: put @@ROWS:<step id>@@ where the list belongs, and the code writes all <n> of its rows.` (n is the step's row count.) The block repeated after it already carries the asked-but-not-produced names and the spec syntax.
+
+**After a second reply with a problem:** the existing salvage, S2 (and S1, as for 038, 040 and 041). With no marker in the second reply, S2 writes the step as plain rows (`item`, not `file`), which the bench grader does not read (the stated limit of A6 in 2.7); a second reply that places the step with a spec gives rows the grader reads (items_answered 200), as the tests show.
+
+**Known limits:** a list that stops short with no elision mark; an elision line that is not on or right after the typed rows; prose that holds an ellipsis and one of the words directly after typed rows (for example "Most are billing... the rest follows no pattern") fires and costs one re-ask. None occurs in the replay (section 8).
+
+**Tests:** `tests/orchestrator/test_compose_placement_elided.py`, on `tests/fixtures/trial35h_compose_a.json` (written by `tests/fixtures/extract_trial35h_compose.py`, read-only from the DB; no D canary, no document text).
 
 ### 2.5 Requirement 5: what a check can and cannot catch
 
@@ -604,7 +634,7 @@ Each code is logged on the re-ask event (`orchestrator_decision`, `"reask": true
 |---|---|---|
 | BRT-ORC-037 | A rows marker's spec cannot be used (unknown field, duplicate name, empty, in brackets, unreadable entry, over 600 characters) | row_markers.parse_target |
 | BRT-ORC-038 | A rows marker is an element of a list, or sits below table rows, that compose wrote | compose_checks.nested_markers |
-| BRT-ORC-039 | Unused: reserved for C2, which the planner dropped | none |
+| BRT-ORC-039 | A list step's rows typed and cut short with an explicit elision, and the step placed by no marker (C5, ruling 36a; C2 never used it) | compose_checks.elided_lists |
 | BRT-ORC-040 | A long step output is neither placed nor present, and the answer points at a step | compose_checks.unplaced_long_outputs |
 | BRT-ORC-041 | Compose gave a value no step produced: for an item with no value for that field, or for an asked-but-not-produced field | compose_checks.invented_values |
 
@@ -688,37 +718,51 @@ Planner reading (4), 18-Nov-2026 (applied by the builder before any code):
 
 Run on 18-Nov-2026 against the code after review round 1 (`8d96103`), by `tests/fixtures/replay_compose_checks.py` (read-only over the git-ignored DBs; prints one JSON row per reply and writes nothing). It runs the marker checks (032, 037), C1 (038), C3 (040) and C4 (041) exactly as `_handle_compose_result` would (`_RowContext.problems`).
 
+**Re-run for ruling 36a (18-Nov-2026)** with C5 (039) added, over the same sources plus the trial runs `bench/results/trial32g_r1data`, `trial32g_r2data`, `trial35h_r1data` and `trial35h_r2data` (rows 16 to 23; `BORG_DATA_ROOT` points the script at the DBs from a worktree). The trial runs have ruling 32c, so their asked-but-not-produced list is read from the block of their first compose request. Every earlier row's fires are unchanged; the 039 column is new.
+
 **How the context is rebuilt.**
 - With a compose request in `outbound_requests` (lane on): the stage results and the document manifest of the run's first compose request; the lane mode from `runs.lane_mode`, or from the manifest wording when the column is missing (round 1).
 - Otherwise (lane off, no request ledger): each plan step's stored envelope. Round 1 stored no node id on envelopes; they are matched to the plan's node ids in planning order.
 - Node types and data scopes come from the plan and re_plan replies. The asked-but-not-produced list is empty (every stored run predates ruling 32c), except a second pass over round-2 job A with the list 32c would hold (the fixture's).
 
-**Sources searched.** Round 1: `bench/results/2026_11_17/dbs/*.db` (five runs with a compose reply; C had none). Round 2: `bench/results/2026_11_18/dbs/*.db` (four runs; `ruling23_live_check.db` holds no run). Demo: `demo/runs/db/demo.db` (five runs with a compose reply). Ruling-21 replay: `tests/fixtures/stage1_job_a_replay.json` (the other fixtures in `tests/fixtures/` hold no compose reply: packing items and request bodies, issues).
+**Sources searched.** Trial runs (36a re-run): `bench/results/trial32g_*/dbs/*.db` (six runs, eight replies) and `bench/results/trial35h_*/dbs/*.db` (two runs). Round 1: `bench/results/2026_11_17/dbs/*.db` (five runs with a compose reply; C had none). Round 2: `bench/results/2026_11_18/dbs/*.db` (four runs; `ruling23_live_check.db` holds no run). Demo: `demo/runs/db/demo.db` (five runs with a compose reply). Ruling-21 replay: `tests/fixtures/stage1_job_a_replay.json` (the other fixtures in `tests/fixtures/` hold no compose reply: packing items and request bodies, issues).
 
 **Grades.** The bench grader's figure for the run (`bench/results/<day>/<job>_borg_cloud_1.json`, `quality`); for demo runs, my reading of the instruction against the stored step results (said so in the row).
 
-| # | Source (DB, run) | Job | Reply | Checks that fire (hits) | Answer (grader) | Verdict |
-|---|---|---|---|---|---|---|
-| 1 | 2026_11_17 A_borg_cloud_1, 0ef867a2 | A, round 1 | `{"action": "compose"}`, no final text | none run: 029 path | BAD (run failed, BRT-ORC-009; items_answered 0) | not applicable |
-| 2 | 2026_11_17 A_borg_local_workers_1, 70d0c3b1 | A, round 1 local workers | `{"action": "continue", "next_nodes": ...}`, no final text; no list step or long output in its stage results, so no block | none run | BAD (run failed; items_answered 0) | not applicable |
-| 3 | 2026_11_17 B_borg_cloud_1, f8c9c899 | B, round 1 | the four files typed in full (long output n2, 10,929 characters) | none | RIGHT (18 checks passed, 0 failed) | no fire on a right answer. C3's "not present" condition is what keeps it quiet: n2 is retyped whole |
-| 4 | 2026_11_17 D_borg_cloud_1, 25fb0186 | D, round 1 | `{"action": "compose"}`, no final text | none run: 029 path | BAD (run failed; items_answered 0) | not applicable |
-| 5 | 2026_11_17 D_borg_local_workers_1, 2e070901 | D, round 1 local workers | `{"action": "continue", ...}`, no final text | none run: 029 path | BAD (run failed; items_answered 0) | not applicable |
-| 6 | 2026_11_18 A_borg_cloud_1, 1806143d | A, round 2 | 10 typed rows, then the marker inside the same `[` | 038 (1) | BAD (items_answered 0) | true catch |
-| 6b | same, with the 32c list | A, round 2 | same | 038 (1), 041 case 2 (9) | BAD | true catches: the 9 urgencies no step produced (email_004's typed values are exempt: the fix step pairs doc_004 with them) |
-| 7 | 2026_11_18 B_borg_cloud_1, 4d238266 | B, round 2 | a summary ending "copy each file from the stage result (n1)" | 040 (1) | BAD (0 of 6 machine checks passed; all four files missing) | true catch |
-| 8 | 2026_11_18 C_borg_cloud_1, 2fe90fe0 | C, round 2 | first reply: not logged (its `orchestrator_decision` event is missing; outbound rows 167 and 168 exist) | skipped: no reply to check | - | - |
-| 8b | same | C, round 2 | second reply (after 029): bare numbers 1 to 8, then filler contradictions | none | MIXED (facts 6 of 8, contradictions 0 of 2; the judge is informational) | no fire. The filler contradictions are a miss (known limit 1 below) |
-| 9 | 2026_11_18 D_borg_cloud_1, 372d53d3 | D, round 2 | all 60 rows typed, "medium" for the 31 notes with no result | 041 case 1 (31) | BAD (0.60 as scored, 11 of them guesses) | true catch, by C4 alone |
-| 10 | demo.db, 19f56430 | demo: 60 feedback lines, sentiment and feature table | per-line table typed | skipped: context cannot be rebuilt. Lane off (no request ledger) and the envelopes of n1 and n4 to n13 (the apply_to_each steps) are not stored; only the two failed state_ops are | - | - |
-| 11 | demo.db, e535b654 | demo: compare two remote-work policies | point-by-point comparison, risks, cost table | none run: no list step, no long output (the answerer fields are lists), so no block: the request is byte-identical to before | RIGHT by my reading (every point, risk and figure is in n1 to n3) | not applicable |
-| 12 | demo.db, e31a5330 | demo: internal notes, topic, owner, follow-up (raw_local) | one typed line per note ("Dock repairs: Mara Quill, yes"), then `@@ROWS:extract_notes@@` | none | RIGHT by my reading: all ten lines equal the stored rows; note 7 comes from the answerer retry_note_07_3 | no fire on a right answer |
-| 13 | demo.db, ece3d973 | demo: 60 feedback lines | counts and top features, then `@@ROWS_TABLE:n1@@` | none | RIGHT by my reading: the counts equal n2 and the features n3's top counts | no fire on a right answer |
-| 14 | demo.db, d04e0d8a | demo: 60 feedback lines | counts, top features "counting related variants", then `@@ROWS:n1@@` | none | RIGHT by my reading: the counts equal n2; the top features merge n3's variants, as the reply says. Its closing note calls the JSON rows "the table above" | no fire on a right answer |
-| 15 | stage1_job_a_replay.json (round-1 A, 0ef867a2) | A, ruling-21 replay | recorded `{"action": "compose"}` | none run: 029 path | BAD (as row 1) | not applicable |
-| 15b | same | A, ruling-21 replay | scripted `{"response": "@@ROWS:extract_urgency@@"}` (the ruling-21 test's reply) | none | RIGHT for this test's purpose (200 rows, all stored values) | no fire on a right answer |
+| # | Source (DB, run) | Job | Reply | Checks that fire (hits) | 039 (C5, ruling 36a) | Answer (grader) | Verdict |
+|---|---|---|---|---|---|---|---|
+| 1 | 2026_11_17 A_borg_cloud_1, 0ef867a2 | A, round 1 | `{"action": "compose"}`, no final text | none run: 029 path | not run | BAD (run failed, BRT-ORC-009; items_answered 0) | not applicable |
+| 2 | 2026_11_17 A_borg_local_workers_1, 70d0c3b1 | A, round 1 local workers | `{"action": "continue", "next_nodes": ...}`, no final text; no list step or long output in its stage results, so no block | none run | not run | BAD (run failed; items_answered 0) | not applicable |
+| 3 | 2026_11_17 B_borg_cloud_1, f8c9c899 | B, round 1 | the four files typed in full (long output n2, 10,929 characters) | none | no | RIGHT (18 checks passed, 0 failed) | no fire on a right answer. C3's "not present" condition is what keeps it quiet: n2 is retyped whole |
+| 4 | 2026_11_17 D_borg_cloud_1, 25fb0186 | D, round 1 | `{"action": "compose"}`, no final text | none run: 029 path | not run | BAD (run failed; items_answered 0) | not applicable |
+| 5 | 2026_11_17 D_borg_local_workers_1, 2e070901 | D, round 1 local workers | `{"action": "continue", ...}`, no final text | none run: 029 path | not run | BAD (run failed; items_answered 0) | not applicable |
+| 6 | 2026_11_18 A_borg_cloud_1, 1806143d | A, round 2 | 10 typed rows, then the marker inside the same `[` | 038 (1) | no | BAD (items_answered 0) | true catch |
+| 6b | same, with the 32c list | A, round 2 | same | 038 (1), 041 case 2 (9) | no | BAD | true catches: the 9 urgencies no step produced (email_004's typed values are exempt: the fix step pairs doc_004 with them) |
+| 7 | 2026_11_18 B_borg_cloud_1, 4d238266 | B, round 2 | a summary ending "copy each file from the stage result (n1)" | 040 (1) | no | BAD (0 of 6 machine checks passed; all four files missing) | true catch |
+| 8 | 2026_11_18 C_borg_cloud_1, 2fe90fe0 | C, round 2 | first reply: not logged (its `orchestrator_decision` event is missing; outbound rows 167 and 168 exist) | skipped: no reply to check | not run | - | - |
+| 8b | same | C, round 2 | second reply (after 029): bare numbers 1 to 8, then filler contradictions | none | no | MIXED (facts 6 of 8, contradictions 0 of 2; the judge is informational) | no fire. The filler contradictions are a miss (known limit 1 below) |
+| 9 | 2026_11_18 D_borg_cloud_1, 372d53d3 | D, round 2 | all 60 rows typed, "medium" for the 31 notes with no result | 041 case 1 (31) | no | BAD (0.60 as scored, 11 of them guesses) | true catch, by C4 alone |
+| 10 | demo.db, 19f56430 | demo: 60 feedback lines, sentiment and feature table | per-line table typed | skipped: context cannot be rebuilt. Lane off (no request ledger) and the envelopes of n1 and n4 to n13 (the apply_to_each steps) are not stored; only the two failed state_ops are | not run | - | - |
+| 11 | demo.db, e535b654 | demo: compare two remote-work policies | point-by-point comparison, risks, cost table | none run: no list step, no long output (the answerer fields are lists), so no block: the request is byte-identical to before | not run | RIGHT by my reading (every point, risk and figure is in n1 to n3) | not applicable |
+| 12 | demo.db, e31a5330 | demo: internal notes, topic, owner, follow-up (raw_local) | one typed line per note ("Dock repairs: Mara Quill, yes"), then `@@ROWS:extract_notes@@` | none | no | RIGHT by my reading: all ten lines equal the stored rows; note 7 comes from the answerer retry_note_07_3 | no fire on a right answer |
+| 13 | demo.db, ece3d973 | demo: 60 feedback lines | counts and top features, then `@@ROWS_TABLE:n1@@` | none | no | RIGHT by my reading: the counts equal n2 and the features n3's top counts | no fire on a right answer |
+| 14 | demo.db, d04e0d8a | demo: 60 feedback lines | counts, top features "counting related variants", then `@@ROWS:n1@@` | none | no | RIGHT by my reading: the counts equal n2; the top features merge n3's variants, as the reply says. Its closing note calls the JSON rows "the table above" | no fire on a right answer |
+| 15 | stage1_job_a_replay.json (round-1 A, 0ef867a2) | A, ruling-21 replay | recorded `{"action": "compose"}` | none run: 029 path | not run | BAD (as row 1) | not applicable |
+| 15b | same | A, ruling-21 replay | scripted `{"response": "@@ROWS:extract_urgency@@"}` (the ruling-21 test's reply) | none | no | RIGHT for this test's purpose (200 rows, all stored values) | no fire on a right answer |
+| 16 | trial32g_r1data A_borg_cloud_1, 1305fc53 | A, trial 32g round-1 data | a summary, then `@@ROWS:classify_emails_2 \| file=item, category=bucket, confidence=confidence, defer_reason=defer_reason@@` | none | no | RIGHT for what was produced (category 0.935, items_answered 200; urgency not produced, so accuracy 0.0) | no fire on a right answer |
+| 17 | trial32g_r1data C_borg_cloud_1, 14d94d7a | C, trial 32g round-1 data | first reply: numbered answers, then two markers naming steps that are not listed | 032 (1) | no | MIXED (facts 5 of 8, contradictions 0 of 2; the judge is informational) | 032 as before; no 039 |
+| 17b | same | C | second reply: the numbered answers, no marker | none | no | as row 17 | no fire |
+| 18 | trial32g_r2data A_borg_cloud_1, b7c5975f | A, trial 32g round-2 data | first reply: 199 rows typed in full, each with an urgency no step produced | 041 case 2 (199) | no | the run's answer is the second reply's (row 18b) | true catch (041), as live |
+| 18b | same | A | second reply: a summary, then `@@ROWS:classify_emails_2 \| file=item, category=bucket@@` | none | no | RIGHT for what was produced (category 0.935, items_answered 200; urgency not produced) | no fire on a right answer |
+| 19 | trial32g_r2data B_borg_cloud_1, 4e0fc474 | B, trial 32g round-2 data | the four files typed in full (lane off: context from the stored envelopes) | none | no | RIGHT (17 of 18 machine checks passed) | no fire on a right answer |
+| 20 | trial32g_r2data C_borg_cloud_1, 72e765c2 | C, trial 32g round-2 data | numbered answers, then a list of contradictions whose quoted excerpts hold "..." (six lines, e.g. `("77 units...259 planned" vs "75 units...271 planned")`) | none | no | MIXED (facts 6 of 8, contradictions 0 of 2; informational) | no fire: the quoted-excerpt ellipses are the false-positive form 36a names |
+| 21 | trial32g_r2data D_borg_cloud_1, 667206de | D, trial 32g round-2 data | all 60 rows typed in full in a ```` ```json ```` fence | none | no | RIGHT (accuracy 1.0, items_answered 60) | no fire on a right answer |
+| 22 | trial35h_r1data A_borg_cloud_1, ae6718f6 | A, trial 35h round-1 data | 10 typed rows, then `// ... (full list of all 200 entries follows the exact pattern above)` and `]` | 039 (1) | **yes** | BAD (items_answered 0) | true catch: the motivating reply of 36a |
+| 23 | trial35h_r2data A_borg_cloud_1, fe361aab | A, trial 35h round-2 data | all 200 rows typed in full | none | no | RIGHT (category 1.0, urgency 0.725, items_answered 200) | no fire on a right answer |
 
 **False positives on a right answer: none.** All six right answers (rows 3, 11 to 14, 15b) pass every check, so no `fix:` commit was needed. Every fire (rows 6, 6b, 7 and 9) is a true catch on an answer the grader scores as bad.
+
+**039 after the 36a re-run: one fire, the motivating reply (row 22).** No right answer fires it (rows 3, 11 to 14, 15b, 16, 18b, 19 to 21, 23), nor any other stored reply. The only stored ellipses besides row 22 are the quoted excerpts of row 20, which it leaves alone.
 
 **Known limits (misses on bad answers):**
 1. C round 2 (row 8b): the filler contradictions, and units missing from the numbers. Compose selected and dropped values; it did not invent one next to an item, so C4 has nothing to read (2.5, "not caught").

@@ -3751,8 +3751,10 @@ async def _handle_compose_result(
     given, so the code-side block was sent): the chosen answer (or a
     declined rationale) is checked for markers that cannot be placed
     (BRT-ORC-032, BRT-ORC-037), rows typed around a rows marker
-    (BRT-ORC-038), and, for an answer only, a long output pointed at but not
-    placed (BRT-ORC-040) and values no step produced (BRT-ORC-041). Any
+    (BRT-ORC-038), and, for an answer only, a list step's rows typed and cut
+    short with an elision instead of placed (BRT-ORC-039, ruling 36a), a long
+    output pointed at but not placed (BRT-ORC-040) and values no step
+    produced (BRT-ORC-041). Any
     problem asks compose once more with one repair message
     (``reask_invalid``); a second reply with problems is salvaged
     (``_salvage_after_check``). Valid markers are replaced by the stored rows
@@ -4142,7 +4144,7 @@ def _salvage_sections(results: dict, lane: Optional[LaneContext], skip=(),
     ``_salvage_finished_results``). With ``rows`` (salvage after a failed
     check, ruling 32e) a list step is written in the plain marker's form
     (flat fields, file-name labels) with the rows guard; with
-    ``long_verbatim`` (S1, after BRT-ORC-038, 040 or 041) a step's long
+    ``long_verbatim`` (S1, after BRT-ORC-038 to 041) a step's long
     string fields are written verbatim, with the text guard on a raw one.
     Steps in ``skip`` (placed already) are left out."""
     if not results:
@@ -4223,7 +4225,7 @@ def _salvage_after_check_text(results: dict, lane: Optional[LaneContext], rows: 
     """S2 and S1 (ruling 32e, 2.4.5): the second reply's valid markers placed
     from stored results (each under ``## <target>``, with the guards); then
     the finished steps not placed, list steps in the plain marker's form, and
-    long string fields verbatim when a check 038, 040 or 041 failed.
+    long string fields verbatim when a check 038 to 041 failed.
     Compose's own text is dropped."""
     from src.orchestrator import compose_checks, row_markers  # noqa: PLC0415
 
@@ -4246,7 +4248,7 @@ def _salvage_after_check_text(results: dict, lane: Optional[LaneContext], rows: 
                 guard(step_rows, body)
         placed.append(f"## {target.key}\n{body}")
         skip.update(target.ids)
-    s1 = any(c in ("BRT-ORC-038", "BRT-ORC-040", "BRT-ORC-041") for c in codes)
+    s1 = any(c in ("BRT-ORC-038", "BRT-ORC-039", "BRT-ORC-040", "BRT-ORC-041") for c in codes)
     sections, withheld = _salvage_sections(results, lane, skip=skip, rows=rows,
                                            long_verbatim=s1)
     return _salvage_text(placed, sections, withheld)
@@ -4257,7 +4259,7 @@ async def _salvage_after_check(results: dict, run_id: UUID, db_path: str, rows: 
                                rejects: Optional[dict] = None) -> str:
     """Salvage after a failed repair re-ask (ruling 32e): ``answer_kind =
     "salvaged"`` and one warning event whose code is the headline (the first
-    of 032, 037, 038, 040, 041 present) and whose ``codes`` carry all of
+    of 032, 037, 038, 039, 040, 041 present) and whose ``codes`` carry all of
     them. Nothing finished: the run fails with the headline code."""
     head = codes[0]
     msg = ("compose's reply could not be used, also when asked again; the answer is "

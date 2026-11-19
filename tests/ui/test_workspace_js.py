@@ -557,8 +557,8 @@ def test_not_produced_line_renders_from_the_redacted_note_shape(tmp_path):
 
 
 def test_compose_check_codes_read_in_plain_words(tmp_path):
-    """Ruling 32e: the codes of the checks after compose have plain-word labels
-    (039 has none: the planner dropped C2), and 032's label is widened."""
+    """Rulings 32e and 36a: the codes of the checks after compose have plain-word
+    labels (039 is the cut-short list of 36a), and 032's label is widened."""
     codes = ["BRT-ORC-032", "BRT-ORC-037", "BRT-ORC-038", "BRT-ORC-040", "BRT-ORC-041", "BRT-ORC-039"]
     got = js(tmp_path, f"return {json.dumps(codes)}.map(W.stageWords);")
     assert got == [
@@ -567,7 +567,7 @@ def test_compose_check_codes_read_in_plain_words(tmp_path):
         "Rows were typed around a row marker",
         "The answer pointed to a step result instead of placing it",
         "The answer gave a value no step produced",
-        "Working",
+        "The answer cut a list short instead of placing it",
     ]
 
 

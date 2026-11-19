@@ -2,8 +2,9 @@
 (docs/design/compose_placement.md, section 2.7 "Unit tests").
 
 ``row_markers`` (targets, specs, joins, labels, OUTPUT, rendering) and
-``compose_checks`` (C1, C3, C4, the item model). C2 (BRT-ORC-039) was dropped
-by the planner and has no test.
+``compose_checks`` (C1, C3, C4, the item model). C2 was dropped by the planner
+and has no test; C5 (BRT-ORC-039, ruling 36a) is tested in
+test_compose_placement_elided.py.
 """
 import json
 from types import SimpleNamespace

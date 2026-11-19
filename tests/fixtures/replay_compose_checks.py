@@ -2,7 +2,10 @@
 
 Reads, read-only, every git-ignored run DB that holds a compose reply:
 ``bench/results/2026_11_17/dbs/*.db`` (round 1), ``bench/results/2026_11_18/dbs/*.db``
-(round 2) and ``demo/runs/db/demo.db`` (the demo runs). For each compose reply
+(round 2), ``bench/results/trial32g_*/dbs/*.db`` and ``bench/results/trial35h_*/dbs/*.db``
+(the trial re-runs, ruling 36a) and ``demo/runs/db/demo.db`` (the demo runs). The DBs
+are looked for under ``BORG_DATA_ROOT`` when set (a worktree has none), else the
+repository root. For each compose reply
 it rebuilds the compose context the way ``extract_round2_compose.py`` does:
 
 - with a compose request in ``outbound_requests`` (lane on): the stage results
@@ -12,11 +15,13 @@ it rebuilds the compose context the way ``extract_round2_compose.py`` does:
 - otherwise (lane off, no request ledger): each plan step's stored envelope.
 
 Node types and data scopes come from the plan and re_plan replies. The
-asked-but-not-produced list is empty (every stored run predates ruling 32c),
-except a second pass over round-2 job A with the list 32c would hold.
+asked-but-not-produced list is the one the first compose request's block
+names (the trial runs, which have ruling 32c); empty for the rounds and the
+demo, which predate 32c, except a second pass over round-2 job A with the list
+32c would hold.
 
-It then runs the marker checks (BRT-ORC-032, 037), C1 (038), C3 (040) and C4
-(041) as ``_handle_compose_result`` would (``_RowContext.problems``) and
+It then runs the marker checks (BRT-ORC-032, 037), C1 (038), C5 (039, the
+elided-list check of ruling 36a), C3 (040) and C4 (041) as ``_handle_compose_result`` would (``_RowContext.problems``) and
 prints one row per reply. No DB content is written anywhere.
 
 Run from the repository root:
@@ -38,15 +43,20 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from extract_round2_compose import (  # noqa: E402
     ASKED_A, STAGE_HEAD, _documents, _plan_nodes, _scope,
 )
+from extract_trial35h_compose import asked_from_block  # noqa: E402
 from src.envelopes.schema import InboundEnvelope  # noqa: E402
 from src.lane.context import LaneContext, lane_scope  # noqa: E402
 from src.lane.documents import Document, DocPart, LoadedDocuments  # noqa: E402
 from src.lane.settings import LaneSettings  # noqa: E402
 from src.orchestrator import engine  # noqa: E402
 
-DBS = (sorted(glob.glob(str(ROOT / "bench/results/2026_11_17/dbs/*.db")))
-       + sorted(glob.glob(str(ROOT / "bench/results/2026_11_18/dbs/*.db")))
-       + [str(ROOT / "demo/runs/db/demo.db")])
+DATA = Path(os.environ.get("BORG_DATA_ROOT") or ROOT)
+DBS = (sorted(glob.glob(str(DATA / "bench/results/2026_11_17/dbs/*.db")))
+       + sorted(glob.glob(str(DATA / "bench/results/2026_11_18/dbs/*.db")))
+       + sorted(glob.glob(str(DATA / "bench/results/trial32g_*/dbs/*.db")))
+       + sorted(glob.glob(str(DATA / "bench/results/trial35h_*/dbs/*.db")))
+       + [str(DATA / "demo/runs/db/demo.db")])
+
 
 
 def _decisions(con, run_id):
@@ -97,7 +107,7 @@ def _env(status, output, node_type, scope):
 
 
 def context(con, run_id, lane_col):
-    """(results, lane mode, documents, how) for a run's compose calls."""
+    """(results, lane mode, documents, how, asked list) for a run's compose calls."""
     nodes = _plan_nodes(_decisions(con, run_id))
     row = con.execute("select body from outbound_requests where run_id=? and "
                       "purpose='orchestrator:compose' order by started_at, rowid limit 1",
@@ -116,7 +126,8 @@ def context(con, run_id, lane_col):
             failed = isinstance(out, dict) and set(out) == {"failure"}
             results[sid] = _env("failed" if failed else "resolved", out,
                                 node.get("type") or _type_of(out), _scope(node))
-        return results, mode, docs, "first compose request"
+        asked = asked_from_block(body["messages"][-1]["content"])
+        return results, mode, docs, "first compose request", asked
     # Round 1 stored no node id on the envelope: top-level envelopes are then
     # matched to the plan's node ids in the order the steps were planned.
     unnamed = iter(list(nodes))
@@ -131,7 +142,8 @@ def context(con, run_id, lane_col):
         node = nodes[sid]
         results[sid] = _env(inbound.get("status") or "resolved", inbound.get("output") or {},
                             node.get("type") or _type_of(inbound.get("output")), _scope(node))
-    return results, lane_col or "off", [], "stored envelopes"
+    return results, lane_col or "off", [], "stored envelopes", []
+
 
 
 def _has(con, table):
@@ -177,8 +189,8 @@ def main():
                 continue
             lane_col = con.execute("select lane_mode from runs where run_id=?", (run_id,)).fetchone()[0] \
                 if "lane_mode" in cols else None
-            results, mode, docs, how = context(con, run_id, lane_col)
-            passes = [((), "")]
+            results, mode, docs, how, block_asked = context(con, run_id, lane_col)
+            passes = [(block_asked, "")]
             if "2026_11_18" in db and os.path.basename(db).startswith("A_"):
                 passes.append((ASKED_A, " +32c list"))
             for asked, tag in passes:
@@ -191,7 +203,8 @@ def main():
                     missing = [n for n, node in _plan_nodes(decisions).items()
                                if n not in results and how == "stored envelopes"]
                     print(json.dumps({
-                        "db": os.path.relpath(db, ROOT).replace(os.sep, "/"), "run": run_id[:8],
+                        "db": os.path.relpath(db, DATA).replace(os.sep, "/"), "run": run_id[:8],
+                        "asked": len(asked),
                         "missing_steps": missing,
                         "reply": n, "pass": tag.strip() or "as stored", "context": how,
                         "lane": mode, "list_steps": list(ctx.steps), "long_outputs": list(ctx.outputs),
