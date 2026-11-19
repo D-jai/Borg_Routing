@@ -1,10 +1,10 @@
 # Trial 32g, 18-Nov-2026: development trial on old data; not a round; no figure here is cited anywhere
 
-This page records an end-to-end live trial of the cloud BORG arm after the ruling-32 fixes (planner rulings 32g and 33a, Deej's ruling 14: cap US$5). It is not a bench round. The data is round 1's and round 2's data, now development data. No README line, deck number, claim or post cites any figure on this page.
+This page records an end-to-end live trial of the cloud BORG arm after the ruling-32 fixes (planner rulings 32g and 33a, the owner's ruling 14: cap US$5). It is not a bench round. The data is round 1's and round 2's data, now development data. No README line, deck number, claim or post cites any figure on this page.
 
 ## What ran
 
-- Head `d88931f` (ruling 32 fixes 32a to 32e built and reviewed; not pushed). The planner-prompt line of ruling 33c was not in: Deej had not answered.
+- Head `d88931f` (ruling 32 fixes 32a to 32e built and reviewed; not pushed). The planner-prompt line of ruling 33c was not in: the owner had not answered.
 - Arm: `borg_cloud` only. No direct re-runs: each job is compared with the stored direct result for the same data. The files `*_direct_1.json` in the trial folders are copies of `bench/results/2026_11_18/` (round-2 data) and `bench/results/2026_11_17/` (round-1 data), put there so the job C judge has its pair.
 - No local-model runs. Job D therefore has no comparison: by rule it compares its local arm with its cloud arm.
 - Part 1, round-2 data (`bench/data` as committed): jobs A, B, C, D, folder `trial32g_r2data`, 16:22 to 16:27 Toronto time. Docker served, so job B's container checks ran.
@@ -31,7 +31,7 @@ The trial win rule is the round's rule on one run: cost at most 70% of the store
 
 - What the fixes changed: packing (A's 200 items in 10 calls, D's 60 in 3), the optional "(only if" field (D's 31 failures gone, D 0.60 to 1.00), the plan checks 035 and 036 (they caught the bad schema and the stray key), and compose's check 041 (it caught a guessed value and the re-ask gave an honest answer). B's answer now holds its files.
 - Job A loses because no step produced urgency. Correction after the evidence (causes note, "trial 32g"): in the round-2-data run the planner's FIRST plan already added urgency through `skill_args.extra_fields`. BRT-ORC-035 refused it only because the schema also named `file` and `category`, renames of the skill's `item` and `bucket`. The 200-character message cut the word `urgency`, and the re_plan dropped the field. In the round-1-data run the planner never added it. In the round-2-data run its two later answerer attempts failed, and their US$0.127 put A over direct. Category at 0.935 would also lose: the rule needs accuracy within 2 points of direct's 1.00.
-- Job C loses on the judge: no call sees two documents together (ruling 33c's question to Deej).
+- Job C loses on the judge: no call sees two documents together (ruling 33c's question to the owner).
 - Job B loses by one reference test.
 - The evidence on job A is in `docs/design/bench_round2_measurements.md`, section "trial 32g".
 
