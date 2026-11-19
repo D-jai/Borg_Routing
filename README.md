@@ -1,6 +1,6 @@
 # BORG_ROUTE
 
-Breaks a job into steps and sends each step to the cheapest model that can do it, local or cloud. <!-- claim C01 --> With the private lane on, the steps that read your documents run only on your own machines. <!-- claim C11 --> <!-- claim C13 -->
+Breaks a job into steps and sends each step to the cheapest model that can do it, local or cloud. <!-- claim C01 --> With the private lane on (`raw_local` or `all_local`), the steps that read your documents run only on your own machines. <!-- claim C36 -->
 
 <!-- TODO (planner): add the Run-view screenshot here. docs/design/screens/ does not exist yet; the CI interface check (work order 4.6) produces the images. Do not invent an image path before then. -->
 
