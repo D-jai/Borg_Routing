@@ -21,7 +21,17 @@ Lead session `borg-route-f1` (Opus 5.5) since 02:20 on 16-Nov-2026. Every work o
 
 If this session stopped abruptly: `git log` and `git status` show what landed; any uncommitted changes belong to an in-progress builder: read the diff, finish or stash it, record which in the build log.
 
-## Where I left off (18-Nov-2026, about 15:40)
+## Where I left off (18-Nov-2026, about 20:55)
+
+- **The ruling 32 to 36 fix cycle is pushed and CI is green.** Head `e97bd70` on `showcase`; CI run 44437792274 passed on Python 3.11 and 3.13 (the full suite, run once).
+- **Trial 32g is closed** at US$1.358 of US$5 (`bench/results/trial32g_report.md`). No job won by the rule. Job A on the fixed path runs at 50 to 55% of direct's cost, with category 0.98 to 1.00 and light-tier urgency about 0.73.
+- **Waiting on:**
+  - Deej on round 3 (planner ruling 33b; no freeze is prepared);
+  - Deej on the protected-file questions the planner holds (job C's compare-documents line; the answerer's "one JSON list" clash; the stale deferrals-table comment; state_query being inert).
+- **Not started:** 4.5 replay and 5.2 (released by ruling 31g; they wait on the planner's next word after this cycle).
+- Rulings and build rows are in BUILD.md sections 8 and 9.
+
+## Earlier waypoint (18-Nov-2026, about 15:40)
 
 - **Planner ruling 32 (fixes from the round-2 causes note)** is being built on `showcase`. Nothing is pushed. 32c and 32e ship in one push; CI runs once, at PR time.
 - **Done and reviewed:**
