@@ -1,16 +1,14 @@
-# Claude — Project Onboarding
+# BORG_ROUTE
 
-## Read First (in this order)
-1. `AGENTS.md` — project status + boot order
-2. `DESIGN_PRINCIPLES.md` — Two Laws + architectural invariants
-3. `CODING_STANDARD_CORE.md` — commit + error-code + test conventions
+@AGENTS.md
 
-## Memory
-- Global memory: `C:\Users\Deejr\.claude\memory\MEMORY.md`
-- Stage memory: `C:\Stage\memory\MEMORY.md`
-- Full memory instructions: `C:\Users\Deejr\.claude\CLAUDE.md`
+## Read first
 
-## Session End
-1. All tests pass
-2. Commit scoped changes
-3. Remind Deej to say **"save to memory"** if anything worth keeping was learned
+1. `AGENTS.md`: project status and boot order (imported above).
+2. `DESIGN_PRINCIPLES.md`: the Two Laws and the architectural invariants. Never break an invariant to make a step pass; raise it with the maintainer instead.
+3. `CONTRIBUTING.md`: the commit law.
+
+## Session end
+
+1. Tests pass, or say which do not.
+2. Commit only the files the task touched; push only when asked.

@@ -17,6 +17,8 @@ Error codes:
 from __future__ import annotations
 
 import logging
+import os
+import re
 from pathlib import Path
 from typing import Optional
 
@@ -32,6 +34,42 @@ _OPENROUTER_MODELS_URL = "https://openrouter.ai/api/v1/models"
 _OPENROUTER_API_BASE = "https://openrouter.ai/api"
 _CURATED_MODELS_PATH = "data/curated_models.yaml"
 _TIMEOUT = 5.0
+_DEFAULT_LMSTUDIO_URLS = [f"http://localhost:{p}" for p in (1234, 1235, 1236, 1237)]
+_DEFAULT_OLLAMA_URL = "http://localhost:11434"
+
+
+def _clean_url(raw: str) -> Optional[str]:
+    """Return ``raw`` without a trailing slash if it is an http(s) URL with a host."""
+    url = raw.strip().rstrip("/")
+    if re.fullmatch(r"https?://[^\s/]+(/[^\s]*)?", url):
+        return url
+    if url:
+        logger.warning("Ignoring malformed local server address %r (need http:// or https://)", raw)
+    return None
+
+
+def _url_list_from_env(var: str) -> list[str]:
+    urls: list[str] = []
+    for part in os.environ.get(var, "").split(","):
+        url = _clean_url(part)
+        if url and url not in urls:
+            urls.append(url)
+    return urls
+
+
+def lmstudio_base_urls() -> list[str]:
+    """LM Studio servers: ``LMSTUDIO_BASE_URLS`` (comma-separated), else the four default ports."""
+    return _url_list_from_env("LMSTUDIO_BASE_URLS") or list(_DEFAULT_LMSTUDIO_URLS)
+
+
+def ollama_base_url() -> str:
+    """Ollama server: ``OLLAMA_BASE_URL``, else http://localhost:11434."""
+    return _clean_url(os.environ.get("OLLAMA_BASE_URL", "")) or _DEFAULT_OLLAMA_URL
+
+
+def local_openai_base_urls() -> list[str]:
+    """Other OpenAI-compatible local servers: ``LOCAL_OPENAI_BASE_URLS`` (optional)."""
+    return _url_list_from_env("LOCAL_OPENAI_BASE_URLS")
 
 
 def _lmstudio_model_id(raw_id: str) -> str:
@@ -75,19 +113,27 @@ def _load_curated_ids(path: str = _CURATED_MODELS_PATH) -> set[str]:
 
 
 async def discover_lmstudio(
-    ports: list[int] = [1234, 1235, 1236, 1237],
+    ports: Optional[list[int]] = None,
+    base_urls: Optional[list[str]] = None,
 ) -> list[ModelInfo]:
-    """Discover models loaded in LM Studio on the given ports."""
+    """Discover models loaded in LM Studio.
+
+    Addresses come from ``base_urls``, else ``ports`` (on localhost), else
+    ``LMSTUDIO_BASE_URLS``, else the four default localhost ports.
+    """
+    if base_urls is None:
+        base_urls = (
+            [f"http://localhost:{p}" for p in ports] if ports is not None else lmstudio_base_urls()
+        )
     found: list[ModelInfo] = []
     async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
-        for port in ports:
-            base = f"http://localhost:{port}"
+        for base in base_urls:
             try:
                 resp = await client.get(f"{base}/v1/models")
                 resp.raise_for_status()
                 data = resp.json()
             except Exception as exc:
-                logger.debug("LM Studio port %d not reachable: %s", port, exc)
+                logger.debug("LM Studio at %s not reachable: %s", base, exc)
                 continue
 
             for item in data.get("data", []):
@@ -108,9 +154,14 @@ async def discover_lmstudio(
 
 
 async def discover_ollama(
-    base_url: str = "http://localhost:11434",
+    base_url: Optional[str] = None,
 ) -> list[ModelInfo]:
-    """Discover models available in Ollama via `GET /api/tags`."""
+    """Discover models available in Ollama via `GET /api/tags`.
+
+    ``base_url`` defaults to ``OLLAMA_BASE_URL``, else http://localhost:11434.
+    """
+    if base_url is None:
+        base_url = ollama_base_url()
     found: list[ModelInfo] = []
     async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
         try:
@@ -127,12 +178,20 @@ async def discover_ollama(
                 continue
             details = item.get("details", {})
             context_length = details.get("context_length") or 4096
+            # Ollama lists cloud-served models with a remote host and a
+            # "-cloud" tag; they are served from localhost but run remotely,
+            # so the on-premise lane must never count them as local.
+            remote = bool(
+                item.get("remote_host") or item.get("remote_model")
+                or name.lower().endswith(("-cloud", ":cloud"))
+            )
             found.append(
                 ModelInfo(
                     model_id=_ollama_model_id(name),
                     source="ollama",
                     endpoint=base_url,
                     context_length=int(context_length),
+                    remote=remote,
                 )
             )
     return found
@@ -250,25 +309,74 @@ async def discover_custom_key(
     return found
 
 
+def _local_server_name(base_url: str) -> str:
+    """Stable id-safe name for a server address, e.g. 'local_vllm_host_8001'."""
+    host = re.sub(r"^https?://", "", base_url)
+    return "local_" + re.sub(r"[^A-Za-z0-9]+", "_", host).strip("_")
+
+
+async def discover_local_openai(
+    base_urls: Optional[list[str]] = None,
+) -> list[ModelInfo]:
+    """Discover models on OpenAI-compatible local servers via ``/v1/models``.
+
+    Addresses default to ``LOCAL_OPENAI_BASE_URLS`` (none when unset). Rows get
+    ``source="custom_key"`` and keep the server address in ``endpoint``, so a
+    later "local" flag can be derived from it. Unreachable servers are skipped.
+    """
+    if base_urls is None:
+        base_urls = local_openai_base_urls()
+    found: list[ModelInfo] = []
+    async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+        for base in base_urls:
+            try:
+                resp = await client.get(f"{base}/v1/models")
+                resp.raise_for_status()
+                data = resp.json()
+            except Exception as exc:
+                logger.warning("BRT-REG-001: Local server at %s not reachable: %s", base, exc)
+                continue
+            name = _local_server_name(base)
+            for item in data.get("data", []):
+                raw_id = item.get("id", "")
+                if not raw_id:
+                    continue
+                context_length = item.get("context_length") or item.get("context_window") or 4096
+                found.append(
+                    ModelInfo(
+                        model_id=f"custom_{name}/{raw_id}",
+                        source="custom_key",
+                        endpoint=base,
+                        context_length=int(context_length),
+                    )
+                )
+    return found
+
+
 async def reconcile_local_rows(
     matrix: CapabilityMatrix,
     discovered_ids: set[str],
 ) -> int:
-    """Mark local rows (lmstudio/ollama) unavailable if not seen this pass.
+    """Mark local rows (lmstudio/ollama/local OpenAI servers) unavailable if not seen.
 
     "Unavailable" means ``endpoint`` is cleared and ``checked`` forced to False.
     The row is kept so operator-assigned scores / notes survive; it just can't
     be routed to until discovery sees it again.
 
-    OpenRouter and custom_key rows are never reconciled — their authoritative
-    source is the curated list / operator-provided credentials, not live probing.
+    Local OpenAI-compatible rows are the ``custom_key`` rows whose id starts
+    ``custom_local_`` (see :func:`discover_local_openai`). OpenRouter and other
+    custom_key rows are never reconciled — their authoritative source is the
+    curated list / operator-provided credentials, not live probing.
 
     Returns:
         Number of rows reconciled.
     """
     reconciled = 0
     for m in matrix.all():
-        if m.source not in ("lmstudio", "ollama"):
+        is_local_custom = m.source == "custom_key" and m.model_id.startswith(
+            "custom_local_"
+        )
+        if m.source not in ("lmstudio", "ollama") and not is_local_custom:
             continue
         if m.model_id in discovered_ids:
             continue
@@ -296,6 +404,7 @@ async def discover_all(
     results = await asyncio.gather(
         discover_lmstudio(),
         discover_ollama(),
+        discover_local_openai(),
         discover_openrouter(api_key=openrouter_key),
         return_exceptions=True,
     )
@@ -316,6 +425,8 @@ async def discover_all(
                         "endpoint": model.endpoint or existing.endpoint,
                         "context_length": model.context_length,
                         "pricing": model.pricing or existing.pricing,
+                        # A remote flag, once reported, sticks (lane safety).
+                        "remote": model.remote or existing.remote,
                     }
                 )
                 matrix.upsert(merged)

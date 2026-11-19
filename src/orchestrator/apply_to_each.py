@@ -15,13 +15,73 @@ Error codes:
 - BRT-APE-002: child envelope dispatch failed (individual failures go to failures[])
 - BRT-APE-003: concurrency_limit invalid
 - BRT-APE-004: max_depth would be exceeded by child envelopes
-- BRT-APE-005: no items to process (empty list)
+- BRT-APE-005: no items to process (empty list, a ref given as an empty
+               list, or a ref naming a step that failed)
+- BRT-APE-006: the step's inputs_ref / items_ref names no step of this run
+               (or is neither a step id nor a list) and it has no inline
+               items; failed before any model call (planner ruling 1a).
+               On a raw (lane) step both are shown upward as code+doc only.
+- BRT-APE-007: BORG_PACK_MAX_ITEMS is not a whole number of 0 or more;
+               packing is off for the step (warning event, ruling 23)
+- BRT-APE-008: failed_items_only named a step that is not a per-item step;
+               all items run (warning event, ruling 32d(i))
+
+Packing (planner ruling 23, ``src/orchestrator/packing.py``): a step whose
+calls go to a cloud host may send several small items in one call. Each item
+still has its own child task, envelope and stored result, filed by
+``_file_env`` exactly as a single call's. With ``BORG_PACK_MAX_ITEMS`` at 0
+or 1, or for any step that may not be packed, the items run as before.
 """
 import asyncio
+import logging
 import uuid
 from typing import Optional
 
 from src.envelopes.schema import InboundEnvelope, WrappedTask
+
+
+_NAME_MAX = 40   # a step name shown in a failure text is cut to this many characters
+
+
+def _short(name: object) -> str:
+    return str(name)[:_NAME_MAX]
+
+
+def unresolved_ref_message(name: object) -> str:
+    """BRT-APE-006 failure text for a ref that names no step.
+
+    The guidance comes first and the name last, cut to 40 characters, so the
+    whole text fits the 200-character cap on what re_plan is shown.
+    """
+    return (
+        "BRT-APE-006: a list from the user's message belongs in `items`; "
+        "`inputs_ref`/`items_ref` must name a step of this run, not a parent's. "
+        f"Not a step id: '{_short(name)}'"
+    )
+
+
+def bad_ref_type_message(key: str, value: object) -> str:
+    """BRT-APE-006 failure text for a ref that is neither a string nor a list."""
+    return (
+        f"BRT-APE-006: `{key}` must be a step id or a list of items, got "
+        f"{type(value).__name__}; this step has no items and made no model call."
+    )
+
+
+def empty_ref_list_message(key: str) -> str:
+    """BRT-APE-005 failure text for a ref given as an empty list."""
+    return (
+        f"BRT-APE-005: `{key}` is an empty list, so this step has no items and "
+        f"made no model call."
+    )
+
+
+def failed_ref_message(name: object) -> str:
+    """BRT-APE-005 failure text for a ref naming a step that failed."""
+    return (
+        "BRT-APE-005: the step this one takes its items from failed, so it has "
+        f"no items and made no model call. Step: '{_short(name)}'"
+    )
 
 
 def _resolve_items(task: WrappedTask) -> list:
@@ -34,7 +94,16 @@ def _resolve_items(task: WrappedTask) -> list:
     Raises:
         ValueError: BRT-APE-001 if items cannot be resolved.
         ValueError: BRT-APE-005 if the resolved items list is empty.
+        ValueError: BRT-APE-006 if the step's ref names no step and it has
+            no items of its own.
     """
+    ref_failure = task.dependency_input.get("ref_failure")
+    if ref_failure and not task.dependency_input.get("items"):
+        raise ValueError(str(ref_failure))
+    unresolved = task.dependency_input.get("unresolved_ref")
+    if unresolved and not task.dependency_input.get("items"):
+        raise ValueError(unresolved_ref_message(unresolved))
+
     # Direct items list (preferred — already resolved by state_op, or by
     # _build_task_from_node when inputs_ref pointed at a prior node).
     items = task.dependency_input.get("items")
@@ -54,6 +123,8 @@ def _resolve_items(task: WrappedTask) -> list:
                     f"points at an upstream node with a non-empty items/"
                     f"results list, or populate node['items'] directly."
                 )
+            # inputs_ref given as a list is the items (ruling 1a review).
+            return inputs_ref_inline
         return items
 
     # inputs_ref as a list of strings (simple inline items)
@@ -79,11 +150,25 @@ def _make_child_task(
     index: int,
     level_suffix: str,
 ) -> WrappedTask:
-    """Create a child answerer WrappedTask for one item."""
+    """Create a child answerer WrappedTask for one item.
+
+    On-premise lane: a child inherits its parent's ``data_scope``. An item
+    that is a document (part) id becomes the child's ``documents``; its
+    context names the id only, and the executor loads the text.
+    """
     if isinstance(item, dict):
         item_context = str(item)
     else:
         item_context = str(item)
+
+    documents: list[str] = []
+    if parent.data_scope == "raw":
+        from src.lane.context import current_lane  # noqa: PLC0415
+
+        lane = current_lane()
+        if lane is not None and lane.is_part_id(item):
+            documents = [item]
+            item_context = f"Document id: {item}"
 
     child_level = parent.level_path + level_suffix
 
@@ -99,13 +184,57 @@ def _make_child_task(
         model_endpoint=parent.model_endpoint,
         model_name=parent.model_name,
         instruction=parent.instruction,
+        governance_instruction=parent.governance_instruction,
         context=item_context,
         output_schema=parent.output_schema,
         max_output_tokens=parent.max_output_tokens,
         trigger_reason=f"apply_to_each:{parent.envelope_id}:item_{index}",
         skill_id=parent.skill_id,
         skill_version=parent.skill_version,
+        extra_fields=list(parent.extra_fields),
+        data_scope=parent.data_scope,
+        documents=documents,
     )
+
+
+def _failure_reason(child: WrappedTask, reason: object,
+                    env: Optional[InboundEnvelope] = None,
+                    exc: Optional[BaseException] = None) -> object:
+    """A raw child's failure as seen upward: code plus document id only.
+
+    Model-written text is never parsed for a code, in any mode: a failure
+    the model reported is BRT-LANE-004 (raw_local/all_local) or BRT-ANS-010
+    (by_reference). In ``by_reference`` (no output guard ran) a raw child's
+    failure is shown by the non-raw rules: ``{"code", "message"}`` with the
+    first 200 characters, unless the runtime built a code + doc failure.
+    """
+    if child.data_scope != "raw":
+        return reason
+    from src.lane.errors import RawStepError  # noqa: PLC0415
+
+    if isinstance(exc, RawStepError):
+        # by_reference: raised while the item ran (a LaneError such as
+        # BRT-LANE-007, or a runtime error): code + doc ids + 200 characters.
+        return exc.failure
+    from src.lane.context import (  # noqa: PLC0415
+        RAW_FAILURE_DEFAULT, failure_of, lane_failure_code, raw_failure_code,
+        raw_failures_hidden,
+    )
+
+    # A failure the runtime built (output guard or lane refusal) keeps its
+    # code and document ids in every mode.
+    code = lane_failure_code(env) if env is not None else None
+    if code:
+        return failure_of(code, list(child.documents))
+    from_model = env is not None and env._reason_from_model
+    if raw_failures_hidden():
+        # Otherwise the reason is a runtime exception: its leading code or a
+        # fixed one. A model-written reason is never parsed.
+        code = RAW_FAILURE_DEFAULT if from_model else raw_failure_code(reason)
+        return failure_of(code, list(child.documents))
+    text = str(reason or "")
+    code = "BRT-ANS-010" if from_model else raw_failure_code(text, "BRT-ORC-004")
+    return {"code": code, "message": text[:200]}
 
 
 async def _dispatch_child(
@@ -115,6 +244,25 @@ async def _dispatch_child(
     """Dispatch a single child task through the executor."""
     from src.agents.executor import execute
     return await execute(task, db_path=db_path)
+
+
+async def _raw_ref_failure(task: WrappedTask, exc: Exception, db_path: str) -> InboundEnvelope:
+    """A raw step's BRT-APE-005/006: the lane's code+doc failure shape."""
+    from src.lane.context import failed_envelope, raw_failure_code  # noqa: PLC0415
+    from src.logging.writer import write_event  # noqa: PLC0415
+
+    code = raw_failure_code(exc, "BRT-APE-005")
+    try:
+        await write_event(
+            "error",
+            run_id=task.run_id,
+            envelope_id=task.envelope_id,
+            decision={"code": code, "msg": "raw step has no items", "error": str(exc)[:2000]},
+            db_path=db_path,
+        )
+    except Exception:
+        pass
+    return failed_envelope(task, code)
 
 
 async def expand_and_run(
@@ -144,6 +292,21 @@ async def expand_and_run(
             f"current_depth ({task.current_depth}) >= max_depth ({task.max_depth})"
         )
 
+    # Ruling 32d(i): a retry of the failed items only, with none failed,
+    # resolves with zero items and says so (no BRT-APE-005).
+    if task.dependency_input.get("failed_items_only") and task.dependency_input.get("items") == []:
+        note = "failed_items_only: the step it reads has no failed items; nothing to retry."
+        logging.getLogger(__name__).info("apply_to_each %s: %s", task.envelope_id, note)
+        return InboundEnvelope(
+            envelope_id=task.envelope_id,
+            subtask_id=task.subtask_id,
+            status="resolved",
+            output={"results": [], "failures": [], "total": 0, "success_count": 0,
+                    "failure_count": 0, "notes": [note]},
+            # Same as the normal path with nothing failed.
+            lane_guarded=True if task.data_scope == "raw" else None,
+        )
+
     # Resolve items. BRT-APE-01 — empty-items used to resolve to an envelope
     # with 0 results (phantom success). Now _resolve_items raises BRT-APE-005
     # which we surface as a failed envelope (the orchestrator sees the code
@@ -151,7 +314,12 @@ async def expand_and_run(
     try:
         items = _resolve_items(task)
     except ValueError as exc:
-        if "BRT-APE-005" in str(exc):
+        if "BRT-APE-005" in str(exc) or "BRT-APE-006" in str(exc):
+            if task.data_scope == "raw":
+                # On-premise lane: a raw step's failure is seen upward as a
+                # code plus document ids only (design note 5.4); the message
+                # stays in the local trace.
+                return await _raw_ref_failure(task, exc, db_path)
             return InboundEnvelope(
                 envelope_id=task.envelope_id,
                 subtask_id=task.subtask_id,
@@ -162,6 +330,9 @@ async def expand_and_run(
                     "total": 0,
                     "success_count": 0,
                     "failure_count": 0,
+                    # re_plan reads a step's output, not its failure_reason:
+                    # the reason goes here too so the planner can act on it.
+                    "failure": str(exc),
                 },
                 failure_reason=str(exc),
             )
@@ -179,56 +350,210 @@ async def expand_and_run(
             f"envelope {task.envelope_id}"
         )
 
+    # Decision 17-Nov-2026: the fan-out is capped at the connection pool's
+    # design size (MAX_CONCURRENCY, a quarter of the pool), so one step can
+    # never exhaust the shared pool (BRT-ANS-011).
+    from src.lane.outbound import MAX_CONCURRENCY  # noqa: PLC0415
+
+    notes: list[str] = []
+    ignored = task.dependency_input.get("failed_items_ignored")
+    if ignored:
+        # Ruling 32d(i): the flag named a step that is not a per-item step.
+        notes.append(str(ignored))
+        from src.logging.writer import write_event  # noqa: PLC0415
+
+        try:
+            await write_event(
+                "error",
+                run_id=task.run_id,
+                envelope_id=task.envelope_id,
+                decision={"code": "BRT-APE-008", "severity": "warning", "msg": str(ignored)},
+                db_path=db_path,
+            )
+        except Exception:
+            pass
+    if concurrency_limit > MAX_CONCURRENCY:
+        note = f"concurrency_limit {concurrency_limit} capped at {MAX_CONCURRENCY}"
+        notes.append(note)
+        concurrency_limit = MAX_CONCURRENCY
+        from src.logging.writer import write_event  # noqa: PLC0415
+
+        try:
+            await write_event(
+                "error",
+                run_id=task.run_id,
+                envelope_id=task.envelope_id,
+                decision={
+                    "code": "BRT-APE-CAPPED",
+                    "severity": "warning",
+                    "msg": note,
+                },
+                db_path=db_path,
+            )
+        except Exception:
+            pass
     semaphore = asyncio.Semaphore(concurrency_limit)
     results = []
     failures = []
+    # Tokens and dollars of every item call, summed onto this envelope.
+    totals = {"input": 0, "output": 0, "dollars": 0.0, "baseline": 0.0}
+    guarded = [0]   # raw items whose output passed the lane's output guard
+    model_reasons: set = set()   # item indexes whose failure the model wrote
 
-    async def _run_one(index: int, item: object) -> None:
-        suffix = _level_suffix(index)
-        child = _make_child_task(task, item, index, suffix)
+    def _file_env(index: int, item: object, child: WrappedTask, env: InboundEnvelope) -> None:
+        """File one item's envelope: a single call's, or one built from a
+        packed reply (ruling 23), by the same rules."""
+        if env.status == "resolved":
+            results.append({
+                "index": index,
+                "item": item,
+                "output": env.output,
+                "confidence": env.confidence,
+            })
+            if env.lane_guarded:
+                guarded[0] += 1
+        else:
+            failures.append({
+                "index": index,
+                "item": item,
+                "reason": _failure_reason(child, env.failure_reason or "status=failed", env),
+                "model_id": child.model_name,
+            })
+            # Planner ruling 21: a row marker shows a model-written
+            # reason as BRT-ANS-010, never parsed. Kept on the
+            # envelope, never in the stored output.
+            if env._reason_from_model:
+                model_reasons.add(index)
+
+    async def _run_one(index: int, item: object, child: Optional[WrappedTask] = None) -> None:
+        if child is None:
+            suffix = _level_suffix(index)
+            child = _make_child_task(task, item, index, suffix)
         async with semaphore:
             try:
                 env = await _dispatch_child(child, db_path)
-                if env.status == "resolved":
-                    results.append({
-                        "index": index,
-                        "item": item,
-                        "output": env.output,
-                        "confidence": env.confidence,
-                    })
-                else:
-                    failures.append({
-                        "index": index,
-                        "item": item,
-                        "reason": env.failure_reason or "status=failed",
-                        "model_id": child.model_name,
-                    })
+                totals["input"] += (env.tokens_used or {}).get("input") or 0
+                totals["output"] += (env.tokens_used or {}).get("output") or 0
+                totals["dollars"] += env.dollars or 0.0
+                totals["baseline"] += env.baseline_dollars or 0.0
+                _file_env(index, item, child, env)
             except Exception as exc:
                 failures.append({
                     "index": index,
                     "item": item,
-                    "reason": f"BRT-APE-002: {exc}",
+                    "reason": _failure_reason(child, f"BRT-APE-002: {exc}", exc=exc),
                     "model_id": child.model_name,
                 })
 
-    await asyncio.gather(*[_run_one(i, item) for i, item in enumerate(items)])
+    from src.lane.outbound import step_scope  # noqa: PLC0415
+    from src.orchestrator import packing  # noqa: PLC0415
+
+    max_items, pack_warning = packing.pack_max_items()
+    if pack_warning:
+        from src.logging.writer import write_event  # noqa: PLC0415
+
+        try:
+            await write_event(
+                "error",
+                run_id=task.run_id,
+                envelope_id=task.envelope_id,
+                decision={"code": "BRT-APE-007", "severity": "warning", "msg": pack_warning},
+                db_path=db_path,
+            )
+        except Exception:
+            pass
+    pack_ctx = await packing.packing_context(task, len(items), max_items, db_path)
+
+    with step_scope(task.envelope_id):
+        if pack_ctx is None:
+            await asyncio.gather(*[_run_one(i, item) for i, item in enumerate(items)])
+        else:
+            children = [
+                _make_child_task(task, item, i, _level_suffix(i)) for i, item in enumerate(items)
+            ]
+
+            def _add_totals(tin: int, tout: int, dollars: float, baseline) -> None:
+                totals["input"] += tin
+                totals["output"] += tout
+                totals["dollars"] += dollars
+                totals["baseline"] += baseline or 0.0
+
+            packer = packing.StepPacker(
+                task=task, items=items, children=children, ctx=pack_ctx, semaphore=semaphore,
+                run_single=lambda i: _run_one(i, items[i], children[i]),
+                file_env=lambda i, env: _file_env(i, items[i], children[i], env),
+                add_totals=_add_totals, db_path=db_path,
+            )
+            await packer.run()
 
     # Sort results by index for deterministic ordering
     results.sort(key=lambda r: r["index"])
     failures.sort(key=lambda r: r["index"])
+    await _note_extra_fields_missing(task, results, db_path)
+    # Ruling 32d(i): a retry of failed items names each entry's index in the
+    # step it retries, so the entry keeps that item's identity.
+    original = task.dependency_input.get("original_indexes")
+    if isinstance(original, list):
+        for entry in results + failures:
+            if 0 <= entry["index"] < len(original):
+                entry["original_index"] = original[entry["index"]]
 
-    return InboundEnvelope(
+    aggregate = {
+        "results": results,
+        "failures": failures,
+        "total": len(items),
+        "success_count": len(results),
+        "failure_count": len(failures),
+    }
+    if notes:
+        aggregate["notes"] = notes
+    out_env = InboundEnvelope(
         envelope_id=task.envelope_id,
         subtask_id=task.subtask_id,
         status="resolved",
-        output={
-            "results": results,
-            "failures": failures,
-            "total": len(items),
-            "success_count": len(results),
-            "failure_count": len(failures),
-        },
+        output=aggregate,
+        tokens_used={"input": totals["input"], "output": totals["output"]},
+        dollars=totals["dollars"],
+        baseline_dollars=totals["baseline"],
+        # A raw aggregate is guard-stamped only when every item passed the
+        # guard; one withheld item keeps the steps that read it raw.
+        lane_guarded=(
+            (not failures and guarded[0] == len(items)) if task.data_scope == "raw" else None
+        ),
     )
+    out_env._model_reason_indexes = model_reasons
+    out_env._extra_fields = list(task.extra_fields)   # the engine stamps it too
+    return out_env
+
+
+async def _note_extra_fields_missing(task: WrappedTask, results: list, db_path: str) -> None:
+    """Planner reading (2) under ruling 35: one plan note per step saying how
+    many kept items ended without each extra field (deferred items need
+    none). Written only when some item lacks one."""
+    if not task.extra_fields:
+        return
+    from src.envelopes.validator import missing_extra_fields_in  # noqa: PLC0415
+
+    counts = {f: 0 for f in task.extra_fields}
+    for entry in results:
+        for f in missing_extra_fields_in(entry.get("output"), task):
+            counts[f] += 1
+    if not any(counts.values()):
+        return
+    from src.logging.writer import write_event  # noqa: PLC0415
+
+    try:
+        await write_event(
+            "orchestrator_decision",
+            run_id=task.run_id,
+            envelope_id=task.envelope_id,
+            model_id=task.model_name,
+            decision={"mode": "extra_fields_missing", "step": str(task.envelope_id),
+                      "fields": counts},
+            db_path=db_path,
+        )
+    except Exception:
+        pass
 
 
 def _level_suffix(index: int) -> str:

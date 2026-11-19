@@ -1,0 +1,14 @@
+<section id="numbers" class="slide tone" data-transition="fade">
+<h2>Measured three times, published as it fell.</h2>
+<p class="lede">Four jobs, each run through BORG_ROUTE and in one call to a top model. The rule for a win was written before the first run.</p>
+<table class="tbl">
+<tr class="hd"><th style="width:30%">Job</th><th style="width:24%">Cost against one call</th><th style="width:30%">Quality</th><th style="width:16%">By the rule</th></tr>
+<tr><td>A. 200 <!-- claim C37 --> support emails, a category and an urgency score</td><td> 59.6% <!-- claim C38 -->, in 15.8 s <!-- claim C39 --> against 46.9 s <!-- claim C40 --></td><td>Category 99% <!-- claim C41 --> right. Urgency exact 69.5% <!-- claim C42 -->, within one point 99.5% <!-- claim C43 -->. Top model 100% <!-- claim C92 -->.</td><td>No win</td></tr>
+<tr class="alt"><td>B. A small Python service from a spec</td><td> 54.3% <!-- claim C93 -->; 98.5% <!-- claim C94 --> without the top model's cut-off first attempt</td><td> 18 of 18 <!-- claim C50 --> checks in two runs, 16 <!-- claim C51 --> in one. Top model 18 <!-- claim C95 --> each time.</td><td>Win, on input that was not fresh</td></tr>
+<tr><td>C. Questions over 15 <!-- claim C53 --> documents (one run)</td><td> 31.6% <!-- claim C96 --></td><td>A judge preferred the top model's answer</td><td>No win</td></tr>
+<tr class="alt"><td>D. A risk label for 60 <!-- claim C58 --> client notes</td><td> 87.9% <!-- claim C59 --></td><td> 90% <!-- claim C62 --> right against 100% <!-- claim C63 --></td><td>Not judged: no local run</td></tr>
+</table>
+<p class="small">Round 3, cloud models only, middle value of three runs. Rounds 1 and 2 won no job. All three rounds are published with the code.</p>
+<div class="foot"><p class="foot-l">BORG_ROUTE</p><p class="foot-r">Aliud Inquisito</p></div>
+<aside>Every figure is from bench/results/2026_11_19 and the README section What was measured: claims C37 to C43, C50, C51, C53, C58, C59, C62, C63 and C92 to C96. The win rule, written before any run: the median cost is at most 70 percent of one call to the top model (anthropic/claude-opus-5.5) and quality is no worse. Job A is scored against known labels, job B by machine checks, job C by a judge model that took no part. Job D’s rule compares a local run with a cloud run, and no local run was made. Job B reused the input of earlier rounds, so its win is not on fresh data. Figures are rounded against BORG_ROUTE.</aside>
+</section>

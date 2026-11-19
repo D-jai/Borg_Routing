@@ -199,3 +199,38 @@ def test_level_suffix():
     assert _level_suffix(25) == "z"
     assert _level_suffix(26) == "aa"
     assert _level_suffix(27) == "ab"
+
+
+@pytest.mark.asyncio
+async def test_concurrency_limit_above_cap_is_noted_and_warned(db):
+    """Round-2 review (3): a capped concurrency_limit is recorded on the step."""
+    from src.lane.outbound import MAX_CONCURRENCY
+
+    task = _ape_task([{"id": "a"}, {"id": "b"}], extra_dep={"concurrency_limit": 500})
+    events = []
+
+    async def fake_event(event_type, **kw):
+        events.append((event_type, kw))
+
+    async def mock_dispatch(child_task, db_path):
+        return _resolved_env(child_task, {"bucket": "bug"})
+
+    with patch("src.orchestrator.apply_to_each._dispatch_child", new=mock_dispatch), \
+            patch("src.logging.writer.write_event", new=fake_event):
+        env = await expand_and_run(task, db_path=db)
+
+    assert env.output["notes"] == [f"concurrency_limit 500 capped at {MAX_CONCURRENCY}"]
+    warn = [kw for t, kw in events if (kw.get("decision") or {}).get("severity") == "warning"]
+    assert len(warn) == 1 and warn[0]["run_id"] == task.run_id
+
+
+@pytest.mark.asyncio
+async def test_concurrency_limit_within_cap_has_no_note(db):
+    task = _ape_task([{"id": "a"}])
+
+    async def mock_dispatch(child_task, db_path):
+        return _resolved_env(child_task, {"bucket": "bug"})
+
+    with patch("src.orchestrator.apply_to_each._dispatch_child", new=mock_dispatch):
+        env = await expand_and_run(task, db_path=db)
+    assert "notes" not in env.output

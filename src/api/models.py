@@ -21,10 +21,12 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
+from src.api.auth import require_admin
 from src.registry.capability_matrix import CapabilityMatrix
 from src.registry.discovery import discover_all
 from src.registry.models import ModelInfo
 from src.registry.scorer import research_and_apply
+from src.registry.throughput import measure_in_background, needs_measuring, speed_status, to_measure
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +39,12 @@ router = APIRouter(tags=["models"])
 
 def get_matrix(request: Request) -> CapabilityMatrix:
     return request.app.state.matrix if hasattr(request.app.state, "matrix") else _get_main_matrix()
+
+
+def _share_with_engine(matrix: CapabilityMatrix) -> None:
+    """R2: after a change, make sure the engine routes on this matrix object."""
+    from src.orchestrator.engine import reload_matrix  # noqa: PLC0415
+    reload_matrix(matrix)
 
 
 def _get_main_matrix() -> CapabilityMatrix:
@@ -84,32 +92,96 @@ class KeyResponse(BaseModel):
 # Endpoints
 # ---------------------------------------------------------------------------
 
-@router.get("/models", response_model=list[ModelInfo])
+class ModelRow(ModelInfo):
+    """A matrix row as the pages read it: the stored fields plus ``is_local``,
+    worked out by the server (src/registry/locality.py), never by the page,
+    and ``speed_status`` (``"measuring"`` while a background speed probe runs,
+    ``"BRT-REG-016"`` after a failed one, else null; ruling 28)."""
+    is_local: bool = False
+    speed_status: Optional[str] = None
+
+
+async def _rows(matrix: CapabilityMatrix) -> list[dict]:
+    from src.api.locality_view import locality_rules, model_row  # noqa: PLC0415
+    from src.db import schema  # noqa: PLC0415
+    rules = await locality_rules(schema.DB_PATH)
+    rows = []
+    for m in matrix.all():
+        row = model_row(m, rules)
+        row["speed_status"] = speed_status(m.model_id)
+        rows.append(row)
+    return rows
+
+
+def _measure_later(matrix: CapabilityMatrix, model_ids: list[str]) -> None:
+    """Ruling 28, item 7: probe the speed of these local rows in the background
+    (the request returns at once); when done, save the matrix and share it with
+    the engine. A failed probe is logged BRT-REG-016 and shown on the Models page."""
+    def _done() -> None:
+        matrix.save()
+        _share_with_engine(matrix)
+
+    measure_in_background(matrix, model_ids, on_done=_done)
+
+
+@router.get("/models", response_model=list[ModelRow])
 async def list_models(matrix: CapabilityMatrix = Depends(get_matrix)):
-    """Return all models currently in the capability matrix."""
-    return matrix.all()
+    """Return all models currently in the capability matrix, each with a
+    computed ``is_local``."""
+    return await _rows(matrix)
 
 
 @router.get("/models/matrix")
 async def get_matrix_json(matrix: CapabilityMatrix = Depends(get_matrix)):
-    """Return the full capability matrix as a JSON array."""
-    return [m.model_dump() for m in matrix.all()]
+    """Return the full capability matrix as a JSON array, each row with a
+    computed ``is_local``."""
+    return await _rows(matrix)
 
 
-@router.post("/models/discover", response_model=DiscoverResponse)
+async def _refuse_in_all_local(action: str) -> None:
+    """On-premise lane: in all_local, admin actions that call out are refused
+    (BRT-LANE-005, design note 6.4)."""
+    from src.db.schema import DB_PATH  # noqa: PLC0415
+    from src.lane.errors import LaneError  # noqa: PLC0415
+    from src.lane.settings import load_lane_settings  # noqa: PLC0415
+
+    try:
+        mode = (await load_lane_settings(DB_PATH)).mode
+    except LaneError as exc:
+        raise HTTPException(status_code=400, detail={"error": exc.code, "message": str(exc)})
+    if mode == "all_local":
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "error": "BRT-LANE-005",
+                "message": f"{action} calls out and is refused while lane_mode is all_local",
+            },
+        )
+
+
+@router.post("/models/discover", response_model=DiscoverResponse, dependencies=[Depends(require_admin)])
 async def discover_models(matrix: CapabilityMatrix = Depends(get_matrix)):
-    """Probe LM Studio, Ollama, and the curated OpenRouter list; upsert results."""
+    """Probe LM Studio, Ollama, and the curated OpenRouter list; upsert results.
+
+    Each local model found with no speed figure is then measured by one short
+    generation in the background (planner ruling 28; the call returns at once,
+    a failed probe is logged BRT-REG-016 and the figure stays unset). Refused
+    (BRT-LANE-005) while lane_mode is all_local.
+    """
+    await _refuse_in_all_local("Discover")
     openrouter_key: Optional[str] = os.getenv("OPENROUTER_API_KEY")
     try:
         count = await discover_all(matrix, openrouter_key=openrouter_key)
         matrix.save()
+        _share_with_engine(matrix)
+        _measure_later(matrix, to_measure(matrix, checked_only=False))
         return DiscoverResponse(upserted=count)
     except Exception as exc:
         logger.error("Discovery failed: %s", exc)
         raise HTTPException(status_code=500, detail=f"Discovery error: {exc}") from exc
 
 
-@router.post("/models/research", response_model=ResearchResponse)
+@router.post("/models/research", response_model=ResearchResponse, dependencies=[Depends(require_admin)])
 async def research_models_endpoint(
     body: ResearchRequest,
     matrix: CapabilityMatrix = Depends(get_matrix),
@@ -118,8 +190,10 @@ async def research_models_endpoint(
 
     If ``model_ids`` is omitted, every row currently in the matrix is scored.
     Otherwise only the listed model_ids are researched (missing rows are
-    skipped with a log warning).
+    skipped with a log warning). Refused (BRT-LANE-005) while lane_mode is
+    all_local.
     """
+    await _refuse_in_all_local("Get Model Info")
     requested = body.model_ids or [m.model_id for m in matrix.all()]
     if not requested:
         return ResearchResponse(scored=[])
@@ -134,10 +208,11 @@ async def research_models_endpoint(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     matrix.save()
+    _share_with_engine(matrix)
     return ResearchResponse(scored=list(scored.keys()))
 
 
-@router.patch("/models/{model_id:path}/checked", response_model=CheckedResponse)
+@router.patch("/models/{model_id:path}/checked", response_model=CheckedResponse, dependencies=[Depends(require_admin)])
 async def set_model_checked(
     model_id: str,
     body: CheckedRequest,
@@ -145,7 +220,7 @@ async def set_model_checked(
 ):
     """Flip the `checked` flag on a model. Unchecked models are excluded from routing.
 
-    BUG-023 — after writing the YAML, also invalidate the orchestrator
+    After writing the YAML, also invalidate the orchestrator
     engine's in-memory matrix cache so the next routed run honours the
     new checked state. Without this, operators saw `GET /models/matrix`
     update immediately but the router kept routing to old (un)checked
@@ -159,26 +234,30 @@ async def set_model_checked(
     matrix.set_checked(model_id, body.checked)
     matrix.save()
 
-    # BUG-023 — drop the engine cache so the next route reads fresh state.
+    # Point the engine at this matrix so the next route sees it.
     # Local import to avoid a top-level cycle (engine imports from many
     # registry modules; the API router is wired in main after engine).
     try:
         from src.orchestrator.engine import reload_matrix  # noqa: PLC0415
-        reload_matrix()
+        reload_matrix(matrix)
     except Exception as exc:
         logger.warning(
-            "BUG-023: failed to invalidate orchestrator matrix cache after "
+            "Failed to invalidate orchestrator matrix cache after "
             "PATCH on model_id=%s: %s. Operator will need to restart "
             "uvicorn for the change to affect routing.", model_id, exc,
         )
 
+    if body.checked and needs_measuring(matrix.get(model_id)):
+        # Ruling 28: a ticked local model with no speed figure is measured in
+        # the background; this call returns at once.
+        _measure_later(matrix, [model_id])
     return CheckedResponse(model_id=model_id, checked=body.checked)
 
 
 _CANONICAL_KEY_VARS = {"openrouter": "OPENROUTER_API_KEY"}
 
 
-@router.post("/keys", response_model=KeyResponse)
+@router.post("/keys", response_model=KeyResponse, dependencies=[Depends(require_admin)])
 async def add_key(body: KeyRequest):
     """Save an external provider API key to the .env file.
 
@@ -207,9 +286,12 @@ async def add_key(body: KeyRequest):
     )
 
     lines: list[str] = []
-    if os.path.exists(env_path):
-        with open(env_path, encoding="utf-8") as f:
-            lines = f.readlines()
+    try:
+        if os.path.exists(env_path):
+            with open(env_path, encoding="utf-8") as f:
+                lines = f.readlines()
+    except OSError:
+        lines = []  # unreadable: the write below reports the real problem
 
     # Remove existing entries for this provider (and any legacy alias)
     def _prefix(varname: str) -> str:
@@ -225,8 +307,20 @@ async def add_key(body: KeyRequest):
     lines.append(f"{key_var}={body.api_key}\n")
     lines.append(f"{endpoint_var}={body.base_url}\n")
 
-    with open(env_path, "w", encoding="utf-8") as f:
-        f.writelines(lines)
+    try:
+        with open(env_path, "w", encoding="utf-8") as f:
+            f.writelines(lines)
+    except OSError:
+        # Docker live mode: .env is not writable by the app's user, and a key written
+        # inside the container would be lost when it is recreated.
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "BRT-API-054: the key could not be saved because the .env file is not "
+                "writable here. Set keys in the host .env file used by compose.live.yaml, "
+                "then restart the container."
+            ),
+        )
 
     # Reload into current process environment
     os.environ[key_var] = body.api_key

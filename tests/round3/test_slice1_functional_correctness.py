@@ -1,8 +1,8 @@
 """Round-3 Slice 1 — three high-severity functional-correctness fixes.
 
-BUG-023 — router cache must invalidate on PATCH /models/.../checked
-BUG-017 — orchestrator system prompt must include today's date
-BUG-020 — compose mode must handle action:fail|compose|continue without raising
+- router cache must invalidate on PATCH /models/.../checked
+- orchestrator system prompt must include today's date
+- compose mode must handle action:fail|compose|continue without raising
 """
 from __future__ import annotations
 
@@ -17,24 +17,29 @@ from src.envelopes.schema import InboundEnvelope
 
 
 # ============================================================
-# BUG-023 — router cache invalidation
+# router cache invalidation
 # ============================================================
 
-def test_reload_matrix_resets_cache():
-    """TC-BUG-023-A — reload_matrix() drops the cached _shared_matrix
-    so the next _get_matrix() call re-reads from YAML."""
+def test_reload_matrix_keeps_one_shared_object():
+    """reload_matrix() adopts the API's matrix object, and
+    with no argument re-reads the shared one in place (never a second copy)."""
     from src.orchestrator import engine as engine_mod
+    from src.registry.capability_matrix import CapabilityMatrix
 
-    sentinel = object()
-    engine_mod._shared_matrix = sentinel  # type: ignore[assignment]
-
-    engine_mod.reload_matrix()
-    assert engine_mod._shared_matrix is None
+    original = engine_mod._shared_matrix
+    try:
+        mine = CapabilityMatrix()
+        engine_mod.reload_matrix(mine)
+        assert engine_mod._get_matrix() is mine
+        engine_mod.reload_matrix()
+        assert engine_mod._get_matrix() is mine
+    finally:
+        engine_mod._shared_matrix = original
 
 
 @pytest.mark.asyncio
 async def test_patch_checked_invalidates_orchestrator_cache(monkeypatch, tmp_path):
-    """TC-BUG-023-B — calling PATCH /models/.../checked through the
+    """calling PATCH /models/.../checked through the
     api/models.py handler reaches reload_matrix(), which is exactly
     what was missing pre-fix. We assert the call is made; that's the
     only behavioural contract operators care about."""
@@ -59,12 +64,12 @@ async def test_patch_checked_invalidates_orchestrator_cache(monkeypatch, tmp_pat
 
 
 # ============================================================
-# BUG-017 — orchestrator system prompt includes today's date
+# orchestrator system prompt includes today's date
 # ============================================================
 
 @pytest.mark.asyncio
 async def test_orchestrator_system_prompt_includes_today_date(monkeypatch, tmp_path):
-    """TC-BUG-017 — the system prompt assembled for an orchestrator call
+    """the system prompt assembled for an orchestrator call
     must contain today's date in YYYY-MM-DD form so the model doesn't
     inject hardcoded training-cutoff years into web_search queries.
 
@@ -146,7 +151,7 @@ async def test_orchestrator_system_prompt_includes_today_date(monkeypatch, tmp_p
 
 
 # ============================================================
-# BUG-020 — compose mode handles all three control-signal shapes
+# compose mode handles all three control-signal shapes
 # ============================================================
 
 def _make_resolved_env(response_text: str) -> InboundEnvelope:
@@ -159,7 +164,7 @@ def _make_resolved_env(response_text: str) -> InboundEnvelope:
 
 
 def test_salvage_helper_picks_last_resolved_envelope():
-    """TC-BUG-020-A — _salvage_answer_from_stage_results returns the
+    """_salvage_answer_from_stage_results returns the
     most recent resolved envelope's textual content."""
     from src.orchestrator.engine import _salvage_answer_from_stage_results
 
@@ -172,7 +177,7 @@ def test_salvage_helper_picks_last_resolved_envelope():
 
 
 def test_salvage_helper_skips_failed_envelopes():
-    """TC-BUG-020-B — failed envelopes never get salvaged."""
+    """failed envelopes never get salvaged."""
     from src.orchestrator.engine import _salvage_answer_from_stage_results
 
     failed = InboundEnvelope(
@@ -190,7 +195,7 @@ def test_salvage_helper_skips_failed_envelopes():
 
 
 def test_salvage_helper_returns_none_when_nothing_usable():
-    """TC-BUG-020-C — empty / failed-only stage_results yield None
+    """empty / failed-only stage_results yield None
     so the BRT-ORC-009 path remains intact for genuine no-answer runs."""
     from src.orchestrator.engine import _salvage_answer_from_stage_results
 
@@ -207,7 +212,7 @@ def test_salvage_helper_returns_none_when_nothing_usable():
 
 
 def test_salvage_helper_recognises_alternative_keys():
-    """TC-BUG-020-D — output keys 'answer', 'text', 'content', 'summary'
+    """output keys 'answer', 'text', 'content', 'summary'
     are all recognised so quirky answerer outputs aren't silently lost."""
     from src.orchestrator.engine import _salvage_answer_from_stage_results
 
@@ -226,7 +231,7 @@ def test_salvage_helper_recognises_alternative_keys():
 
 @pytest.mark.asyncio
 async def test_compose_action_fail_returns_rationale_not_raises(monkeypatch, tmp_path):
-    """TC-BUG-020-E — when compose returns {action: 'fail'}, the run
+    """when compose returns {action: 'fail'}, the run
     completes with the rationale as the user-facing response instead
     of raising BRT-ORC-009."""
     from src.orchestrator import engine as engine_mod
@@ -273,7 +278,7 @@ async def test_compose_action_fail_returns_rationale_not_raises(monkeypatch, tmp
 
 @pytest.mark.asyncio
 async def test_compose_action_compose_lifts_from_stage_results(monkeypatch, tmp_path):
-    """TC-BUG-020-F — when compose returns {action: 'compose'} with no
+    """when compose returns {action: 'compose'} with no
     response, but stage_results contains a resolved answerer envelope,
     the engine lifts the answerer's output instead of raising."""
     from src.orchestrator import engine as engine_mod
@@ -329,7 +334,7 @@ async def test_compose_action_compose_lifts_from_stage_results(monkeypatch, tmp_
 
 @pytest.mark.asyncio
 async def test_compose_with_response_returns_response(monkeypatch, tmp_path):
-    """TC-BUG-020-G — happy path: when compose returns
+    """happy path: when compose returns
     {response: '...'}, that response is returned verbatim. No regression."""
     from src.orchestrator import engine as engine_mod
 
@@ -375,8 +380,8 @@ async def test_compose_with_response_returns_response(monkeypatch, tmp_path):
 
 @pytest.mark.asyncio
 async def test_compose_with_direct_answer_alias_returns_response(monkeypatch, tmp_path):
-    """TC-BUG-020-H — alternate happy-path key 'direct_answer' is also
-    honoured. Round-2 BUG-010 already supported this; we keep it."""
+    """alternate happy-path key 'direct_answer' is also
+    honoured. Round 2 already supported this; we keep it."""
     from src.orchestrator import engine as engine_mod
 
     db = str(tmp_path / "bug020h.db")
@@ -421,7 +426,7 @@ async def test_compose_with_direct_answer_alias_returns_response(monkeypatch, tm
 
 @pytest.mark.asyncio
 async def test_compose_handler_with_nothing_usable_still_raises(tmp_path):
-    """TC-BUG-020-I — when compose_result is genuinely empty AND
+    """when compose_result is genuinely empty AND
     stage_results has no resolved envelopes, _handle_compose_result
     still raises BRT-ORC-009. The fix doesn't paper over genuine
     no-answer runs in the main plan→re_plan→compose loop. (The
@@ -446,7 +451,7 @@ async def test_compose_handler_with_nothing_usable_still_raises(tmp_path):
 
 @pytest.mark.asyncio
 async def test_empty_plan_branch_uses_decoder_for_action_fail(monkeypatch, tmp_path):
-    """TC-BUG-020-J — the empty-plan graceful fallback also routes
+    """the empty-plan graceful fallback also routes
     through _handle_compose_result, so action=fail still surfaces the
     rationale (instead of the legacy 'I was unable' string)."""
     from src.orchestrator import engine as engine_mod

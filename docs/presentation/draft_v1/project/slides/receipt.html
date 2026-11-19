@@ -1,0 +1,26 @@
+<section id="receipt" class="slide dark center" data-transition="fade">
+<div class="split">
+<div class="receipt">
+<div class="r-head"><p class="r-brand">BORG_ROUTE</p><p class="r-word">RECEIPT</p></div>
+<p class="r-job">A category and an urgency score for each of 200 <!-- claim C37 --> support emails</p>
+<hr>
+<div class="r-row"><p class="r-name">Plan the job</p><p class="r-who">cloud planner</p><p class="r-amt"> $0.044 <!-- claim C82 --></p></div>
+<div class="r-row"><p class="r-name">Label and score 200 emails</p><p class="r-who">low-cost cloud</p><p class="r-amt"> $0.021 <!-- claim C83 --></p></div>
+<div class="r-row"><p class="r-name">Write the answer</p><p class="r-who">cloud planner</p><p class="r-amt"> $0.060 <!-- claim C84 --></p></div>
+<hr>
+<div class="r-total"><p class="r-tl">TOTAL</p><p class="r-ta"> $0.125 <!-- claim C85 --></p></div>
+<div class="r-row"><p class="r-name">Time</p><p class="r-amt"> 15.8 s <!-- claim C87 --></p></div>
+<p class="r-note">The same job in one call to the top model: $0.208 <!-- claim C86 --></p>
+</div>
+<div class="notes">
+<p class="eyebrow">Under every answer</p>
+<h2>Every answer comes with a receipt.</h2>
+<div class="call"><p class="call-t">Each step, itemised</p><p class="call-x">Which model did it, where that model runs and what the step cost.</p></div>
+<div class="call"><p class="call-t">The reason for each choice</p><p class="call-x">The models that were in the running and why this one won.</p></div>
+<div class="call"><p class="call-t">The comparison</p><p class="call-x">What the same job cost in one call to the top model, measured in the same round. All four jobs are on a later slide.</p></div>
+<p class="small">A real run: round 3, the email job, the run with the middle cost.</p>
+</div>
+</div>
+<div class="foot"><p class="foot-l">BORG_ROUTE</p><p class="foot-r">Aliud Inquisito</p></div>
+<aside>Where each amount comes from: run A_borg_cloud_3 of round 3 (bench/results/2026_11_19). Plan the job is the planning call plus one re-plan, US$0.04353625 (C82). Label and score is ten calls to the low-cost model, each a pack of 20 emails, US$0.020789 (C83). Write the answer is the write-up call, asked twice because the first reply could not be used, US$0.0598725 (C84). The three are split by mode in bench/results/2026_11_19/cost_split_A.json, read from the run's own database. The total is the run's logged cost, US$0.12419775 (C85), and the time is that run's own wall time, 15.781 s (C87). Amounts are rounded up to the tenth of a cent. The one call to the top model is the middle of three direct runs, US$0.208456, rounded down (C86). The planner and write-up model in this run was x-ai/grok-4.20; the top model is anthropic/claude-opus-5.5.</aside>
+</section>

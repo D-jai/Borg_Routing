@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ask - BORG_ROUTE</title>
+<link rel="stylesheet" href="assets/app.css">
+</head>
+<body>
+<main id="page" data-page="ask">
+  <div class="thread stack" id="thread" aria-live="polite"></div>
+
+  <div class="composer card">
+    <label class="small muted" for="q">Ask</label>
+    <textarea id="q" placeholder="Describe the job. Enter sends, Shift+Enter makes a new line."></textarea>
+    <div class="docs hidden" id="docs-box">
+      <label class="small muted" for="docs-folder">Folder, inside the documents folder (BORG_DOCS_ROOT)</label>
+      <input id="docs-folder" type="text" autocomplete="off" placeholder="for example client_notes">
+      <button class="btn" type="button" id="docs-clear">Remove</button>
+    </div>
+    <div class="row" style="margin-top:8px">
+      <button class="btn" type="button" id="docs-btn" aria-expanded="false">Add documents (folder)</button>
+      <span class="small muted" id="lane-line"><span class="dot local" id="lane-dot" style="display:inline-block"></span> <span id="lane-text">Reading the lane setting...</span></span>
+      <span style="flex:1"></span>
+      <label class="small muted" for="alias">Routing</label>
+      <select id="alias" class="btn">
+        <option value="borg_route">automatic</option>
+        <option value="borg_route:light">every step light</option>
+        <option value="borg_route:mid">every step mid</option>
+        <option value="borg_route:heavy">every step heavy</option>
+        <option value="borg_route:coding">coding work</option>
+        <option value="borg_route:reasoning">reasoning work</option>
+        <option value="borg_route:extraction">extraction work</option>
+        <option value="borg_route:local">prefer this machine</option>
+      </select>
+      <button class="btn" type="button" id="clear">Clear chat</button>
+      <button class="btn primary" type="button" id="send">Send</button>
+    </div>
+  </div>
+</main>
+<script src="assets/vendor/marked.min.js"></script>
+<script src="assets/vendor/purify.min.js"></script>
+<script src="assets/app.js"></script>
+<script src="assets/admin.js"></script>
+<script src="assets/workspace.js"></script>
+<script src="assets/pages/ask.js"></script>
+</body>
+</html>

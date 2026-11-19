@@ -160,3 +160,129 @@ async def test_dispatch_returns_resolved_envelope():
     env = await dispatch_state_op(task)
     assert env.status == "resolved"
     assert env.output["result"]["count"] == 5
+
+
+# --- Planner ruling 25 -------------------------------------------------------
+
+APE_ROWS = [
+    {"index": 0, "item": "e0", "output": {"bucket": "bug", "topic": "crash"}},
+    {"index": 1, "item": "e1", "output": {"bucket": "billing", "topic": "refund"}},
+    {"index": 2, "item": "e2", "output": {"bucket": "bug", "topic": "sync"}},
+]
+
+
+@pytest.mark.asyncio
+async def test_field_read_from_output_then_row_and_output_prefix_same():
+    """25a — 'bucket' and 'output.bucket' read the row's output; 'item' the row."""
+    assert len(await op_filter(APE_ROWS, {"key": "bucket", "value": "bug"})) == 2
+    kept = await op_filter(APE_ROWS, {"key": "output.bucket", "value": "bug"})
+    assert kept == [APE_ROWS[0], APE_ROWS[2]]  # whole rows, full shape
+    assert await op_filter(APE_ROWS, {"key": "item", "value": "e1"}) == [APE_ROWS[1]]
+    assert await op_count(APE_ROWS, {"key": "bucket"}) == {"bug": 2, "billing": 1}
+
+
+@pytest.mark.asyncio
+async def test_group_by_counts_and_rows():
+    """25b/c — group_by takes key or group_by; count: true gives counts."""
+    assert await op_group_by(APE_ROWS, {"group_by": "bucket", "count": True}) == {
+        "bug": 2, "billing": 1}
+    groups = await op_group_by(APE_ROWS, {"key": "bucket"})
+    assert groups == {"bug": [APE_ROWS[0], APE_ROWS[2]], "billing": [APE_ROWS[1]]}
+
+
+@pytest.mark.asyncio
+async def test_two_different_grouping_fields_fail():
+    with pytest.raises(ValueError, match="BRT-SOP-002.*one field"):
+        await op_group_by(APE_ROWS, {"key": "bucket", "group_by": "topic"})
+
+
+@pytest.mark.asyncio
+async def test_sample_per_group_from_field_or_grouped_source():
+    """25d — n from each group, one flat list."""
+    flat = await op_sample(APE_ROWS, {"n": 1, "key": "bucket", "seed": 1})
+    assert len(flat) == 2 and {r["output"]["bucket"] for r in flat} == {"bug", "billing"}
+    task = _state_op_task("sample", params={"n": 5})
+    task.dependency_input.pop("items")
+    task.dependency_input["groups"] = {"bug": [APE_ROWS[0], APE_ROWS[2]],
+                                       "billing": [APE_ROWS[1]]}
+    env = await dispatch_state_op(task)
+    assert env.output["result"] == [APE_ROWS[0], APE_ROWS[2], APE_ROWS[1]]
+
+
+@pytest.mark.asyncio
+async def test_counts_are_not_rows_for_the_next_op():
+    """A state_op reading counts per group fails loudly, naming its source."""
+    task = _state_op_task("sample", params={"n": 1})
+    task.dependency_input.pop("items")
+    task.dependency_input["source_ref"] = "n2"
+    with pytest.raises(ValueError, match="BRT-SOP-003: source 'n2' gave no rows"):
+        await dispatch_state_op(task)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("op, params, code", [
+    ("count", {"field": "bucket"}, "BRT-SOP-006"),
+    ("sample", {"n": "three"}, "BRT-SOP-002"),
+    ("sample", {"n": -1}, "BRT-SOP-002"),
+    ("group_by", "bucket", "BRT-SOP-002"),
+])
+async def test_bad_params_fail_and_name_the_params(op, params, code):
+    task = _state_op_task(op, items=APE_ROWS, params=None)
+    task.dependency_input["params"] = params
+    with pytest.raises(ValueError) as info:
+        await dispatch_state_op(task)
+    text = str(info.value)
+    assert text.startswith(code) and "Its params:" in text and len(text) <= 187
+
+
+def test_sample_result_is_a_row_marker_list_step():
+    """25g — the compose row-marker block reads sample/filter results as rows."""
+    from src.envelopes.schema import InboundEnvelope
+    from src.orchestrator import row_markers as rm
+
+    env = InboundEnvelope(envelope_id=uuid.uuid4(), subtask_id=uuid.uuid4(),
+                          status="resolved",
+                          output={"result": [APE_ROWS[2], APE_ROWS[0]]})
+    env._node_type = "state_op"
+    rows = rm.rows_for(env, None)
+    assert rows == [{"item": "e0", "bucket": "bug", "topic": "crash"},
+                    {"item": "e2", "bucket": "bug", "topic": "sync"}]
+    env.output = {"result": {"bug": 2, "billing": 1}}
+    assert rm.rows_for(env, None) is None  # counts are not a list step
+
+
+# --- Review of ac1c932: params are taken strictly -----------------------------
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("op, params", [
+    ("group_by", {"key": "bucket", "count": "true"}),
+    ("group_by", {"key": "bucket", "count": 1}),
+    ("filter", {"key": "bucket", "value": "bug", "negate": "false"}),
+])
+async def test_count_and_negate_must_be_real_booleans(op, params):
+    task = _state_op_task(op, items=APE_ROWS, params=params)
+    with pytest.raises(ValueError, match=r"^BRT-SOP-002: .*Its params:"):
+        await dispatch_state_op(task)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("op, params", [
+    ("filter", {"key": "", "value": "bug"}),
+    ("group_by", {"key": ""}),
+    ("group_by", {"group_by": ""}),
+])
+async def test_an_empty_key_is_a_missing_param(op, params):
+    task = _state_op_task(op, items=APE_ROWS, params=params)
+    with pytest.raises(ValueError, match=r"^BRT-SOP-002: .*Its params:"):
+        await dispatch_state_op(task)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("op", [5, ["count"], {"op": "count"}])
+async def test_an_op_that_is_not_a_string_is_brt_sop_001(op):
+    task = _state_op_task("count", items=APE_ROWS)
+    task.dependency_input["op"] = op
+    with pytest.raises(ValueError) as info:
+        await dispatch_state_op(task)
+    text = str(info.value)
+    assert text.startswith("BRT-SOP-001") and "group_by(" in text and "sample(" in text

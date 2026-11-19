@@ -1,0 +1,50 @@
+{
+ "sanity": [],
+ "pairs": [
+  {
+   "id": "C_1",
+   "winner": "direct",
+   "note": "borg run failed",
+   "judges": [],
+   "answer_markers": {
+    "direct": {
+     "chars": 1049,
+     "words": 160,
+     "headings": 0,
+     "list_items": 11,
+     "code_blocks": 0,
+     "part_id_refs": 0
+    },
+    "borg": {
+     "chars": 82,
+     "words": 9,
+     "headings": 0,
+     "list_items": 0,
+     "code_blocks": 0,
+     "part_id_refs": 0
+    }
+   }
+  }
+ ],
+ "comparisons": 1,
+ "no_verdict": 0,
+ "direct_wins": 1,
+ "borg_wins": 0,
+ "ties": 0,
+ "direct_preferred_in_majority": true,
+ "dollars": 0.0,
+ "status": "completed",
+ "job": "C",
+ "judge_models": [
+  "openrouter/qwen/qwen4-max"
+ ],
+ "estimate_dollars": 0.0,
+ "cost_dollars": 0.0,
+ "this_call_dollars": 0.0,
+ "reused_pairs": [],
+ "incomplete_repeats": [],
+ "calls_logs": [
+  "C:\\Stage\\BORG_ROUTE\\bench\\results\\2026_11_17\\dbs\\judge_C.calls.jsonl"
+ ],
+ "calls_log": "C:\\Stage\\BORG_ROUTE\\bench\\results\\2026_11_17\\dbs\\judge_C.calls.jsonl"
+}

@@ -1,0 +1,105 @@
+{
+ "job": "D",
+ "arm": "borg_cloud",
+ "repeat": 1,
+ "date": "trial32g_r2data",
+ "status": "completed",
+ "error": null,
+ "lane_mode": "by_reference",
+ "routing_config": {
+  "leaf_floors": {
+   "light": 6.0,
+   "mid": 7.5,
+   "heavy": 9.0
+  },
+  "time_cost_per_sec": 0.0001,
+  "pool": [
+   "ollama/llama3.2:3b",
+   "openrouter/anthropic/claude-opus-4.7",
+   "openrouter/anthropic/claude-sonnet-4.6",
+   "openrouter/deepseek/deepseek-v3.2",
+   "openrouter/google/gemini-3.1-flash-lite-preview",
+   "openrouter/google/gemini-3.1-pro-preview",
+   "openrouter/moonshotai/kimi-k2-thinking",
+   "openrouter/openai/gpt-5.3-codex",
+   "openrouter/openai/gpt-5.4-nano",
+   "openrouter/x-ai/grok-4.20"
+  ],
+  "lane_mode": "by_reference",
+  "max_run_seconds": 7200,
+  "direct_timeout_seconds": 7200.0,
+  "answerer_call_timeout_seconds": 7200.0,
+  "orchestrator_call_timeout_seconds": 7200.0,
+  "tools_enabled": false,
+  "env": {
+   "ANSWERER_MAX_TOKENS": "6000",
+   "ORCHESTRATOR_MAX_TOKENS": "6000",
+   "ORCHESTRATOR_QUALITY_REQUIREMENT": "9.0",
+   "BORG_RULE_ZERO_SHORTCUT": "true",
+   "LEAF_QUALITY_LIGHT": "6.0",
+   "LEAF_QUALITY_MID": "7.5",
+   "LEAF_QUALITY_HEAVY": "9.0",
+   "TIME_COST_PER_SEC": "0.0001",
+   "BORG_LANE_MAX_OUTPUT_CHARS": "1500",
+   "BORG_LANE_MAX_VERBATIM_CHARS": "120",
+   "BORG_LANE_MAX_NGRAM_SHARE": "0.10",
+   "BORG_LANE_MANIFEST": "names",
+   "BORG_LANE_PART_CHARS": "8000",
+   "BORG_LANE_LOCAL_ALLOWLIST": null,
+   "BORG_LOCAL_HOSTS": null,
+   "BORG_ANSWERER_CALL_TIMEOUT": "7200",
+   "BORG_ORCHESTRATOR_CALL_TIMEOUT": "7200",
+   "BORG_LANE_MODE": "by_reference",
+   "BORG_MAX_RUN_SECONDS": "7200",
+   "BASELINE_MODEL_ID": "openrouter/anthropic/claude-opus-5.5"
+  },
+  "baseline_model_id": "openrouter/anthropic/claude-opus-5.5",
+  "baseline_resolved_by_engine": true,
+  "baseline_note": "the bench baseline; the engine resolves it from the matrix it is given"
+ },
+ "run_id": "667206de-4c9c-4f94-99e3-1ba4673b73c1",
+ "cost_dollars": 0.06047085000000001,
+ "digest_cost_dollars": 0.06047085000000001,
+ "baseline_dollars": 0.288124,
+ "wall_seconds": 28.617,
+ "tokens": {
+  "prompt_tokens": 49396,
+  "completion_tokens": 4527,
+  "total_tokens": 53923
+ },
+ "models": [
+  "openrouter/openai/gpt-5.4-nano"
+ ],
+ "models_per_step": [
+  {
+   "step": "classify_notes_2",
+   "task_type": "extraction",
+   "tier": "light",
+   "chosen": "openrouter/openai/gpt-5.4-nano",
+   "reason": "routed",
+   "dollars": 0.0
+  }
+ ],
+ "model_calls": 3,
+ "answer": "Here is the credit risk classification for all 60 client notes:\n\n```json\n[\n  {\"file\": \"note_01.txt\", \"risk\": \"low\"},\n  {\"file\": \"note_02.txt\", \"risk\": \"medium\"},\n  {\"file\": \"note_03.txt\", \"risk\": \"high\"},\n  {\"file\": \"note_04.txt\", \"risk\": \"low\"},\n  {\"file\": \"note_05.txt\", \"risk\": \"medium\"},\n  {\"file\": \"note_06.txt\", \"risk\": \"high\"},\n  {\"file\": \"note_07.txt\", \"risk\": \"low\"},\n  {\"file\": \"note_08.txt\", \"risk\": \"medium\"},\n  {\"file\": \"note_09.txt\", \"risk\": \"high\"},\n  {\"file\": \"note_10.txt\", \"risk\": \"low\"},\n  {\"file\": \"note_11.txt\", \"risk\": \"medium\"},\n  {\"file\": \"note_12.txt\", \"risk\": \"high\"},\n  {\"file\": \"note_13.txt\", \"risk\": \"low\"},\n  {\"file\": \"note_14.txt\", \"risk\": \"medium\"},\n  {\"file\": \"note_15.txt\", \"risk\": \"high\"},\n  {\"file\": \"note_16.txt\", \"risk\": \"low\"},\n  {\"file\": \"note_17.txt\", \"risk\": \"medium\"},\n  {\"file\": \"note_18.txt\", \"risk\": \"high\"},\n  {\"file\": \"note_19.txt\", \"risk\": \"low\"},\n  {\"file\": \"note_20.txt\", \"risk\": \"medium\"},\n  {\"file\": \"note_21.txt\", \"risk\": \"high\"},\n  {\"file\": \"note_22.txt\", \"risk\": \"low\"},\n  {\"file\": \"note_23.txt\", \"risk\": \"medium\"},\n  {\"file\": \"note_24.txt\", \"risk\": \"high\"},\n  {\"file\": \"note_25.txt\", \"risk\": \"low\"},\n  {\"file\": \"note_26.txt\", \"risk\": \"medium\"},\n  {\"file\": \"note_27.txt\", \"risk\": \"high\"},\n  {\"file\": \"note_28.txt\", \"risk\": \"low\"},\n  {\"file\": \"note_29.txt\", \"risk\": \"medium\"},\n  {\"file\": \"note_30.txt\", \"risk\": \"high\"},\n  {\"file\": \"note_31.txt\", \"risk\": \"high\"},\n  {\"file\": \"note_32.txt\", \"risk\": \"medium\"},\n  {\"file\": \"note_33.txt\", \"risk\": \"medium\"},\n  {\"file\": \"note_34.txt\", \"risk\": \"low\"},\n  {\"file\": \"note_35.txt\", \"risk\": \"medium\"},\n  {\"file\": \"note_36.txt\", \"risk\": \"high\"},\n  {\"file\": \"note_37.txt\", \"risk\": \"high\"},\n  {\"file\": \"note_38.txt\", \"risk\": \"high\"},\n  {\"file\": \"note_39.txt\", \"risk\": \"medium\"},\n  {\"file\": \"note_40.txt\", \"risk\": \"high\"},\n  {\"file\": \"note_41.txt\", \"risk\": \"low\"},\n  {\"file\": \"note_42.txt\", \"risk\": \"medium\"},\n  {\"file\": \"note_43.txt\", \"risk\": \"medium\"},\n  {\"file\": \"note_44.txt\", \"risk\": \"high\"},\n  {\"file\": \"note_45.txt\", \"risk\": \"high\"},\n  {\"file\": \"note_46.txt\", \"risk\": \"high\"},\n  {\"file\": \"note_47.txt\", \"risk\": \"high\"},\n  {\"file\": \"note_48.txt\", \"risk\": \"high\"},\n  {\"file\": \"note_49.txt\", \"risk\": \"high\"},\n  {\"file\": \"note_50.txt\", \"risk\": \"high\"},\n  {\"file\": \"note_51.txt\", \"risk\": \"low\"},\n  {\"file\": \"note_52.txt\", \"risk\": \"medium\"},\n  {\"file\": \"note_53.txt\", \"risk\": \"medium\"},\n  {\"file\": \"note_54.txt\", \"risk\": \"high\"},\n  {\"file\": \"note_55.txt\", \"risk\": \"medium\"},\n  {\"file\": \"note_56.txt\", \"risk\": \"high\"},\n  {\"file\": \"note_57.txt\", \"risk\": \"low\"},\n  {\"file\": \"note_58.txt\", \"risk\": \"medium\"},\n  {\"file\": \"note_59.txt\", \"risk\": \"high\"},\n  {\"file\": \"note_60.txt\", \"risk\": \"high\"}\n]\n```",
+ "canaries_sent_to_cloud": 3,
+ "canaries_in_answer": 0,
+ "db_path": "bench/results/trial32g_r2data/dbs/D_borg_cloud_1.db",
+ "calls_log": null,
+ "attempt": 1,
+ "ledger_dollars": 0.06047085000000001,
+ "aborted_attempts": [],
+ "estimate_dollars": 1.1779950000000001,
+ "quality": {
+  "accuracy": 1.0,
+  "per_field_accuracy": {
+   "risk": 1.0
+  },
+  "items_expected": 60,
+  "items_answered": 60
+ },
+ "data_root": "C:\\Stage\\BORG_ROUTE\\bench\\data",
+ "local_speed": {
+  "ollama/llama3.2:3b": 5.389
+ }
+}

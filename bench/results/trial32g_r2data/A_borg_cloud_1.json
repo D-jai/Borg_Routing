@@ -1,0 +1,121 @@
+{
+ "job": "A",
+ "arm": "borg_cloud",
+ "repeat": 1,
+ "date": "trial32g_r2data",
+ "status": "completed",
+ "error": null,
+ "lane_mode": "by_reference",
+ "routing_config": {
+  "leaf_floors": {
+   "light": 6.0,
+   "mid": 7.5,
+   "heavy": 9.0
+  },
+  "time_cost_per_sec": 0.0001,
+  "pool": [
+   "ollama/llama3.2:3b",
+   "openrouter/anthropic/claude-opus-4.7",
+   "openrouter/anthropic/claude-sonnet-4.6",
+   "openrouter/deepseek/deepseek-v3.2",
+   "openrouter/google/gemini-3.1-flash-lite-preview",
+   "openrouter/google/gemini-3.1-pro-preview",
+   "openrouter/moonshotai/kimi-k2-thinking",
+   "openrouter/openai/gpt-5.3-codex",
+   "openrouter/openai/gpt-5.4-nano",
+   "openrouter/x-ai/grok-4.20"
+  ],
+  "lane_mode": "by_reference",
+  "max_run_seconds": 7200,
+  "direct_timeout_seconds": 7200.0,
+  "answerer_call_timeout_seconds": 7200.0,
+  "orchestrator_call_timeout_seconds": 7200.0,
+  "tools_enabled": false,
+  "env": {
+   "ANSWERER_MAX_TOKENS": "6000",
+   "ORCHESTRATOR_MAX_TOKENS": "6000",
+   "ORCHESTRATOR_QUALITY_REQUIREMENT": "9.0",
+   "BORG_RULE_ZERO_SHORTCUT": "true",
+   "LEAF_QUALITY_LIGHT": "6.0",
+   "LEAF_QUALITY_MID": "7.5",
+   "LEAF_QUALITY_HEAVY": "9.0",
+   "TIME_COST_PER_SEC": "0.0001",
+   "BORG_LANE_MAX_OUTPUT_CHARS": "1500",
+   "BORG_LANE_MAX_VERBATIM_CHARS": "120",
+   "BORG_LANE_MAX_NGRAM_SHARE": "0.10",
+   "BORG_LANE_MANIFEST": "names",
+   "BORG_LANE_PART_CHARS": "8000",
+   "BORG_LANE_LOCAL_ALLOWLIST": null,
+   "BORG_LOCAL_HOSTS": null,
+   "BORG_ANSWERER_CALL_TIMEOUT": "7200",
+   "BORG_ORCHESTRATOR_CALL_TIMEOUT": "7200",
+   "BORG_LANE_MODE": "by_reference",
+   "BORG_MAX_RUN_SECONDS": "7200",
+   "BASELINE_MODEL_ID": "openrouter/anthropic/claude-opus-5.5"
+  },
+  "baseline_model_id": "openrouter/anthropic/claude-opus-5.5",
+  "baseline_resolved_by_engine": true,
+  "baseline_note": "the bench baseline; the engine resolves it from the matrix it is given"
+ },
+ "run_id": "b7c5975f-2f4e-4314-b023-89e09c02089c",
+ "cost_dollars": 0.3315671,
+ "digest_cost_dollars": 0.3315671,
+ "baseline_dollars": 1.21718,
+ "wall_seconds": 146.389,
+ "tokens": {
+  "prompt_tokens": 176200,
+  "completion_tokens": 25619,
+  "total_tokens": 201819
+ },
+ "models": [
+  "openrouter/google/gemini-3.1-pro-preview",
+  "openrouter/openai/gpt-5.4-nano"
+ ],
+ "models_per_step": [
+  {
+   "step": "classify_emails_2",
+   "task_type": "extraction",
+   "tier": "light",
+   "chosen": "openrouter/openai/gpt-5.4-nano",
+   "reason": "routed",
+   "dollars": 0.0
+  },
+  {
+   "step": "add_urgency_and_fix",
+   "task_type": "extraction",
+   "tier": "mid",
+   "chosen": "openrouter/google/gemini-3.1-pro-preview",
+   "reason": "planner_pick",
+   "dollars": 0.09833599999999999
+  },
+  {
+   "step": "fix_and_complete",
+   "task_type": "extraction",
+   "tier": "mid",
+   "chosen": "openrouter/google/gemini-3.1-pro-preview",
+   "reason": "planner_pick",
+   "dollars": 0.028594
+  }
+ ],
+ "model_calls": 13,
+ "answer": "The classification step produced category (as \"bucket\") and confidence for 199 of the 200 emails, but did not produce urgency values for any email. Per the instructions, urgency is therefore omitted from the output (it was not produced by any step).\n\nThe single failed item (doc_055 / job_a/email_055.txt) has no result and is excluded.\n\nThe final structured output (with category mapped from bucket, file names normalized, and urgency omitted) is:\n\n```json\n[\n{\"file\": \"job_a/email_001.txt\", \"category\": \"billing\"},\n{\"file\": \"job_a/email_002.txt\", \"category\": \"technical\"},\n{\"file\": \"job_a/email_003.txt\", \"category\": \"account_access\"},\n{\"file\": \"job_a/email_004.txt\", \"category\": \"shipping\"},\n{\"file\": \"job_a/email_005.txt\", \"category\": \"feedback\"},\n{\"file\": \"job_a/email_006.txt\", \"category\": \"billing\"},\n{\"file\": \"job_a/email_007.txt\", \"category\": \"technical\"},\n{\"file\": \"job_a/email_008.txt\", \"category\": \"account_access\"},\n{\"file\": \"job_a/email_009.txt\", \"category\": \"shipping\"},\n{\"file\": \"job_a/email_010.txt\", \"category\": \"technical\"},\n{\"file\": \"job_a/email_011.txt\", \"category\": \"billing\"},\n{\"file\": \"job_a/email_012.txt\", \"category\": \"technical\"},\n{\"file\": \"job_a/email_013.txt\", \"category\": \"account_access\"},\n{\"file\": \"job_a/email_014.txt\", \"category\": \"shipping\"},\n{\"file\": \"job_a/email_015.txt\", \"category\": \"feedback\"},\n{\"file\": \"job_a/email_016.txt\", \"category\": \"billing\"},\n{\"file\": \"job_a/email_017.txt\", \"category\": \"technical\"},\n{\"file\": \"job_a/email_018.txt\", \"category\": \"account_access\"},\n{\"file\": \"job_a/email_019.txt\", \"category\": \"shipping\"},\n{\"file\": \"job_a/email_020.txt\", \"category\": \"technical\"},\n{\"file\": \"job_a/email_021.txt\", \"category\": \"billing\"},\n{\"file\": \"job_a/email_022.txt\", \"category\": \"technical\"},\n{\"file\": \"job_a/email_023.txt\", \"category\": \"account_access\"},\n{\"file\": \"job_a/email_024.txt\", \"category\": \"shipping\"},\n{\"file\": \"job_a/email_025.txt\", \"category\": \"feedback\"},\n{\"file\": \"job_a/email_026.txt\", \"category\": \"billing\"},\n{\"file\": \"job_a/email_027.txt\", \"category\": \"technical\"},\n{\"file\": \"job_a/email_028.txt\", \"category\": \"account_access\"},\n{\"file\": \"job_a/email_029.txt\", \"category\": \"shipping\"},\n{\"file\": \"job_a/email_030.txt\", \"category\": \"feedback\"},\n{\"file\": \"job_a/email_031.txt\", \"category\": \"billing\"},\n{\"file\": \"job_a/email_032.txt\", \"category\": \"technical\"},\n{\"file\": \"job_a/email_033.txt\", \"category\": \"account_access\"},\n{\"file\": \"job_a/email_034.txt\", \"category\": \"shipping\"},\n{\"file\": \"job_a/email_035.txt\", \"category\": \"billing\"},\n{\"file\": \"job_a/email_036.txt\", \"category\": \"billing\"},\n{\"file\": \"job_a/email_037.txt\", \"category\": \"technical\"},\n{\"file\": \"job_a/email_038.txt\", \"category\": \"account_access\"},\n{\"file\": \"job_a/email_039.txt\", \"category\": \"shipping\"},\n{\"file\": \"job_a/email_040.txt\", \"category\": \"feedback\"},\n{\"file\": \"job_a/email_041.txt\", \"category\": \"billing\"},\n{\"file\": \"job_a/email_042.txt\", \"category\": \"technical\"},\n{\"file\": \"job_a/email_043.txt\", \"category\": \"account_access\"},\n{\"file\": \"job_a/email_044.txt\", \"category\": \"shipping\"},\n{\"file\": \"job_a/email_045.txt\", \"category\": \"billing\"},\n{\"file\": \"job_a/email_046.txt\", \"category\": \"billing\"},\n{\"file\": \"job_a/email_047.txt\", \"category\": \"technical\"},\n{\"file\": \"job_a/email_048.txt\", \"category\": \"account_access\"},\n{\"file\": \"job_a/email_049.txt\", \"category\": \"shipping\"},\n{\"file\": \"job_a/email_050.txt\", \"category\": \"billing\"},\n{\"file\": \"job_a/email_051.txt\", \"category\": \"billing\"},\n{\"file\": \"job_a/email_052.txt\", \"category\": \"technical\"},\n{\"file\": \"job_a/email_053.txt\", \"category\": \"account_access\"},\n{\"file\": \"job_a/email_054.txt\", \"category\": \"shipping\"},\n{\"file\": \"job_a/email_055.txt\", \"error\": \"BRT-ANS-005\"},\n{\"file\": \"job_a/email_056.txt\", \"category\": \"billing\"},\n{\"file\": \"job_a/email_057.txt\", \"category\": \"technical\"},\n{\"file\": \"job_a/email_058.txt\", \"category\": \"account_access\"},\n{\"file\": \"job_a/email_059.txt\", \"category\": \"shipping\"},\n{\"file\": \"job_a/email_060.txt\", \"category\": \"billing\"},\n{\"file\": \"job_a/email_061.txt\", \"category\": \"billing\"},\n{\"file\": \"job_a/email_062.txt\", \"category\": \"technical\"},\n{\"file\": \"job_a/email_063.txt\", \"category\": \"account_access\"},\n{\"file\": \"job_a/email_064.txt\", \"category\": \"shipping\"},\n{\"file\": \"job_a/email_065.txt\", \"category\": \"feedback\"},\n{\"file\": \"job_a/email_066.txt\", \"category\": \"billing\"},\n{\"file\": \"job_a/email_067.txt\", \"category\": \"technical\"},\n{\"file\": \"job_a/email_068.txt\", \"category\": \"account_access\"},\n{\"file\": \"job_a/email_069.txt\", \"category\": \"shipping\"},\n{\"file\": \"job_a/email_070.txt\", \"category\": \"feedback\"},\n{\"file\": \"job_a/email_071.txt\", \"category\": \"billing\"},\n{\"file\": \"job_a/email_072.txt\", \"category\": \"technical\"},\n{\"file\": \"job_a/email_073.txt\", \"category\": \"account_access\"},\n{\"file\": \"job_a/email_074.txt\", \"category\": \"shipping\"},\n{\"file\": \"job_a/email_075.txt\", \"category\": \"feedback\"},\n{\"file\": \"job_a/email_076.txt\", \"category\": \"billing\"},\n{\"file\": \"job_a/email_077.txt\", \"category\": \"technical\"},\n{\"file\": \"job_a/email_078.txt\", \"category\": \"account_access\"},\n{\"file\": \"job_a/email_079.txt\", \"category\": \"shipping\"},\n{\"file\": \"job_a/email_080.txt\", \"category\": \"feedback\"},\n{\"file\": \"job_a/email_081.txt\", \"category\": \"billing\"},\n{\"file\": \"job_a/email_082.txt\", \"category\": \"technical\"},\n{\"file\": \"job_a/email_083.txt\", \"category\": \"account_access\"},\n{\"file\": \"job_a/email_084.txt\", \"category\": \"shipping\"},\n{\"file\": \"job_a/email_085.txt\", \"category\": \"feedback\"},\n{\"file\": \"job_a/email_086.txt\", \"category\": \"billing\"},\n{\"file\": \"job_a/email_087.txt\", \"category\": \"technical\"},\n{\"file\": \"job_a/email_088.txt\", \"category\": \"account_access\"},\n{\"file\": \"job_a/email_089.txt\", \"category\": \"shipping\"},\n{\"file\": \"job_a/email_090.txt\", \"category\": \"feedback\"},\n{\"file\": \"job_a/email_091.txt\", \"category\": \"billing\"},\n{\"file\": \"job_a/email_092.txt\", \"category\": \"technical\"},\n{\"file\": \"job_a/email_093.txt\", \"category\": \"account_access\"},\n{\"file\": \"job_a/email_094.txt\", \"category\": \"shipping\"},\n{\"file\": \"job_a/email_095.txt\", \"category\": \"feedback\"},\n{\"file\": \"job_a/email_096.txt\", \"category\": \"billing\"},\n{\"file\": \"job_a/email_097.txt\", \"category\": \"technical\"},\n{\"file\": \"job_a/email_098.txt\", \"category\": \"account_access\"},\n{\"file\": \"job_a/email_099.txt\", \"category\": \"shipping\"},\n{\"file\": \"job_a/email_100.txt\", \"category\": \"feedback\"},\n{\"file\": \"job_a/email_101.txt\", \"category\": \"shipping\"},\n{\"file\": \"job_a/email_102.txt\", \"category\": \"billing\"},\n{\"file\": \"job_a/email_103.txt\", \"category\": \"billing\"},\n{\"file\": \"job_a/email_104.txt\", \"category\": \"billing\"},\n{\"file\": \"job_a/email_105.txt\", \"category\": \"feedback\"},\n{\"file\": \"job_a/email_106.txt\", \"category\": \"billing\"},\n{\"file\": \"job_a/email_107.txt\", \"category\": \"billing\"},\n{\"file\": \"job_a/email_108.txt\", \"category\": \"billing\"},\n{\"file\": \"job_a/email_109.txt\", \"category\": \"feedback\"},\n{\"file\": \"job_a/email_110.txt\", \"category\": \"technical\"},\n{\"file\": \"job_a/email_111.txt\", \"category\": \"technical\"},\n{\"file\": \"job_a/email_112.txt\", \"category\": \"billing\"},\n{\"file\": \"job_a/email_113.txt\", \"category\": \"technical\"},\n{\"file\": \"job_a/email_114.txt\", \"category\": \"account_access\"},\n{\"file\": \"job_a/email_115.txt\", \"category\": \"account_access\"},\n{\"file\": \"job_a/email_116.txt\", \"category\": \"technical\"},\n{\"file\": \"job_a/email_117.txt\", \"category\": \"account_access\"},\n{\"file\": \"job_a/email_118.txt\", \"category\": \"shipping\"},\n{\"file\": \"job_a/email_119.txt\", \"category\": \"account_access\"},\n{\"file\": \"job_a/email_120.txt\", \"category\": \"shipping\"},\n{\"file\": \"job_a/email_121.txt\", \"category\": \"feedback\"},\n{\"file\": \"job_a/email_122.txt\", \"category\": \"technical\"},\n{\"file\": \"job_a/email_123.txt\", \"category\": \"technical\"},\n{\"file\": \"job_a/email_124.txt\", \"category\": \"technical\"},\n{\"file\": \"job_a/email_125.txt\", \"category\": \"feedback\"},\n{\"file\": \"job_a/email_126.txt\", \"category\": \"feedback\"},\n{\"file\": \"job_a/email_127.txt\", \"category\": \"shipping\"},\n{\"file\": \"job_a/email_128.txt\", \"category\": \"feedback\"},\n{\"file\": \"job_a/email_129.txt\", \"category\": \"technical\"},\n{\"file\": \"job_a/email_130.txt\", \"category\": \"billing\"},\n{\"file\": \"job_a/email_131.txt\", \"category\": \"account_access\"},\n{\"file\": \"job_a/email_132.txt\", \"category\": \"technical\"},\n{\"file\": \"job_a/email_133.txt\", \"category\": \"billing\"},\n{\"file\": \"job_a/email_134.txt\", \"category\": \"shipping\"},\n{\"file\": \"job_a/email_135.txt\", \"category\": \"shipping\"},\n{\"file\": \"job_a/email_136.txt\", \"category\": \"feedback\"},\n{\"file\": \"job_a/email_137.txt\", \"category\": \"feedback\"},\n{\"file\": \"job_a/email_138.txt\", \"category\": \"account_access\"},\n{\"file\": \"job_a/email_139.txt\", \"category\": \"feedback\"},\n{\"file\": \"job_a/email_140.txt\", \"category\": \"account_access\"},\n{\"file\": \"job_a/email_141.txt\", \"category\": \"technical\"},\n{\"file\": \"job_a/email_142.txt\", \"category\": \"technical\"},\n{\"file\": \"job_a/email_143.txt\", \"category\": \"shipping\"},\n{\"file\": \"job_a/email_144.txt\", \"category\": \"feedback\"},\n{\"file\": \"job_a/email_145.txt\", \"category\": \"feedback\"},\n{\"file\": \"job_a/email_146.txt\", \"category\": \"technical\"},\n{\"file\": \"job_a/email_147.txt\", \"category\": \"shipping\"},\n{\"file\": \"job_a/email_148.txt\", \"category\": \"account_access\"},\n{\"file\": \"job_a/email_149.txt\", \"category\": \"technical\"},\n{\"file\": \"job_a/email_150.txt\", \"category\": \"shipping\"},\n{\"file\": \"job_a/email_151.txt\", \"category\": \"account_access\"},\n{\"file\": \"job_a/email_152.txt\", \"category\": \"billing\"},\n{\"file\": \"job_a/email_153.txt\", \"category\": \"billing\"},\n{\"file\": \"job_a/email_154.txt\", \"category\": \"technical\"},\n{\"file\": \"job_a/email_155.txt\", \"category\": \"account_access\"},\n{\"file\": \"job_a/email_156.txt\", \"category\": \"shipping\"},\n{\"file\": \"job_a/email_157.txt\", \"category\": \"shipping\"},\n{\"file\": \"job_a/email_158.txt\", \"category\": \"technical\"},\n{\"file\": \"job_a/email_159.txt\", \"category\": \"billing\"},\n{\"file\": \"job_a/email_160.txt\", \"category\": \"technical\"},\n{\"file\": \"job_a/email_161.txt\", \"category\": \"billing\"},\n{\"file\": \"job_a/email_162.txt\", \"category\": \"billing\"},\n{\"file\": \"job_a/email_163.txt\", \"category\": \"billing\"},\n{\"file\": \"job_a/email_164.txt\", \"category\": \"shipping\"},\n{\"file\": \"job_a/email_165.txt\", \"category\": \"shipping\"},\n{\"file\": \"job_a/email_166.txt\", \"category\": \"technical\"},\n{\"file\": \"job_a/email_167.txt\", \"category\": \"shipping\"},\n{\"file\": \"job_a/email_168.txt\", \"category\": \"shipping\"},\n{\"file\": \"job_a/email_169.txt\", \"category\": \"feedback\"},\n{\"file\": \"job_a/email_170.txt\", \"category\": \"billing\"},\n{\"file\": \"job_a/email_171.txt\", \"category\": \"account_access\"},\n{\"file\": \"job_a/email_172.txt\", \"category\": \"account_access\"},\n{\"file\": \"job_a/email_173.txt\", \"category\": \"account_access\"},\n{\"file\": \"job_a/email_174.txt\", \"category\": \"shipping\"},\n{\"file\": \"job_a/email_175.txt\", \"category\": \"shipping\"},\n{\"file\": \"job_a/email_176.txt\", \"category\": \"feedback\"},\n{\"file\": \"job_a/email_177.txt\", \"category\": \"technical\"},\n{\"file\": \"job_a/email_178.txt\", \"category\": \"billing\"},\n{\"file\": \"job_a/email_179.txt\", \"category\": \"technical\"},\n{\"file\": \"job_a/email_180.txt\", \"category\": \"technical\"},\n{\"file\": \"job_a/email_181.txt\", \"category\": \"account_access\"},\n{\"file\": \"job_a/email_182.txt\", \"category\": \"billing\"},\n{\"file\": \"job_a/email_183.txt\", \"category\": \"account_access\"},\n{\"file\": \"job_a/email_184.txt\", \"category\": \"technical\"},\n{\"file\": \"job_a/email_185.txt\", \"category\": \"billing\"},\n{\"file\": \"job_a/email_186.txt\", \"category\": \"feedback\"},\n{\"file\": \"job_a/email_187.txt\", \"category\": \"account_access\"},\n{\"file\": \"job_a/email_188.txt\", \"category\": \"technical\"},\n{\"file\": \"job_a/email_189.txt\", \"category\": \"billing\"},\n{\"file\": \"job_a/email_190.txt\", \"category\": \"account_access\"},\n{\"file\": \"job_a/email_191.txt\", \"category\": \"feedback\"},\n{\"file\": \"job_a/email_192.txt\", \"category\": \"shipping\"},\n{\"file\": \"job_a/email_193.txt\", \"category\": \"shipping\"},\n{\"file\": \"job_a/email_194.txt\", \"category\": \"account_access\"},\n{\"file\": \"job_a/email_195.txt\", \"category\": \"account_access\"},\n{\"file\": \"job_a/email_196.txt\", \"category\": \"feedback\"},\n{\"file\": \"job_a/email_197.txt\", \"category\": \"shipping\"},\n{\"file\": \"job_a/email_198.txt\", \"category\": \"shipping\"},\n{\"file\": \"job_a/email_199.txt\", \"category\": \"shipping\"},\n{\"file\": \"job_a/email_200.txt\", \"category\": \"account_access\"}\n]\n```",
+ "db_path": "bench/results/trial32g_r2data/dbs/A_borg_cloud_1.db",
+ "calls_log": null,
+ "attempt": 1,
+ "ledger_dollars": 0.3315671,
+ "aborted_attempts": [],
+ "estimate_dollars": 2.67964,
+ "quality": {
+  "accuracy": 0.0,
+  "per_field_accuracy": {
+   "category": 0.935,
+   "urgency": 0.0
+  },
+  "items_expected": 200,
+  "items_answered": 200
+ },
+ "data_root": "C:\\Stage\\BORG_ROUTE\\bench\\data",
+ "local_speed": {
+  "ollama/llama3.2:3b": 5.389
+ }
+}

@@ -1,6 +1,6 @@
 # User Guide — BORG_ROUTE
 > Audience: Non-technical end users
-> Updated with every feature — see Parallel Commit Law in CODING_STANDARD_CORE.md
+> Updated with every feature — see the commit law in CONTRIBUTING.md
 
 ---
 
@@ -40,11 +40,12 @@ To use external AI models (like those on OpenRouter), you need to add an API key
 1. Open `http://localhost:8000/ui/keys.html` in your browser.
 2. For OpenRouter: enter your key in the OpenRouter row (get one free at openrouter.ai).
 3. Click **Save**. The key is stored in your local `.env` file — it never leaves your machine.
-4. Go to the **Models** page and click **Discover Models** to load the new provider's models.
+4. Go to the **Models** page and click **Discover** to load the models and their prices.
 
 ### If something goes wrong
-- **"All fields are required"** — fill in the Provider Name, Base URL, and API Key before saving.
-- **Key not taking effect** — restart the server after saving a new key.
+- **The page says "In .env, restart needed"** — the key is written in `.env` but the running server does not have it yet. Restart the server.
+- **"BRT-API-054: the key could not be saved"** — the server cannot write `.env` (this is how Docker live mode runs). Put the key in the `.env` file on the host that `compose.live.yaml` reads, then restart the container.
+- Only the OpenRouter key is saved from this page. The Tavily key (web search) is set by adding `TAVILY_API_KEY` to `.env` and restarting.
 
 ---
 
@@ -57,8 +58,8 @@ by default 12 picks spanning frontier, mid, cheap, and specialty tiers.
 ### How to use it
 1. Start your local model server (LM Studio or Ollama) if you want local models.
 2. Open `http://localhost:8000/ui/models.html`.
-3. Click **Discover Models**. LM Studio + Ollama are probed live; the 12 OpenRouter rows are populated with pricing + context length.
-4. The table shows two sections: **LM Studio (local)** and **OpenRouter (curated)**.
+3. Click **Discover**. LM Studio and Ollama are probed live; the 12 OpenRouter rows are populated with pricing + context length.
+4. The table lists every model with its tick box and scores, and marks each as running on this machine or in the cloud.
 
 ### Editing the OpenRouter pool
 Edit `data/curated_models.yaml` (add / remove `- id: <openrouter-id>`
@@ -66,7 +67,7 @@ entries) and re-run Discover. A good spread has 1-3 frontier, 2-4 mid,
 2-4 cheap / fast, and 1 specialty (e.g. web-search).
 
 ### If something goes wrong
-- **No local models appear** — LM Studio on ports 1234-1237, or Ollama at `http://localhost:11434`, must be running.
+- **No local models appear** — LM Studio on ports 1234-1237, or Ollama at `http://localhost:11434`, must be running. Servers on other addresses are set with `LMSTUDIO_BASE_URLS`, `OLLAMA_BASE_URL` and `LOCAL_OPENAI_BASE_URLS` in `.env` (see the install guide).
 - **OpenRouter section is empty** — Check that `data/curated_models.yaml` exists and lists at least one `id:` (BRT-REG-032).
 - **"Invalid OpenRouter API key"** — Check `OPENROUTER_API_KEY` in `.env`.
 
@@ -83,30 +84,122 @@ the operator opts models into the pool explicitly.
 2. Tick the checkbox next to each model you want the orchestrator to be able to pick today. Typical: 3-6 total.
 3. Unchecking removes a model from the pool immediately. Scores are preserved — re-ticking restores instantly.
 4. State persists in `data/capability_matrix.yaml`; it survives restarts.
+5. Discover Models, Get Model Info and the checkboxes all change the one matrix the router uses, so the next run sees them with no restart.
 
 ### If something goes wrong
-- **"BRT-REG-020: no model found"** — No row is checked, or none meets the quality bar. Tick at least one row that has been researched.
+- **"BRT-ORC-007: no orchestrator model available"** — No row is checked, or none can plan the run. Tick at least one row that has been researched. (`BRT-REG-020` reaches you only when a `compare_and_rank` or `verify_claim` step has more data than any ticked model can hold.)
 
 ### Tuning the quality bar and time-cost knobs (BRT-RT-01)
 The router only picks models whose `task_scores` for the current task meet
-the **quality bar**, then among those picks the cheapest. Cost combines the
-row's pricing with a **time cost per second** so faster models are preferred
-when latency matters.
+the **quality bar**, then among those picks the one with the lowest **effective
+cost**: the row's estimated dollars plus a **time cost per second** for the
+waiting, so faster models are preferred when latency matters. (A chat alias
+such as `borg_route:local` can change the order; the step's route notes say so.)
 
-Fresh installs ship with developer-friendly defaults:
+Fresh installs ship with these defaults (the quality bar of 9.0 means a frontier-class model plans each run; if no ticked model reaches it, the planner retries at a bar of 5.1 and picks the cheapest ticked model, by effective cost, that scores at least 5.1; the trace shows `BRT-ORC-NO-FRONTIER`):
 
 | Knob | Default | Where it lives |
 |---|---|---|
-| `orchestrator_quality_requirement` | `6.5` | `.env` or Admin UI |
+| `orchestrator_quality_requirement` | `9.0` | `.env` or Admin UI |
 | `time_cost_per_sec` | `0.0001` (~$0.36/hr) | `.env` or Admin UI |
 
 Lower the quality bar to let weaker local models orchestrate (useful while
-you're still running Get Model Info). Raise it to force frontier-only
-orchestration. Lower the time cost toward 0 to strongly prefer local
-(free) models; raise it toward `0.0083` ($30/hr) if you're running a SaaS
+you're still running Get Model Info; a model not yet researched has no scores and is not chosen by score-based routing until Get Model Info runs (the planner can still name it, and a request can call it by exact id), while the 12 curated rows ship with scores). Raise it to force frontier-only
+orchestration. Raise the time cost toward `0.0083` ($30/hr) if you're running a SaaS
 where every second of latency costs you real money. Both settings can be
 changed live from **Admin UI → Settings** — the next run reads the new
 value with no restart.
+
+A model on this machine has no price, so its effective cost is its waiting time: tokens divided by its speed, times the time cost. Its speed is measured, not guessed: on **Discover**, when you tick it, and (if it still has no figure) at the start of the next run, one short generation records its output tokens per second (for Ollama, the server's own generation rate, so loading time is left out). After Discover or a tick the page does not wait: the measurement runs in the background and the Models page shows "speed: measuring" until the figure arrives, which can take a few minutes on a CPU host (the probe of one model gives up after 180 seconds; a run start that measures several models waits up to 180 seconds for each). Only one measurement of a model runs at a time: ticking it again, Discover or a run start while it is measuring waits for that measurement instead of starting another. A failed probe shows `BRT-REG-016` on the Models page, and when a run's start hit it, as a warning in that run's trace; the app remembers the failure, so later runs do not probe that model again until you tick it or press Discover (or restart the app). Lower the time cost toward 0 and local models become preferred, because their waiting counts for less and they cost no dollars; raise it and fast cloud models win more steps. A local model whose speed could not be measured (the probe failed: `BRT-REG-016`) is never treated as free: it is priced as no faster than the slowest measured model in the pool, and if no model in the pool has a figure, it is ranked after every priced model that clears the bar (the step's route notes say "speed not measured: ranked after priced models"). It can still win a step no priced model can take, and a raw-document step or `borg_route:local` still goes to a local model. The route record shows the time part of each estimate as `est_time_cost`.
+
+### Where cost appears and how it is computed
+Every model call (each step, and the orchestrator's plan, re-plan and compose
+calls) is logged with its token counts and its **dollars**:
+
+`dollars = input tokens x the model's input price + output tokens x its output price` <!-- claim C04 -->
+
+
+The prices come from the capability-matrix row of the model that served the call.
+A model with no pricing (a local model) costs `0.0`, and so does a model the
+matrix does not know; <!-- claim C05 --> the call is never left blank, with one exception: a
+direct-to-model (bypass) call whose provider sends no usage is logged with its
+tokens and dollars left blank (unknown), not zero. A call that was retried
+after being cut off counts the tokens of both attempts. The tools do not carry
+a price today, so tool calls log `0.0`.
+
+- **Run total:** the run digest (`run_digests`) is the sum of the logged calls'
+  dollars and tokens for the run and every child run it spawned, so it always
+  matches the log. <!-- claim C06 --> It stores `cost_dollars`, `tokens_input`
+  and `tokens_output`, and `GET /runs/{id}` returns it as `digest`. An
+  `orchestrate` or `apply_to_each` step's envelope shows the total of the calls
+  it spawned. The Logs page's Cost Summary tab sums `model_call` rows plus the
+  `orchestrator_decision` rows that carry tokens or dollars (route decisions
+  carry neither). A call that was billed but then failed (a retry after a
+  cut-off that errors) is still logged with what was billed.
+- **Reply:** the `usage` block of the chat reply (`prompt_tokens`,
+  `completion_tokens`, `total_tokens`) is the run's total across every call.
+  A direct-to-model request (an exact model id) reports the provider's own
+  usage and logs one priced `model_call` under its run id; if the provider
+  sends no usage the block is left out. Streamed replies do not report usage
+  yet, but a streamed direct call is still logged once, even if the provider
+  fails mid-stream or the client disconnects (tokens blank if unknown). When
+  the provider refuses the stream, a single reply is fetched instead and
+  recorded; if that also fails, nothing is recorded (as for a non-streamed
+  call). A
+  direct-to-model run is tagged `kind = 'bypass'` (all other runs are
+  `orchestrated`), so `GET /runs` leaves bypass runs out by default; add
+  `?include_bypass=true` to list them too. `GET /runs/{id}` still returns a
+  bypass run by its id. A digest saved before the token and floor columns
+  existed reads those fields as unknown (null), not 0.
+- **One-pass floor.** Each finished run stores `direct_floor_dollars` in its digest (and `GET /runs/{id}` returns it as `digest.direct_floor_dollars`, with `direct_floor_model`, the baseline model it was priced on). It is a floor on what one direct pass on the baseline model would cost: (the characters of your message, plus the characters of every document supplied, each counted once) divided by 4 at the baseline model's input price, plus (the characters of the final answer) divided by 4 at its output price. <!-- claim C07 --> The receipt and the Run page show it as "One pass on <baseline model>: at least US$X", followed by a note (the amount is rounded down, so it never reads above the stored floor): the figure leaves out retries, and structured output such as JSON costs more tokens than the estimate assumes. On the round-1 benchmark (17-Nov-2026) the real direct cost was between 1.3 and 4.4 times this floor (job C 1.3, job A 2.2, job B 4.4; the top of the range includes a retry that was thrown away); `digest.direct_floor_ratio` carries that range, `[1.3, 4.4]`. <!-- claim C23 --> No page shows the old figure: the per-run `baseline_dollars` (BORG's own tokens priced at a reference model) is no longer written to the digest, old digest rows keep theirs, and the raw Details view strips every baseline field. A failed run (including one that timed out), a resumed child run, a run with no baseline model or none with a price, and a direct-to-model run, store no floor and the line is left out. The baseline model is the checked model with the highest `reasoning` score (ties go to the smaller model id); set `baseline_model_id` (Admin config) or `BASELINE_MODEL_ID` in `.env` to pick another.
+
+### How each step gets its model
+The planner and the final answer use the orchestrator model (the quality
+bar above). The planner is shown only the models that are ticked in the
+pool and have an endpoint, all of them, best reasoning score first. Each
+line gives the model's three strongest kinds of work with their scores and
+its price per million tokens (input and output; a cheap model shows its
+real price, such as `$0.001`, never `$0.00`; a model on your own machine
+shows no token price). The planner labels each step with its kind of work
+(`task_type`) and size (`tier`). Every other step in a plan is routed on
+its own:
+
+1. If the planner names a model for the step (`recommended_model`) and
+   that model is ticked in the pool, the step uses it.
+2. Otherwise the step's **kind of work** (`task_type`: reasoning, coding,
+   summarize, writing, roleplay, agentic, extraction) and **size** (`tier`:
+   light, mid, heavy) decide. Unless a run alias such as `borg_route:local`
+   prefers local models (see "Chat model aliases"), the step goes to the ticked
+   model with the lowest effective cost (dollars plus time) whose score for that
+   kind of work is at or above the tier's floor and whose context window fits the step. <!-- claim C01 -->
+   A step that invokes a skill takes the skill's own tier and specialty when
+   the planner gave none. A step with no labels is `reasoning`, `mid`.
+   Near-synonyms are accepted (`creative` is read as writing, `code` as
+   coding, `extract` as extraction, `summary` or `summarise` as
+   summarize), and each such reading is written into the step's route
+   notes; any other unknown word is treated as `reasoning`, also noted.
+   If the skill a step names cannot be found, the trace shows a
+   `BRT-ORC-023` warning and the step is routed without the skill's hints.
+   An `apply_to_each` step's items all run on the step's own model.
+3. Outside the on-premise lane, if no ticked model clears the floor, the step
+   runs on the run's default model and the trace shows a `BRT-ORC-019` warning. <!-- claim C02 -->
+   (A step that must stay local never falls back to a cloud model; see "On-premise lane".) If routing fails for
+   any other reason, the step also runs on the default model and its route
+   entry carries the error.
+
+| Tier | Floor (default) | Setting |
+|---|---|---|
+| light | `6.0` | `LEAF_QUALITY_LIGHT` / config key `leaf_quality_light` |
+| mid | `7.5` | `LEAF_QUALITY_MID` / config key `leaf_quality_mid` |
+| heavy | `9.0` | `LEAF_QUALITY_HEAVY` / config key `leaf_quality_heavy` |
+
+A config key (set through `POST /config`) wins over the `.env` value and
+takes effect on the next run. The run trace records, for every step, why
+its model was chosen: a `route` entry with the kind of work, tier, floor,
+up to eight models that cleared the floor (the chosen one included), lowest
+effective cost first, then any model ranked after the priced ones because no
+model in the pool has a speed figure (its cost is unknown, so it is recorded as
+null, never 0). <!-- claim C03 -->
 
 ---
 
@@ -122,7 +215,7 @@ extraction). This is the "Get Model Info" button.
 1. Set `OPENROUTER_API_KEY` in `.env` (the default scoring LLM is `perplexity/sonar-pro-search`, accessed via OpenRouter).
 2. Open `http://localhost:8000/ui/models.html`.
 3. Click **Get Model Info**. The scorer processes the matrix in batches of 5, with a rolling summary so it can keep relative rankings consistent across all models.
-4. Takes 30-90 seconds for a full 19-row matrix and costs roughly $0.05-0.20 per run.
+4. It takes a while for a full pool and spends a little money on the scoring model, so run it when you add models, not before every question.
 5. Score cells fill in per task type. You can re-run any time — each click re-researches from scratch.
 
 ### Overriding the scoring model
@@ -144,8 +237,22 @@ Every piece of work BORG_ROUTE sends to a model is wrapped in a **WrappedTask** 
 
 ### What a WrappedTask contains
 - **instruction** — the exact task the model must perform
+- **governance_instruction** — what the operator originally asked, word for word. Every step, every item of an `apply_to_each` and every call inside a child run shows this in its governance block, so no model is ever told that a step's own text is "the user's instruction" (Law 1). <!-- claim C08 --> A child run also gets a short "Your Assignment In This Run" block naming its sub-task.
 - **output_schema** — the exact shape the model must return (this is the compression contract)
 - **type** — one of: `orchestrate`, `answerer`, `apply_to_each`, `state_op`
+- **state_op `source`** — a `state_op` step can name an earlier step (`"source": "n1"`; `inputs_ref` is read the same way, never ignored); it then works on the list that step produced (its `items`, `results`, `list` or `result`), or on the groups of rows a `group_by` without `count` produced. If the named step has produced neither (or does not exist), the step fails with BRT-SOP-003; counts per group are not rows, so a step reading them fails the same way. A list that is empty (for example a filter that matched nothing) is valid, so a following count gives 0.
+- **state_op ops and params** (planner ruling 25) — the four ops and the params each takes:
+
+  | Op | Params | Result |
+  |---|---|---|
+  | `filter` | `key` (required), `value` (required), `negate` (optional, true keeps the rows that do not match) | the whole rows whose field equals `value` |
+  | `count` | `key` or `group_by` (optional) | `{"count": N}`, or the number of rows per value of the field (a row without it counts under `__missing__`) |
+  | `group_by` | `key` or `group_by` (required), `count` (optional) | the rows per value of the field; with `"count": true`, the number of rows per value |
+  | `sample` | `n` (required), `key` or `group_by` (optional), `seed` (optional) | `n` rows at random; with a grouping field, or reading a `group_by` step's groups, `n` from each group, as one flat list |
+
+  A field is read from the row's `output` first, then the row itself, so the rows of an `apply_to_each` step (`{index, item, output: {...}}`) work as they are; `"output.bucket"` means the same as `"bucket"`. `filter` and `sample` return whole rows in that shape. A param the op does not take fails the step with BRT-SOP-006 and is never ignored; an unknown op (BRT-SOP-001) or a missing param (BRT-SOP-002) also fails it. Each of these messages names the op's params within the 200 characters re_plan is shown. `count` and `negate` must be `true` or `false` (a string such as `"true"`, or `1`, fails with BRT-SOP-002), an empty `key` is a missing param, and an `op` that is not a string fails with BRT-SOP-001.
+- **skill `items_ref`** — a skill that works on a list (such as `extract_fields`) takes `items_ref` naming the earlier step whose list it should walk (`"items_ref": "n1"`). The items are read from that step's output the same way a plain `apply_to_each` step does. If no such step has produced a list, the step fails with BRT-APE-001.
+- **`failed_items_only`** — an `apply_to_each` step (or a skill step) whose `inputs_ref` or `items_ref` names another `apply_to_each` step may carry `"failed_items_only": true`, on the step or inside `skill_args`. It then runs only that step's failed items, with their original inputs (the same document part id, or the same inline value), in the original order; each result also carries `original_index`, the item's index in the first step of the chain (for a retry of a retry, still the first step's index). `true` written as the text "true" counts too. If the step named is not an `apply_to_each` step, the flag is ignored: every item runs, the step's `notes` says "failed_items_only ignored: <step> is not a per-item step; all items run" and the trace shows BRT-APE-008. If nothing failed, the step finishes with zero items and a note saying so. Without the flag the step reads the earlier step's `results` as before.
 - **level_path** — where this task sits in the run tree (e.g. `"1a"`, `"2b"`)
 - **trigger_reason** — why this envelope was created (e.g. `initial_plan`, `escalation_from:env-id`)
 
@@ -158,6 +265,7 @@ Every piece of work BORG_ROUTE sends to a model is wrapped in a **WrappedTask** 
 - **"BRT-ENV-001" in logs** — A model returned `status="unresolved"`. This should never happen; the schema rejects it. Check the model's raw output in the run trace.
 - **"BRT-ENV-003" in logs** — A plan exceeded the maximum recursion depth (default: 5). The task may be too complex to decompose at this depth; check the run trace and consider restructuring the request.
 - **"BRT-ENV-011" with JSON-Schema-shaped `output_schema`** — Fixed in Phase 2 (BRT-VAL-01). The validator now walks `properties` and honours `required`, so answerer outputs like `{recommendation, reason}` are no longer rejected when the schema is `{"type": "object", "properties": {...}, "required": [...]}`.
+- **A field marked "(only if ...)" in an output schema may be left out** (or be null): for example `defer_reason: "string<=50 (only if bucket='defer')"` in `classify_into_buckets`. A present value is checked as before; a field without that hint is still required (BRT-ENV-011, or BRT-ANS-005 on an answerer item). The marker is read from a string hint or from a property's `description`, and an explicit JSON-Schema `required` list wins: a field named there stays required. This holds for packed and unpacked items alike.
 
 ---
 
@@ -173,6 +281,43 @@ Writing a synthesis node **without** `depends_on` is an anti-pattern — that no
 
 ### Observability codes
 - **BRT-ORC-017** — A `depends_on` id referenced a node not present in the plan (orchestrator hallucination). The node dispatches anyway with whatever upstream outputs could be resolved; the trace shows the missing ids.
+
+### When the final write-up goes wrong (BRT-ORC-028, -029, -030)
+
+The planner, re-plan and final write-up (compose) share one prompt. The engine's message to the model names the mode in one line ("Mode: re_plan. Reply with the next action." or "Mode: compose. Reply with the final answer."). If the write-up still comes back in the wrong form, BORG_ROUTE tries, in order:
+
+1. **The answer is there, in the wrong place** (for example `{"action": "compose", "response": "..."}`, or the text under `final_answer` or `answer`, or a list where text was expected): it is used as the answer, with no extra call. The trace shows BRT-ORC-028. When the reply also carries `action` or `next_nodes` (it is shaped like a re-plan), only `response`, `direct_answer`, `final_answer` or `answer` count; a `message`, `output` or similar field there is the planner's note, not the answer, and the write-up is asked for again (step 2).
+2. **No answer in the reply:** the write-up is asked for once more (BRT-ORC-029).
+3. **Still no answer:** you get the results of the steps that finished, under a plain note saying the final write-up failed: each step's answer, or for a per-item step each item's result and how many items failed. The steps that finished come back under the note, with `answer_kind` `salvaged` (in `raw_local` or `all_local`, a step that read documents shows its output only if it passed the output check). <!-- claim C10 --> The trace shows BRT-ORC-030 as a warning, and `GET /runs/{id}` shows `"answer_kind": "salvaged"` on the run (a written-up answer shows `"composed"`). With the on-premise lane in `raw_local` or `all_local`, a step that read your documents appears only if its output passed the output check, and only document ids (never document text) are shown for its items.
+
+If the write-up call itself fails (a timeout, a connection error, a reply that is not JSON), step 3 happens straight away: the finished steps' results come back with the note, BRT-ORC-030 and `"answer_kind": "salvaged"`.
+
+If no step finished either, the run fails with BRT-ORC-009 (or the failed call's own error) as before.
+
+### Long lists in the answer: rows and outputs placed by code (BRT-ORC-032, BRT-ORC-037 to BRT-ORC-041)
+
+When a run has a finished per-item step (`apply_to_each`) or a `state_op` that returned a list, the write-up does not need to retype its rows. The engine adds a few lines to the write-up's message: each such step's id, its row count, whether its rows are in input order or stored order, and its field names (nothing else). The write-up may then write `@@ROWS:<step id>@@` where the list belongs, and the engine replaces it with that step's stored rows, one row per line in a ```` ```json ```` block, or `@@ROWS_TABLE:<step id>@@` for a Markdown table. Each row is `{"item": <the item or its id>, ...the step's output fields}`. A failed item stays in its place as `{"item": ..., "error": "<code>"}`. A failure the model itself reported shows as **BRT-ANS-010**. <!-- claim C24 --> So a 200-row answer costs the write-up a sentence and one marker instead of thousands of output tokens. A write-up that types the rows itself still works.
+
+- **Item names (ruling 32e).** An item that is one of your documents (or a part of one) shows the document's name as the planner's list of documents showed it, for example `job_a/email_001.txt` (`name#2` for part 2); with `lane_manifest: ids` it shows the document id instead. The step lines say which: `item (file name)` or `item (document id)`, and each line also gives how many items failed.
+- **Chosen fields and names, and joins (ruling 32e).** `@@ROWS:<step id> | file=item, category=bucket@@` writes only the fields named after the bar, in that order, under the names given (`item` is the item's name). `@@ROWS:a + b | file=item, category, urgency@@` joins two steps on the item: rows come in the first step's order, a field takes the later step's value when both have one, a later empty value or failure never erases an earlier value, and a field whose step failed the item shows that failure's code. A failed item keeps only its name and `error`. A field no listed step has is refused (**BRT-ORC-037**); the sentence asking the write-up again says "write <new name>=<field>, where the field is one of: ..." with the step's own fields.
+- **A pair written the other way round (ruling 39).** Each `a=b` pair is read as written first (`a` the new name, `b` the field). A `b` that names a field with case ignored is that field (`Item=Sentiment` gives the field `sentiment` under `Item`). Only when `b` names no field of the step (or steps) even with case ignored, and `a` does (case ignored, or `a` is `item`), is it read the other way round: `item=feedback` gives the item under the heading `feedback`, and `owner=Owner name` the field `owner` under `Owner name`. A pair that fits both ways, case ignored, keeps the written reading (`topic=Topic` gives the column `topic`); a pair that fits neither is still BRT-ORC-037. A pair that would be read the other way round but whose written name is a value the field holds in the step's rows (trimmed, case ignored; for `item`, the item names), such as `needs_follow_up=yes` or `bucket=billing`, is a filter attempt: it is refused with BRT-ORC-037 and the sentence "...a rows marker cannot filter. Place all rows, or name the few items in your own text." After the one re-ask it is handled like any other bad field list (below). One oddity is accepted: a field whose values include its own heading, such as a `follow_up` field holding "Follow-up", cannot be renamed `follow_up=Follow-up`. Each time a pair is read the other way round, the trace records a note (`rows_pairs_reversed`) naming the marker and the pairs.
+- **A bad field list on a good step (ruling 39c).** If, after the one repair re-ask, the only problem left is a rows marker whose step is known but whose field list cannot be used (BRT-ORC-037), the answer is kept: that step's rows are placed where the marker stands in the plain `@@ROWS:<step id>@@` form (all its fields, file-name labels), with the usual checks on placed rows, and the write-up's own text stays. The run is `composed`, the trace shows BRT-ORC-037 as a warning, and the receipt line is "the write-up asked for columns that do not exist; all columns are shown". An unknown step, an `@@OUTPUT:` marker, a join that cannot be placed without a field list, or any other problem left still salvages as below.
+- **A step's whole output (ruling 32e).** When a step's output holds a text of 2,000 characters or more (a report, generated code, a child run's answer), the write-up is told its size and can write `@@OUTPUT:<step id>@@`; the engine writes that text in word for word (as a JSON string when the marker sits inside JSON the write-up wrote). With two or more long fields the line names the field: `@@OUTPUT:n1 | files@@`.
+- **What the write-up is told.** The added lines say the reader sees only the answer, never a step or its result; how many items have no result (a step failed them and nothing else gave them a value), with "never give them a value"; per field, how many rows came back with no value; and the fields the plan asked a skill for that it does not return under those names (ruling 35d). Each such step gets one line listing the asked names and, beside them, the step's own fields, for example `- classify_emails (skill classify_into_buckets): file, category. The step's own fields: item (file name), bucket, confidence, defer_reason, urgency`, then: "For each of these names, choose from the step's own fields: where one of them holds what the name asks for, place it under that name with a rows marker, for example @@ROWS:classify_emails | file=<field>, ...@@. Where none does, leave the name out and tell the reader it was not produced. Do not supply values for these fields yourself." The engine pairs nothing itself: whether `item` fits `file` is the write-up's choice (it may look at the rows it is shown). A step with no rows to place gets "The step has no rows to place, so these were not produced." and the section ends "Do not supply values for these fields yourself: tell the reader they were not produced."
+- **Checks after the write-up (ruling 32e).** When those lines were sent, the answer is checked before anything is placed: a marker that cannot be placed (**BRT-ORC-032**, **BRT-ORC-037**), rows typed around a rows marker (**BRT-ORC-038**), a list typed and cut short instead of placed, such as ten rows and then "// ... the rest follows" (**BRT-ORC-039**), a long output the answer points to ("see the stage result (n1)") without placing it (**BRT-ORC-040**), and a value no step produced, such as a label for a note no step classified or an urgency no step returned (**BRT-ORC-041**). Any of them gets the write-up asked once more, with one sentence per problem; a run asks at most once for all of them. If the second reply still has a problem, the run is salvaged: the second reply's valid markers are placed from the stored results, the write-up's own text is dropped, and the other finished steps follow (a list step as plain rows; a long text written out verbatim only when the problem was BRT-ORC-038 to 041, not after a marker problem alone, 032 or 037). A faithful retype of stored rows is accepted as it is.
+- **Limits of the checks.** BRT-ORC-040 does not catch a long output that the answer simply leaves out without pointing at a step; only the added lines guard against that. BRT-ORC-041 does not catch a changed value for an item that has a result, a value under a new field name nobody asked for, or values in prose. BRT-ORC-039 needs an explicit elision mark (an ellipsis as a list element, in a code comment, or with a word such as "follows", "remaining" or "N more") on or right after the typed rows; a list that simply stops short is not caught, nor a table row such as `| ... (190 more rows) | | |`, and an ellipsis in prose, in a quoted excerpt (double, single or backtick quotes) or after a list that names every item never counts. A step that another placed step supersedes over the same items (a retry, say) can still be asked about when the write-up types a short preview of it. A declined write-up (`action: fail`) gets only the marker checks.
+- **Known and left alone (ruling 36d).** When the write-up types rows itself instead of placing them, it can change values for items that do have results; no check compares typed values with stored ones, so placing rows with a marker is the safe form. A packed call can come back with every item invalid; each item is then retried alone (rulings 23 and 35), so a pack whose items all fail costs the pack's call plus one call per item.
+- **A marker is never left in an answer.** A marker that names no step the code can place, or a near-miss such as `@@Row:x@@`, gets the write-up asked once more (BRT-ORC-032). If the second reply is wrong too, the run is salvaged as above, with BRT-ORC-032 as a warning and `"answer_kind": "salvaged"`. Text like a marker that you wrote in your own message, or that a step returned, is left alone.
+- **A write-up cut off by the token cap** while such a step exists is retried once (even at the 16,000-token ceiling), and the retry tells it to use the marker instead of typing the rows or the long output. If that retry is cut off too, the finished steps' results come back (salvaged).
+- A `@@ROWS:` marker inside a code block but not alone on its line is placed as one compact line, so the block stays intact; a `@@ROWS_TABLE:` marker inside a code block is moved out of it.
+- With no such step, no long output and nothing asked for but not produced, nothing changes: the write-up's message is exactly as before.
+- **Limit:** a list inside a child run (an `orchestrate` step) reaches the parent run as text, so the parent cannot choose its fields; a long child answer can be placed whole with `@@OUTPUT:<step id>@@`.
+
+Every completed run records how its answer was made in `answer_kind` (`GET /runs/{id}`): `composed` (the final write-up), `salvaged` (the finished steps' results with a note, BRT-ORC-030), `direct` (the planner answered without steps), `declined` (the write-up declined with `action: fail` and its reason is the answer, or nothing at all came back with no steps to show) or `shortcut` (a short conversational message answered by the Rule Zero shortcut). One more kind, `planner_only` (planner ruling 26a): the run had no documents, steps were planned, every one of them failed, and the write-up still returned text. The run is still `completed`, but the trace records BRT-ORC-033 as a warning, and the receipt (Ask page) and the Run page header say: "Every planned step failed (N of N), so the planning model wrote this answer alone, with no step's work behind it. Step failure codes: ...". <!-- claim C26 --> Treat such an answer as the planning model's own, unchecked. With the lane on, a viewer who is not an admin still sees this note: the event keeps its code, the count and the step codes (codes and document ids only); when the count cannot be read, the note leaves it out.
+
+With documents the rule is stricter (planner ruling 26b): if the run has documents (any lane mode) and no step that read them finished, the run fails with BRT-ORC-034 before the write-up is called, so no answer text exists. The error lists each failed step's code; a step that read documents shows only its code and document ids (for example `BRT-LANE-002 (document doc_001,doc_002)`), never its message or any document text.
+
+When some steps finished and some failed, the answer is composed as before. The receipt adds one line, "k of N steps failed", only when k is above 0, and "m of n items failed" when a per-item step went on with some failed items (planner ruling 26e); the Run page marks each failed step on the plan. For all of this, a per-item step (`apply_to_each`) whose every item failed counts as a failed step; one successful item is enough for it to count as finished (planner ruling 26f). A child run (an `orchestrate` step) follows the same rule when it planned a step that reads the documents, whether or not the step that started it named any: if none of its document steps finish, the child fails with BRT-ORC-034 instead of handing its planner's text to the parent, and the parent's step fails (BRT-ORC-022). A child run whose every step failed but whose planner still wrote an answer (`planner_only`) is a failed step in its parent too (planner ruling 26g): the parent's step fails with BRT-ORC-022, re_plan sees BRT-ORC-033 and the child's step failure codes, and the child's text is never passed up; the child run keeps its own answer. A child whose planner answered directly, with no steps, still counts as a finished step. The failed-step count includes steps that failed before any call (no local model, a failed source, a failed dependency, a build failure), read from the run's error events; with the lane on, a viewer who is not an admin still sees each such event's code and step id, nothing else.
 
 ---
 
@@ -223,15 +368,16 @@ Each tool invocation writes a `model_call` event with `model_id="tool:web_search
 
 ## Rule Zero Shortcut (BRT-ZERO-01)
 
-For unambiguously conversational short prompts — greetings, factual lookups, small requests, casual chat — BORG_ROUTE now bypasses the plan / re_plan cycle and answers in a single compose call. This saves 2-3 orchestrator calls (~$0.0035) on prompts where decomposition adds no value.
+For unambiguously conversational short prompts — greetings, factual lookups, small requests, casual chat — BORG_ROUTE now bypasses the plan / re_plan cycle and answers in a single compose call. This saves 2-3 orchestrator calls on prompts where decomposition adds no value.
 
 ### When the shortcut fires
 The pre-classifier is deterministic and rule-based:
 - prompt length < 500 characters, AND
 - no list markers (`-`, `*`, `•`, `1.`, `1)` on a line start), AND
-- none of these phrases: `for each`, `list of`, `classify these`, `analyse these`, `analyze these`, `summarise each`, `summarize each`, `process each`, `compare these`, `compare all`, `for every`.
+- none of these phrases: `for each`, `list of`, `classify these`, `analyse these`, `analyze these`, `summarise each`, `summarize each`, `process each`, `compare these`, `compare all`, `for every`, AND
+- none of these live-data words (the prompt needs a web search, so it takes the full path): `latest`, `current`, `today's`, `this week`, `this month`, `this year`, `news`, `price of`, `stock`, `weather`, `score`, `who won`, `breaking`, `right now`, `as of`.
 
-If all three checks pass, the orchestrator goes straight to compose mode. An `orchestrator_decision` event with `mode=rule_zero_shortcut` is written to the run trace, so you can tell the shortcut fired vs. a normal direct-mode decision.
+If all four checks pass, the orchestrator goes straight to compose mode. An `orchestrator_decision` event with `mode=rule_zero_shortcut` is written to the run trace, so you can tell the shortcut fired vs. a normal direct-mode decision.
 
 ### Disabling the shortcut
 - **Per-install:** set `BORG_RULE_ZERO_SHORTCUT=false` in `.env`.
@@ -245,10 +391,10 @@ Turn it off when you want to compare costs / latency before and after, or when d
 
 `POST /v1/chat/completions` with `stream: true` and `model: borg_route*` now emits SSE keepalive comments (`: heartbeat <ts>`) every `BORG_STREAM_HEARTBEAT_SEC` seconds while the pipeline runs. Previously the stream went silent until `orchestrate_run` finished, which on multi-node plans took long enough that browsers timed the fetch out before any bytes arrived.
 
-Keepalive lines are ignored by SSE consumers but reset their idle timers. The real response is word-streamed after the pipeline resolves.
+Keepalive lines are ignored by SSE consumers but reset their idle timers. The real response is word-streamed after the pipeline resolves, and the chunks add back up to the exact answer: line breaks, indents and code blocks arrive intact. Stage updates shown while a chat streams belong to that chat's own run only; other runs going on at the same time no longer leak in.
 
 ### Tuning
-`BORG_STREAM_HEARTBEAT_SEC` (default `5`). Set to `0` to disable heartbeats entirely. Non-streaming (`stream: false`) requests are unaffected.
+`BORG_STREAM_HEARTBEAT_SEC` (default `5`). The value must be positive; `0` does not turn heartbeats off. Non-streaming (`stream: false`) requests are unaffected.
 
 ---
 
@@ -260,50 +406,113 @@ Previously, three silent-fallback sites in `orchestrate_run` could make a broken
 - **BRT-ORC-015** (warning) — the default answerer selection failed and the orchestrator model is being reused. The run still completes; you'll see the event in the trace.
 - **BRT-ORC-016** (error) — envelope save/update failed. Logged and the run continues; check DB health (`data/borg_route.db`).
 
+### When a reply is cut off by the token cap (BRT-ORC-018, BRT-ANS-009)
+
+Every call to a model carries a cap on how many tokens it may write: `ORCHESTRATOR_MAX_TOKENS` for planning and composing, `ANSWERER_MAX_TOKENS` for steps (both default to 2000 when unset). A reasoning-family model gets four times the cap, at least 8000, to leave room for its hidden thinking. A step may ask for a larger cap of its own (`max_output_tokens`, default 4000); the larger of the two is used.
+
+If the model stops because it reached the cap, BORG_ROUTE repeats the call **once** at double the cap, never above 16000. There is no second retry. <!-- claim C22 --> If the first cap is already 16000 or more (for example a reasoning model with `ANSWERER_MAX_TOKENS=6000`, which gives 24000), no retry is made.
+
+What you see:
+
+- **Planner or compose call retried:** the run carries on. The trace's `orchestrator_decision` event for that call shows `"length_retry": true` and `"code": "BRT-ORC-018"`, and its token counts are the two attempts added together.
+- **Every planner, re-plan and compose call** records why the model stopped (`finish_reason`, for example `stop` or `length`) on its `orchestrator_decision` event, retries included, so you can tell from the trace whether a reply was cut off.
+- **A step still cut off:** the step fails with **BRT-ANS-009**. The message says either "even after one retry at double the cap (A -> B)" or "no retry", so you know which happened. Raise `ANSWERER_MAX_TOKENS` in `.env` or split the request into smaller pieces.
+
+**Per-call timeouts.** One step call may take `BORG_ANSWERER_CALL_TIMEOUT` seconds (default 120, else **BRT-ANS-006**) and one planner or compose call `BORG_ORCHESTRATOR_CALL_TIMEOUT` seconds (default 180, else **BRT-ORC-001**); both are read at each call, and a value that is not a positive number is ignored with a warning in the log.
+
 ---
 
 <!-- Added: 2026-04-18 — Slice 3: Recursion + Admin + Resume + Threads -->
 ## Recursion and Depth Control
 
-BORG_ROUTE can orchestrate sub-problems by spawning **child runs**. Each child run has its own run ID, linked to its parent via `parent_run_id`. The depth of nesting is controlled by **Max Recursion Depth** (default: 5).
+BORG_ROUTE can orchestrate sub-problems by spawning **child runs**. Each child run has its own run ID, linked to its parent via `parent_run_id`. The depth of nesting is controlled by the maximum recursion depth (5).
 
 ### What happens at the depth cap
 When an orchestrate node is dispatched at the maximum depth, BORG_ROUTE **demotes it to an answerer** — the model responds directly rather than trying to recurse further. This is logged as a `BRT-ORC-020` event in the run trace.
 
-### How to adjust the depth limit
-1. Open `http://localhost:8000/ui/admin.html`.
-2. In the **Settings** section, adjust **Max Recursion Depth** (1–10).
-3. Click **Save Settings**.
+### The depth limit
+The limit is fixed at 5 in the engine (`MAX_DEPTH` in `src/orchestrator/engine.py`). It cannot be changed from the Admin pages.
 
 ---
 
-## Admin Panel
+## Admin Pages
 
-The Admin panel at `http://localhost:8000/ui/admin.html` lets you configure BORG_ROUTE's behaviour without restarting the server.
+The Admin pages sit in the left menu under **Admin**, starting at `http://localhost:8000/ui/admin_overview.html`. Changes apply from the next run; nothing needs a restart.
 
-### Global Rules
-Text entered here is injected verbatim into every model call's governance layer. Use it to add blanket constraints — for example, "Always respond in English" or "Never reveal pricing information."
+- **Overview** — a first-run checklist (cloud key saved, models in the pool, local server reachable, admin token, lane mode), what has been spent, and the last runs. A failed run has a **Run again** button.
+- **Models** — tick the models the router may use. **Discover** finds local models and adds the curated cloud list; **Get Model Info** researches each model and updates its scores. Each row is marked as running on this machine or in the cloud.
+- **Keys** — says whether the OpenRouter key is saved (the running server has it); a key that is only written in `.env` shows as "In .env, restart needed". It never shows a key. Paste a new key to replace the saved one.
+- **Rules** — global rules (free text) and the rules ledger. Both are sent with every model call. A retired rule stops being sent but stays in the ledger.
+- **Settings** — every setting the engine reads: the quality floors for light, mid and heavy steps, the orchestrator quality requirement, time cost per second, the baseline model (it prices the one-pass floor on the receipt, and the router prices each step on it), a pinned planner, the run time limit, Rule Zero, and the on-premise lane keys. A bad value is refused with `BRT-ADM-006` (lane keys: `BRT-LANE-005`). **Reset** (or saving an empty value) forgets the saved value, so the `.env` value, or the built-in default, applies again. Baseline model empty means `BASELINE_MODEL_ID` from `.env` if set, else the ticked model with the highest reasoning score. The pinned planner endpoint must be an `http://` or `https://` address. `POST /config` also refuses a key that is not a setting (`global_rules` and `admin_rules_ledger` excepted) and a rules ledger that is not a list of rule objects, both with `BRT-ADM-006`. The two max-token settings are read from `.env` only and are shown read-only.
+- **Skills** — the skill library with each skill's usage.
+- **Logs** — events, the cost summary, and Stats: run outcomes, tokens by model, feedback and the outlier runs. Outlier runs are ranked by what they cost or how long they took, never by prompt length.
 
-### Admin Rules Ledger
-Additive rules that accumulate over time. New rules are appended; old rules can be retired (they are excluded from future model calls but kept in the ledger for audit purposes).
+### The admin lock
 
-### Settings
-- **Max Recursion Depth** — Maximum levels of nested orchestration (1–10, default: 5).
-- **Default Strategy** — `SYSTEM_CHOOSE` lets BORG_ROUTE pick the best available model; `LOCAL_FIRST` prefers local models and only falls back to external if no local model qualifies.
-- **Context Window Size** — How many recent conversation turns to include in the orchestrator's context (default: 10).
-- **Time Cost Per Second** — Dollar value assigned to one second of local-model compute time, used in cost estimation (default: $0.0083 ≈ $30/hr).
+Pages that change things (keys, settings, rules, models, skills) and the logs (`GET /logs`, entities and export) are locked by `BORG_ADMIN_TOKEN` in `.env`. <!-- claim C18 -->
+
+- **Token set:** the first time you save something, the page shows a box asking for the token. Type it once and press **Save token**; the call is retried and the token is kept until you close the tab. A wrong token is forgotten and asked for again. Overview shows "Admin token set".
+- **Token not set:** only the computer the server runs on can use these pages. From any other computer the page says that remote admin is off and what to set (`BRT-API-046`). Overview shows "Admin token not set".
+- Asking questions and reading a run stay open to everyone. <!-- claim C19 --> In a run's details, the exact text sent to cloud models is shown only to an admin (the same rule), and while the lane is on the event text (error messages and other decision notes) is hidden from anyone else; type, model, tokens, cost, times and routing stay.
+- The token must be ASCII (letters, digits, punctuation; no spaces or accents). Anything else is reported as misconfigured (`BRT-API-047`, `admin_token_valid: false` in `GET /keys/status`) and the locked routes refuse everyone until it is fixed.
+- **Logs, Export JSONL** is a button: it downloads through the same token prompt and saves a file.
+- API clients send `Authorization: Bearer <token>`; a missing or wrong token gets 401 (`BRT-API-045`).
 
 ---
 
-## Resuming a Failed Run
+## Status endpoints (Admin pages)
 
-If a run fails partway through (network error, model timeout, etc.), you can resume it without re-running the work that already completed.
+These two read-only routes feed the Overview checklist and the Keys page. Neither returns, logs or echoes a key.
 
-### How to resume
-1. Open `http://localhost:8000/ui/dashboard.html`.
-2. Find the failed run in the run history table.
-3. Click **Resume** — only failed or in-progress runs show this button.
-4. The system re-dispatches only the failed/in-flight envelopes. Completed work is not repeated.
+### `GET /keys/status`
+Returns `{"providers": [{"id", "label", "env_var", "saved", "env_file_only"}], "admin_token_set": bool, "admin_token_valid": bool}` for OpenRouter and Tavily. `admin_token_set` says whether `BORG_ADMIN_TOKEN` is set and `admin_token_valid` whether it is ASCII-only (never the token); Overview uses them. `saved` is true only when the running server has the key (set from `.env` at start-up, or by saving it on the Keys page). `env_file_only` is true when the key is a line in `.env` but the running server does not have it yet: restart the server.
+
+### `GET /status/local`
+Probes the configured local model servers (Ollama, LM Studio, other local OpenAI-compatible addresses) with a short request and returns `{"reachable": bool, "servers": [{"name", "url", "reachable"}]}`. `reachable` is true when any server answers. No model is loaded by the probe.
+
+### `GET /runs`
+Besides the `runs` page (`limit`, newest first), the response carries `counts`: `total`, `completed`, `failed`, `running`, `pending`, `thumbs_up` and `thumbs_down` over every run, not just the page. The Overview and Logs Stats counts come from there.
+
+---
+
+## Routes at a glance
+
+Read from the app's own route list on 18-Nov-2026. "Admin" means the admin lock above; every route that changes state returns 403 in replay mode, and so do the four read routes marked "closed in replay" (see "Replay demo").
+
+| Route | What it does | Who |
+|---|---|---|
+| `GET /health` | Liveness check | open |
+| `GET /`, `/ui`, `/ui/`, `/ui/chat.html` | Redirect to the Ask page | open |
+| `POST /v1/chat/completions` | OpenAI-compatible chat; streams | open |
+| `POST /v1/task` | Submit a task and get the run id | open |
+| `POST /mcp` | MCP tools: submit a task, read a run | open |
+| `GET /runs`, `GET /runs/{id}` | List runs; one run with its digest | open |
+| `GET /runs/{id}/stream` | Live events of a run | open |
+| `POST /runs/{id}/rating` | Rate a run | open |
+| `POST /runs/{id}/resume` | Run a failed run again | open |
+| `GET /models`, `GET /models/matrix` | The model pool | open |
+| `POST /models/discover`, `POST /models/research`, `PATCH /models/{id}/checked` | Discover, Get Model Info, tick a model | admin |
+| `POST /keys` | Save the OpenRouter key | admin |
+| `GET /keys/status`, `GET /status/local` | Key and local-server status for the Admin pages | open; closed (403) in replay |
+| `GET /config`, `GET /config/effective`, `GET /config/rules` | Settings and rules, read (`/config/effective` is closed in replay) | open |
+| `POST /config`, `POST /config/rules`, `POST /config/rules/{id}/retire` | Settings and rules, write | admin |
+| `GET /skills`, `GET /skills/{id}` | Skills library | open |
+| `POST /skills/{id}/version` | Add a skill version | admin |
+| `GET /logs`, `GET /logs/entities`, `GET /logs/export` | Events, entities, JSONL export | admin |
+| `GET /logs/cost-summary`, `GET /logs/outlier-runs` | Cost summary (closed in replay); outlier runs | open |
+| `GET /replay/status` | Whether replay mode is on | open |
+| `GET /openapi.json` | The app's own route description | open |
+
+---
+
+## Running a Failed Run Again
+
+If a run fails partway through (network error, model timeout, etc.), you can run it again from the Admin Overview.
+
+### How to run it again
+1. Open `http://localhost:8000/ui/admin_overview.html`.
+2. Find the failed run under **Last runs**.
+3. Click **Run again**. It is offered only for failed runs. It plans the run from the start, with the words you first sent (also when the run failed before it had any steps, for example at planning). It does not continue where the run stopped, and it refuses runs that read documents. A run that is running, or that was just submitted and still has work in flight, cannot be run again (409, BRT-API-024); wait for it to finish or fail.
 
 ### Via API
 ```
@@ -311,27 +520,163 @@ POST /runs/{run_id}/resume
 ```
 Returns 202 immediately. Poll `GET /runs/{run_id}` for updated status.
 
+The re-run works from the run's own instruction, the words you first sent,
+and every step it makes is governed by those words (Law 1), never by the
+text of a step saved in the failed run. <!-- claim C09 --> Resuming a child run keeps its own
+sub-task and is governed by the top-level run's instruction.
+
 ### If something goes wrong
 - **"BRT-DB-020"** — The run is already completed and cannot be resumed.
-- **"no_pending_work"** — All envelopes already succeeded; nothing to retry.
+- **"BRT-API-024" (409)** — The run is still running. Wait until it finishes or fails.
+- **"no_pending_work"** — The run is not failed and has no failed or unfinished step, so there is nothing to do.
+
+---
+
+## Chat model aliases
+
+The `model` field of `POST /v1/chat/completions` (and the **Routing** dropdown on the Ask page) steers how the router picks a model for each step:
+
+- `borg_route`: the planner's own tier for each step.
+- `borg_route:light`, `:mid`, `:heavy`: every step is routed at that tier's quality floor, replacing the tier the planner chose. `:light` is the cheap run, `:heavy` the careful one. Planning and the final answer still use the orchestrator model.
+- `borg_route:coding`, `:creative`, `:reasoning`, `:extraction`: every step is routed for that kind of work, replacing the kind the planner chose, the same way a tier alias replaces the tier (`creative` is read as writing). Each step's routing notes say what the alias replaced.
+- `borg_route:local`: a local model (LM Studio, Ollama) that clears the step's floor is preferred over a cheaper cloud one; if none clears it, the cheapest cloud model is used as usual.
+
+A step's `recommended_model` still comes first. The alias also reaches the child runs of the request. Each step's `routing` (see below) lists the alias and a note saying what it changed.
+
+---
+
+## Reading why each step used its model
+
+`GET /runs/{run_id}` returns `run`, `envelopes`, `child_envelopes`, `events`, `digest`, `outbound` and `calls_left_machine`. `run.lane_mode` is the lane mode the run started under (`off`, `raw_local`, `all_local` or `by_reference`; null for a run from before it was recorded), not today's setting. `calls_left_machine` is `{count, source}`: the outbound ledger's count (`source` "ledger") when the run used the lane, otherwise the number of logged calls to models that are not on this machine, child runs included (`source` "locality"). When it cannot be worked out (a model no longer in the matrix, or no call logged) both are null and the pages say "Not recorded"; it is never turned into 0. Each envelope's `outbound_payload` carries `node_id`, the plan node it ran, so a step with no route event (a `state_op`) still maps to the plan. Every model row from `GET /models` and `GET /models/matrix` carries `is_local`, worked out from the endpoint's host (loopback or `BORG_LOCAL_HOSTS`), `-cloud` tags and the allow-list, never from the `source` label. `child_envelopes` holds the envelopes (with their `routing`) of every child run the run started, each tagged with its own `run_id`. Do not add these dollars to the parent's: the `dollars` of an `orchestrate` envelope already include everything its child run spent, and a child run's `orchestrate` envelope already includes its own grandchildren. The run total is `digest`. Each envelope (one per step) now carries:
+
+- `routing`: why the step went to its model. It holds `chosen`, `reason` (`routed`, `planner_pick` or `fallback_default`), `task_type`, `tier`, `floor`, `est_input_tokens`, `est_output_tokens`, `candidates` (the models that cleared the floor, lowest `est_cost` first, at most 8, each with a score, `est_cost` (dollars plus time cost), `est_dollars` (dollars only) and `est_time_cost` (the time part, one call)); the chosen model's `est_time_cost` sits beside its `est_cost`. A model with no price and no speed figure, in a pool where no model has a figure, is ranked after every model with a cost: its `est_cost` and `est_time_cost` are `null` (unknown), never 0.0, and it is listed after the models with a cost. The record also holds `baseline` (a reference model the router prices the same step on: the best-reasoning checked model, or the one set by the `baseline_model_id` config key / `BASELINE_MODEL_ID`) and `baseline_est_cost`. These are kept in the record for anyone reading the API; the pages show no baseline comparison. If a configured baseline is not in the matrix, `baseline_note` says which model was used instead.
+  - Every figure under `routing` is an estimate, never a measured cost. The token counts are guessed from the step's text length, and `dollars` on the envelope is the only real cost.
+  - `est_dollars` is the chosen model's estimated dollars only (0.0 for a local model). `baseline_est_cost` is the same estimate at the baseline model's prices, so the two compare like for like. `est_cost` is what the router ranks by: dollars plus the cost of waiting (`TIME_COST_PER_SEC`), so it is not comparable with `baseline_est_cost`.
+  - A step whose routing failed (`fallback_default`) still carries the token estimate and `est_dollars`; if no estimate could be made they are `null`, never 0.0. A `planner_pick` also lists `candidates`, for information; the pick itself is unchanged. When no model cleared the floor, `candidates` is empty and `candidates_reason` says so.
+  - For an `apply_to_each` step the estimates cover every item: `items` is the count, `per_item_est_dollars` and `per_item_baseline_est_cost` are one call, and `est_dollars` and `baseline_est_cost` are the totals. They assume one call per item, so for a step whose items are packed (see "Packing small items into one call") they overstate the cost; every model is overstated alike, so the choice of model is the same.
+  - For an `orchestrate` step `served_by` is `child_run`: a child run plans the step and picks its own models, so `chosen` is only the fallback if the step is demoted at max depth (`note` says so), `child_run_id` names the child run, and `est_dollars` and `baseline_est_cost` are `null`. A step demoted at max depth runs as one single call instead: it has no `served_by` or `child_run_id`, carries `est_dollars` and `baseline_est_cost` like any single call, and its `note` is "demoted at max depth". A skill step is described by the type it runs as (`apply_to_each` or `orchestrate`), not by the type written in the plan.
+- `dollars`: what the step's call actually cost.
+- `latency_ms`: the step's own wall-clock run time in milliseconds: from the start of its call (model calls, tools, a child run) until it returns. It leaves out the pricing and database work done after the step returns. Latency of each individual call is on the log rows.
+
+---
+
+## On-premise lane
+
+The lane hands documents to the steps that read them, by reference. What it promises depends on the mode:
+
+- `raw_local` and `all_local` keep your documents on your own machines. Their promise, in these words: **raw document text is sent only to models on your own machines. Everything sent to a cloud model is listed, and you can read it.** <!-- claim C11 -->
+- `by_reference` makes **no privacy promise**: any ticked model, cloud included, may read a document's text. It only keeps bulk data out of the prompt, and still lists every request (see "By reference, for cloud models" below).
+
+The full design is `docs/design/on_premise_lane.md`.
+
+### What counts as "local"
+
+A model is local when the address its requests go to is this machine, never because of its label on the Models page:
+
+- `localhost`, `127.x.x.x` and `[::1]` are local. So is any host you list in `BORG_LOCAL_HOSTS` in `.env` (names, IP addresses or ranges such as `10.8.0.0/16`, comma-separated). A private address that is not listed (for example `192.168.1.20`) is not local: it could forward to a cloud service.
+- Addresses written in unusual forms (`127.1`, `2130706433`, `0x7f.1`, `0.0.0.0`, a URL with a user name in it) are not local.
+- An Ollama model whose tag ends in `-cloud`, or that Ollama reports as served from a remote host, is never local: it is served from localhost but runs elsewhere.
+
+In `raw_local` and `all_local`, when a step must stay local, the router offers it only local models, ignores a cloud model the planner recommended, and never falls back to a cloud model. If no local model clears the step's quality floor, the step fails with **BRT-LANE-002** and nothing is sent. <!-- claim C13 --> Each such step's `routing` shows `"local_only": true`. In `by_reference` no step must stay local: a step that reads documents is routed like any other step, and the document's size still counts toward the model's context.
+
+### Turning the lane on
+
+Set `lane_mode` in Admin (or `BORG_LANE_MODE` in `.env`):
+
+| Mode | Planning and the final answer | Steps that read documents | Other steps | Web search | Direct-to-model, Discover, Get Model Info |
+|---|---|---|---|---|---|
+| `off` (default) | as before | documents are refused | as before | allowed | allowed |
+| `raw_local` | may use a cloud model | **local models only** | may use a cloud model | allowed, checked, listed | allowed and listed; documents refused |
+| `all_local` | **local only** | **local only** | **local only** | refused | refused |
+| `by_reference` | may use a cloud model | **any ticked model, cloud included** | may use a cloud model | allowed, listed | allowed and listed; documents refused |
+
+With `off`, nothing changes from the behaviour before the lane existed.
+
+### By reference, for cloud models (`by_reference`)
+
+`by_reference` makes no privacy promise. It hands documents over exactly as `raw_local` does (`BORG_DOCS_ROOT` and its path checks, a manifest to the planner, the text loaded inside the step that reads it, long documents in parts), but the step that reads a document may be served by any ticked model, cloud included, and that model receives the document's text. The output guard (**BRT-LANE-004**) and the check on everything sent out (**BRT-LANE-006**) do not run, so no step is refused for reading or copying a document. Every request is still written to `outbound_requests`, with whether it left the machine, and listed under the run. The planner's manifest says the steps that read documents may run on cloud models. A run that read documents is still not resumed (**BRT-LANE-008**), as in the other modes.
+
+Use it to keep bulk data out of the prompt. Lists of more than a few dozen items go in as documents, not in the prompt.
+
+### Handing over documents
+
+1. Put the documents in one folder and set `BORG_DOCS_ROOT` in `.env` to it. It may not be `.` or the application folder (which holds `.env` and the database).
+2. Name them relative to that folder: `"documents": {"folder": "client_notes"}` (every file in it and below) or `"documents": {"files": ["client_notes/acme.txt"]}`.
+3. Only `.txt` and `.md` are read (as UTF-8). Other files are listed as "unsupported, not read".
+
+A path that leaves the folder (`..`, an absolute path, `C:x.txt`, `\x.txt`, a network path, a link or junction pointing outside) is refused with **BRT-LANE-001** before anything is read; <!-- claim C15 --> the message names only the path you sent. A file replaced between the check and the read is refused too.
+
+The planner never sees the text. It gets a list: an id per document (`doc_001`), its name, type and size. Set `lane_manifest` to `ids` to hide the names as well. A document longer than `lane_part_chars` (default 8000 characters) is split into parts (`doc_001#2`); nothing is cut off.
+
+### How a step that reads documents works
+
+- The runtime, not the planner, marks a step **raw** when it reads documents (`"inputs_ref": "documents"`, `"documents": ["doc_001"]`, or a skill given `items_ref: documents`), or when it reads the output of a raw step that was withheld. Raw steps run on local models only (in `by_reference`, on any ticked model, with no output guard and no call check; the limits and checks below are those of `raw_local` and `all_local`).
+- **What is sent to the planner:** the manifest, step results as above, and the plan-validation message for an unknown step type with the step the planner wrote, built from the plan and the skill list only (BRT-ORC-036).
+- The text is loaded inside the step, right before its own (local) request. Plans, saved envelopes and results carry document ids, never text.
+- **What a local step returns can be passed on.** That is the limit of the promise, so it is bounded: an output longer than `lane_max_output_chars` (default 1500 characters), one that copies a passage of `lane_max_verbatim_chars` (default 120) characters from the document, or one that holds a short document (under that limit) whole, is withheld (**BRT-LANE-004**). <!-- claim C17 --> The check reads the output's values as text, so line breaks and accented letters do not hide a copy. Ask such steps for short fields (names, dates, labels).
+- When a raw step fails (in `raw_local` and `all_local`), the planner and the final answer see only the code and the document id, for example `{"code": "BRT-LANE-004", "doc": "doc_001"}`. A failure the local model itself reported always shows as **BRT-LANE-004**, whatever code or text it wrote. Only a failure BORG_ROUTE itself raised keeps its own code (for example **BRT-ANS-009** for a truncated answer, or a `BRT-LANE-*` refusal). The full error stays in the local trace.
+- In `by_reference` a failed step that read documents is shown like any other failed step: the code and the first 200 characters of the message, with **BRT-ANS-010** when the model itself reported the failure. Text a model wrote is never read for a code, in any mode. A failure BORG_ROUTE itself raised while such a step ran keeps its own code and also names the document id, for example `{"code": "BRT-LANE-007", "doc": "doc_001", "message": "BRT-LANE-007: the ledger row ... could not be written ..."}` when the record of a request could not be written. (A path outside `BORG_DOCS_ROOT` never gets this far: the whole request is refused with **BRT-LANE-001** before any step runs.)
+- With documents, the planner may not answer directly or skip the plan (**BRT-ORC-003**), and the short-prompt shortcut is off.
+- An `orchestrate` step given documents is refused outside `all_local` (**BRT-LANE-005**): its own planner would read them.
+- Every call a raw step makes, retries included, is checked right before it is sent; a call about to leave the machine is blocked (**BRT-LANE-003**, which means a defect).
+- Rows the engine writes into the answer for a row marker (see "Long lists in the answer") are rows the write-up already received in that run: placing them sends nothing new off the machine. Each rows block is also checked against the documents with the same copy rules as the output check, before it is placed; a hit fails the run and nothing is stored (**BRT-LANE-009**, which means a defect). The same check runs on a long output placed by `@@OUTPUT:` and on rows or long text written out by a salvage after a failed check (ruling 32e). An output the output check held back is never offered for placement, and a marker naming it is refused (BRT-ORC-032). Item names in placed rows are only the names the planner was already shown (none with `lane_manifest: ids`). The write-up's own text is not checked this way.
+
+### The check on everything sent out, and the record
+
+- While the lane is `raw_local` or `all_local` and the run has documents, every request headed off the machine (planner, final answer, cloud steps, web search, direct-to-model) is compared with the documents first. If it holds a passage of 120 characters, more than 10% of a document's 8-word sequences (`lane_max_ngram_share`), or a short document whole, it is blocked (**BRT-LANE-006**). <!-- claim C16 --> Case, punctuation, line breaks, repeated JSON escaping, invisible characters (zero-width space, soft hyphen) and a copy split one word per field do not hide a match. What it does not catch is listed under "What is not promised".
+- Every request a run makes while the lane is on is written to the `outbound_requests` table before it is sent, with its exact body (secret fields such as `api_key` are blanked in the stored copy), and whether it left the machine. If that write fails, the request is not sent (**BRT-LANE-007**). <!-- claim C14 --> A retry is its own row. Many steps sending at once (a document in dozens of parts) take turns writing: each write waits for the database (up to 30 seconds) and is tried up to 5 times, so only a write that truly fails blocks a request.
+- Local calls ignore proxy settings (`HTTP_PROXY` and the like), so a proxy cannot carry them off the machine.
+
+### What you will see on screen
+
+The short fields a local step derives from your documents (such as a topic or an owner name) appear in the run view, because they passed the output check. An output that the check refused appears only as a code and the document ids (for example `BRT-LANE-004` and `doc_003`), never as text. While the lane is on, a viewer who is not the admin sees the same text for each stage in the Ask page's progress line as on the Run page: both hide the planner's notes and messages the same way.
+
+### Using the lane from the API
+
+- `POST /v1/task`: add `"documents": {"folder": "..."}` (or `"files"`) to the body. A refused path returns 400 with **BRT-LANE-001** and creates no run; documents while `lane_mode` is `off` return 400 with **BRT-LANE-005**.
+- `POST /v1/chat/completions`: the same `documents` field, at the top level next to `messages`, with a `borg_route` model. With a direct model id it is refused (**BRT-LANE-005**); in `all_local` every direct-model request is refused.
+- `GET /runs/{run_id}` returns `outbound`: every request this run and its child runs sent off the machine, oldest first, each with `run_id`, `url`, `destination`, `attempt`, `status` and the exact `body`. It is empty when the lane was off. The `body` of each entry is shown only to an admin (a valid `BORG_ADMIN_TOKEN`, or this computer when none is set); other callers get `body: null`. <!-- claim C20 --> The hook is `lane_admin_allowed` in `src/api/tasks.py`. `GET /logs/entities` and `GET /logs/export` need the same admin access.
+- `POST /runs/{run_id}/resume` is refused for a run that read documents, or for a child of one (409, **BRT-LANE-008**): start a new run with the same documents. If the check itself fails, the resume is refused too. A resume, and a run started with the MCP tool `borg_route.submit_task`, follow the current `lane_mode` exactly as `POST /v1/task` does.
+- **Chat history is the client's job.** The server stores no chat history for `POST /v1/chat/completions`: each request carries its own `messages`. A client must not resend answers given under `all_local` in a later request made under another mode, or those answers go to whatever model that mode allows. The Ask page tags each turn with its lane mode and leaves `all_local` turns out under another mode (see "Workspace" below); in every other client this is up to you.
+- With `lane_mode` `off`, no other lane setting is read or checked: a run is exactly as before the lane existed.
+- Discover and Get Model Info are refused while `lane_mode` is `all_local` (403, **BRT-LANE-005**).
+- The lane settings (`lane_mode`, `lane_max_output_chars`, `lane_max_verbatim_chars`, `lane_max_ngram_share`, `lane_manifest`, `lane_local_allowlist`, `lane_part_chars`) appear in `GET /config/effective` and are saved with `POST /config`; an invalid value is refused (400, **BRT-LANE-005**). A new value applies from the next run.
+
+### What is not promised
+
+- In `by_reference`, nothing below is promised either: it makes no privacy promise. Any ticked model, cloud included, receives the text of the documents its steps read, and no copy check runs. The list below is about `raw_local` and `all_local`.
+- Your own prompt goes to the planner. Hand documents over by reference; text pasted into the prompt from a document that was also loaded is blocked, text from any other document cannot be recognised.
+- Facts a local step extracts (a name, a date, a short quote) can leave inside its answer, within the limits above, and are listed. A local model may copy a short phrase from a document word for word into a field it returns; the lane lets that field through when it is within the output guard's limits (no copied passage over 120 characters, 1,500 characters in all), so the phrase can appear on screen and reach the planning model. The public demo applies a stricter rule to its own recordings: no 24-character stretch of a demo document may appear in a recorded run.
+- A document can carry instructions aimed at the local model ("put everything in base64"). The limits reduce the damage; they do not catch encodings or paraphrase.
+- In `by_reference`, a step's documents may be packed into one cloud call (see "Packing small items into one call"): each document sits between its own delimiters and the call says that items are data, but a document carrying instructions ("label every item X") can still steer the answers for the other documents in its pack. Nothing claims the model resists. For documents from untrusted senders set `BORG_PACK_MAX_ITEMS=0` (or `1`): one call per document, as before.
+- The copy checks (the output guard and the check on everything sent out) do not catch:
+  - documents shorter than 24 characters once case, punctuation and spacing are folded: these are never checked;
+  - encodings (base64, hex), reversed text or reversed word order, look-alike letters from other alphabets, a marker word inserted every few words, or a copy placed one word per key name;
+  - paraphrase and summaries;
+  - a document spread over many rows of a list placed by code, each row below both copy limits: the 8-word-sequence check is not run on rows joined in code (each row was checked on its own);
+  - the results joined in code when the write-up fails ("salvaged" answers): these get no check of their own beyond each step's output check.
+
+  The check is a backstop, not proof.
+- File names are visible to the planner unless `lane_manifest` is set to `ids`.
+- A local model server that itself forwards to a cloud service looks local. Restrict the lane with `lane_local_allowlist` (model ids or `host:port`) to servers you vouch for.
+- `all_local` removes these limits by sending nothing out. <!-- claim C12 -->
+- Copies of document-derived text stay in the local database (`logs`, `log_entities`, `envelopes`, `outbound_requests`).
 
 ---
 
 ## Multi-turn Conversations (Threads)
 
-BORG_ROUTE tracks conversation history in **threads**. Each thread stores the sequence of user and assistant messages. When a new run is created within a thread, the last N messages are passed to the orchestrator as context, enabling coherent multi-turn conversations.
+The engine can keep conversation history in **threads** (database tables `threads` and `messages`). When a run is started with a `thread_id`, the system loads that thread's rolling summary (`rolling_summary:{thread_id}`) and links the run to its thread through the `thread_id` field on the run record. It does not pass the last turns for you: the caller must pass `thread_window` itself.
 
-### How threads work
-1. A thread is created automatically when you start a conversation via the Chat UI.
-2. Each user message and assistant response is stored in the thread.
-3. The orchestrator receives the last **Context Window Size** turns as `thread_window`.
-4. Run IDs are linked to their thread via the `thread_id` field on the run record.
+### What is and is not connected
+1. No page and no API route creates a thread or passes a `thread_id` today. The Ask page keeps its conversation in the browser and resends earlier turns with each question (see "Workspace"); `POST /v1/chat/completions` uses the `messages` the client sends.
+2. Threads are used by code that calls the pipeline directly (see "Historical Memory" below).
 
 ---
 
 ## Feedback — Rating Runs
 
-After each assistant reply in the Chat UI, thumbs-up (👍) and thumbs-down (👎) buttons appear. Click either to submit a rating. Ratings are stored against the run and visible in the Dashboard Stats tab.
+After each answer on the Ask page, thumbs-up (👍) and thumbs-down (👎) buttons appear. Click either to submit a rating. Ratings are stored against the run and counted on the Logs page, Stats tab.
 
 You can also rate a run via the API: `POST /runs/{run_id}/rating` with body `{"rating": 1}` (up) or `{"rating": -1}` (down).
 
@@ -339,13 +684,13 @@ You can also rate a run via the API: `POST /runs/{run_id}/rating` with body `{"r
 
 ## Observability Logs
 
-The Logs page at `http://localhost:8000/ui/logs.html` provides three tabs:
+The Logs page at `http://localhost:8000/ui/logs.html` has three tabs:
 
 - **Events** — all model_call, orchestrator_decision, child_residue, and error events with filtering by run ID and event type
-- **Cost Summary** — aggregate token counts and dollar cost grouped by model
-- **NER Entities** — named entities extracted from log payloads by the background NER worker
+- **Cost Summary** — aggregate token counts and dollar cost grouped by model (`model_call` plus priced `orchestrator_decision` rows)
+- **Stats** — run outcomes, tokens by model, feedback and outlier runs (see "Logs and Stats")
 
-Click **Export JSONL** to download a full log snapshot for offline analysis.
+Click **Export JSONL** to download up to 1000 `logs` rows, oldest first, for offline analysis. The export has no entities.
 
 ### NER Worker (Optional, Currently Parked)
 
@@ -364,8 +709,7 @@ structured facts:
 - **Subject-verb-object relations** — simple `(subject, verb, object)` triples
   extracted from sentences via dependency parsing.
 
-Results land in the `log_entities` and `log_relations` tables and are surfaced
-on the **NER Entities** tab of `/ui/logs.html`.
+Results land in the `log_entities` and `log_relations` tables and are available only through `GET /logs/entities` (admin); the JSONL export does not include them. The Logs page has no NER tab.
 
 #### What it was meant to be useful for
 1. **Search across runs** — "show me every run that mentioned customer X" or
@@ -374,8 +718,7 @@ on the **NER Entities** tab of `/ui/logs.html`.
    terms leaking into prompts or outputs.
 3. **Skill-improvement signal** — see which entity types a skill reliably
    handles vs. drops, feeding the Skills Library continuous-improvement loop.
-4. **Offline exploration** — export JSONL from the Logs page and join
-   entities to runs for ad-hoc analysis.
+4. **Offline exploration** — export JSONL from the Logs page for the log rows, and fetch entities from `GET /logs/entities` to join them to runs for ad-hoc analysis.
 
 #### How to turn it on (when you decide you want it)
 1. Download the spaCy model once:
@@ -396,7 +739,7 @@ on the **NER Entities** tab of `/ui/logs.html`.
    from src.logging.ner_worker import run_ner_worker
    asyncio.run(run_ner_worker())
    ```
-3. Open `/ui/logs.html` → **NER Entities** tab. Entities for new payloads
+3. Call `GET /logs/entities` (admin). Entities for new payloads
    should appear within ~5 seconds (the worker's poll interval).
 
 #### How it behaves
@@ -421,13 +764,62 @@ become worth the cost — nothing else in the pipeline depends on it.
 
 ---
 
+## Packing small items into one call (`BORG_PACK_MAX_ITEMS`)
+
+A per-item step (`apply_to_each`) repeats the same fixed text in every call: the rules, your instruction, the step's task and its output shape. When the item itself is a short line, almost all of each call is that repeat. With packing, a step whose calls go to a cloud model sends several items in one call: the rules and your instruction once, word for word, then the step's task once, then each item between its own start and end lines under a short id. The reply is one JSON object with one value per id, and each value is what a single call returns (`status`, `confidence`, `output`, `failure_reason`). Every item still gets its own stored result, so the planner, the write-up, rows placed by code and the receipt see exactly what they would see without packing. <!-- claim C25 -->
+
+- **Setting.** `BORG_PACK_MAX_ITEMS` in `.env`, default 20 items per call. `0` or `1` turns packing off: one call per item, and every request is exactly as before. A value that is not a whole number turns packing off with warning **BRT-APE-007**.
+- **Cloud calls only.** A call to a model on this machine (Ollama, LM Studio, any server at a local address) is never packed, in any lane mode, so steps that read documents in `raw_local` and `all_local` never are. Packing cuts the token bill, and a local model has none: its gain would be prompt-reading time only. Against that stand the context window a local server really serves, which BORG_ROUTE cannot see (a prompt longer than it can lose its start, where your instruction and the rules sit, with no error), and small models answering 20 items at once.
+- **Steps with side effects or tools.** A step that calls a tool (web search, fetch) is never packed, nor is a step with any declared side effect other than `deferrals`. A step whose only side effect is `deferrals` packs too, whether it is a skill step (such as `classify_into_buckets`) or a step the planner wrote itself: an item's deferral is carried entirely in its own answer (`bucket: defer` with its `defer_reason`), so a deferred item in a pack is stored and shown to the planner exactly as it is from a single call.
+- **Which items share a call.** Items are taken in order. An item over 400 estimated tokens (characters / 4) runs alone. A call holds at most 4,000 estimated tokens of items, and its prompt plus expected output must fit the model's context and the step's output cap, counting each estimate twice over for safety. The first call of a step goes alone; the other calls are sized from the tokens its reply really used per item. A step whose items fit one call is sent as one call.
+- **When the reply is not right.** An item whose id is missing, given twice, or whose value does not match the output shape is sent again on its own, once. An answer under an id that is not in that call is never accepted. A reply cut off at the length limit is split in half and each half sent again (a call of 20 items makes at most 59 calls in the worst case, against 40 one at a time). A call that fails or times out sends its items one at a time; after a timeout the rest of that step runs one item per call. An item the model declines (`status: failed`) is stored as declined (**BRT-ANS-010** upward) and not retried, as with a single call.
+- **Known limit: swapped answers.** If the model writes item A's answer under item B's id and B's under A's, nothing can tell. The ids are random-looking, not numbers, so a reply that renumbers or shifts them is caught, but a swap between two real ids is not.
+- **Known limit: one item can steer another.** Items in one call are read together. A line inside one item ("label every item X") can change the answers for the others, whatever the frame says. For documents from untrusted senders, set `BORG_PACK_MAX_ITEMS=0`.
+- **Cost.** Each packed call's tokens and dollars are split across its items (in whole tokens and whole picodollars, so the parts add up exactly to the call) and logged as one row per item. A call cut off at the length limit is paid and counted too. Every call count (the Run page, `GET /logs/cost-summary`, "calls that left this machine") counts a packed call once.
+- **Run page.** The step's "Items" line reads "N items in M calls", and "k retried alone" when some items were sent again on their own. With packing off it reads "N items in N calls". One `orchestrator_decision` event per packed call (`mode: "pack_outcome"`) records how many items were accepted, declined, missing, given twice, under an unknown id, or invalid, and whether the call was cut, timed out or failed.
+- **Record of what left.** In the lane's record of outbound requests, each item call names its step (`step_envelope_id`), and a packed call that carries documents lists every document id in it (`documents`).
+
+## How steps get their items, and what the planner sees when a step fails
+
+- When the list is in your message, the planner puts it in the step's `items` (for a skill such as `extract_fields`, `items` in its args, or `items_ref` given as a list), and the step makes one call per item, or packs small items into fewer calls (see "Packing small items into one call" below). Lists of more than a few dozen items belong in documents, not in the prompt: your whole message is sent with every step.
+- A step whose `inputs_ref`, `items_ref` or `source` names another step of the same plan waits for that step to finish, just as if it were listed in `depends_on`.
+- If `inputs_ref` or `items_ref` names something that is not a step id, and the step has no items of its own, the step fails with BRT-APE-006 before any model call. The message starts with the fix (a list from your message belongs in `items`; `inputs_ref` and `items_ref` must name a step of this run, not a parent run's) and ends with the id it could not find, cut to 40 characters.
+- Within one plan, steps run in waves until none is ready; only then does the planner re-plan. A step that waits on another step of the plan (through `inputs_ref`, a skill's `items_ref`, `source` or `depends_on`) runs in the same plan once that step finishes.
+- Steps that wait on each other in a loop (n1 reads n2 and n2 reads n1) can never run: they fail with BRT-ORC-024 before re-planning, the message names the loop, and no model is called.
+- A step that takes its items from a step that failed fails with BRT-APE-005, naming that step, and makes no model call. This holds for a `state_op` too: one whose `source` (or `inputs_ref`) step failed is not run. A state_op over a failed source now fails instead of computing on an empty list (a `count` over a failed `apply_to_each` used to report 0).
+- A skill step with its items written in the step and `items_ref` set to `null` runs as if `items_ref` were left out. A step that cannot be built at all (a skill arg the template refuses, for example) fails with BRT-ORC-008: an `error` event names the step, and the planner sees the reason when it re-plans.
+- A skill step ignores the plan step's own `output_schema`: the skill returns its own fields (and `item` and `error`, which every row has), plus any the step names in `extra_fields`. When the plan is checked, before any of its steps runs, a skill step whose `output_schema` names fields the skill does not return still runs as written, the first time, and the planner is not asked again (planner ruling 35a; the names cannot tell a rename such as `file` for `item` from a field nobody produces). Each such name is recorded three ways: a plan note (an `orchestrator_decision` event with code BRT-ORC-035), a receipt line "the plan asked for <field> from <skill>, which does not return it; not produced" (one per field), and an entry in the run's "asked for but not produced" list, which the write-up is shown beside the step's own fields (see "What the write-up is told"). Fields named in `extra_fields` are produced and never listed. A skill step with no `output_schema`, or one naming only the skill's fields, runs as before. Exemption: for a skill whose fields come from an argument (`extract_fields` `fields`, `defer_and_collect` `output_schema`, `decompose_task` `expected_return_schema`, `retry_escalate` `original_output_schema`), the fields are read from that argument; when it cannot be read the step is not checked.
+- A plan step may only carry the keys its type takes, and a skill step's `skill_args` only the keys its skill takes. Any other key is left out when the plan is checked, before any of its steps runs, and the step runs without it, the first time, with no question to the planner (planner ruling 35b): a plan note (code BRT-ORC-036), a receipt line "the plan asked for <field> from <skill>, which does not take it; not used" ("from step <id>" for a step key), and an entry in the run's "asked for but not produced" list. A step's keys: for every type, id, type, depends_on, inputs_ref, source, source_ref, documents, skill_id, skill_version, skill_args, trigger_reason, tier, task_type, recommended_model, instruction and context; then for `answerer` output_schema, tool_requests, side_effects, state_query, max_output_tokens, dependency_input and items; for `orchestrate` the same without items; for `apply_to_each` items, output_schema, concurrency_limit, side_effects and failed_items_only; for `state_op` op, params and items. A skill's `skill_args`: its required args, extra_fields, items, any key ending `_ref`, and failed_items_only. A `type` other than the four is refused (it does not run as an answerer); a step with no `type` is an answerer. The planner is asked once per run to fix it: it is shown "BRT-ORC-036: step type '<value>' is not a node type. Types: answerer, apply_to_each, state_op, orchestrate" (the value whole, first; the list of types is shortened if the value is long) and the step it wrote (as JSON, at most 600 characters). Both come from the plan and the skill list only, so the planner sees them under every lane mode. A later step with an unknown `type` fails and sends no question of its own (its failure is shown, like any failed step, in the next ordinary re_plan).
+- A key a step may carry but that does nothing on that step is recorded, not refused: one plan note per step (`orchestrator_decision`, `action` `accepted_unused`) naming the keys. These are a skill step's own instruction, context, output_schema, concurrency_limit, side_effects, tool_requests, max_output_tokens and dependency_input (the skill's template builds the step; a step-level concurrency_limit does not set the skill's; the node-level instruction and context of a skill step are not sent to the model, but the router counts them in its size estimate), `state_query` on any step (it is never run), `items` on a non-skill answerer or orchestrate step, `skill_args` and `skill_version` on a step with no `skill_id`, and a `state_op`'s instruction, context, tier, task_type and recommended_model. Nothing is refused and no receipt line is shown. These keys build nothing for the model, but the node-level instruction, context and skill_args still count in the router's size estimate, so they can change which model is chosen or raise BRT-REG-020. Also recorded: `op` and `params` on a state_op that has a `skill_id` (the skill branch never reads them), and node-level `failed_items_only` on a skill step whose skill renders as an answerer (it is read only for an apply_to_each).
+- If a step that a later step `depends_on` failed (including one that failed in a loop, BRT-ORC-024), the later step fails with BRT-ORC-025 before any model is called, naming the failed step, so a chain of dependent steps stops costing money at the first failure.
+- When a step has no id, it gets one no other step in the run has used, so a step added at re-planning always runs and keeps its own result. Ids the planner writes are kept as written, with one exception: a re-planned step that reuses the id of a step that already ran (a retry named like the failed step) is renamed `<id>_2` (then `_3`, and so on) and runs; the trace shows BRT-ORC-026 with the old and new ids. Other steps of the same re-plan that name that id (in `depends_on`, `inputs_ref`, `source` or a skill's `*_ref`) are pointed at the new step, unless that would make the two steps wait on each other (the renamed step itself waits on that step): then the reference keeps reading the earlier result, so both run, the renamed one after. Every other reference, and the renamed step's own reference to its old id, still reads the earlier result, which keeps its original id. A number written as an id is the same id as its text (`1` and `"1"` name one step).
+- If the planner's step list holds something that is not a step (for example a stray string such as `"rationale: "`), that entry is dropped with BRT-ORC-027 and the other steps run. If nothing valid is left, the reply is treated as having no steps: a plan falls back to the final answer (or BRT-ORC-003 when the run has documents), and a re-plan goes to the final answer.
+- If the planner's whole reply to a plan or re-plan is JSON but not an object (a list, or a bare string), it is treated like a reply that is not JSON: the planner is asked once more for JSON only, and if that reply is no better the run fails with BRT-ORC-002. When this happens at a re-plan after at least one step has finished (or the re-plan call itself fails: a timeout, an HTTP error such as 500 or 429, no usable reply, BRT-ORC-001, the retry's own call included), the run is not thrown away: planning stops there and the final write-up uses the steps finished so far, as when the loop limit is reached. The write-up is told "Planning stopped early: the planner's last reply could not be used, so only the steps finished so far are below. Tell the reader the answer may be incomplete; do not present it as complete.", the trace shows BRT-ORC-002 (or BRT-ORC-001) as a warning, and the receipt says "Planning stopped early: the planner’s last reply could not be used, so this answer uses only the steps finished so far and may be incomplete." (an admin or not). The usual rules still hold: with documents and no finished step that read them the run fails with BRT-ORC-034, the "k of N steps failed" line still shows, and if the write-up fails too the finished steps come back salvaged. With no finished step, the run fails as before, and a planner that decides the task cannot be done (BRT-ORC-006) still fails the run.
+- A list can be given in place of a ref: `inputs_ref`, `items_ref` or `failed_items_ref` written as a list of strings is the step's items. An empty list fails with BRT-APE-005; a number or an object fails with BRT-APE-006.
+- A skill step's instruction is always complete before it is sent: list args such as `fields` (names, or `{name, type, description}` entries) are written out one per line, and if a skill's args cannot fill its template (for example `fields: []`), the step fails with BRT-SKL-008 before any model call and the planner is told why.
+- A skill step can ask for more than its skill does: only fields named in the step's `extra_fields` argument (for example `{"urgency": "integer from 1 to 5"}`, a list of names, or a JSON Schema whose `properties` are the fields) that the skill's schema lacks are added to what each item must return, and one line of the instruction ("Also return these fields: ...") asks for them. On a per-item (apply_to_each) skill step, an item whose answer lacks one (absent or null) is not failed (ruling 35, reading 2): in a packed call it is retried once alone, as any packed item that fails its check is; an unpacked item gets no retry. If it still lacks the field, the item is kept with the fields it has, the extra field is left with no value, and the compose step sees it in the "Rows with no value" count, even when no row holds the field at all; a value compose types in for such a row is refused as invented (BRT-ORC-041). The step writes one plan note (an `orchestrator_decision` event, `{"mode": "extra_fields_missing", "step": ..., "fields": {"urgency": 2}}`) giving how many items ended without each extra field; a redacted viewer sees the step, the field names and the counts only. A deferred item needs no extra field and is never retried for one: deferred means one of the skill's own fields that offers "defer" holds it (`bucket: defer`, or `result_or_defer: defer` in `defer_and_collect`); an extra field holding "defer", or a rewritten text that reads "Defer", is not a deferral. A plain answerer skill step (such as `verify_claim` or `compare_and_rank`) has no retry, so its extra fields stay required as before (BRT-ENV-011, or BRT-ANS-005). A present extra field is kept as given: the check tests that a field is there, not its type. The skill's own fields stay required as before (BRT-ENV-011, or BRT-ANS-005 on an item). The step's `output_schema` is never added (it describes the rows of the final answer, not each item), JSON Schema words such as `type`, `items`, `properties` or `required` are never fields, and the skill's own keys are never replaced. A malformed `extra_fields` fails with BRT-SKL-008 before any model call.
+- The skill list the planner reads shows `extra_fields` ("more fields per item, for example {"urgency": "integer 1-5"}") on the four skills whose step has its own per-item fields: classify_into_buckets, summarize, filter_by_criterion and transform_style. The other six do not show it: extract_fields, retry_escalate and defer_and_collect take their fields from an argument, compare_and_rank and verify_claim give one answer, and decompose_task starts a child plan.
+- A skill whose output is "derived from fields" (such as `extract_fields`) asks for one key per field: `"<type> | null"`, or `"enum:a|b|c|null"` when `enum_values` are given. `fields` may be `{name, type, description}` entries, bare names, a name-to-type map or a comma string; a nameless, duplicate or empty field fails with BRT-SKL-008. A schema argument given as a JSON string is parsed.
+- Every templated field of a skill is filled in: `concurrency_limit` takes the argument's number (20 when left out; values above 256 run at 256, and the step's output notes the cap), `decompose_task`'s `context_for_child` becomes the child's context.
+- `compare_and_rank` and `verify_claim` see their data in the step's context as a numbered list: the items written in the step, or the output of the step their `items_ref` or `evidence_ref` names. With neither, the step fails with BRT-SKL-008 and makes no model call.
+- A skill step reads the run's documents whenever any of its `*_ref` arguments is `documents` (for example `verify_claim` with `evidence_ref: documents`). In `raw_local` it then runs on a local model or fails with BRT-LANE-002; in `by_reference` its documents go to whichever checked model is routed. It never runs without them.
+- The data a `compare_and_rank` or `verify_claim` step reads counts toward the step's size when its model is chosen: only models whose context window holds the data plus the answer are considered. If none can, the step fails with BRT-REG-020 before any model call. The data is never cut short; give the step fewer or shorter entries.
+- A list argument may be given as a JSON string (`fields: '{"a": "string", "b": "int"}'`); a string that starts with `[` or `{` but is not valid JSON fails with BRT-SKL-008. `concurrency_limit` accepts a whole number written as a float (12.0 is 12).
+- An argument whose type allows null may be left out; the planner's skill list marks these as "optional".
+- BORG_ROUTE runs at most 256 items of one apply_to_each step at a time, whatever `concurrency_limit` says. If a run shows BRT-ANS-011, too many model calls were in flight at once and one waited too long for a free connection; the model was not slow.
+- A cookie a provider sets is never kept or sent to another provider. List arguments (`fields`, `buckets`, `criteria`) may be written as a comma string such as "billing, sales".
+- A ref names a step of this run only. A child run (an `orchestrate` step) cannot name its parent's steps.
+- `documents` names the run's documents only while the on-premise lane is on; with the lane off it is an ordinary step id.
+- When a step fails, the planner is told its error code and the first 200 characters of the reason, so it can retry or change course. The final answer step sees only the code. For steps that read your documents on-premise, the planner is told only the code and the document id, never the message.
+- If the model itself says it cannot do a step, the code is BRT-ANS-010 (on-premise steps show BRT-LANE-004), whatever code its own text starts with.
+
+---
+
 ## Skills Library
 
-The Skills page at `http://localhost:8000/ui/skills.html` shows all loaded skills with:
-- Call count, success rate, residue count, average tokens and latency
-- An **Edit → New Version** button that opens a form to create an improved version of any skill
+The Skills page at `http://localhost:8000/ui/skills.html` is a read-only table of the loaded skills: version, tier, what it does, calls, succeeded, average tokens and average time. It has no edit form; new versions are made through the API below.
 
-New versions are appended to `data/skills.yaml` with an incremented version number. The orchestrator will use the highest version by default.
+A new version is appended to `data/skills.yaml` with an incremented version number. The orchestrator will use the highest version by default.
 
 You can also manage skills via the API:
 - `GET /skills` — list all skills with stats
@@ -436,12 +828,9 @@ You can also manage skills via the API:
 
 ---
 
-## Dashboard Stats Tab
+## Stats
 
-The Dashboard at `http://localhost:8000/ui/dashboard.html` now has two tabs:
-
-- **Runs** — full run history table with trace and resume buttons
-- **Stats** — run outcome counts, cost breakdown by model, feedback summary (thumbs up/down), and top outlier runs
+The Stats tab of the Logs page (`http://localhost:8000/ui/logs.html`) shows run outcome counts, token use by model, feedback (thumbs up/down) and the outlier runs.
 
 ---
 
@@ -470,30 +859,77 @@ summary = await compress_inactive_turns(
 
 ---
 
-## Dashboard
+## Logs and Stats
 
-The Dashboard at `http://localhost:8000/ui/dashboard.html` shows all runs with their status, parent link, and creation time. Click **Trace** to open the full run trace for any run.
-
-The **Stats** tab now shows:
-- **Cost Cards** — total cost, total tokens, number of models used, and total calls at a glance.
-- **Token Leaderboard** — horizontal bar chart showing token consumption per model (top 8).
-- **Depth Tree** — visual tree of runs and their child runs, so you can see recursive orchestration at a glance.
-- **Outlier Runs** — the five most complex runs by instruction length.
+The Logs page at `http://localhost:8000/ui/logs.html` has three tabs: **Events**, **Cost summary** and **Stats**. Stats shows:
+- **Totals** — runs by outcome, and thumbs up and down.
+- **Tokens by model** — a bar per model (top 8).
+- **Runs and the runs they started** — which runs spawned child runs.
+- **Outlier runs** — the five top-level runs that cost the most, or took the longest (your choice); `GET /logs/outlier-runs?sort=cost|duration`. A run's cost is the whole run tree (the run and every run it started); its duration is the span of the tree's logged activity, from the first to the last log row. Runs the router started inside another run are not listed on their own.
 
 ---
 
-<!-- Added: 2026-04-18 — S6-01..S6-04: Live streaming -->
-## Live Run Trace
+## Workspace: Ask, Run and Runs
 
-When you open a run trace (`/ui/run.html?id=<run_id>`) while a run is still in progress, the page automatically connects to the live event stream. You will see:
+Open `http://localhost:8000/` (or `/ui/`); it goes to the Ask page. The old chat page address, `/ui/chat.html`, goes there too.
 
-- A **green pulsing dot** labelled "Live" in the top bar while the stream is active.
-- Envelope rows appearing and updating in real time as the orchestrator dispatches tasks.
-- An **apply_to_each counter** showing how many parallel subtasks have been launched.
-- The dot changes to "Completed" or "Failed" when the run finishes and the stream closes.
+**Nothing loads from another site.** Every response carries a Content-Security-Policy: pages, scripts, images and requests come from this server only (images may also be `data:`), no inline script runs, and the page cannot be put in a frame. <!-- claim C21 --> An answer that contains an image from another site shows no image, and a link to another site is shown as plain text.
 
-No page refresh is needed — everything updates automatically.
+### Ask (`/ui/ask.html`)
 
-## Streaming Chat
+- Type the job and press Enter (Shift+Enter makes a new line). While it runs, a progress line says what is happening (planning, choosing a model for a step, writing the answer) with a clock.
+- The answer arrives word by word. Under it is a **receipt**: number of steps, models used (each marked "this machine" with a filled dot or "cloud" with a ring, with its number of calls), time and cost. Cost is the whole run's total from its digest, steps' own runs included. Every model call is counted, rejected replies included: a write-up reply that was refused and asked again (no final answer, BRT-ORC-029; a marker or check problem, BRT-ORC-032, 037, 038, 039, 040 or 041), and a reply that was not JSON and was retried are each priced and logged as their own `orchestrator_decision` event, so the cost includes them. A reply cut off at the length limit and retried (BRT-ORC-018) is priced on one event, not two: its tokens are both attempts' tokens added together (when the retry itself fails, the event holds the first attempt). A reply that parses as JSON but is not an object (a list or a bare string) is logged too, with `reply_type`; a step's reply of that kind is priced before the step fails (BRT-ANS-003). A reply with no content (a reasoning model that spent its limit) is priced and then fails or is retried as an unreadable reply would be (`content_null` on a planning-model event); one that reports no token counts is logged with zero tokens (`usage_missing`) and never stops the run. Each priced event carries a `call_id`; the event that rejects a write-up reply carries `rejected: true`, its code and `rejected_call`, the `call_id` of the reply it rejected (planner ruling 35e). When the run stored a floor, the receipt adds "One pass on <baseline model>: at least US$X" with the note described under **One-pass floor** above; a figure of BORG's own tokens priced at the flagship is never shown.
+- **See how it was done** opens the run. The thumbs record a rating (`POST /runs/{id}/rating`).
+- **Add documents (folder)** sends a folder, relative to `BORG_DOCS_ROOT`, by reference (`"documents": {"folder": "..."}`). A line beside it says which lane mode is on. With the lane off, documents cannot be added.
+- **Routing** picks a chat alias (see "Chat model aliases").
+- The conversation is kept in this browser (`localStorage`); **Clear chat** empties it. Each turn remembers the lane mode it ran under. The server stores no chat history: the page resends earlier turns with each question, **except turns asked under `all_local`, which are resent only while the mode is still `all_local`**. Under any other mode they stay on screen and are never sent again. The page reads the lane mode again just before every send; if it cannot read it, or the value is not one of the four modes, it treats the new turn as `all_local` and resends no `all_local` turn. Other clients of `POST /v1/chat/completions` send their own history and must apply this rule themselves.
 
-The Chat page (`/ui/chat.html`) now streams tokens progressively as the model generates them. Text appears word by word instead of waiting for the full response. The **View run trace** link still appears after each reply, and the rating buttons (👍/👎) work as before.
+### Run (`/ui/run.html?id=<run_id>`)
+
+- **Header:** what was asked, status, the lane mode the run recorded, and four totals: cost of this run (the run's digest; before it exists, "cost so far" from this run's logged calls), time, steps (and model calls), and calls that left this machine (the server's figure; "Not recorded" when it cannot be known). When the run stored a floor, the cost tile adds "One pass on <baseline model>: at least US$X" and a note under the tiles says what it leaves out; no "one top model" figure is shown. A failed run shows its `failure_reason` in plain words with its code.
+- **Plan:** a diagram drawn from the run's steps: Plan, then the steps in columns by what they depend on (`depends_on`, `inputs_ref`, `source`, a skill's `*_ref`), then Compose. An `apply_to_each` step is one node with its item count. A step that ran as its own run links to that run; its cost is already inside this run's total. While the run is going, the page follows `/runs/{id}/stream` and redraws as steps finish: one request at a time, an old response never overwrites a newer one, and a dropped stream reconnects with a growing wait (1 s up to 15 s) until the run ends.
+- **Select a step** to see its model (this machine or cloud), kind of work and tier, the score it needed, cost, time and tokens, whether its input left this machine, why it failed (plain words), and **Why this model**: the candidates that cleared the bar, lowest effective cost first. The row the router chose says why (lowest effective cost, the planner's pick, or a routing alias or strategy). Two estimated columns: effective cost (dollars plus time cost, what the router ranks by) and dollars alone; both are made before the step ran. The raw record is behind **Details**.
+- **What happened:** the run's events as sentences, with the time since the start.
+- **What left this machine** (when the lane is on or the run has a record of requests): every request sent off this machine, where it went and what it was. The exact text of each request is shown to the admin only.
+
+### Runs (`/ui/runs.html`)
+
+The history of runs, newest first, with status and rating. Direct-to-model questions (bypass runs) are left out unless **Include direct-to-model questions** is ticked.
+
+---
+
+## Replay demo (work order 4.5)
+
+Replay mode shows what BORG_ROUTE does without a key, a model or a network: the server plays back runs that were recorded earlier. The runs it ships with are **demo runs** (planner ruling 24): fictional data, and they back no claim or benchmark number.
+
+### How to use it
+
+1. Set `BORG_DEMO_MODE=replay` in `.env` (or the environment) and start the server as usual. No key is needed. To play the demo only, `pip install -c constraints.txt -e .` is enough; the `dev` extra adds the test tools and spaCy.
+2. Every page shows a notice in the top bar: "Replay of a recorded run on 18-Nov-2026 · demo run, not a benchmark result. The documents and notes in these runs are made-up demo data; in the private-notes run, the point is what was not sent to a cloud model." The date is the day the run was recorded, in Toronto time.
+3. On **Ask** the text box is gone. Each recorded run is a button ("Play Job 1: bulk small items (demo run, 1:31 as recorded)"). Choosing one plays the run as it was recorded: the progress line shows each stage at the moment it happened, then the recorded answer arrives with its receipt (steps, models, time, cost, the one-pass floor, calls that left the machine). The receipt totals are the recorded ones; the sentence comparing the floor with the round-1 benchmark is left out in replay, because a demo run backs no benchmark result. When the answer has arrived, **See how it was done** opens the Run page with the whole recorded run: every step, the plan diagram and the recorded totals.
+4. Playback speed: unless a speed is set, each run plays in at most 60 seconds (speed = the larger of 1 and the recorded duration divided by 60), so a run shorter than a minute plays at recorded speed and the lane run (job 3, about 14 minutes when recorded) plays in one minute. `BORG_REPLAY_SPEED` sets the speed for every run (it divides the recorded times: 1 is recorded speed, 2 twice as fast), and a client may send its own `replay_speed` with the request; a speed that is set always wins over the 60-second rule. Whatever the speed, no single wait between two stages plays longer than 4 seconds, so a long local step does not leave the page still for a minute; each stage line says how long that stage took when recorded (for example "recorded: 9 min 12 s"), and the top-bar notice says once that playback is shortened. The buttons say how long each run took and how long it will play.
+5. **Runs** lists the recorded runs; each opens finished.
+
+While replay mode is on, every route that changes state (new tasks, resume, ratings, keys, settings, rules, models, skills, MCP) and every route that could read a key or call out (local status probes, Discover, the admin pages' data) returns 403 with BRT-RPL-001. The Admin pages therefore show that their data is not available. Nothing is written to any database.
+
+### Making the replay files
+
+`python scripts/export_run.py <run_id> --db <run database> [--out demo/runs] [--docs-root <documents folder>] [--canary <text>]` writes one file per run. It never writes to the run database (it works on a copy).
+
+**What the file holds:** the run view exactly as a viewer who is not the admin sees it on the Run page (for a run with the lane on, as that viewer sees it while the lane is on): the run record, every step (envelope) with its routing decision and its stored payloads (the step's own instruction and its output, which for a step that read documents are the short fields it derived, or a code and document ids when the output check refused it), the events with times relative to the run's start, the costs, what left the machine (destination and status), the stage timeline the Ask page shows, the models used (id and whether each is on this machine), and the final answer.
+
+**What is removed:** the text of every request sent to a model (the "What left this machine" bodies, shown to the admin only), keys (replaced by `[key]`), absolute local paths (`[local path]`), the machine id, and the round-1 benchmark ratio (no benchmark figure travels with a demo run).
+
+**The check before anything is written:** the script refuses, and writes no file, when any exported string, JSON held as text included, holds a canary however it is written: canaries are compared on letters and digits only (after Unicode normalisation, any letter case, so spaces, underscores or other hyphens do not hide one), the whole body or any part of it of 6 or more characters in one string, or the whole body split across strings in the order they are exported (BRT-RPL-010); any run of 24 characters from one of the run's documents, ignoring letter case and spacing, or a document it cannot read to check against (BRT-RPL-011); a key or path left after stripping (BRT-RPL-012); an answer it cannot check (BRT-RPL-013); or a run that is missing or not finished (BRT-RPL-014). The answer is not stored in the run database: the demo recorder keeps it in `answers/<run_id>.md` beside the database, and otherwise the script rebuilds it from the run's last compose reply. Either way its length must equal the one the run's stored floor was priced on; a run with no priced floor is refused. The committed demo files are checked the same way by the tests (`tests/scripts/test_demo_exports.py`), so a file edited by hand cannot pass either.
+
+### If something goes wrong
+
+- **The Ask page says no recorded run was found:** check `BORG_REPLAY_DIR` (default `demo/runs`); the server log names any file it skipped (BRT-RPL-003).
+- **403 with BRT-RPL-002:** the prompt was not one of the recorded ones. Use the buttons.
+- **A mistyped `BORG_DEMO_MODE`:** any value other than empty, `off` or `replay` is treated as replay (BRT-RPL-005 in the log), so a typo never opens the live app. Set it to `off` or remove it to run for real.
+
+---
+
+## Interface check (work order 4.6, CI only)
+
+`scripts/check_ui.py` opens every page (10 pages) in a real browser against the app in replay mode, at 390 and 1280 pixels wide, in light and dark. It fails on console errors, failed requests nobody expected and required parts that are missing. It saves screenshots and a report, uploaded as the CI artifact `ui-check`. It runs only in CI, on GitHub's hosted runner; it is never run on the development laptop.

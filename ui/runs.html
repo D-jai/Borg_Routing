@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Runs - BORG_ROUTE</title>
+<link rel="stylesheet" href="assets/app.css">
+</head>
+<body>
+<main id="page" data-page="runs" class="stack">
+  <div class="row"><h1>Runs</h1><span class="muted small" id="counts"></span></div>
+  <div class="card">
+    <div class="row" style="margin-bottom:8px">
+      <label class="small muted"><input type="checkbox" id="bypass"> Include direct-to-model questions (no plan, one model)</label>
+      <span style="flex:1"></span>
+      <button class="btn" type="button" id="reload">Reload</button>
+    </div>
+    <div id="list"><p class="muted small">Loading...</p></div>
+  </div>
+</main>
+<script src="assets/app.js"></script>
+<script src="assets/admin.js"></script>
+<script src="assets/pages/runs.js"></script>
+</body>
+</html>

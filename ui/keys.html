@@ -1,138 +1,33 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>API Keys — BORG_ROUTE</title>
-  <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: sans-serif; background: #0f0f1a; color: #ddd; }
-    nav { background: #1a1a2e; color: #eee; padding: 10px 20px; display: flex; gap: 20px; align-items: center; }
-    nav .brand { font-weight: bold; color: #e94560; font-size: 1.1em; }
-    nav a { color: #eee; text-decoration: none; }
-    nav a:hover { color: #e94560; }
-    nav span.dim { color: #555; }
-    .container { padding: 20px; max-width: 720px; }
-    h1 { margin-bottom: 8px; font-size: 1.4em; }
-    .subtitle { color: #888; font-size: 0.9em; margin-bottom: 24px; }
-    .key-form { background: #1a1a2e; border-radius: 8px; padding: 20px; margin-bottom: 16px; border: 1px solid #2a2a4a; }
-    .key-form h3 { margin-bottom: 12px; font-size: 1em; color: #aaa; }
-    .field { margin-bottom: 10px; }
-    label { display: block; font-size: 0.8em; color: #888; margin-bottom: 4px; }
-    input { width: 100%; background: #0f0f1a; border: 1px solid #333; color: #ddd; padding: 8px 10px; border-radius: 4px; font-size: 0.9em; }
-    input:focus { outline: none; border-color: #e94560; }
-    input[type="password"] { font-family: monospace; }
-    button { background: #e94560; color: #fff; border: none; padding: 8px 20px; border-radius: 4px; cursor: pointer; font-size: 0.9em; margin-top: 8px; }
-    button:hover { background: #c73652; }
-    .status-ok  { color: #6fcf97; font-size: 0.85em; margin-top: 6px; }
-    .status-err { color: #ef5350; font-size: 0.85em; margin-top: 6px; }
-    .note { background: #1a2a1a; border: 1px solid #2a4a2a; border-radius: 6px; padding: 12px 16px; margin-top: 24px; font-size: 0.85em; color: #aaa; }
-    .note strong { color: #6fcf97; }
-  </style>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Keys - BORG_ROUTE</title>
+<link rel="stylesheet" href="assets/app.css">
 </head>
 <body>
-<nav>
-  <span class="brand">BORG_ROUTE</span>
-  <a href="/ui/chat.html">Chat</a>
-  <a href="/ui/models.html">Models</a>
-  <a href="/ui/keys.html" style="color:#e94560">API Keys</a>
-  <a href="/ui/dashboard.html">Dashboard</a>
-  <a href="/ui/logs.html">Logs</a>
-  <a href="/ui/skills.html">Skills</a>
-  <a href="/ui/admin.html">Admin</a>
-</nav>
-<div class="container">
-  <h1>API Keys</h1>
-  <p class="subtitle">Configure external model providers. Keys are stored in your local <code>.env</code> file — never sent off-device.</p>
-
-  <!-- Row 1: OpenRouter (pre-filled name) -->
-  <div class="key-form" id="form-openrouter">
-    <h3>OpenRouter <span style="color:#888;font-weight:normal;font-size:0.9em;">(recommended — access to 200+ models)</span></h3>
-    <div class="field">
-      <label>Provider Name</label>
-      <input type="text" id="name-openrouter" value="openrouter" readonly style="color:#555;">
-    </div>
-    <div class="field">
-      <label>Base URL</label>
-      <input type="text" id="url-openrouter" value="https://openrouter.ai/api/v1">
-    </div>
-    <div class="field">
-      <label>API Key</label>
-      <input type="password" id="key-openrouter" placeholder="sk-or-…">
-    </div>
-    <button onclick="saveKey('openrouter')">Save</button>
-    <div id="status-openrouter"></div>
+<main id="page" data-page="keys" class="stack">
+  <div class="row"><h1>Keys</h1><span class="chip">Admin</span></div>
+  <p class="muted">Keys are stored in this computer's <span class="num">.env</span> file and are never shown again after you save them. This page only says whether one is saved.</p>
+  <div class="card stack">
+    <h2>OpenRouter</h2>
+    <div class="row"><span id="openrouter-state" class="chip">Checking...</span><span class="small muted">The cloud models in the pool are called through this key.</span></div>
+    <form id="openrouter-form" class="field" autocomplete="off">
+      <label for="openrouter-key">New key (replaces the saved one)</label>
+      <input id="openrouter-key" class="wide" type="password" placeholder="sk-or-..." autocomplete="off">
+      <div class="actions"><button class="btn primary" type="submit">Save key</button><span class="small muted" id="openrouter-msg" role="status"></span></div>
+    </form>
+    <p class="small muted">After saving, press Discover on the <a href="models.html">Models</a> page to pull in the model list and prices.</p>
   </div>
-
-  <!-- Rows 2-5: Custom providers -->
-  <div id="custom-forms"></div>
-  <button onclick="addRow()" style="background:#333;color:#aaa;margin-top:0;">+ Add Provider</button>
-
-  <div class="note">
-    <strong>How it works:</strong> OpenRouter keys are written to <code>.env</code> as
-    <code>OPENROUTER_API_KEY=…</code> (the canonical env var read by discovery,
-    the scorer, and chat completions). Custom providers fall back to
-    <code>KEY_{NAME}=…</code> and <code>ENDPOINT_{NAME}=…</code>. After saving,
-    run <strong>Discover Models</strong> on the Models page to pull in this
-    provider's model list and pricing.
+  <div class="card stack">
+    <h2>Web search (optional)</h2>
+    <div class="row"><span id="tavily-state" class="chip">Checking...</span></div>
+    <p class="small muted">Tavily is the first choice for the web search tool. Without it the tool falls back to Perplexity through OpenRouter. To set it, add <span class="num">TAVILY_API_KEY</span> to the <span class="num">.env</span> file and restart the server.</p>
   </div>
-</div>
-
-<script>
-let customCount = 0;
-
-function addRow() {
-  if (customCount >= 4) {
-    alert('Maximum 5 providers (1 OpenRouter + 4 custom). Remove one to add another.');
-    return;
-  }
-  customCount++;
-  const id = `custom${customCount}`;
-  const div = document.createElement('div');
-  div.className = 'key-form';
-  div.id = `form-${id}`;
-  div.innerHTML = `
-    <h3>Custom Provider ${customCount}</h3>
-    <div class="field"><label>Provider Name</label><input type="text" id="name-${id}" placeholder="myprovider"></div>
-    <div class="field"><label>Base URL</label><input type="text" id="url-${id}" placeholder="https://api.example.com/v1"></div>
-    <div class="field"><label>API Key</label><input type="password" id="key-${id}" placeholder="sk-…"></div>
-    <button onclick="saveKey('${id}')">Save</button>
-    <div id="status-${id}"></div>
-  `;
-  document.getElementById('custom-forms').appendChild(div);
-}
-
-async function saveKey(id) {
-  const name = document.getElementById(`name-${id}`).value.trim();
-  const url  = document.getElementById(`url-${id}`).value.trim();
-  const key  = document.getElementById(`key-${id}`).value.trim();
-  const statusEl = document.getElementById(`status-${id}`);
-
-  if (!name || !url || !key) {
-    statusEl.className = 'status-err';
-    statusEl.textContent = 'All fields are required.';
-    return;
-  }
-
-  try {
-    const resp = await fetch('/keys', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, base_url: url, api_key: key }),
-    });
-    const data = await resp.json();
-    if (!resp.ok) {
-      statusEl.className = 'status-err';
-      statusEl.textContent = data.detail || 'Error saving key.';
-    } else {
-      statusEl.className = 'status-ok';
-      statusEl.textContent = data.message;
-    }
-  } catch (e) {
-    statusEl.className = 'status-err';
-    statusEl.textContent = `Network error: ${e.message}`;
-  }
-}
-</script>
+</main>
+<script src="assets/app.js"></script>
+<script src="assets/admin.js"></script>
+<script src="assets/pages/keys.js"></script>
 </body>
 </html>

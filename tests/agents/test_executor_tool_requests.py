@@ -80,10 +80,11 @@ def _make_answerer_task(tool_requests=None) -> WrappedTask:
 
 def _patch_model_call(captured: dict, response: dict):
     """Mock _call_model to capture the system prompt and return a fixed response."""
-    async def fake_call(model, system_prompt, user_msg):
+    async def fake_call(model, system_prompt, user_msg, requested_max_tokens=None):
         captured["system_prompt"] = system_prompt
         captured["model"] = model
-        return json.dumps(response), 10, 5
+        captured["requested_max_tokens"] = requested_max_tokens
+        return json.dumps(response), 10, 5, "stop"
 
     return patch("src.agents.executor._call_model", side_effect=fake_call)
 

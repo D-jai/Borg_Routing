@@ -8,6 +8,11 @@ TC-ANS-005 — model response missing required output key → failed envelope (B
 TC-ANS-006 — scratch_cleanup directives applied after successful call
 TC-ANS-007 — model_call event logged after successful call
 TC-ANS-008 — HTTP error from model → BRT-ANS-002
+TC-ANS-009 — finish_reason=length on first attempt → retry at doubled cap succeeds
+TC-ANS-010 — finish_reason=length even after retry → BRT-ANS-009 failed envelope
+TC-ANS-011 — envelope max_output_tokens acts as a floor over ANSWERER_MAX_TOKENS
+TC-ANS-012 — the answerer retry is capped at 16000
+TC-ANS-013 — cut off at or above the 16000 ceiling: no retry, message says so
 """
 import asyncio
 import json
@@ -70,7 +75,7 @@ async def test_execute_answerer_resolved(db):
         "scratch_writes": [],
         "scratch_cleanup": [],
     })
-    with patch("src.agents.executor._call_model", new=AsyncMock(return_value=(model_output, 50, 20))):
+    with patch("src.agents.executor._call_model", new=AsyncMock(return_value=(model_output, 50, 20, "stop"))):
         env = await execute(task, db_path=db)
     assert isinstance(env, InboundEnvelope)
     assert env.status == "resolved"
@@ -87,9 +92,9 @@ async def test_governance_injected(db):
 
     captured_prompt: list[str] = []
 
-    async def mock_call(endpoint, system_prompt, user_msg):
+    async def mock_call(endpoint, system_prompt, user_msg, requested_max_tokens=None):
         captured_prompt.append(system_prompt)
-        return json.dumps({"status": "resolved", "output": {"bucket": "bug"}}), 50, 20
+        return json.dumps({"status": "resolved", "output": {"bucket": "bug"}}), 50, 20, "stop"
 
     with patch("src.agents.executor._call_model", new=AsyncMock(side_effect=mock_call)):
         await execute(task, db_path=db)
@@ -111,7 +116,7 @@ async def test_unparseable_json_returns_failed_envelope(db):
     """TC-ANS-004 — model returning unparseable text gives failed envelope."""
     run_id = uuid.uuid4()
     task = _task(run_id)
-    with patch("src.agents.executor._call_model", new=AsyncMock(return_value=("not json at all", 10, 5))):
+    with patch("src.agents.executor._call_model", new=AsyncMock(return_value=("not json at all", 10, 5, "stop"))):
         env = await execute(task, db_path=db)
     assert env.status == "failed"
     assert "BRT-ANS-004" in env.failure_reason
@@ -136,7 +141,7 @@ async def test_missing_output_key_returns_failed_envelope(db):
     )
     # model returns output without 'confidence'
     model_output = json.dumps({"status": "resolved", "output": {"bucket": "bug"}})
-    with patch("src.agents.executor._call_model", new=AsyncMock(return_value=(model_output, 30, 10))):
+    with patch("src.agents.executor._call_model", new=AsyncMock(return_value=(model_output, 30, 10, "stop"))):
         env = await execute(task, db_path=db)
     assert env.status == "failed"
     assert "BRT-ANS-005" in env.failure_reason
@@ -158,7 +163,7 @@ async def test_scratch_cleanup_applied(db):
         "scratch_writes": [],
         "scratch_cleanup": [{"table": "deferrals", "action": "delete", "ids": [str(row_id)]}],
     })
-    with patch("src.agents.executor._call_model", new=AsyncMock(return_value=(model_output, 30, 10))):
+    with patch("src.agents.executor._call_model", new=AsyncMock(return_value=(model_output, 30, 10, "stop"))):
         env = await execute(task, db_path=db)
 
     assert env.status == "resolved"
@@ -174,7 +179,7 @@ async def test_model_call_event_logged(db):
     run_id = uuid.uuid4()
     task = _task(run_id)
     model_output = json.dumps({"status": "resolved", "output": {"bucket": "bug"}})
-    with patch("src.agents.executor._call_model", new=AsyncMock(return_value=(model_output, 40, 15))):
+    with patch("src.agents.executor._call_model", new=AsyncMock(return_value=(model_output, 40, 15, "stop"))):
         await execute(task, db_path=db)
     await asyncio.sleep(0.15)  # drain async tasks
     async with aiosqlite.connect(db) as conn:
@@ -198,3 +203,188 @@ async def test_http_error_raises_brt_ans_002(db):
     with patch("src.agents.executor._call_model", new=AsyncMock(side_effect=ValueError("BRT-ANS-002: HTTP 500"))):
         with pytest.raises(ValueError, match="BRT-ANS-002"):
             await execute(task, db_path=db)
+
+
+@pytest.mark.asyncio
+async def test_truncation_retry_succeeds(db):
+    """TC-ANS-009 — _call_model auto-retries once on finish_reason=='length'.
+
+    Simulates the OpenAI/OpenRouter wire format: first POST cuts off mid-JSON
+    (finish_reason='length'); the executor's retry doubles max_tokens and
+    the second POST returns clean JSON. Final envelope must be 'resolved'
+    and reflect both calls' token usage.
+    """
+    import httpx
+    run_id = uuid.uuid4()
+    task = _task(run_id)
+
+    truncated_payload = {
+        "choices": [{
+            "message": {"content": '{"status": "resolved", "output": {"bucket": "bu'},
+            "finish_reason": "length",
+        }],
+        "usage": {"prompt_tokens": 100, "completion_tokens": 4000},
+    }
+    full_payload = {
+        "choices": [{
+            "message": {"content": json.dumps({"status": "resolved", "output": {"bucket": "bug"}})},
+            "finish_reason": "stop",
+        }],
+        "usage": {"prompt_tokens": 100, "completion_tokens": 60},
+    }
+
+    call_count = {"n": 0}
+    caps: list[int] = []
+
+    class _MockClient:
+        def __init__(self, *a, **kw):
+            pass
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, *a):
+            return False
+        async def post(self, url, json=None, headers=None):
+            call_count["n"] += 1
+            caps.append(json["max_tokens"])
+            body = truncated_payload if call_count["n"] == 1 else full_payload
+            req = httpx.Request("POST", url)
+            return httpx.Response(200, json=body, request=req)
+
+    with patch("src.agents.executor.httpx.AsyncClient", _MockClient):
+        env = await execute(task, db_path=db)
+
+    assert call_count["n"] == 2, "executor must retry once on finish_reason=length"
+    assert caps[1] == 2 * caps[0], "the retry must ask for double the first cap"
+    assert env.status == "resolved"
+    assert env.output["bucket"] == "bug"
+    # Tokens accumulate across both calls
+    assert env.tokens_used["input"] == 200
+    assert env.tokens_used["output"] == 4060
+
+
+@pytest.mark.asyncio
+async def test_truncation_retry_exhausted_returns_brt_ans_009(db):
+    """TC-ANS-010 — both attempts truncate → BRT-ANS-009 failed envelope.
+
+    When even the doubled-cap retry returns finish_reason='length' the
+    executor must surface BRT-ANS-009 (distinct from BRT-ANS-004) so
+    operators see "the cap is too small" instead of the misleading
+    "unparseable JSON" symptom.
+    """
+    run_id = uuid.uuid4()
+    task = _task(run_id)
+    truncated_content = '{"status": "resolved", "output": {"bucket": "bu'
+    with patch(
+        "src.agents.executor._call_model",
+        new=AsyncMock(return_value=(truncated_content, 200, 8000, "length")),
+    ):
+        env = await execute(task, db_path=db)
+    assert env.status == "failed"
+    assert "BRT-ANS-009" in env.failure_reason
+    assert "even after one retry at double the cap" in env.failure_reason
+    # Tokens-used still recorded so cost accounting works.
+    assert env.tokens_used == {"input": 200, "output": 8000}
+
+
+@pytest.mark.asyncio
+async def test_envelope_max_output_tokens_acts_as_floor(db, monkeypatch):
+    """TC-ANS-011 — task.max_output_tokens overrides ANSWERER_MAX_TOKENS up.
+
+    When the orchestrator stamps a higher per-node cap on a WrappedTask,
+    _call_model must pass that value (not the smaller env default) into
+    the wire payload so the model has the headroom the planner asked for.
+    """
+    import httpx
+    monkeypatch.setenv("ANSWERER_MAX_TOKENS", "2000")
+
+    run_id = uuid.uuid4()
+    # Plan node declared 9000 tokens for a Go-impl-plus-tests answer.
+    task = _task(run_id)
+    task = task.model_copy(update={"max_output_tokens": 9000})
+
+    captured: dict = {}
+
+    class _MockClient:
+        def __init__(self, *a, **kw):
+            pass
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, *a):
+            return False
+        async def post(self, url, json=None, headers=None):
+            captured["payload"] = json
+            req = httpx.Request("POST", url)
+            return httpx.Response(200, json={
+                "choices": [{
+                    "message": {"content": '{"status":"resolved","output":{"bucket":"bug"}}'},
+                    "finish_reason": "stop",
+                }],
+                "usage": {"prompt_tokens": 50, "completion_tokens": 30},
+            }, request=req)
+
+    with patch("src.agents.executor.httpx.AsyncClient", _MockClient):
+        env = await execute(task, db_path=db)
+
+    assert env.status == "resolved"
+    assert captured["payload"]["max_tokens"] == 9000, (
+        "envelope max_output_tokens (9000) must beat ANSWERER_MAX_TOKENS (2000)"
+    )
+
+
+def _cut_off_client(caps: list[int]):
+    """A fake httpx client whose every reply is cut off by the cap."""
+    import httpx
+
+    class _MockClient:
+        def __init__(self, *a, **kw):
+            pass
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, *a):
+            return False
+        async def post(self, url, json=None, headers=None):
+            caps.append(json["max_tokens"])
+            req = httpx.Request("POST", url)
+            return httpx.Response(200, json={
+                "choices": [{
+                    "message": {"content": '{"status": "resolved", "output": {"bu'},
+                    "finish_reason": "length",
+                }],
+                "usage": {"prompt_tokens": 10, "completion_tokens": 5},
+            }, request=req)
+
+    return _MockClient
+
+
+@pytest.mark.asyncio
+async def test_answerer_retry_is_capped_at_16000(db, monkeypatch):
+    """TC-ANS-012 — a 12000 cap retries at 16000, not 24000."""
+    monkeypatch.setenv("ANSWERER_MAX_TOKENS", "2000")
+    task = _task(uuid.uuid4()).model_copy(update={"max_output_tokens": 12000})
+    caps: list[int] = []
+
+    with patch("src.agents.executor.httpx.AsyncClient", _cut_off_client(caps)):
+        env = await execute(task, db_path=db)
+
+    assert caps == [12000, 16000]
+    assert env.status == "failed"
+    assert "even after one retry at double the cap (12000 -> 16000)" in env.failure_reason
+
+
+@pytest.mark.asyncio
+async def test_cut_off_at_the_ceiling_does_not_retry_and_says_so(db, monkeypatch):
+    """TC-ANS-013 — a node cap of 20000 is above the ceiling: one call, and
+    the failure message must not claim a retry happened."""
+    monkeypatch.setenv("ANSWERER_MAX_TOKENS", "2000")
+    task = _task(uuid.uuid4()).model_copy(update={"max_output_tokens": 20000})
+    caps: list[int] = []
+
+    with patch("src.agents.executor.httpx.AsyncClient", _cut_off_client(caps)):
+        env = await execute(task, db_path=db)
+
+    assert caps == [20000]
+    assert env.status == "failed"
+    assert "BRT-ANS-009" in env.failure_reason
+    assert "no retry" in env.failure_reason
+    assert "after one retry" not in env.failure_reason
+    assert env.tokens_used == {"input": 10, "output": 5}

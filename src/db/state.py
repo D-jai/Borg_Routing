@@ -13,6 +13,7 @@ from uuid import UUID, uuid4
 
 import aiosqlite
 
+from src.db.connect import connect
 from src.db.schema import DB_PATH
 from src.envelopes.schema import InboundEnvelope, WrappedTask
 
@@ -22,8 +23,19 @@ async def create_run(
     parent_run_id: Optional[UUID] = None,
     thread_id: Optional[str] = None,
     db_path: str = DB_PATH,
+    run_id: Optional[UUID] = None,
+    kind: str = "orchestrated",
+    route_options: Optional[dict] = None,
+    documents: Optional[list] = None,
+    lane_mode: Optional[str] = None,
 ) -> UUID:
     """Insert a new run record with status=pending. Returns the new run_id.
+
+    ``run_id`` is for a caller that already issued the id (a bypass request);
+    omit it to get a fresh one. ``documents`` is the manifest of a run that
+    reads documents (on-premise lane); such a run is never resumed.
+    ``lane_mode`` is the lane mode the run runs under (``off`` when no lane);
+    None leaves it unrecorded.
 
     BRT-LOG-DB-COMPAT — also stamps instance_id so The_Borg_DB can tell
     apart runs from different devices when aggregated via hive-collective.
@@ -32,22 +44,59 @@ async def create_run(
     # monkey-patch the provenance singletons.
     from src.logging.provenance import resolve_instance_id  # noqa: PLC0415
 
-    run_id = uuid4()
-    async with aiosqlite.connect(db_path) as db:
-        await db.execute(
-            """INSERT INTO runs(
-                run_id, parent_run_id, thread_id, status, user_instruction, instance_id
-            ) VALUES (?, ?, ?, 'pending', ?, ?)""",
-            (
-                str(run_id),
-                str(parent_run_id) if parent_run_id else None,
-                thread_id,
-                user_instruction,
-                resolve_instance_id(),
-            ),
-        )
+    run_id = run_id or uuid4()
+    async with connect(db_path) as db:
+        if documents:
+            await db.execute(
+                """INSERT INTO runs(
+                    run_id, parent_run_id, thread_id, status, user_instruction, instance_id,
+                    kind, route_options, documents
+                ) VALUES (?, ?, ?, 'pending', ?, ?, ?, ?, ?)""",
+                (
+                    str(run_id),
+                    str(parent_run_id) if parent_run_id else None,
+                    thread_id,
+                    user_instruction,
+                    resolve_instance_id(),
+                    kind,
+                    json.dumps(route_options) if route_options else None,
+                    json.dumps(documents),
+                ),
+            )
+        else:
+            await db.execute(
+                """INSERT INTO runs(
+                    run_id, parent_run_id, thread_id, status, user_instruction, instance_id,
+                    kind, route_options
+                ) VALUES (?, ?, ?, 'pending', ?, ?, ?, ?)""",
+                (
+                    str(run_id),
+                    str(parent_run_id) if parent_run_id else None,
+                    thread_id,
+                    user_instruction,
+                    resolve_instance_id(),
+                    kind,
+                    json.dumps(route_options) if route_options else None,
+                ),
+            )
+        if lane_mode is not None:
+            await db.execute(
+                "UPDATE runs SET lane_mode=? WHERE run_id=?", (lane_mode, str(run_id))
+            )
         await db.commit()
     return run_id
+
+
+def lane_mode_of(lane) -> str:
+    """The mode string recorded on a run: the lane's mode, ``off`` with no lane."""
+    return lane.settings.mode if lane is not None else "off"
+
+
+async def set_run_lane_mode(run_id: UUID, lane_mode: str, db_path: str = DB_PATH) -> None:
+    """Record the lane mode a run (re)starts under."""
+    async with connect(db_path) as db:
+        await db.execute("UPDATE runs SET lane_mode=? WHERE run_id=?", (lane_mode, str(run_id)))
+        await db.commit()
 
 
 async def update_run_status(
@@ -71,7 +120,7 @@ async def update_run_status(
     if status not in valid:
         raise ValueError(f"BRT-DB-012: invalid run status '{status}'. Must be one of {sorted(valid)}")
 
-    async with aiosqlite.connect(db_path) as db:
+    async with connect(db_path) as db:
         sql = "UPDATE runs SET status=?"
         params: list = [status]
         if status in ("completed", "failed"):
@@ -87,9 +136,34 @@ async def update_run_status(
         await db.commit()
 
 
+ANSWER_KINDS = ("composed", "salvaged", "direct", "declined", "shortcut", "planner_only")
+
+
+async def set_run_answer_kind(run_id: UUID, kind: str, db_path: str = DB_PATH) -> None:
+    """Record how the run's final answer was made (planner ruling 20, R2).
+
+    ``composed``: the compose call wrote it. ``salvaged``: compose gave no
+    answer (twice, or its call raised) and the answer is the finished steps'
+    results with a note (BRT-ORC-030). ``direct``: the planner's
+    ``direct_answer``. ``declined``: compose replied ``action: fail`` and the
+    answer is its rationale (or no plan and no write-up came back at all).
+    ``shortcut``: the Rule Zero shortcut answered. ``planner_only``: steps were planned, none finished, and compose still wrote text, so the planning model wrote the answer alone (planner ruling 26a; a BRT-ORC-033 warning event lists the step failure codes). Every completed run has
+    one (R1-R4 review). NULL: a failed run, or a run from before this column. Shown in ``GET /runs/{id}`` as ``run.answer_kind``.
+    A run id with no row is ignored.
+
+    Raises:
+        ValueError: BRT-DB-012 if ``kind`` is not one of ANSWER_KINDS.
+    """
+    if kind not in ANSWER_KINDS:
+        raise ValueError(f"BRT-DB-012: invalid answer_kind '{kind}'. Must be one of {list(ANSWER_KINDS)}")
+    async with connect(db_path) as db:
+        await db.execute("UPDATE runs SET answer_kind=? WHERE run_id=?", (kind, str(run_id)))
+        await db.commit()
+
+
 async def save_envelope(task: WrappedTask, db_path: str = DB_PATH) -> None:
     """Insert an outbound envelope record with status=in_flight."""
-    async with aiosqlite.connect(db_path) as db:
+    async with connect(db_path) as db:
         await db.execute(
             """INSERT INTO envelopes(
                 envelope_id, run_id, subtask_id, type, level_path,
@@ -121,9 +195,10 @@ async def update_envelope_inbound(
     dollars: Optional[float] = None,
     latency_ms: Optional[int] = None,
     db_path: str = DB_PATH,
+    baseline_dollars: Optional[float] = None,
 ) -> None:
     """Store the inbound envelope payload and mark the envelope completed."""
-    async with aiosqlite.connect(db_path) as db:
+    async with connect(db_path) as db:
         cur = await db.execute(
             """UPDATE envelopes SET
                 status=?,
@@ -132,6 +207,7 @@ async def update_envelope_inbound(
                 tokens_output=?,
                 dollars=?,
                 latency_ms=?,
+                baseline_dollars=?,
                 completed_at=CURRENT_TIMESTAMP
                WHERE envelope_id=?""",
             (
@@ -141,6 +217,7 @@ async def update_envelope_inbound(
                 tokens_output,
                 dollars,
                 latency_ms,
+                baseline_dollars,
                 str(envelope_id),
             ),
         )
@@ -155,7 +232,7 @@ async def get_run(run_id: UUID, db_path: str = DB_PATH) -> dict:
     Raises:
         ValueError: BRT-DB-010 if not found.
     """
-    async with aiosqlite.connect(db_path) as db:
+    async with connect(db_path) as db:
         db.row_factory = aiosqlite.Row
         async with db.execute(
             "SELECT * FROM runs WHERE run_id=?", (str(run_id),)
@@ -166,21 +243,51 @@ async def get_run(run_id: UUID, db_path: str = DB_PATH) -> dict:
     return dict(row)
 
 
-async def get_runs_list(limit: int = 50, db_path: str = DB_PATH) -> list[dict]:
-    """Return the most recent runs ordered by created_at descending."""
-    async with aiosqlite.connect(db_path) as db:
+async def get_runs_list(
+    limit: int = 50, db_path: str = DB_PATH, include_bypass: bool = False
+) -> list[dict]:
+    """Return the most recent runs ordered by created_at descending.
+
+    Direct-to-model (bypass) runs are left out unless ``include_bypass``.
+    """
+    where = "" if include_bypass else "WHERE COALESCE(kind, 'orchestrated') != 'bypass' "
+    async with connect(db_path) as db:
         db.row_factory = aiosqlite.Row
         async with db.execute(
-            "SELECT * FROM runs ORDER BY created_at DESC LIMIT ?",
+            f"SELECT * FROM runs {where}ORDER BY created_at DESC LIMIT ?",
             (limit,),
         ) as cur:
             rows = await cur.fetchall()
     return [dict(r) for r in rows]
 
 
+async def get_run_counts(db_path: str = DB_PATH, include_bypass: bool = False) -> dict:
+    """True totals over every run (not a page): total, per status, thumbs.
+
+    Direct-to-model (bypass) runs are left out unless ``include_bypass``.
+    """
+    where = "" if include_bypass else "WHERE COALESCE(kind, 'orchestrated') != 'bypass' "
+    counts = {"total": 0, "completed": 0, "failed": 0, "running": 0, "pending": 0,
+              "thumbs_up": 0, "thumbs_down": 0}
+    async with connect(db_path) as db:
+        async with db.execute(
+            f"SELECT status, COUNT(*), "
+            f"SUM(CASE WHEN user_rating = 1 THEN 1 ELSE 0 END), "
+            f"SUM(CASE WHEN user_rating = -1 THEN 1 ELSE 0 END) "
+            f"FROM runs {where}GROUP BY status"
+        ) as cur:
+            rows = await cur.fetchall()
+    for status, n, up, down in rows:
+        counts["total"] += n
+        counts[status] = counts.get(status, 0) + n
+        counts["thumbs_up"] += up or 0
+        counts["thumbs_down"] += down or 0
+    return counts
+
+
 async def get_envelopes(run_id: UUID, db_path: str = DB_PATH) -> list[dict]:
     """Return all envelope records for a run, ordered by created_at."""
-    async with aiosqlite.connect(db_path) as db:
+    async with connect(db_path) as db:
         db.row_factory = aiosqlite.Row
         async with db.execute(
             "SELECT * FROM envelopes WHERE run_id=? ORDER BY created_at",
@@ -204,7 +311,7 @@ async def resume_run(run_id: UUID, db_path: str = DB_PATH) -> list:
             f"BRT-DB-020: run '{run_id}' is already completed and cannot be resumed"
         )
 
-    async with aiosqlite.connect(db_path) as db:
+    async with connect(db_path) as db:
         db.row_factory = aiosqlite.Row
         async with db.execute(
             """SELECT outbound_payload FROM envelopes
@@ -225,26 +332,181 @@ async def resume_run(run_id: UUID, db_path: str = DB_PATH) -> list:
     return tasks
 
 
-async def compute_and_save_digest(run_id: UUID, db_path: str = DB_PATH) -> dict:
-    """Aggregate envelope cost/tokens for a run and persist to run_digests.
+async def _sum_run_tree(db, run_id: UUID):
+    """Sum logged model_call / orchestrator_decision rows for a run and every
+    descendant run (child runs spawned by orchestrate nodes, via parent_run_id)."""
+    async with db.execute(
+        """WITH RECURSIVE tree(run_id) AS (
+               SELECT ?
+               UNION
+               SELECT r.run_id FROM runs r JOIN tree t ON r.parent_run_id = t.run_id
+           )
+           SELECT COALESCE(SUM(tokens_input), 0) AS tin,
+                  COALESCE(SUM(tokens_output), 0) AS tout,
+                  COALESCE(SUM(dollars), 0) AS total_cost,
+                  COALESCE(SUM(baseline_dollars), 0) AS total_baseline
+           FROM logs
+           WHERE run_id IN (SELECT run_id FROM tree)
+             AND event_type IN ('model_call','orchestrator_decision')""",
+        (str(run_id),),
+    ) as cur:
+        return await cur.fetchone()
 
-    Returns the digest dict: {run_id, summary, cost_dollars, token_count}.
-    Safe to call multiple times — upserts on conflict.
-    """
-    async with aiosqlite.connect(db_path) as db:
+
+async def get_descendant_run_ids(run_id: UUID, db_path: str = DB_PATH) -> list[str]:
+    """Run ids of every descendant of a run (child runs spawned by orchestrate
+    nodes, via parent_run_id), oldest first. The run itself is not included."""
+    async with connect(db_path) as db:
+        async with db.execute(
+            """WITH RECURSIVE tree(run_id) AS (
+                   SELECT ?
+                   UNION
+                   SELECT r.run_id FROM runs r JOIN tree t ON r.parent_run_id = t.run_id
+               )
+               SELECT run_id FROM runs
+               WHERE run_id IN (SELECT run_id FROM tree) AND run_id != ?
+               ORDER BY created_at""",
+            (str(run_id), str(run_id)),
+        ) as cur:
+            rows = await cur.fetchall()
+    return [r[0] for r in rows]
+
+
+async def get_outbound_requests(
+    run_id, db_path: str = DB_PATH, left_machine_only: bool = True
+) -> list[dict]:
+    """On-premise lane: "what left this machine" for a run and every
+    descendant run (via parent_run_id), oldest first. Each row holds the exact
+    body that was sent. ``left_machine_only=False`` adds the local calls."""
+    where = "AND left_machine = 1" if left_machine_only else ""
+    async with connect(db_path) as db:
         db.row_factory = aiosqlite.Row
         async with db.execute(
-            """SELECT COUNT(*) as cnt,
-                      COALESCE(SUM(tokens_input), 0) + COALESCE(SUM(tokens_output), 0) AS total_tokens,
-                      COALESCE(SUM(dollars), 0) AS total_cost
-               FROM envelopes WHERE run_id=?""",
+            f"""WITH RECURSIVE tree(run_id) AS (
+                   SELECT ?
+                   UNION
+                   SELECT r.run_id FROM runs r JOIN tree t ON r.parent_run_id = t.run_id
+               )
+               SELECT * FROM outbound_requests
+               WHERE run_id IN (SELECT run_id FROM tree) {where}
+               ORDER BY started_at, rowid""",
+            (str(run_id),),
+        ) as cur:
+            rows = await cur.fetchall()
+    return [dict(r) for r in rows]
+
+
+async def get_run_documents(run_id, db_path: str = DB_PATH) -> Optional[list]:
+    """The document manifest of a run or of any run above it, else None.
+    A run that read documents is never resumed (on-premise lane)."""
+    current = str(run_id)
+    for _ in range(33):
+        async with connect(db_path) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute("SELECT * FROM runs WHERE run_id=?", (current,)) as cur:
+                row = await cur.fetchone()
+        if row is None:
+            return None
+        row = dict(row)
+        if row.get("documents"):
+            try:
+                return json.loads(row["documents"])
+            except (TypeError, ValueError):
+                return [{"status": "unreadable manifest"}]
+        if not row.get("parent_run_id"):
+            return None
+        current = row["parent_run_id"]
+    return None
+
+
+async def sum_run_tree(run_id: UUID, db_path: str = DB_PATH) -> dict:
+    """Logged tokens and dollars for a run plus all its descendant runs."""
+    async with connect(db_path) as db:
+        db.row_factory = aiosqlite.Row
+        row = await _sum_run_tree(db, run_id)
+    return {
+        "tokens_input": int(row["tin"]),
+        "tokens_output": int(row["tout"]),
+        "dollars": float(row["total_cost"]),
+        "baseline_dollars": float(row["total_baseline"]),
+    }
+
+
+async def get_run_digest(run_id: UUID, db_path: str = DB_PATH) -> Optional[dict]:
+    """The stored digest row for a run, or None if no digest was saved."""
+    async with connect(db_path) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            """SELECT summary, cost_dollars, baseline_dollars, tokens_input,
+                      tokens_output, token_count, direct_floor_dollars, direct_floor_model
+               FROM run_digests WHERE run_id=?""",
             (str(run_id),),
         ) as cur:
             row = await cur.fetchone()
+    return dict(row) if row else None
 
-    envelope_count = row["cnt"] if row else 0
-    token_count = int(row["total_tokens"]) if row else 0
+
+async def _direct_floor_for_run(run_id: UUID, answer_text: str, db_path: str, matrix=None):
+    """``(direct_floor_dollars, baseline model id)`` for a run (ruling 22), or ``(None, None)``.
+
+    Input chars: the operator message (``runs.user_instruction``) plus each supplied document's
+    chars once, from the run's document manifest (``chars``). Never raises."""
+    try:
+        from src.registry.cost import direct_floor_dollars, resolve_baseline_model  # noqa: PLC0415
+
+        if matrix is None:
+            from src.orchestrator.engine import _get_matrix  # noqa: PLC0415
+
+            matrix = _get_matrix()
+        baseline = await resolve_baseline_model(matrix, db_path)
+        async with connect(db_path) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute("SELECT user_instruction, parent_run_id FROM runs WHERE run_id=?", (str(run_id),)) as cur:
+                row = await cur.fetchone()
+        if row is None or row["parent_run_id"]:
+            return None, None       # a child run (a resumed step) is priced on its step text: no floor
+        message = row["user_instruction"]
+        docs = await get_run_documents(run_id, db_path=db_path) or []
+        doc_chars = sum(int(d.get("chars") or 0) for d in docs if isinstance(d, dict))
+        floor = direct_floor_dollars(len(message or "") + doc_chars, len(answer_text or ""), baseline)
+        return (floor, baseline.model_id) if floor is not None else (None, None)
+    except Exception:
+        return None, None
+
+
+async def compute_and_save_digest(
+    run_id: UUID, db_path: str = DB_PATH, answer_text: Optional[str] = None, matrix=None,
+) -> dict:
+    """Aggregate cost/tokens for a run from its logged calls and persist to run_digests.
+
+    Totals are the sums over the run's logged ``model_call`` and
+    ``orchestrator_decision`` rows, so the digest equals what the log shows.
+    The envelope count still comes from the envelopes table.
+
+    Returns the digest dict: {run_id, summary, cost_dollars, token_count,
+    tokens_input, tokens_output, direct_floor_dollars, direct_floor_model}.
+    ``answer_text`` is the final answer the run returns; with it the digest stores the ruling-22
+    floor, and without it an earlier stored floor is kept. ``baseline_dollars`` on the digest is
+    no longer written (old rows keep theirs); it reads as None for a new run.
+    Safe to call multiple times — upserts on conflict.
+    """
+    async with connect(db_path) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            "SELECT COUNT(*) AS cnt FROM envelopes WHERE run_id=?",
+            (str(run_id),),
+        ) as cur:
+            env_row = await cur.fetchone()
+        row = await _sum_run_tree(db, run_id)
+
+    envelope_count = env_row["cnt"] if env_row else 0
+    tokens_in_total = int(row["tin"]) if row else 0
+    tokens_out_total = int(row["tout"]) if row else 0
+    token_count = tokens_in_total + tokens_out_total
     cost_dollars = float(row["total_cost"]) if row else 0.0
+    floor, floor_model = (None, None)
+    if answer_text is not None:
+        floor, floor_model = await _direct_floor_for_run(run_id, answer_text, db_path, matrix)
 
     summary = (
         f"{envelope_count} envelope(s) dispatched; "
@@ -252,23 +514,42 @@ async def compute_and_save_digest(run_id: UUID, db_path: str = DB_PATH) -> dict:
         f"${cost_dollars:.4f} cost."
     )
 
-    async with aiosqlite.connect(db_path) as db:
+    async with connect(db_path) as db:
         await db.execute(
-            """INSERT INTO run_digests(run_id, summary, cost_dollars, token_count)
-               VALUES (?, ?, ?, ?)
+            """INSERT INTO run_digests(run_id, summary, cost_dollars, token_count,
+                                       tokens_input, tokens_output,
+                                       direct_floor_dollars, direct_floor_model)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                ON CONFLICT(run_id) DO UPDATE SET
                  summary=excluded.summary,
                  cost_dollars=excluded.cost_dollars,
-                 token_count=excluded.token_count""",
-            (str(run_id), summary, cost_dollars, token_count),
+                 token_count=excluded.token_count,
+                 tokens_input=excluded.tokens_input,
+                 tokens_output=excluded.tokens_output,
+                 direct_floor_dollars=COALESCE(excluded.direct_floor_dollars,
+                                               run_digests.direct_floor_dollars),
+                 direct_floor_model=COALESCE(excluded.direct_floor_model,
+                                             run_digests.direct_floor_model)""",
+            (str(run_id), summary, cost_dollars, token_count,
+             tokens_in_total, tokens_out_total, floor, floor_model),
         )
+        async with db.execute(
+            "SELECT direct_floor_dollars, direct_floor_model FROM run_digests WHERE run_id=?",
+            (str(run_id),),
+        ) as cur:
+            kept = await cur.fetchone()
         await db.commit()
+    floor, floor_model = (kept[0], kept[1]) if kept else (floor, floor_model)
 
     return {
         "run_id": str(run_id),
         "summary": summary,
         "cost_dollars": cost_dollars,
         "token_count": token_count,
+        "tokens_input": tokens_in_total,
+        "tokens_output": tokens_out_total,
+        "direct_floor_dollars": floor,
+        "direct_floor_model": floor_model,
     }
 
 
@@ -281,7 +562,7 @@ async def set_run_rating(run_id: UUID, rating: int, db_path: str = DB_PATH) -> N
     """
     if rating not in (1, -1):
         raise ValueError(f"Invalid rating '{rating}': must be 1 (up) or -1 (down)")
-    async with aiosqlite.connect(db_path) as db:
+    async with connect(db_path) as db:
         cur = await db.execute(
             "UPDATE runs SET user_rating=? WHERE run_id=?",
             (rating, str(run_id)),
@@ -293,7 +574,7 @@ async def set_run_rating(run_id: UUID, rating: int, db_path: str = DB_PATH) -> N
 
 async def get_config(key: str, db_path: str = DB_PATH) -> Optional[str]:
     """Return config value for key, or None if not set."""
-    async with aiosqlite.connect(db_path) as db:
+    async with connect(db_path) as db:
         async with db.execute(
             "SELECT value FROM config WHERE key=?", (key,)
         ) as cur:
@@ -307,10 +588,18 @@ async def get_config(key: str, db_path: str = DB_PATH) -> Optional[str]:
         return value
 
 
+async def delete_config(key: str, db_path: str = DB_PATH) -> bool:
+    """Delete a saved config key so env/default applies again. True if it existed."""
+    async with connect(db_path) as db:
+        cur = await db.execute("DELETE FROM config WHERE key=?", (key,))
+        await db.commit()
+        return cur.rowcount > 0
+
+
 async def set_config(key: str, value, db_path: str = DB_PATH) -> None:
     """Upsert a config value. Value is JSON-serialised if not a string."""
     stored = json.dumps(value) if not isinstance(value, str) else value
-    async with aiosqlite.connect(db_path) as db:
+    async with connect(db_path) as db:
         await db.execute(
             """INSERT INTO config(key, value) VALUES (?,?)
                ON CONFLICT(key) DO UPDATE SET value=excluded.value,

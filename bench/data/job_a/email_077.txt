@@ -1,0 +1,8 @@
+Hi team,
+
+Your API returns error 500 on the items endpoint (request 50132).
+This is the first time I have had to write to you.
+Nothing time critical, reply when convenient.
+
+Regards,
+Hana

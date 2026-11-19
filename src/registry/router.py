@@ -14,7 +14,7 @@ Error codes:
 from typing import Literal, Optional
 
 from .capability_matrix import CapabilityMatrix
-from .cost import effective_cost
+from .cost import route_rank, slowest_measured_tps
 from .models import ModelInfo
 
 _DEFAULT_TIME_COST_PER_SEC = 0.0001  # BRT-RT-01: local-dev default; see cost.py
@@ -29,6 +29,7 @@ def select_model(
     strategy: Literal["LOCAL_FIRST", "SYSTEM_CHOOSE"] = "SYSTEM_CHOOSE",
     specialty_hint: Optional[str] = None,
     time_cost_per_sec: float = _DEFAULT_TIME_COST_PER_SEC,
+    pool: Optional[list[ModelInfo]] = None,
 ) -> ModelInfo:
     """Return the cheapest checked model meeting the quality + context bar.
 
@@ -43,6 +44,10 @@ def select_model(
         specialty_hint: Optional specialty_tag string; candidates with this tag
             are preferred (sorted to the front before cost sort).
         time_cost_per_sec: Passed through to effective_cost().
+        pool: The models whose slowest speed figure an unmeasured model is
+            priced at (ruling 28 b); default every row of ``matrix``. With no
+            figure in the pool, an unmeasured model is ranked after every
+            priced model (ruling 28h).
 
     Returns:
         The selected ModelInfo.
@@ -62,7 +67,7 @@ def select_model(
             f"with quality_requirement={quality_requirement} and "
             f"min_context_length={estimated_input_tokens}. "
             "Possible causes: no models are currently checked on the Models page; "
-            "the Get Info pass has not been run so scores are at the default 5.0; "
+            "the Get Info pass has not been run so the models have no scores yet; "
             "or the quality bar is too strict. Check models, lower the bar, or "
             "re-run Get Info."
         )
@@ -81,10 +86,15 @@ def select_model(
         if hinted:
             candidates = hinted
 
-    # Sort by effective_cost ascending; cheapest first
+    # Sort by effective_cost ascending; cheapest first. An unmeasured model is
+    # priced at the pool's slowest speed figure, or, with none, ranked after
+    # the priced models (rulings 28 b, 28h). The sort is stable: equal keys
+    # keep the query's order (higher score first).
+    unmeasured_tps = slowest_measured_tps(pool if pool is not None else matrix.all())
     candidates.sort(
-        key=lambda m: effective_cost(
-            m, estimated_input_tokens, estimated_output_tokens, time_cost_per_sec
+        key=lambda m: route_rank(
+            m, estimated_input_tokens, estimated_output_tokens, time_cost_per_sec,
+            unmeasured_tps=unmeasured_tps,
         )
     )
 

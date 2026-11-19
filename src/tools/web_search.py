@@ -30,6 +30,8 @@ from typing import Any, Optional
 
 import httpx
 
+from src.lane.context import current_lane
+from src.lane.outbound import send_outbound
 from src.tools.base import BaseTool, ToolError, ToolInvocationResult
 
 logger = logging.getLogger(__name__)
@@ -43,7 +45,7 @@ _MAX_RESULTS_CAP = 20
 _URL_RE = re.compile(r"https?://[^\s\])>,\"']+")
 
 # Module-level flag so we only log BRT-TOOL-DEGRADED once per process
-# (same pattern as BRT-ORC-007-DEGRADED in engine.py).
+# (same pattern as BRT-ORC-NO-FRONTIER in engine.py).
 _degraded_logged = False
 
 
@@ -68,6 +70,14 @@ def _timeout_sec() -> float:
         return float(os.getenv("BORG_WEB_SEARCH_TIMEOUT_SEC", "8"))
     except ValueError:
         return 8.0
+
+
+def _must_stay_local() -> bool:
+    """In ``all_local`` every call must stay on the machine, tool calls
+    included: the call guard refuses a search at the door (BRT-LANE-003)
+    even if the executor's own ``all_local`` refusal were bypassed."""
+    lane = current_lane()
+    return lane is not None and lane.all_local
 
 
 class WebSearchTool(BaseTool):
@@ -143,8 +153,13 @@ class WebSearchTool(BaseTool):
             "search_depth": "basic",
         }
         try:
-            async with httpx.AsyncClient(timeout=_timeout_sec()) as client:
-                resp = await client.post(_TAVILY_URL, json=payload)
+            # Through the lane's door: backstop and ledger when the lane is
+            # on, a plain POST otherwise (src/lane/outbound.py).
+            resp = await send_outbound(
+                _TAVILY_URL, payload, timeout=_timeout_sec(),
+                must_stay_local=_must_stay_local(),
+                purpose="tool", destination="tool:web_search:tavily",
+            )
             resp.raise_for_status()
         except httpx.TimeoutException as exc:
             raise ToolError("BRT-TOOL-002", f"Tavily timeout: {exc}") from exc
@@ -219,8 +234,11 @@ class WebSearchTool(BaseTool):
         }
         headers = {"Authorization": f"Bearer {api_key}"}
         try:
-            async with httpx.AsyncClient(timeout=_timeout_sec()) as client:
-                resp = await client.post(_PERPLEXITY_URL, json=payload, headers=headers)
+            resp = await send_outbound(
+                _PERPLEXITY_URL, payload, headers, timeout=_timeout_sec(),
+                must_stay_local=_must_stay_local(),
+                purpose="tool", destination="tool:web_search:perplexity",
+            )
             resp.raise_for_status()
         except httpx.TimeoutException as exc:
             raise ToolError("BRT-TOOL-002", f"Perplexity timeout: {exc}") from exc

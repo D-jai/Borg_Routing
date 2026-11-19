@@ -71,7 +71,7 @@ async def test_tavily_failure_falls_back_to_perplexity(monkeypatch, caplog):
     """TC-WEB-002 — Tavily 502 → Perplexity answers → result marked degraded,
     BRT-TOOL-DEGRADED logged once.
 
-    BUG-001 fix: Sonar actually returns PROSE + a top-level ``citations``
+    Sonar actually returns PROSE + a top-level ``citations``
     list; the previous mock returned strict JSON which looked nothing like
     real Sonar output, letting a bug slip through. This mock matches real
     Sonar shape.
@@ -92,8 +92,15 @@ async def test_tavily_failure_falls_back_to_perplexity(monkeypatch, caplog):
     }
     perplexity_client = _mock_httpx_post(perplexity_body)
 
+    # Clients are shared per event loop (work order 1.12), so both providers
+    # are called on one client: its post answers Tavily, then Perplexity.
+    shared = _mock_httpx_post({})
+    shared.post = AsyncMock(side_effect=[
+        await tavily_client.post(), await perplexity_client.post(),
+    ])
+
     tool = WebSearchTool()
-    with patch("httpx.AsyncClient", side_effect=[tavily_client, perplexity_client]):
+    with patch("httpx.AsyncClient", return_value=shared):
         with caplog.at_level("WARNING"):
             res = await tool.run({"query": "hello"})
 
@@ -132,7 +139,7 @@ async def test_no_tavily_key_uses_perplexity_silently(monkeypatch, caplog):
 
 @pytest.mark.asyncio
 async def test_perplexity_no_citations_regexes_urls_from_prose(monkeypatch):
-    """BUG-001 — when ``citations`` is absent, URLs must be extracted from prose."""
+    """When ``citations`` is absent, URLs must be extracted from prose."""
     monkeypatch.delenv("TAVILY_API_KEY", raising=False)
     monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test")
 
@@ -154,7 +161,7 @@ async def test_perplexity_no_citations_regexes_urls_from_prose(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_perplexity_prose_only_returns_synthesized_record(monkeypatch):
-    """BUG-001 — prose with no URLs yields one synthesised record, not a raise."""
+    """Prose with no URLs yields one synthesised record, not a raise."""
     monkeypatch.delenv("TAVILY_API_KEY", raising=False)
     monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test")
 
@@ -177,7 +184,7 @@ async def test_perplexity_prose_only_returns_synthesized_record(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_perplexity_model_env_var(monkeypatch):
-    """BUG-001 — BORG_PERPLEXITY_MODEL swaps the model in the payload."""
+    """BORG_PERPLEXITY_MODEL swaps the model in the payload."""
     monkeypatch.delenv("TAVILY_API_KEY", raising=False)
     monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test")
     monkeypatch.setenv("BORG_PERPLEXITY_MODEL", "perplexity/sonar-pro")

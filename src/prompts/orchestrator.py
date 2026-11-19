@@ -191,6 +191,8 @@ Your plan is a list of nodes. Each node is one of:
   "output_schema": {{ ... narrow shape you want back ... }},
   "side_effects": ["optional_scratch_table_names"],
   "state_query": "optional SQL run before dispatch; result injected as context",
+  "task_type": "reasoning | coding | summarize | writing | roleplay | agentic | extraction",
+  "tier": "light | mid | heavy (the smallest that does this step well)",
   "recommended_model": "model_id or null (router chooses)",
   "trigger_reason": "initial_plan | escalation_from:id | retry:id | deferral_batch:table"
 }}
@@ -206,16 +208,21 @@ Use this instead of emitting N identical answerers.
 {{"type": "apply_to_each",
   "id": "n1",
   "instruction": "Do this to ONE item: ...",
-  "inputs_ref": "input_list",  // the runtime resolves this from run state
+  "inputs_ref": "id of the earlier step that produces the list (omit when you give items)",
+  "items": ["only when the list is in the user's message: the items themselves, one string each"],
   "output_schema": {{ ... per-item shape ... }},
   "concurrency_limit": 20,
   "side_effects": ["deferrals"],
+  "task_type": "reasoning | coding | summarize | writing | roleplay | agentic | extraction",
+  "tier": "light | mid | heavy (the smallest that does this step well)",
   "recommended_model": "model_id or null"
 }}
 ```
 The runtime expands this into N envelopes. Failures are returned as a
 structured list alongside successes (best-effort). You handle the failures
 in re_plan.
+
+Where the items come from. If the list is in the user's message, copy the items into `items`, one string per item, and leave `inputs_ref` out. If an earlier step produces the list, set `inputs_ref` to that step's id. `inputs_ref` is always the id of a step; a name you make up resolves to nothing. The same holds for a skill's `items_ref`.
 
 ### 3. `state_op` — Deterministic, no model, free
 ```json
@@ -229,6 +236,14 @@ in re_plan.
 ```
 Use these aggressively. "Count how many items landed in bucket A" does not
 need a model — it's SQL. Every state_op saves tokens and adds zero error risk.
+
+Params of each op. Any other param fails the step.
+- `filter`: `key` (a field name) and `value` (keep the rows where that field equals it); optional `negate`: true keeps the rows that do not match.
+- `count`: no params gives the number of rows; optional `key` gives a count per value of that field.
+- `group_by`: `key` (a field name) gives the rows per value; add `count`: true for counts per value.
+- `sample`: `n` (rows to take); optional `key` takes n per value of that field; optional `seed`. Over a `group_by` source without `count` it takes n per group.
+A field name is a field of the upstream step's output, written bare (`bucket`).
+These four are the only ops: there is no join, sort, order or limit.
 
 ### 4. `orchestrate` — Spawn a child orchestrator
 When a sub-problem is itself complex enough to need its own WBS, spawn a

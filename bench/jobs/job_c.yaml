@@ -1,0 +1,18 @@
+# Job C: answer eight questions over fifteen long documents and find the contradictions.
+job: C
+title: Questions and contradictions over about 150,000 tokens of documents
+data_folder: job_c
+answers_file: answers/job_c_answers.json
+# {questions} is replaced by the numbered questions stored in the answers file (the answers stay out of the prompt).
+instruction: |
+  The folder holds fifteen long operations documents. Read all of them and answer the numbered
+  questions below, one numbered answer each, quoting the exact value the documents give. Be brief.
+
+  {questions}
+arms:
+  direct: {}
+  borg_cloud: {lane_mode: by_reference}
+repeats: 3
+est_output_tokens: 1500
+quality:
+  kind: pairwise_judge                  # bench/judge.py; machine fact score is also recorded

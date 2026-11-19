@@ -1,0 +1,8 @@
+Dear support,
+
+Your API returns error 500 on the items endpoint (request 10174).
+My colleague suggested I contact you directly.
+A reply within the week would be fine.
+
+Kind regards,
+Zainab

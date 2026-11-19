@@ -2,7 +2,7 @@
 
 Tables: runs, subtasks, envelopes, scratch, logs, log_payloads,
         skill_usage_log, config, threads, messages, run_digests,
-        log_entities, log_relations.
+        log_entities, log_relations, outbound_requests.
 
 Call `create_all(db_path)` on startup to ensure all tables exist.
 
@@ -27,6 +27,8 @@ _MIGRATIONS = [
     # ingestible by The_Borg_DB without breaking any existing call sites.
     # Every column has a safe default; old code paths keep working.
     "ALTER TABLE runs ADD COLUMN instance_id TEXT",
+    # The chat alias a run started with (JSON), so a resume routes the same way.
+    "ALTER TABLE runs ADD COLUMN route_options TEXT",
     "ALTER TABLE logs ADD COLUMN instance_id TEXT",
     "ALTER TABLE logs ADD COLUMN source_version TEXT",
     "ALTER TABLE logs ADD COLUMN domain_profile TEXT DEFAULT 'general'",
@@ -36,6 +38,35 @@ _MIGRATIONS = [
     "ALTER TABLE log_relations ADD COLUMN instance_id TEXT",
     "ALTER TABLE log_relations ADD COLUMN confidence REAL DEFAULT 1.0",
     "ALTER TABLE log_relations ADD COLUMN provenance TEXT",
+    # Work order 1.6 — what the same tokens would have cost on the baseline model.
+    "ALTER TABLE logs ADD COLUMN baseline_dollars NUMERIC",
+    "ALTER TABLE envelopes ADD COLUMN baseline_dollars NUMERIC",
+    # Run digest: baseline price of the run and the input/output token split.
+    # NULL means unknown (a digest saved before these columns existed).
+    "ALTER TABLE run_digests ADD COLUMN baseline_dollars REAL",
+    "ALTER TABLE run_digests ADD COLUMN tokens_input INTEGER",
+    "ALTER TABLE run_digests ADD COLUMN tokens_output INTEGER",
+    # Ruling 22: the receipt's comparison figure, a floor, and the baseline model it was priced on.
+    # baseline_dollars on run_digests keeps old rows but is no longer written.
+    "ALTER TABLE run_digests ADD COLUMN direct_floor_dollars REAL",
+    "ALTER TABLE run_digests ADD COLUMN direct_floor_model TEXT",
+    # Direct-to-model (bypass) runs are tagged so run lists can leave them out.
+    "ALTER TABLE runs ADD COLUMN kind TEXT DEFAULT 'orchestrated'",
+    # On-premise lane: the manifest (JSON) of a run that read documents. Such
+    # a run is never resumed. NULL for every other run.
+    "ALTER TABLE runs ADD COLUMN documents TEXT",
+    # Planner ruling 20 (R2): how the final answer was made, "composed" or
+    # "salvaged" (compose failed; finished step results returned). NULL for
+    # a direct answer, a failed run, or a run from before this column.
+    "ALTER TABLE runs ADD COLUMN answer_kind TEXT",
+    # 4.2 review: the lane mode the run ran under (off, raw_local, all_local,
+    # by_reference). NULL when not recorded (a run from before this column).
+    "ALTER TABLE runs ADD COLUMN lane_mode TEXT",
+    # Planner ruling 23: the ledger names the apply_to_each step of an item
+    # call (packed or single), and every document id of a packed call. NULL
+    # for any other call, and for a packed call that carries no documents.
+    "ALTER TABLE outbound_requests ADD COLUMN step_envelope_id TEXT",
+    "ALTER TABLE outbound_requests ADD COLUMN documents TEXT",
 ]
 
 _SCHEMA_SQL = """
@@ -51,7 +82,12 @@ CREATE TABLE IF NOT EXISTS runs (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     completed_at TIMESTAMP,
     user_rating INTEGER,
-    failure_reason TEXT
+    failure_reason TEXT,
+    kind TEXT DEFAULT 'orchestrated',
+    route_options TEXT,
+    documents TEXT,
+    answer_kind TEXT,
+    lane_mode TEXT
 );
 
 CREATE TABLE IF NOT EXISTS subtasks (
@@ -82,7 +118,8 @@ CREATE TABLE IF NOT EXISTS envelopes (
     dollars NUMERIC,
     latency_ms INTEGER,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    completed_at TIMESTAMP
+    completed_at TIMESTAMP,
+    baseline_dollars NUMERIC
 );
 
 CREATE TABLE IF NOT EXISTS scratch (
@@ -110,7 +147,8 @@ CREATE TABLE IF NOT EXISTS logs (
     dollars NUMERIC,
     latency_ms INTEGER,
     decision_json TEXT,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    baseline_dollars NUMERIC
 );
 CREATE INDEX IF NOT EXISTS idx_logs_run ON logs(run_id);
 CREATE INDEX IF NOT EXISTS idx_logs_event_type ON logs(event_type);
@@ -163,6 +201,11 @@ CREATE TABLE IF NOT EXISTS run_digests (
     summary TEXT NOT NULL,
     cost_dollars REAL DEFAULT 0,
     token_count INTEGER DEFAULT 0,
+    baseline_dollars REAL,
+    tokens_input INTEGER,
+    tokens_output INTEGER,
+    direct_floor_dollars REAL,
+    direct_floor_model TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -189,6 +232,28 @@ CREATE TABLE IF NOT EXISTS log_relations (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_log_relations_run ON log_relations(run_id);
+
+-- On-premise lane (P3): one row per HTTP request a run made while the lane
+-- was on, written (and awaited) BEFORE the request is sent, then updated.
+-- body is the exact JSON body as sent (secret fields such as api_key are
+-- redacted). left_machine = 1 for a request to a non-local address.
+CREATE TABLE IF NOT EXISTS outbound_requests (
+    request_id TEXT PRIMARY KEY,
+    run_id TEXT,
+    envelope_id TEXT,
+    attempt INTEGER NOT NULL DEFAULT 1,
+    purpose TEXT NOT NULL,
+    destination TEXT,
+    url TEXT NOT NULL,
+    left_machine INTEGER NOT NULL CHECK(left_machine IN (0, 1)),
+    body TEXT NOT NULL,
+    status TEXT NOT NULL CHECK(status IN ('pending','sent','failed')),
+    http_status INTEGER,
+    error TEXT,
+    started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    finished_at TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_outbound_run ON outbound_requests(run_id);
 
 -- BRT-LOG-DB-COMPAT — incremental export cursor for The_Borg_DB.
 -- One row per consumer (e.g., 'borg_db:default'); tracks the last log /
@@ -271,7 +336,7 @@ async def drop_all(db_path: str = DB_PATH) -> None:
     tables = [
         "log_relations", "log_entities", "log_payloads", "skill_usage_log", "logs",
         "scratch", "envelopes", "subtasks", "run_digests", "runs", "config",
-        "messages", "threads", "borg_db_export_cursor",
+        "messages", "threads", "borg_db_export_cursor", "outbound_requests",
     ]
     async with aiosqlite.connect(db_path) as db:
         await db.execute("DROP VIEW IF EXISTS borg_db_interactions")

@@ -1,242 +1,39 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Run Trace — BORG_ROUTE</title>
-  <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: monospace; background: #0f0f1a; color: #ddd; }
-    nav { background: #1a1a2e; color: #eee; padding: 10px 20px; display: flex; gap: 20px; align-items: center; }
-    nav .brand { font-weight: bold; color: #e94560; font-size: 1.1em; font-family: sans-serif; }
-    nav a { color: #eee; text-decoration: none; font-family: sans-serif; }
-    nav a:hover { color: #e94560; }
-    .container { padding: 20px; max-width: 1200px; margin: 0 auto; }
-    h1 { font-size: 1.1em; color: #e94560; margin-bottom: 6px; font-family: sans-serif; }
-    .meta { font-size: 0.8em; color: #666; margin-bottom: 20px; }
-    .meta span { color: #aaa; }
-    h2 { font-size: 0.95em; color: #ccc; margin: 24px 0 8px; font-family: sans-serif; }
-    table { width: 100%; border-collapse: collapse; font-size: 0.78em; }
-    th { background: #1a1a2e; color: #888; padding: 6px 10px; text-align: left; border-bottom: 1px solid #2a2a3e; }
-    td { padding: 5px 10px; border-bottom: 1px solid #1a1a2e; vertical-align: top; word-break: break-all; }
-    tr:hover td { background: #151524; }
-    .badge { display: inline-block; padding: 1px 6px; border-radius: 3px; font-size: 0.75em; }
-    .badge.resolved { background: #1a3a1a; color: #4c4; }
-    .badge.failed { background: #3a1a1a; color: #c44; }
-    .badge.in_flight { background: #1a2a3a; color: #48f; }
-    .badge.pending { background: #2a2a1a; color: #aa8; }
-    .badge.completed { background: #1a3a1a; color: #4c4; }
-    .badge.running { background: #1a2a3a; color: #48f; }
-    .event-row { border-left: 3px solid #333; padding: 6px 10px; margin-bottom: 8px; font-size: 0.78em; background: #111120; }
-    .event-row.orchestrator_decision { border-color: #e94560; }
-    .event-row.child_residue { border-color: #ffa500; }
-    .event-row.model_call { border-color: #4080c0; }
-    .event-time { color: #555; font-size: 0.8em; }
-    .decision { color: #aaa; white-space: pre-wrap; max-height: 120px; overflow-y: auto; }
-    #status { padding: 20px; color: #888; font-family: sans-serif; }
-    #live-bar { background: #1a1a2e; border: 1px solid #2a2a3e; border-radius: 4px; padding: 8px 14px; margin-bottom: 16px; font-size: 0.82em; display: flex; gap: 20px; align-items: center; }
-    #live-dot { width: 8px; height: 8px; border-radius: 50%; background: #555; display: inline-block; margin-right: 6px; }
-    #live-dot.live { background: #4c4; animation: pulse 1.2s ease-in-out infinite; }
-    @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }
-  </style>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Run - BORG_ROUTE</title>
+<link rel="stylesheet" href="assets/app.css">
 </head>
 <body>
-<nav>
-  <span class="brand">BORG_ROUTE</span>
-  <a href="/ui/chat.html">Chat</a>
-  <a href="/ui/models.html">Models</a>
-  <a href="/ui/keys.html">API Keys</a>
-  <a href="/ui/dashboard.html">Dashboard</a>
-  <a href="/ui/logs.html">Logs</a>
-  <a href="/ui/skills.html">Skills</a>
-  <a href="/ui/admin.html">Admin</a>
-</nav>
+<main id="page" data-page="run" class="stack">
+  <div class="row"><h1>Run</h1><span id="status-chip"></span><span class="muted small num" id="run-meta"></span><span id="live" class="stage hidden"><span class="spin" aria-hidden="true"></span><span>Live</span></span></div>
+  <p class="muted small" id="loading">Loading the run...</p>
+  <div id="content" class="stack hidden">
+    <div class="card"><h3>Asked</h3><p class="prompt" id="prompt"></p><p class="small muted hidden" id="parent-line"></p></div>
+    <p class="small muted" id="run-lane"></p>
+    <div class="card failure hidden" id="failure"><h3>Why it failed</h3><p id="failure-words" style="margin:6px 0 4px"></p><p class="small muted" id="failure-detail" style="margin:0"></p></div>
+    <div class="tiles" id="tiles"></div>
 
-<div class="container">
-  <div id="status">Loading run trace…</div>
-  <div id="content" style="display:none">
-    <h1>Run Trace</h1>
-    <div class="meta">
-      Run ID: <span id="run-id"></span> &nbsp;|&nbsp;
-      Status: <span id="run-status"></span> &nbsp;|&nbsp;
-      Created: <span id="run-created"></span>
-    </div>
-    <div style="background:#1a1a2e;border-radius:6px;padding:12px 16px;margin-bottom:20px;font-size:0.85em;color:#ccc;white-space:pre-wrap;" id="instruction"></div>
-
-    <div id="live-bar">
-      <span><span id="live-dot"></span><span id="live-label">Connecting…</span></span>
-      <span>Envelopes: <strong id="env-count">0</strong></span>
-      <span>apply_to_each: <strong id="ate-count">0</strong></span>
+    <div class="split">
+      <div class="card">
+        <h2 style="margin-bottom:12px">Plan</h2>
+        <div class="plan-scroll" id="plan-box"></div>
+        <p class="small muted legend" style="margin:10px 0 0"><span class="dot local"></span> on this machine &nbsp; <span class="dot cloud"></span> cloud &nbsp; Select a step to see why its model was chosen.</p>
+      </div>
+      <aside class="card stack" id="panel" aria-live="polite"></aside>
     </div>
 
-    <h2>Envelopes</h2>
-    <table id="envelope-table">
-      <thead>
-        <tr>
-          <th>Level</th><th>Type</th><th>Skill</th><th>Trigger</th>
-          <th>Model</th><th>Tokens In</th><th>Tokens Out</th><th>Status</th><th>Child Run</th>
-        </tr>
-      </thead>
-      <tbody id="envelope-body"></tbody>
-    </table>
-
-    <h2>Orchestrator Decisions + Events</h2>
-    <div id="events"></div>
+    <div class="split">
+      <div class="card"><h2 style="margin-bottom:8px">What happened</h2><ol class="timeline" id="timeline"></ol></div>
+      <div class="card hidden" id="left-card"><h2 style="margin-bottom:8px">What left this machine</h2><div id="left-list"></div></div>
+    </div>
   </div>
-</div>
-
-<script>
-  const params = new URLSearchParams(window.location.search);
-  const runId = params.get('id');
-
-  // envelope_id -> <tr> element
-  const envRows = {};
-  let ateCount = 0;
-
-  if (!runId) {
-    document.getElementById('status').textContent = 'No run ID provided. Add ?id=<run_id> to the URL.';
-  } else {
-    // Initial load — populate header and events
-    fetch(`/runs/${runId}`)
-      .then(r => r.json())
-      .then(data => {
-        document.getElementById('status').style.display = 'none';
-        document.getElementById('content').style.display = 'block';
-
-        const run = data.run || {};
-        document.getElementById('run-id').textContent = run.run_id || runId;
-        document.getElementById('run-status').innerHTML = badge(run.status);
-        document.getElementById('run-created').textContent = run.created_at || '—';
-        document.getElementById('instruction').textContent = run.user_instruction || '—';
-
-        // Seed envelope table from initial snapshot
-        (data.envelopes || []).forEach(upsertEnvelopeRow);
-
-        // Events (static — populated once from initial fetch)
-        const eventsDiv = document.getElementById('events');
-        (data.events || []).forEach(ev => {
-          eventsDiv.appendChild(buildEventDiv(ev));
-        });
-        if (!data.events || data.events.length === 0) {
-          eventsDiv.innerHTML = '<p style="color:#555;font-size:0.85em;">No events yet.</p>';
-        }
-
-        // Start SSE stream for live updates
-        startStream(run.status);
-      })
-      .catch(err => {
-        document.getElementById('status').textContent = `Error loading run: ${err.message}`;
-      });
-  }
-
-  function startStream(initialStatus) {
-    if (initialStatus === 'completed' || initialStatus === 'failed') {
-      setLiveBar(false, initialStatus);
-      return;
-    }
-
-    const es = new EventSource(`/runs/${runId}/stream`);
-    setLiveBar(true, 'live');
-
-    es.onmessage = (e) => {
-      let msg;
-      try { msg = JSON.parse(e.data); } catch { return; }
-
-      if (msg.type === 'envelope_update') {
-        upsertEnvelopeRow(msg.envelope);
-      } else if (msg.type === 'run_terminal') {
-        document.getElementById('run-status').innerHTML = badge(msg.status);
-        setLiveBar(false, msg.status);
-        es.close();
-      } else if (msg.type === 'error') {
-        setLiveBar(false, 'error');
-        es.close();
-      }
-    };
-
-    es.onerror = () => {
-      setLiveBar(false, 'disconnected');
-      es.close();
-    };
-  }
-
-  function upsertEnvelopeRow(env) {
-    const tbody = document.getElementById('envelope-body');
-    const placeholder = tbody.querySelector('td[colspan]');
-    if (placeholder) placeholder.parentElement.remove();
-
-    let childRunId = null;
-    if (env.type === 'orchestrate' && env.inbound_payload) {
-      try {
-        const inbound = JSON.parse(env.inbound_payload);
-        childRunId = inbound.output?.child_run_id || null;
-      } catch(e) {}
-    }
-    const childCell = childRunId
-      ? `<a href="/ui/run.html?id=${childRunId}" style="font-family:monospace;font-size:0.78em;color:#88aaff;">${childRunId.slice(0,8)}…</a>`
-      : '—';
-
-    const cells = [
-      `<td>${env.level_path || '—'}</td>`,
-      `<td>${env.type || '—'}</td>`,
-      `<td>${env.skill_id || '—'}</td>`,
-      `<td>${env.trigger_reason || '—'}</td>`,
-      `<td>${env.model_id || '—'}</td>`,
-      `<td>${env.tokens_input ?? '—'}</td>`,
-      `<td>${env.tokens_output ?? '—'}</td>`,
-      `<td class="status-cell">${badge(env.status)}</td>`,
-      `<td>${childCell}</td>`,
-    ].join('');
-
-    const eid = env.envelope_id;
-    if (envRows[eid]) {
-      envRows[eid].innerHTML = cells;
-    } else {
-      const tr = document.createElement('tr');
-      tr.innerHTML = cells;
-      tbody.appendChild(tr);
-      envRows[eid] = tr;
-      // Update counters
-      document.getElementById('env-count').textContent = Object.keys(envRows).length;
-      if (env.type === 'apply_to_each') {
-        ateCount++;
-        document.getElementById('ate-count').textContent = ateCount;
-      }
-    }
-  }
-
-  function buildEventDiv(ev) {
-    const div = document.createElement('div');
-    div.className = 'event-row ' + (ev.event_type || '');
-    let decision = '';
-    if (ev.decision_json) {
-      try { decision = JSON.stringify(JSON.parse(ev.decision_json), null, 2); }
-      catch { decision = ev.decision_json; }
-    }
-    div.innerHTML = `
-      <strong>${ev.event_type || '—'}</strong>
-      <span class="event-time"> ${ev.created_at || ''}</span>
-      ${ev.model_id ? `<span style="color:#555"> · ${ev.model_id}</span>` : ''}
-      ${decision ? `<div class="decision">${htmlEscape(decision)}</div>` : ''}
-    `;
-    return div;
-  }
-
-  function setLiveBar(isLive, label) {
-    const dot = document.getElementById('live-dot');
-    dot.className = isLive ? 'live' : '';
-    document.getElementById('live-label').textContent =
-      isLive ? 'Live' : (label === 'completed' ? 'Completed' : label === 'failed' ? 'Failed' : label || 'Stopped');
-  }
-
-  function badge(status) {
-    if (!status) return '—';
-    return `<span class="badge ${status}">${status}</span>`;
-  }
-
-  function htmlEscape(str) {
-    return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-  }
-</script>
+</main>
+<script src="assets/app.js"></script>
+<script src="assets/admin.js"></script>
+<script src="assets/workspace.js"></script>
+<script src="assets/pages/run.js"></script>
 </body>
 </html>

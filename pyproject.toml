@@ -14,11 +14,16 @@ dependencies = [
     "python-dotenv>=1.0",
     "pydantic>=2.9",
     "pyyaml>=6.0",
-    "spacy>=3.8",
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.3", "pytest-asyncio>=0.24", "httpx>=0.28"]
+dev = ["pytest>=8.3", "pytest-asyncio>=0.24", "httpx>=0.28", "spacy>=3.8"]
+# Named-entity worker (src/logging/ner_worker.py). Not needed to run the app; also
+# `python -m spacy download en_core_web_sm` for the language model.
+ner = ["spacy>=3.8"]
+# Interface check (scripts/check_ui.py, work order 4.6). CI only: then
+# `python -m playwright install chromium --with-deps` for the browser.
+ui_test = ["playwright>=1.48"]
 
 [tool.setuptools.packages.find]
 where = ["."]

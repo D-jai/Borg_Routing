@@ -1,0 +1,7 @@
+Hello,
+
+Uploads above 20 MB fail with a timeout message.
+A reply within the week would be fine.
+
+Regards,
+Dmitri

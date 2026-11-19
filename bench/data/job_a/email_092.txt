@@ -1,0 +1,7 @@
+Hi team,
+
+Your API returns error 500 on the items endpoint (request 50911).
+A reply within the week would be fine.
+
+Thanks,
+Priya

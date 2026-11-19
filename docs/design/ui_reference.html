@@ -1,0 +1,364 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BORG_ROUTE interface reference</title>
+<style>
+/* ---------- Tokens: copy this block into ui/assets/app.css unchanged ---------- */
+:root {
+  --bg: #F5F7F6; --surface: #FFFFFF; --surface-2: #ECF1F0;
+  --ink: #12201F; --ink-2: #485957; --ink-3: #6F7E7C; --line: #D7DFDD;
+  --brand: #0F5257; --brand-ink: #FFFFFF; --brand-soft: #E1EEED;
+  --accent: #C9A227;            /* gold: dots, rules, focus rings. Never text. */
+  --ok: #1B7447; --ok-soft: #E2F2E9; --warn: #8A5F00; --warn-soft: #FBF1D6;
+  --bad: #B3261E; --bad-soft: #FBE7E5; --cloud: #55668A; --cloud-soft: #E8ECF4;
+  --radius: 10px; --radius-sm: 6px;
+  --s1: 4px; --s2: 8px; --s3: 12px; --s4: 16px; --s5: 24px; --s6: 32px;
+  --font: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --mono: ui-monospace, "Cascadia Mono", "SF Mono", Consolas, monospace;
+  --shadow: 0 1px 2px rgba(18,32,31,.06), 0 4px 14px rgba(18,32,31,.05);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0B1415; --surface: #111D1E; --surface-2: #172729;
+    --ink: #E5EEED; --ink-2: #A7B7B5; --ink-3: #82918F; --line: #24373A;
+    --brand: #62B5B1; --brand-ink: #06201F; --brand-soft: #14302F;
+    --ok: #5CC08B; --ok-soft: #12301F; --warn: #E0B341; --warn-soft: #33290C;
+    --bad: #F08A80; --bad-soft: #3A1614; --cloud: #9FB0D6; --cloud-soft: #1B2436;
+    --shadow: 0 1px 2px rgba(0,0,0,.4);
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0B1415; --surface: #111D1E; --surface-2: #172729;
+  --ink: #E5EEED; --ink-2: #A7B7B5; --ink-3: #82918F; --line: #24373A;
+  --brand: #62B5B1; --brand-ink: #06201F; --brand-soft: #14302F;
+  --ok: #5CC08B; --ok-soft: #12301F; --warn: #E0B341; --warn-soft: #33290C;
+  --bad: #F08A80; --bad-soft: #3A1614; --cloud: #9FB0D6; --cloud-soft: #1B2436;
+  --shadow: 0 1px 2px rgba(0,0,0,.4);
+}
+
+/* ---------- Base ---------- */
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body { background: var(--bg); color: var(--ink); font: 15px/1.55 var(--font); }
+h1, h2, h3 { margin: 0; line-height: 1.25; text-wrap: balance; }
+h1 { font-size: 22px; font-weight: 650; } h2 { font-size: 16px; font-weight: 650; }
+h3 { font-size: 12px; font-weight: 650; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3); }
+p { margin: 0 0 var(--s3); } a { color: var(--brand); }
+button, input, textarea, select { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.num { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+.muted { color: var(--ink-2); } .small { font-size: 13px; }
+
+/* ---------- Shell ---------- */
+.topbar { display: flex; align-items: center; gap: var(--s3); padding: var(--s3) var(--s4); background: var(--surface); border-bottom: 1px solid var(--line); position: sticky; top: 0; z-index: 5; }
+.brandmark { width: 28px; height: 28px; flex: none; color: var(--brand); }
+.wordmark { font-weight: 700; letter-spacing: .02em; }
+.tagline { color: var(--ink-3); font-size: 12px; }
+.topbar .spacer { flex: 1; }
+.chip { display: inline-flex; align-items: center; gap: 6px; padding: 2px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; background: var(--surface-2); color: var(--ink-2); white-space: nowrap; }
+.chip.replay { background: var(--warn-soft); color: var(--warn); }
+.dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+.dot.local { background: var(--brand); } .dot.cloud { background: transparent; border: 2px solid var(--cloud); }
+.dot.gold { background: var(--accent); }
+.btn { border: 1px solid var(--line); background: var(--surface); padding: 7px 14px; border-radius: var(--radius-sm); cursor: pointer; }
+.btn:hover { border-color: var(--brand); }
+.btn.primary { background: var(--brand); color: var(--brand-ink); border-color: var(--brand); font-weight: 600; }
+.layout { display: grid; grid-template-columns: 216px minmax(0, 1fr); min-height: calc(100vh - 57px); }
+.side { border-right: 1px solid var(--line); background: var(--surface); padding: var(--s4) var(--s3); }
+.side h3 { padding: var(--s3) var(--s2) var(--s1); }
+.side a { display: flex; align-items: center; gap: var(--s2); padding: 7px var(--s2); border-radius: var(--radius-sm); color: var(--ink-2); text-decoration: none; cursor: pointer; }
+.side a:hover { background: var(--surface-2); color: var(--ink); }
+.side a[aria-current="page"] { background: var(--brand-soft); color: var(--brand); font-weight: 600; }
+.main { padding: var(--s5); max-width: 1180px; width: 100%; }
+.screen { display: none; } .screen.on { display: block; }
+.notice { border: 1px dashed var(--line); border-left: 3px solid var(--accent); background: var(--surface); padding: var(--s2) var(--s3); border-radius: var(--radius-sm); margin-bottom: var(--s5); font-size: 13px; color: var(--ink-2); }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); padding: var(--s4); }
+.stack > * + * { margin-top: var(--s4); }
+.row { display: flex; gap: var(--s3); align-items: center; flex-wrap: wrap; }
+
+/* ---------- Ask ---------- */
+.thread { max-width: 780px; margin: 0 auto; }
+.bubble { background: var(--brand-soft); border-radius: var(--radius); padding: var(--s3) var(--s4); margin-left: auto; max-width: 85%; width: fit-content; }
+.answer h2 { margin-bottom: var(--s2); } .answer ul { margin: 0 0 var(--s3); padding-left: 20px; }
+.receipt { border-top: 1px solid var(--line); margin-top: var(--s4); padding-top: var(--s3); }
+.receipt-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(118px, 1fr)); gap: var(--s3); margin: var(--s2) 0 var(--s3); }
+.stat .k { font-size: 12px; color: var(--ink-3); } .stat .v { font-size: 18px; font-weight: 650; }
+.stat .v.est { color: var(--ink-2); font-weight: 500; }
+.composer { max-width: 780px; margin: var(--s5) auto 0; }
+.composer textarea { width: 100%; min-height: 64px; resize: vertical; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface); padding: var(--s3); }
+.stage { display: flex; align-items: center; gap: var(--s2); color: var(--ink-2); font-size: 13px; }
+.spin { width: 14px; height: 14px; border: 2px solid var(--line); border-top-color: var(--brand); border-radius: 50%; animation: spin .8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .spin { animation: none; } }
+
+/* ---------- Run ---------- */
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: var(--s3); }
+.tile { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: var(--s3) var(--s4); }
+.tile .v { font-size: 24px; font-weight: 650; } .tile .k { font-size: 12px; color: var(--ink-3); }
+.status { display: inline-flex; align-items: center; gap: 6px; padding: 2px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; }
+.status.ok { background: var(--ok-soft); color: var(--ok); } .status.bad { background: var(--bad-soft); color: var(--bad); }
+.status.run { background: var(--cloud-soft); color: var(--cloud); }
+.split { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(280px, 1fr); gap: var(--s4); align-items: start; }
+.plan-scroll { overflow-x: auto; }
+.plan { min-width: 760px; width: 100%; height: auto; display: block; }
+.plan .edge { stroke: var(--line); stroke-width: 1.5; fill: none; }
+.plan .node rect { fill: var(--surface); stroke: var(--line); stroke-width: 1.2; rx: 8; }
+.plan .node.sel rect { stroke: var(--brand); stroke-width: 2; }
+.plan .node.core rect { fill: var(--brand-soft); stroke: var(--brand); }
+.plan text { font-family: var(--font); fill: var(--ink); font-size: 12px; }
+.plan .t { font-weight: 650; } .plan .m { fill: var(--ink-2); font-size: 11px; } .plan .c { font-family: var(--mono); font-size: 11px; fill: var(--ink-2); }
+.plan .loc { fill: var(--brand); } .plan .cld { fill: none; stroke: var(--cloud); stroke-width: 2; }
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th { text-align: left; font-weight: 600; color: var(--ink-3); font-size: 12px; padding: 6px 8px; border-bottom: 1px solid var(--line); }
+td { padding: 7px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+tr.win td { background: var(--brand-soft); }
+.tscroll { overflow-x: auto; }
+dl.kv { display: grid; grid-template-columns: auto 1fr; gap: 6px var(--s3); margin: 0; font-size: 13px; }
+dl.kv dt { color: var(--ink-3); } dl.kv dd { margin: 0; }
+.timeline { list-style: none; margin: 0; padding: 0; }
+.timeline li { display: grid; grid-template-columns: 52px 1fr; gap: var(--s3); padding: 6px 0; border-bottom: 1px solid var(--line); font-size: 13px; }
+.timeline .at { color: var(--ink-3); font-family: var(--mono); font-size: 12px; }
+
+/* ---------- Admin ---------- */
+.check { display: flex; gap: var(--s3); align-items: flex-start; padding: var(--s2) 0; border-bottom: 1px solid var(--line); }
+.check:last-child { border-bottom: 0; }
+.mark { width: 20px; height: 20px; border-radius: 50%; flex: none; display: grid; place-items: center; font-size: 12px; font-weight: 700; }
+.mark.yes { background: var(--ok-soft); color: var(--ok); } .mark.no { background: var(--warn-soft); color: var(--warn); }
+.bar { height: 6px; background: var(--surface-2); border-radius: 3px; overflow: hidden; min-width: 60px; }
+.bar i { display: block; height: 100%; background: var(--brand); }
+
+/* ---------- Narrow screens ---------- */
+@media (max-width: 860px) {
+  .layout { grid-template-columns: 1fr; }
+  .side { border-right: 0; border-bottom: 1px solid var(--line); display: flex; gap: var(--s1); overflow-x: auto; padding: var(--s2) var(--s4); }
+  .side h3 { display: none; } .side a { white-space: nowrap; }
+  .main { padding: var(--s4); } .split { grid-template-columns: 1fr; } .tagline { display: none; }
+}
+</style>
+</head>
+<body>
+<header class="topbar">
+  <svg class="brandmark" viewBox="0 0 28 28" aria-hidden="true"><rect x="1.5" y="1.5" width="25" height="25" rx="6" fill="none" stroke="currentColor" stroke-width="2"/><path d="M8 14h4m0 0l5-5m-5 5l5 5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="19.5" cy="8.5" r="2" fill="#C9A227"/><circle cx="19.5" cy="19.5" r="2" fill="currentColor"/></svg>
+  <div><div class="wordmark">BORG_ROUTE</div><div class="tagline">Brokered Orchestration, Retrieval and Generation</div></div>
+  <span class="spacer"></span>
+  <span class="chip replay">Replay of a recorded run</span>
+  <button class="btn" id="theme" type="button" aria-label="Switch light or dark">Theme</button>
+</header>
+
+<div class="layout">
+  <nav class="side" aria-label="Sections">
+    <h3>Workspace</h3>
+    <a data-go="ask" aria-current="page">Ask</a>
+    <a data-go="run">Runs</a>
+    <h3>Admin</h3>
+    <a data-go="admin">Overview</a>
+    <a>Models</a><a>Keys</a><a>Rules</a><a>Settings</a><a>Skills</a><a>Logs</a>
+  </nav>
+
+  <main class="main">
+    <div class="notice"><strong>Design reference.</strong> Every number and model name on this page is a sample, not a measurement. Copy the tokens, components, spacing and wording style. Ask, Runs and Overview are drawn; the other pages use the same parts.</div>
+
+    <!-- ======================= ASK ======================= -->
+    <section class="screen on" id="ask">
+      <div class="thread stack">
+        <div class="bubble">Classify the 200 support emails in <span class="num">inbox_march</span>, then summarise the urgent ones for the support lead.</div>
+
+        <article class="card answer">
+          <h2>Urgent emails: 14 of 200</h2>
+          <p>Nine concern failed payments after the 3 March update, three are login lockouts, two are data export errors.</p>
+          <ul><li>Failed payments: all on annual plans; refund requested in six.</li><li>Lockouts: all use single sign-on.</li><li>Export errors: files over 2 GB.</li></ul>
+          <div class="receipt">
+            <h3>Receipt</h3>
+            <div class="receipt-grid">
+              <div class="stat"><div class="k">Steps</div><div class="v num">4</div></div>
+              <div class="stat"><div class="k">Models used</div><div class="v num">3</div></div>
+              <div class="stat"><div class="k">Time</div><div class="v num">41 s</div></div>
+              <div class="stat"><div class="k">Cost</div><div class="v num">$0.012</div></div>
+              <div class="stat"><div class="k">Estimate, same steps on cloud-top</div><div class="v est num">$0.094</div></div>
+            </div>
+            <div class="row">
+              <span class="chip"><span class="dot local"></span>local-small · 200 calls</span>
+              <span class="chip"><span class="dot cloud"></span>cloud-mid · 1 call</span>
+              <span class="chip"><span class="dot cloud"></span>cloud-top · 2 calls</span>
+              <span class="chip"><span class="dot gold"></span>Raw documents stayed on this machine</span>
+              <a href="#" data-go="run">See how it was done</a>
+            </div>
+          </div>
+        </article>
+
+        <div class="stage"><span class="spin"></span><span>Step 2 of 4: classifying emails, 132 of 200</span><span class="num">0:27</span></div>
+      </div>
+
+      <div class="composer card">
+        <label class="small muted" for="q">Ask</label>
+        <textarea id="q" placeholder="Describe the job. Enter sends, Shift+Enter makes a new line."></textarea>
+        <div class="row" style="margin-top:8px">
+          <button class="btn" type="button">Add documents (folder)</button>
+          <span class="small muted"><span class="dot local" style="display:inline-block"></span> Lane on: raw documents are read only by models on this machine.</span>
+          <span style="flex:1"></span>
+          <button class="btn primary" type="button">Send</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ======================= RUN ======================= -->
+    <section class="screen stack" id="run">
+      <div class="row"><h1>Run</h1><span class="status ok">Completed</span><span class="muted small num">16-Nov-2026 09:14 · run 7c1e…a92</span></div>
+      <div class="card"><h3>Asked</h3><p style="margin:6px 0 0">Classify the 200 support emails in inbox_march, then summarise the urgent ones for the support lead.</p></div>
+
+      <div class="tiles">
+        <div class="tile"><div class="k">Cost</div><div class="v num">$0.012</div><div class="small muted">Estimate on cloud-top: <span class="num">$0.094</span></div></div>
+        <div class="tile"><div class="k">Time</div><div class="v num">41 s</div><div class="small muted">Longest step: <span class="num">29 s</span></div></div>
+        <div class="tile"><div class="k">Steps</div><div class="v num">4</div><div class="small muted"><span class="num">203</span> model calls</div></div>
+        <div class="tile"><div class="k">Calls that left this machine</div><div class="v num">3</div><div class="small muted">No raw document text</div></div>
+      </div>
+
+      <div class="split">
+        <div class="card">
+          <h2 style="margin-bottom:12px">Plan</h2>
+          <div class="plan-scroll">
+          <svg class="plan" viewBox="0 0 880 250" role="img" aria-label="Plan diagram: plan, three steps, compose">
+            <path class="edge" d="M150 125 C190 125 190 60 230 60"/><path class="edge" d="M150 125 C190 125 190 190 230 190"/>
+            <path class="edge" d="M410 60 C450 60 450 125 490 125"/><path class="edge" d="M410 190 C450 190 450 125 490 125"/>
+            <path class="edge" d="M670 125 L710 125"/>
+            <g class="node core"><rect x="10" y="95" width="140" height="60"/><text class="t" x="24" y="119">Plan</text><circle class="cld" cx="28" cy="137" r="4"/><text class="m" x="38" y="141">cloud-top</text><text class="c" x="100" y="141">$0.004</text></g>
+            <g class="node sel"><rect x="230" y="22" width="180" height="76"/><text class="t" x="244" y="44">Classify each email</text><text class="m" x="244" y="61">200 items · extraction · light</text><circle class="loc" cx="248" cy="81" r="4"/><text class="m" x="258" y="85">local-small</text><text class="c" x="340" y="85">$0.000 · 29 s</text></g>
+            <g class="node"><rect x="230" y="152" width="180" height="76"/><text class="t" x="244" y="174">Count by category</text><text class="m" x="244" y="191">no model needed</text><text class="c" x="244" y="215">$0.000 · 0 s</text></g>
+            <g class="node"><rect x="490" y="87" width="180" height="76"/><text class="t" x="504" y="109">Summarise urgent ones</text><text class="m" x="504" y="126">summarize · mid</text><circle class="cld" cx="508" cy="146" r="4"/><text class="m" x="518" y="150">cloud-mid</text><text class="c" x="600" y="150">$0.002 · 6 s</text></g>
+            <g class="node core"><rect x="710" y="95" width="160" height="60"/><text class="t" x="724" y="119">Compose answer</text><circle class="cld" cx="728" cy="137" r="4"/><text class="m" x="738" y="141">cloud-top</text><text class="c" x="812" y="141">$0.006</text></g>
+          </svg>
+          </div>
+          <p class="small muted" style="margin:10px 0 0"><span class="dot local" style="display:inline-block"></span> on this machine &nbsp; <span class="dot cloud" style="display:inline-block"></span> cloud &nbsp; Select a step to see why its model was chosen.</p>
+        </div>
+
+        <aside class="card stack">
+          <div><h3>Step</h3><h2>Classify each email</h2></div>
+          <dl class="kv">
+            <dt>Model</dt><dd>local-small <span class="chip"><span class="dot local"></span>this machine</span></dd>
+            <dt>Kind of work</dt><dd>extraction, light</dd>
+            <dt>Needed score</dt><dd class="num">6.0 or more</dd>
+            <dt>Cost, time</dt><dd class="num">$0.000 · 29 s · 31,400 tokens</dd>
+            <dt>Input left this machine</dt><dd>No</dd>
+          </dl>
+          <div>
+            <h3 style="margin-bottom:6px">Why this model</h3>
+            <div class="tscroll"><table>
+              <thead><tr><th>Model</th><th>Score</th><th>Est. cost</th><th></th></tr></thead>
+              <tbody>
+                <tr class="win"><td>local-small</td><td class="num">6.8</td><td class="num">$0.0000</td><td>Chosen: cheapest that clears 6.0</td></tr>
+                <tr><td>cloud-cheap</td><td class="num">7.4</td><td class="num">$0.0041</td><td>Not offered: raw documents</td></tr>
+                <tr><td>cloud-top</td><td class="num">9.5</td><td class="num">$0.0920</td><td>Not offered: raw documents</td></tr>
+              </tbody>
+            </table></div>
+          </div>
+          <button class="btn" type="button">Details (raw record)</button>
+        </aside>
+      </div>
+
+      <div class="split">
+        <div class="card"><h2 style="margin-bottom:8px">What happened</h2>
+          <ol class="timeline">
+            <li><span class="at">0:00</span><span>The planner split the job into 3 steps.</span></li>
+            <li><span class="at">0:03</span><span>200 emails went to local-small, 20 at a time.</span></li>
+            <li><span class="at">0:32</span><span>Counting needed no model.</span></li>
+            <li><span class="at">0:33</span><span>cloud-mid summarised the 14 urgent emails from their labels and subjects.</span></li>
+            <li><span class="at">0:39</span><span>cloud-top wrote the final answer.</span></li>
+          </ol>
+        </div>
+        <div class="card"><h2 style="margin-bottom:8px">What left this machine</h2>
+          <div class="tscroll"><table>
+            <thead><tr><th>To</th><th>What was sent</th><th>Size</th></tr></thead>
+            <tbody>
+              <tr><td>cloud-top</td><td>Your request and the file list (names, sizes)</td><td class="num">412 tok</td></tr>
+              <tr><td>cloud-mid</td><td>14 labels, subjects and one-line reasons</td><td class="num">1,180 tok</td></tr>
+              <tr><td>cloud-top</td><td>Counts and the summary</td><td class="num">960 tok</td></tr>
+            </tbody>
+          </table></div>
+          <p class="small muted" style="margin:10px 0 0">Open any row to read exactly what was sent.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ======================= ADMIN OVERVIEW ======================= -->
+    <section class="screen stack" id="admin">
+      <div class="row"><h1>Overview</h1><span class="chip">Admin</span></div>
+      <div class="split">
+        <div class="card"><h2 style="margin-bottom:6px">Getting ready</h2>
+          <div class="check"><span class="mark yes">✓</span><div><strong>Cloud key saved</strong><div class="small muted">OpenRouter. The key is never shown here.</div></div></div>
+          <div class="check"><span class="mark yes">✓</span><div><strong>5 models in the pool</strong><div class="small muted">1 on this machine, 4 cloud. <a href="#">Models</a></div></div></div>
+          <div class="check"><span class="mark yes">✓</span><div><strong>Local model server reachable</strong><div class="small muted">LM Studio at 127.0.0.1:1234</div></div></div>
+          <div class="check"><span class="mark no">!</span><div><strong>Admin token not set</strong><div class="small muted">Admin pages are open to this computer only. Set <span class="num">BORG_ADMIN_TOKEN</span> before others can reach this server.</div></div></div>
+          <div class="check"><span class="mark yes">✓</span><div><strong>Lane: raw documents stay local</strong><div class="small muted"><a href="#">Settings</a></div></div></div>
+        </div>
+        <div class="stack">
+          <div class="tiles">
+            <div class="tile"><div class="k">Spent, last 7 days</div><div class="v num">$1.84</div></div>
+            <div class="tile"><div class="k">Runs</div><div class="v num">63</div><div class="small muted"><span class="num">2</span> failed</div></div>
+          </div>
+          <div class="card"><h2 style="margin-bottom:8px">Spend by model</h2>
+            <div class="tscroll"><table><tbody>
+              <tr><td>cloud-top</td><td style="width:45%"><div class="bar"><i style="width:72%"></i></div></td><td class="num">$1.32</td></tr>
+              <tr><td>cloud-mid</td><td><div class="bar"><i style="width:24%"></i></div></td><td class="num">$0.44</td></tr>
+              <tr><td>cloud-cheap</td><td><div class="bar"><i style="width:5%"></i></div></td><td class="num">$0.08</td></tr>
+              <tr><td>local-small</td><td><div class="bar"><i style="width:0%"></i></div></td><td class="num">$0.00</td></tr>
+            </tbody></table></div>
+          </div>
+        </div>
+      </div>
+      <div class="card"><h2 style="margin-bottom:8px">Pool</h2>
+        <div class="tscroll"><table>
+          <thead><tr><th>In pool</th><th>Model</th><th>Where</th><th>Reasoning</th><th>Coding</th><th>Extraction</th><th>Price in / out per million</th></tr></thead>
+          <tbody>
+            <tr><td><input type="checkbox" checked aria-label="In pool"></td><td>local-small</td><td><span class="chip"><span class="dot local"></span>this machine</span></td><td class="num">6.1</td><td class="num">5.8</td><td class="num">6.8</td><td class="num">free</td></tr>
+            <tr><td><input type="checkbox" checked aria-label="In pool"></td><td>cloud-cheap</td><td><span class="chip"><span class="dot cloud"></span>cloud</span></td><td class="num">7.2</td><td class="num">7.0</td><td class="num">7.4</td><td class="num">$0.25 / $0.38</td></tr>
+            <tr><td><input type="checkbox" checked aria-label="In pool"></td><td>cloud-top</td><td><span class="chip"><span class="dot cloud"></span>cloud</span></td><td class="num">9.8</td><td class="num">9.7</td><td class="num">9.5</td><td class="num">$5.00 / $25.00</td></tr>
+          </tbody>
+        </table></div>
+      </div>
+    </section>
+
+    <!-- ======================= RULES FOR BUILDERS ======================= -->
+    <section class="card stack" style="margin-top:32px">
+      <h2>Rules for builders</h2>
+      <ul style="margin:0;padding-left:20px">
+        <li><strong>Colour.</strong> Teal is structure and the one action colour. Gold marks a point, a rule or a focus ring; it is never text and never a fill larger than a dot. Status colours appear only on status.</li>
+        <li><strong>Local and cloud.</strong> A filled teal dot means "on this machine", a hollow slate ring means "cloud". Use the pair everywhere a model is named; never colour alone, always with the word on first use in a view.</li>
+        <li><strong>Numbers.</strong> Money, time, tokens and ids use the mono face with tabular figures. Money shows three decimals under one dollar, two above. An estimate always carries the word "Estimate".</li>
+        <li><strong>Words.</strong> Say what happened in a sentence ("200 emails went to local-small"), not field names. Raw records sit behind a "Details" control. Errors say what failed and what to do next.</li>
+        <li><strong>Layout.</strong> Spacing only from the scale (4, 8, 12, 16, 24, 32). One card style. Page gutter 24px, 16px on phones. Nothing scrolls sideways except a table or the plan inside its own box.</li>
+        <li><strong>Type.</strong> 15px body, 13px secondary, 12px labels in capitals with letter spacing, 22px page title, 16px card title. System fonts only: the app must work with no internet.</li>
+        <li><strong>Plan diagram.</strong> Plain SVG. Columns by dependency depth, left to right. Plan and Compose use the soft teal fill. An <span class="num">apply_to_each</span> step is one node with its item count. The selected node has a 2px teal border.</li>
+        <li><strong>Themes.</strong> Light by default; dark follows the system or the switch (<span class="num">data-theme</span> on the root). Every colour comes from a token.</li>
+        <li><strong>Replay.</strong> In replay mode the amber chip in the top bar is always visible and the Ask box is replaced by buttons for the recorded jobs.</li>
+      </ul>
+    </section>
+  </main>
+</div>
+
+<script>
+  // Reference-only behaviour: section switch and theme switch.
+  document.querySelectorAll('[data-go]').forEach(function (a) {
+    a.addEventListener('click', function (e) {
+      e.preventDefault();
+      var id = a.getAttribute('data-go');
+      document.querySelectorAll('.screen').forEach(function (s) { s.classList.toggle('on', s.id === id); });
+      document.querySelectorAll('.side a').forEach(function (n) {
+        if (n.getAttribute('data-go') === id) n.setAttribute('aria-current', 'page'); else n.removeAttribute('aria-current');
+      });
+      window.scrollTo(0, 0);
+    });
+  });
+  var root = document.documentElement;
+  try { var saved = localStorage.getItem('borg_theme'); if (saved) root.setAttribute('data-theme', saved); } catch (_) {}
+  document.getElementById('theme').addEventListener('click', function () {
+    var dark = root.getAttribute('data-theme') === 'dark' ||
+      (!root.getAttribute('data-theme') && window.matchMedia('(prefers-color-scheme: dark)').matches);
+    var next = dark ? 'light' : 'dark';
+    root.setAttribute('data-theme', next);
+    try { localStorage.setItem('borg_theme', next); } catch (_) {}
+  });
+</script>
+</body>
+</html>

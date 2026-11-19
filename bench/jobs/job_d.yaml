@@ -1,0 +1,24 @@
+# Job D: label 60 client notes by risk. Notes carry canary account numbers.
+# D compares raw_local with borg_cloud (3.2 text). A direct arm would send the notes to a top cloud
+# model in one call; it is listed under optional_arms and runs only with --arms direct.
+job: D
+title: Risk-label 60 client notes
+data_folder: job_d
+answers_file: answers/job_d_answers.json
+instruction: |
+  Each file in the folder is one client note. For every note, give the client's credit risk label:
+  low, medium or high. Return one JSON list with an object {"file": <file name>, "risk": <label>}
+  for every note, covering all 60 notes, and no other text.
+arms:
+  borg_cloud: {lane_mode: by_reference}
+  borg_local_workers: {lane_mode: raw_local, local: true}
+optional_arms:
+  direct: {}
+repeats: 3
+est_output_tokens: 3000
+quality:
+  kind: classification
+  key_field: file
+  fields: [risk]
+  win_margin_points: 2
+  canary_check: true                    # records whether a canary account number reached a cloud request

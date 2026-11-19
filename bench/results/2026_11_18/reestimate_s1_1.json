@@ -1,0 +1,21 @@
+{
+ "stage": 1,
+ "tripped_by": "C_direct_1",
+ "cost": 0.800072,
+ "spend_with_aborted_attempts": 0.800072,
+ "estimate": 0.77882,
+ "worst_ratio": 1.027287434837318,
+ "remaining": {
+  "B_borg_cloud_1": 1.0665606334711486,
+  "D_borg_cloud_1": 1.2101394618011865,
+  "D_borg_local_workers_1": 1.2101394618011865,
+  "C_borg_cloud_1": 1.8976618504404101,
+  "A_borg_cloud_1": 2.752760501887471,
+  "A_borg_local_workers_1": 2.752760501887471
+ },
+ "ledger_spent": 4.6842157,
+ "judge_tail": 0.12112499999999998,
+ "total_if_all_run": 15.695363111288874,
+ "cap": 20.0,
+ "decision": "continue"
+}

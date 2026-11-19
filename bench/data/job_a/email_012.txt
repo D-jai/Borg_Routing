@@ -1,0 +1,7 @@
+Dear support,
+
+Your API returns error 500 on the items endpoint (request 26044).
+Nothing time critical, reply when convenient.
+
+Thank you,
+Sofia

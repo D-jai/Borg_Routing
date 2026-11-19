@@ -1,0 +1,13 @@
+# Job B: build a small all-Python service from a spec (SQL, FastAPI, OpenAPI YAML, pytest).
+job: B
+title: Build the notes service from the spec
+spec_file: jobs/job_b_spec.md           # under bench/; its text is added to the instruction for both arms
+instruction: |
+  Build the service described in the spec below. Follow the spec's answer format exactly.
+arms:
+  direct: {}
+  borg_cloud: {lane_mode: "off"}        # no documents, no lane: the spec is short and goes in the message
+repeats: 3
+est_output_tokens: 7000
+quality:
+  kind: machine_checks                  # bench/checks.py

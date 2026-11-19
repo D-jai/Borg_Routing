@@ -1,0 +1,14 @@
+<section id="why" class="slide" data-transition="fade">
+<h2>Every choice comes with its reason.</h2>
+<p class="lede">Step 2, label each email: light extraction work. The bar for light work is 6.0 <!-- claim C104 -->.</p>
+<table class="tbl">
+<tr class="hd"><th style="width:34%">Model</th><th style="width:16%">Score for this work</th><th style="width:16%">Estimated cost</th><th style="width:34%">Decision</th></tr>
+<tr><td>google/gemini-3.1-flash-lite-preview</td><td> 8.8 <!-- claim C105 --></td><td> 0.00115 <!-- claim C106 --></td><td>Chosen: named by the planner</td></tr>
+<tr class="alt"><td>openai/gpt-5.4-nano</td><td> 8.0 <!-- claim C107 --></td><td> 0.001054 <!-- claim C108 --></td><td>Lowest cost that cleared the bar. Not used: the planner named a model</td></tr>
+<tr><td>anthropic/claude-sonnet-4.6</td><td> 9.2 <!-- claim C109 --></td><td> 0.0091 <!-- claim C110 --></td><td>Cleared the bar at a higher cost</td></tr>
+</table>
+<p class="small">Estimated cost is the router's estimate for one email, made before the call, in US dollars: the token price plus the waiting time priced at the run's time cost. It is not the bill.</p>
+<p class="lede">The planner names a model from the scorecard. When it names none, the step goes to the cheapest model that clears the bar. Either way the run record keeps the candidates and the reason.</p>
+<div class="foot"><p class="foot-l">BORG_ROUTE</p><p class="foot-r">Aliud Inquisito</p></div>
+<aside>The real route record of the labelling step in round 3 run A_borg_cloud_3, the run on the receipt (bench/results/2026_11_19/route_reasons.json; claims C104 to C110). The record's reason field reads planner_pick when the planning model named the model and routed when the router's own rule chose: the lowest effective cost that clears the bar. This step reads planner_pick. Eight models cleared the bar; the table shows the chosen one, the cheapest and the dearest. In round 3 the planning model named every step of the email, code and notes jobs, and the router's rule chose both steps of the document job (C103).</aside>
+</section>

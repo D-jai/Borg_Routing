@@ -4,8 +4,9 @@ TC-APE-010 — _build_task_from_node resolves inputs_ref="<node_id>" against
              a prior envelope's output.items → dependency_input['items'].
 TC-APE-011 — empty resolved items raises BRT-APE-005 at expand time
              (visible failed envelope, not a silent 0-result success).
-TC-APE-012 — string inputs_ref with no matching upstream node falls through
-             to BRT-APE-001 (no items + no inline list).
+TC-APE-012 — string inputs_ref naming no step and no inline items: the
+             built task carries the name as ``unresolved_ref`` and the
+             expander fails it with BRT-APE-006 (planner ruling 1a).
 """
 import uuid
 
@@ -89,11 +90,11 @@ async def test_empty_items_raises_005(db):
     assert env.output["success_count"] == 0
 
 
-def test_inputs_ref_unknown_falls_through_to_001():
+@pytest.mark.asyncio
+async def test_inputs_ref_unknown_fails_with_006(db):
     """TC-APE-012 — inputs_ref references a node not in results; node has
-    no inline items. Built task still has empty items; expand_and_run
-    surfaces BRT-APE-005 (empty list is what the orchestrator will see,
-    which is visible rather than silent)."""
+    no inline items. The built task names the ref as unresolved, and
+    expand_and_run fails it with BRT-APE-006 before any child call."""
     node = {
         "type": "apply_to_each",
         "id": "n2",
@@ -101,7 +102,6 @@ def test_inputs_ref_unknown_falls_through_to_001():
         "inputs_ref": "does_not_exist",
         "output_schema": {"ok": "bool"},
     }
-    results = {}  # empty — no upstream to resolve from
 
     task = _build_task_from_node(
         node=node,
@@ -112,10 +112,14 @@ def test_inputs_ref_unknown_falls_through_to_001():
         model_endpoint="http://localhost:1234",
         model_name="test",
         user_instruction="root prompt",
-        results=results,
+        results={},
     )
 
-    # dependency_input.items remains empty — downstream _resolve_items will
-    # raise BRT-APE-005 which surfaces as a failed envelope.
     assert task.dependency_input["items"] == []
     assert task.dependency_input["inputs_ref"] == "does_not_exist"
+    assert task.dependency_input["unresolved_ref"] == "does_not_exist"
+
+    env = await expand_and_run(task, db_path=db)
+    assert env.status == "failed"
+    assert "BRT-APE-006" in env.failure_reason
+    assert "Not a step id: 'does_not_exist'" in env.failure_reason

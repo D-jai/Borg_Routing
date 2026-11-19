@@ -1,0 +1,47 @@
+{
+ "worker": "openrouter/google/gemini-3.1-flash-lite-preview",
+ "first_post_accepted": 40,
+ "accuracy_on_first_post_accepted": "40/40",
+ "accuracy_unpacked": "40/40",
+ "accuracy_packed": "40/40",
+ "differ_count": 0,
+ "differ": [],
+ "unpacked": {
+  "calls": 40,
+  "dollars": 0.0166605,
+  "tokens_in": 54018,
+  "tokens_out": 2104,
+  "packed_posts": 0,
+  "pack_failures": {
+   "missing": 0,
+   "duplicate": 0,
+   "unknown_id": 0,
+   "invalid": 0,
+   "declined": 0,
+   "alone": 0,
+   "cut": 0,
+   "timed_out": 0,
+   "raised": 0
+  }
+ },
+ "packed": {
+  "calls": 2,
+  "dollars": 0.00253225,
+  "tokens_in": 2509,
+  "tokens_out": 1270,
+  "packed_posts": 2,
+  "pack_failures": {
+   "missing": 0,
+   "duplicate": 0,
+   "unknown_id": 0,
+   "invalid": 0,
+   "declined": 0,
+   "alone": 0,
+   "cut": 0,
+   "timed_out": 0,
+   "raised": 0
+  }
+ },
+ "spend_logged_dollars": 0.01919275,
+ "verdict": "PASS"
+}

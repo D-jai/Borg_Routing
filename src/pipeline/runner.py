@@ -30,6 +30,7 @@ from src.db.state import (
     get_config,
     get_envelopes,
     get_run,
+    lane_mode_of,
     update_run_status,
 )
 from src.logging.writer import write_event
@@ -67,8 +68,18 @@ async def run_pipeline(
     parent_run_id: Optional[UUID] = None,
     current_depth: int = 0,
     thread_id: Optional[str] = None,
+    run_id: Optional[UUID] = None,
+    route_options: Optional[dict] = None,
+    documents: Optional[dict] = None,
+    lane=None,
 ) -> dict:
     """Create a run, orchestrate it, return a summary.
+
+    On-premise lane: ``documents`` (``{"folder": ...}`` or ``{"files": [...]}``
+    under ``BORG_DOCS_ROOT``) are checked and loaded before the run starts;
+    a caller that already prepared the lane passes ``lane`` instead. A lane
+    refusal (BRT-LANE-001 path, BRT-LANE-005 lane off) returns a failed
+    summary with no run created and nothing sent.
 
     Returns:
         {
@@ -102,6 +113,23 @@ async def run_pipeline(
             "error": "BRT-PIP-004: user_instruction is empty",
         }
 
+    if lane is None:
+        from src.lane.context import prepare_lane  # noqa: PLC0415
+        from src.lane.errors import LaneError  # noqa: PLC0415
+
+        try:
+            lane = await prepare_lane(documents, db_path)
+        except Exception as exc:
+            return {
+                "run_id": None,
+                "response": "",
+                "status": "failed",
+                "latency_ms": 0,
+                "envelope_count": 0,
+                "error": str(exc) if isinstance(exc, LaneError)
+                else f"BRT-PIP-001: run setup failed: {exc}",
+            }
+
     # Create run record
     try:
         run_id = await create_run(
@@ -109,6 +137,10 @@ async def run_pipeline(
             parent_run_id=parent_run_id,
             thread_id=thread_id,
             db_path=db_path,
+            run_id=run_id,
+            route_options=route_options,
+            lane_mode=lane_mode_of(lane),
+            **({"documents": lane.manifest()} if lane is not None and lane.has_documents else {}),
         )
     except Exception as exc:
         return {
@@ -143,6 +175,8 @@ async def run_pipeline(
                 rolling_summary=rolling_summary,
                 db_path=db_path,
                 current_depth=current_depth,
+                **({"route_options": route_options} if route_options else {}),
+                **({"lane": lane} if lane is not None else {}),
             ),
             timeout=max_run_seconds,
         )
@@ -214,13 +248,30 @@ async def run_pipeline(
     except Exception:
         envelope_count = 0
 
-    # Fire-and-forget digest at completion
+    # Digest at completion. Totals come from the logged rows, so wait for the
+    # fire-and-forget log writes first.
+    usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+    cost_dollars = 0.0
+    direct_floor = None
     try:
-        await compute_and_save_digest(run_id, db_path=db_path)
+        from src.logging.writer import flush_pending  # noqa: PLC0415
+
+        await flush_pending()
+        digest = await compute_and_save_digest(run_id, db_path=db_path, answer_text=(response or "") if status == "completed" else None)
+        usage = {
+            "prompt_tokens": digest["tokens_input"],
+            "completion_tokens": digest["tokens_output"],
+            "total_tokens": digest["token_count"],
+        }
+        cost_dollars = digest["cost_dollars"]
+        direct_floor = digest["direct_floor_dollars"]
     except Exception:
         pass
 
     return {
+        "usage": usage,
+        "cost_dollars": cost_dollars,
+        "direct_floor_dollars": direct_floor,
         "run_id": str(run_id),
         "response": response,
         "status": status,

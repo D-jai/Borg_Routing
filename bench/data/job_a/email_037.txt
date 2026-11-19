@@ -1,0 +1,7 @@
+Good morning,
+
+Your API returns error 500 on the items endpoint (request 88926).
+Please get back to me within two or three days.
+
+Regards,
+Ingrid

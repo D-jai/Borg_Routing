@@ -1,0 +1,7 @@
+Hello,
+
+Your API returns error 500 on the items endpoint (request 98706).
+URGENT: our whole business is stopped, I need help right now.
+
+Thanks,
+Mei

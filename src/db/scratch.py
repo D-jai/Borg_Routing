@@ -15,6 +15,7 @@ from uuid import UUID
 
 import aiosqlite
 
+from src.db.connect import connect
 from src.db.schema import DB_PATH
 from src.envelopes.schema import SideEffectAction
 
@@ -33,7 +34,7 @@ async def write_scratch(
         RuntimeError: BRT-DB-015 if the insert fails.
     """
     try:
-        async with aiosqlite.connect(db_path) as db:
+        async with connect(db_path) as db:
             cur = await db.execute(
                 """INSERT INTO scratch(run_id, level_path, envelope_id, table_name, data)
                    VALUES (?,?,?,?,?)""",
@@ -56,7 +57,7 @@ async def read_scratch_for_level(
         RuntimeError: BRT-DB-016 if the read fails.
     """
     try:
-        async with aiosqlite.connect(db_path) as db:
+        async with connect(db_path) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(
                 "SELECT * FROM scratch WHERE run_id=? AND level_path=? ORDER BY id",
@@ -89,7 +90,7 @@ async def delete_scratch_for_level(
         RuntimeError: BRT-DB-017 if the delete fails.
     """
     try:
-        async with aiosqlite.connect(db_path) as db:
+        async with connect(db_path) as db:
             cur = await db.execute(
                 "DELETE FROM scratch WHERE run_id=? AND level_path=?",
                 (str(run_id), level_path),
@@ -106,7 +107,7 @@ async def count_scratch_for_level(
     db_path: str = DB_PATH,
 ) -> int:
     """Return the count of scratch rows for a given (run_id, level_path)."""
-    async with aiosqlite.connect(db_path) as db:
+    async with connect(db_path) as db:
         async with db.execute(
             "SELECT COUNT(*) FROM scratch WHERE run_id=? AND level_path=?",
             (str(run_id), level_path),
@@ -129,7 +130,7 @@ async def apply_cleanup_directives(
     """
     if not directives:
         return
-    async with aiosqlite.connect(db_path) as db:
+    async with connect(db_path) as db:
         for directive in directives:
             if directive.action != "delete":
                 continue

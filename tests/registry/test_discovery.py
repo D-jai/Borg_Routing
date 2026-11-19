@@ -23,6 +23,13 @@ from src.registry.discovery import (
 from src.registry.models import ModelInfo
 
 
+@pytest.fixture(autouse=True)
+def _isolate_local_env(monkeypatch):
+    """A developer's .env must not make discover_all probe real servers."""
+    for k in ("LMSTUDIO_BASE_URLS", "OLLAMA_BASE_URL", "LOCAL_OPENAI_BASE_URLS"):
+        monkeypatch.delenv(k, raising=False)
+
+
 # ---------------------------------------------------------------------------
 # Fixture responses
 # ---------------------------------------------------------------------------
@@ -379,7 +386,7 @@ async def test_reconcile_end_to_end_via_discover_all():
 
 @pytest.mark.asyncio
 async def test_discover_all_with_unreachable_lmstudio_seeds_zero_rows():
-    """BUG-007 — when every LM Studio port is unreachable, discover_all
+    """When every LM Studio port is unreachable, discover_all
     must not seed or retain any lmstudio rows as live endpoints."""
     cm = CapabilityMatrix()
     # Seed a pre-existing ghost to prove reconciliation kicks in.

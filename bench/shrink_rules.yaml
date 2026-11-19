@@ -1,0 +1,9 @@
+# SUPERSEDED by planner ruling 14 (17-Nov-2026): the staged plan (--stage 1, --stage 2) replaced the US$14
+# pre-flight rule and these shrink steps. No code reads this file any more; it is kept for the record only.
+estimate_limit_dollars: 14.0
+phase_cap_dollars: 20.0
+steps:
+  - name: "job C: one repeat instead of three"
+    job_repeats: {C: 1}
+  - name: "all jobs: two repeats instead of three (job C stays at one)"
+    repeats: 2

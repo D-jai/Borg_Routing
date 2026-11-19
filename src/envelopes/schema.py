@@ -14,7 +14,7 @@ Error codes:
 from typing import Literal, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, field_validator, model_validator
+from pydantic import BaseModel, PrivateAttr, field_validator, model_validator
 
 VALID_ENVELOPE_TYPES = {"orchestrate", "answerer", "apply_to_each", "state_op"}
 VALID_SIDE_EFFECT_ACTIONS = {"write", "delete"}
@@ -68,17 +68,49 @@ class WrappedTask(BaseModel):
     model_endpoint: Optional[str] = None
     model_name: Optional[str] = None
     instruction: str
+    # Law 1 — the operator's verbatim instruction for the whole run. The
+    # engine stamps it on every task at every depth so the governance block
+    # of each model call shows what the operator asked, never a step's own
+    # text. None only for tasks built outside the engine; the executor then
+    # falls back to ``instruction``.
+    governance_instruction: Optional[str] = None
     context: str = ""
     state_query: Optional[str] = None
     side_effects: list[str] = []
     tool_requests: list[ToolRequest] = []
     dependency_input: dict = {}
     output_schema: dict
-    max_output_tokens: int = 1000
+    # BRT-ANS-009 — Per-envelope token budget request. The executor uses
+    # this as a FLOOR: effective_max = max(ANSWERER_MAX_TOKENS env, this).
+    # Plan nodes that need more headroom (e.g. "produce a Go impl + 3
+    # tests") can declare a higher cap; the orchestrator stamps it onto
+    # the WrappedTask via _build_task_from_node. Default 4000 keeps small
+    # answers cheap while leaving room for non-trivial JSON outputs
+    # without immediately tripping finish_reason=length.
+    max_output_tokens: int = 4000
     trigger_reason: str = "initial_plan"
+    # The plan node this envelope runs (set by the engine); the Run page's
+    # diagram maps envelopes to plan nodes by it. None for tasks built elsewhere.
+    node_id: Optional[str] = None
     skill_id: Optional[str] = None
     skill_version: Optional[int] = None
     skill_args: Optional[dict] = None
+    # Planner reading (2) under ruling 35: the names of the fields the step
+    # added through ``skill_args.extra_fields`` (set by the skill library's
+    # render on apply_to_each skill steps only, copied to each child; a plain
+    # answerer step keeps them strict and leaves this empty). A reply without one is
+    # retried where a failing item is retried today, then kept; the skill's
+    # own fields stay strict (src/envelopes/validator.py).
+    extra_fields: list[str] = []
+    # On-premise lane (docs/design/on_premise_lane.md section 5). Set by the
+    # runtime, never by the planner: "raw" when the task reads document
+    # content or the unguarded output of a raw step. A raw task is routed to
+    # local models only and its output passes the output guard.
+    data_scope: Literal["raw", "derived"] = "derived"
+    # Document or part ids this task reads ("doc_001", "doc_001#2"). Ids only:
+    # the text is loaded inside the executing task, right before its own
+    # (local) request is built.
+    documents: list[str] = []
 
     @field_validator("type", mode="before")
     @classmethod
@@ -115,6 +147,11 @@ class InboundEnvelope(BaseModel):
     output: dict
     failure_reason: Optional[str] = None
     tokens_used: dict = {}
+    # Dollars for the calls behind this envelope (and, for an orchestrate or
+    # apply_to_each node, behind everything it spawned). None = not set; the
+    # engine then prices ``tokens_used`` against the node's model.
+    dollars: Optional[float] = None
+    baseline_dollars: Optional[float] = None
     scratch_writes: list[SideEffectAction] = []
     scratch_cleanup: list[SideEffectAction] = []
     # BRT-WEB-02 — raw tool invocation results (e.g. web_search citations)
@@ -124,3 +161,31 @@ class InboundEnvelope(BaseModel):
     #   {"web_search": [{"title":..., "url":..., "snippet":...}, ...], ...}
     # Empty dict when no tools were invoked.
     tool_results: dict = {}
+    # On-premise lane: True when a raw envelope's output passed the output
+    # guard; a step reading an unguarded raw output is raw itself. None for
+    # an envelope the guard never saw (any derived step).
+    lane_guarded: Optional[bool] = None
+    # On-premise lane: True when ``failure_reason`` was written by the model
+    # (the envelope was built from its JSON), not by the runtime. Never
+    # serialised; the output guard then shows BRT-LANE-004 upward.
+    _reason_from_model: bool = PrivateAttr(default=False)
+    # On-premise lane: the data_scope of the task that produced this envelope
+    # ("raw" or "derived"), and its document ids label. Set by the engine;
+    # never serialised. Decides what a prompt shows of a failure.
+    _data_scope: Optional[str] = PrivateAttr(default=None)
+    _doc_label: Optional[str] = PrivateAttr(default=None)
+    # The node type of the task that produced it (planner ruling 21: compose
+    # row markers place the rows of apply_to_each and list state_op steps).
+    # Set by the engine; never serialised.
+    _node_type: Optional[str] = PrivateAttr(default=None)
+    # apply_to_each: the item indexes whose failure reason the model itself
+    # wrote (ruling 21: shown as BRT-ANS-010). Never serialised.
+    _model_reason_indexes: set = PrivateAttr(default_factory=set)
+    # Planner ruling 35b: a step refused for an unknown node type carries the
+    # node as the plan wrote it (JSON, cut; built from the plan only), shown to
+    # re_plan beside the failure, never to compose. Never serialised.
+    _plan_node: Optional[str] = PrivateAttr(default=None)
+    # apply_to_each: the step's declared extra fields (WrappedTask.extra_fields),
+    # so compose counts them under "Rows with no value" even when no row holds
+    # one (ruling 35, reading 2). Never serialised.
+    _extra_fields: list = PrivateAttr(default_factory=list)

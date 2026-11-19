@@ -1,0 +1,7 @@
+Hello support team,
+
+Your API returns error 500 on the items endpoint (request 26072).
+This is blocking my team today, please prioritise it.
+
+Thanks,
+Mei

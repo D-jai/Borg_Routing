@@ -1,0 +1,7 @@
+Good morning,
+
+Your API returns error 500 on the items endpoint (request 10458).
+URGENT: our whole business is stopped, I need help right now.
+
+Regards,
+Omar

@@ -1,0 +1,7 @@
+Hi team,
+
+Your API returns error 500 on the items endpoint (request 56264).
+No rush at all, whenever you get a chance.
+
+Regards,
+Sofia

@@ -1,0 +1,13 @@
+# Live mode override: the full app with your keys from .env (copy .env.example to .env first).
+#   docker compose -f compose.yaml -f compose.live.yaml up -d --build
+# BORG_ADMIN_TOKEN must be set in .env: the browser reaches the container from the Docker
+# gateway address, not loopback, so without a token the admin pages and key routes refuse
+# it (BRT-API-046). Keys are set in the host .env, not from the Keys page (BRT-API-054).
+services:
+  borg:
+    env_file:
+      - .env
+    environment:
+      BORG_DEMO_MODE: "off"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"

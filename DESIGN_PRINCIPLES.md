@@ -26,6 +26,8 @@ Every SQLite write has an owner. Children self-clean before returning; parents v
 - Parent sweeps `WHERE level = {child_level}` after fold-in. Residue → `child_residue` event + trust adjustment + cleanup.
 - Scratch is ephemeral; structured envelope outputs persist.
 
+**Status (16-Nov-2026).** The rule stands. Its machinery (the `scratch` table, cleanup directives, fold-in residue check) exists, but no current step writes scratch: `write_scratch` has no caller in `src/`, and an answerer's `scratch_writes` are recorded, not stored. Law 2 is therefore not exercised by any current run and is outside the showcase's claims. The same holds for the `deferrals` side effect (18-Nov-2026, planner ruling 32): a deferral is carried in the item's own result (bucket `defer` plus `defer_reason`) and reaches re_plan in the step output; no deferrals table is filled.
+
 ---
 
 ## 3. Core Patterns (mental model)
@@ -34,9 +36,9 @@ Every SQLite write has an owner. Children self-clean before returning; parents v
 |---|---|
 | **Wrapper-as-Compression Contract** | The inbound schema IS the compression spec. "Return me this shape" ≡ "compress to fit this shape." |
 | **Progressive Distillation** | Compression is a by-product of work, not a separate step. Every answerer emits already-compressed structured output. |
-| **Cascading Distillation** | If one pass isn't enough, cascade another. Bounded by `MAX_RECURSION_DEPTH = 5`. |
+| **Cascading Distillation** | If one pass isn't enough, cascade another. Bounded by `MAX_DEPTH = 5`. |
 | **Context Bucket** | Multi-resolution context assembled at Composer time: high-res (governance + question) + structured evidence + compact history + state snapshots. |
-| **Orchestrator = Composer** | Same prompt, different `current_mode` flag (`plan \| dispatch \| re_plan \| compose`). No handover → no information loss. |
+| **Orchestrator = Composer** | Same prompt, different `current_mode` flag (the engine uses `plan \| re_plan \| compose`). No handover → no information loss. |
 
 ---
 
@@ -49,6 +51,9 @@ Every SQLite write has an owner. Children self-clean before returning; parents v
 - `state_op` — deterministic (no-model) operator: `filter`, `count`, `group_by`, `sample`.
 
 ### Four Shared-State Mechanisms (enable emergent patterns)
+
+**Status (17-Nov-2026).** Mechanisms 1 and 2 are declared in the envelope schema but not executed by the current runtime: the engine never runs a `state_query`, and `side_effects` are passed along but never written. Mechanisms 3 and 4 are live.
+
 1. `state_query` on envelope inputs — parameterised SQL executed before dispatch, injected as context.
 2. `side_effects` on envelope outputs — declared, structured writes to named tables.
 3. Orchestrator re-invocation mid-run — invoked with current state digest whenever re-planning is needed.
@@ -59,6 +64,8 @@ Every SQLite write has an owner. Children self-clean before returning; parents v
 select_model(task_type, est_input_tokens, quality_req, strategy)
 # candidates = matrix.query(task_type) filtered by score>=quality_req and context>=tokens
 # sorted by effective_cost; tier is derived
+# an unpriced model with no speed figure is priced at the pool's slowest figure; with no figure in
+# the pool it is ranked after every model with a cost and its est_cost is null (rulings 28, 28h)
 ```
 
 ---
@@ -72,8 +79,8 @@ effective_cost =
 ```
 
 - External: first term dominates; rates from OpenRouter `/api/v1/models`.
-- Local: first term = 0; throughput_tps measured during benchmark.
-- `time_cost_per_sec` is an Admin UI knob (default ≈ $30/hr).
+- Local: first term = 0; throughput_tps is measured by one short generation on Discover, on ticking, and at run start (`src/registry/throughput.py`, planner ruling 28). An unmeasured local model is never free: it is priced at the slowest figure in the pool, or, with none, ranked after every priced model (ruling 28h).
+- `time_cost_per_sec` is an Admin UI knob (default 0.0001 per second, about $0.36/hr).
 
 ---
 
@@ -85,8 +92,8 @@ effective_cost =
 | `trigger_reason` on envelopes | causal graph via one WHERE clause (`initial_plan`, `escalation_from:X`, `retry:X`, ...) |
 | `orchestrator_decision` event | verbatim reasoning + plan per invocation |
 | `child_residue` event | fold-in sweep hit → misbehaviour signal per model |
-| `run_digests` | one row per finished run: cost, latency, token-by-model, counts, rating |
-| `user_rating` on runs | ground-truth signal from thumbs-up/down |
+| `run_digests` | one row per finished run: `summary`, `cost_dollars`, `token_count`, `direct_floor_dollars`, `direct_floor_model`, `tokens_input`, `tokens_output` (old rows keep `baseline_dollars`; it is no longer written) |
+| `user_rating` on runs (`runs.user_rating`) | ground-truth signal from thumbs-up/down |
 | NER worker (optional) | spaCy entity + SVO extraction over log_payloads — parked, enable on demand |
 
 **Rejected (do not reintroduce):** a scheduled Coach/critic model. The system self-regulates via Direct-mode bias + quality-by-floor lineup.
@@ -100,7 +107,7 @@ The orchestrator's core skill is **designing good inbound schemas.** The Skill L
 - Catalogue: `data/skills.yaml` (versioned)
 - Loader: `src/skills/library.py`
 - Telemetry: `skill_usage_log` (outcome, tokens, latency, composer_accepted, residue_count)
-- UI: `/ui/skills.html` — per-skill stats + "Edit → New Version" bumps version; old stats preserved.
+- UI: `/ui/skills.html` — read-only list of skills; a new version is created through `POST /skills/{skill_id}/version` (admin), old stats preserved.
 
 **This is not the Coach.** The Coach policed decisions; the Skill Library sharpens tools.
 
@@ -113,9 +120,11 @@ The orchestrator's core skill is **designing good inbound schemas.** The Skill L
 | **Primary** | `POST /v1/chat/completions` | OpenAI-compatible gateway (Cursor, Continue, Droid, custom scripts). Streaming via SSE. |
 | **Secondary** | `POST /v1/task` → `GET /runs/{id}/stream` | Long-running async jobs; 202 + poll/SSE. |
 | **Tertiary** | `/mcp` JSON-RPC | MCP tools for Claude Desktop, Continue. |
-| **Reference client** | browser UI (`/chat`, `/models`, `/admin`, `/dashboard`, `/run/{id}`, `/logs`, `/skills`) | Dogfoods the public API — no privileged backdoor. |
+| **Reference client** | browser UI at `/` (redirects to Ask): Ask `/ui/ask.html`, Run `/ui/run.html?id=<run_id>`, Runs `/ui/runs.html`; Admin pages `/ui/admin_overview.html`, `/ui/models.html`, `/ui/keys.html`, `/ui/rules.html`, `/ui/settings.html`, `/ui/skills.html`, `/ui/logs.html` | Dogfoods the public API: the pages call `/v1/chat/completions`, `/runs`, `/runs/{id}`, `/runs/{id}/stream`, `/models`, `/config`, `/skills`, `/logs` and `/keys/status`, with no privileged backdoor. Admin routes sit behind `BORG_ADMIN_TOKEN` (or loopback). |
 
-Gateway model aliases: `borg_route`, `borg_route:{tier}`, `borg_route:{specialty}`, `borg_route:local`, or any raw `model_id` (bypass).
+Gateway model aliases: `borg_route`, `borg_route:{tier}` (light, mid, heavy), `borg_route:{kind of work}` (coding, creative, reasoning, extraction), `borg_route:local`, or any raw `model_id` (bypass).
+
+Other routes: `GET /runs` (history), `POST /runs/{id}/resume`, `POST /runs/{id}/rating`, `GET/POST /config` (settings, rules), `GET /health`.
 
 ---
 
@@ -132,6 +141,6 @@ If any of these look necessary: stop, document why, and escalate before coding.
 ---
 
 ## Further Reading
-- `CODING_STANDARD_CORE.md` — commit + error-code + test conventions.
+- `CONTRIBUTING.md`: commit law and conventions.
 - `docs/user-guide.md` — operator-facing behaviour.
 - `docs/install-guide.md` — install + LLM-installer notes.

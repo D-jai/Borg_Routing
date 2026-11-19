@@ -1,0 +1,8 @@
+Hi team,
+
+Your API returns error 500 on the items endpoint (request 33065).
+This is the first time I have had to write to you.
+URGENT: we are losing money every hour until this is fixed.
+
+Regards,
+Omar

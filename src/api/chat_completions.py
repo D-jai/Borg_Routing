@@ -3,26 +3,38 @@
 POST /v1/chat/completions — accepts standard OpenAI request bodies.
 Model aliases:
   borg_route               → full orchestration, SYSTEM_CHOOSE
-  borg_route:light         → quality_requirement=5
-  borg_route:mid           → quality_requirement=7
-  borg_route:heavy         → quality_requirement=9
-  borg_route:coding|creative|reasoning|extraction → specialty hint
-  borg_route:local         → LOCAL_FIRST strategy
+  borg_route:light|mid|heavy → every step is routed at that tier's floor
+  borg_route:coding|creative|reasoning|extraction → kind of work for every step
+                              (replaces the planner's choice)
+  borg_route:local         → LOCAL_FIRST strategy (a local model that clears
+                              the floor wins over a cheaper cloud one)
+  (see _route_options_for_alias; the run trace notes the alias per step)
   {exact model_id}         → bypass orchestration, direct to that model
 
 Streaming: if stream=true, emit SSE with OpenAI-compat data: lines.
   - Bypass mode: relays actual SSE chunks from the underlying model endpoint.
-  - Orchestration mode: word-level SSE after pipeline completion.
+  - Orchestration mode: word-level SSE after pipeline completion; every
+    character, including newlines, is preserved.
 
 Error codes:
 - BRT-API-010: malformed request body
 - BRT-API-011: model not found (bypass mode)
 - BRT-API-012: pipeline execution failed
 - BRT-API-013: bypass model streaming relay failed
+- BRT-LANE-001: a document path was refused (400)
+- BRT-LANE-005: documents with the lane off or with a bypass model id; bypass
+                while lane_mode is all_local (400)
+
+On-premise lane: an extra top-level ``documents`` field
+(``{"folder": ...}`` or ``{"files": [...]}`` under BORG_DOCS_ROOT) sends
+documents by reference to an orchestrated run. In raw_local a bypass call is
+recorded in the outbound ledger before it is sent.
 """
 import asyncio
+import contextlib
 import json
 import os
+import re
 import time
 import uuid
 from typing import AsyncIterator, Optional
@@ -61,6 +73,8 @@ class ChatRequest(BaseModel):
     stream: bool = False
     max_tokens: Optional[int] = None
     temperature: Optional[float] = None
+    # On-premise lane: documents by reference (extra top-level field).
+    documents: Optional[dict] = None
 
 
 def _parse_model_alias(model: str) -> tuple[str, float, Optional[str], str]:
@@ -91,15 +105,47 @@ def _parse_model_alias(model: str) -> tuple[str, float, Optional[str], str]:
         return ("borg_route", 7.0, None, "SYSTEM_CHOOSE")
 
 
+def _route_options_for_alias(model: str) -> Optional[dict]:
+    """What a ``borg_route:<hint>`` alias asks of the router, or None.
+
+    A tier (light, mid, heavy) replaces every step's tier; a specialty
+    (coding, creative, reasoning, extraction) replaces each step's kind of
+    work, as a tier replaces the tier; ``local`` prefers a local model that clears the
+    floor. Plain ``borg_route`` and an unknown hint ask for nothing.
+    """
+    parts = model.split(":", 1)
+    if parts[0] != "borg_route" or len(parts) == 1:
+        return None
+    hint = parts[1]
+    if hint in ("light", "mid", "heavy"):
+        return {"alias": model, "tier": hint}
+    if hint == "local":
+        return {"alias": model, "strategy": "LOCAL_FIRST"}
+    if hint in ("coding", "creative", "reasoning", "extraction"):
+        return {"alias": model, "task_type": hint}
+    return None
+
+
+def _route_kwargs(model: str) -> dict:
+    """``route_options`` for run_pipeline, or nothing when the alias asks for none."""
+    options = _route_options_for_alias(model)
+    return {"route_options": options} if options else {}
+
+
 def _build_openai_response(
     run_id: str,
     model_alias: str,
     response_text: str,
     prompt_tokens: int = 0,
     completion_tokens: int = 0,
+    include_usage: bool = True,
 ) -> dict:
-    """Build an OpenAI-shaped chat completion response."""
-    return {
+    """Build an OpenAI-shaped chat completion response.
+
+    ``include_usage=False`` leaves the ``usage`` block out (a provider that
+    reported none), rather than claiming zero tokens.
+    """
+    body = {
         "id": f"chatcmpl-{run_id}",
         "object": "chat.completion",
         "created": int(time.time()),
@@ -114,12 +160,14 @@ def _build_openai_response(
                 "finish_reason": "stop",
             }
         ],
-        "usage": {
+    }
+    if include_usage:
+        body["usage"] = {
             "prompt_tokens": prompt_tokens,
             "completion_tokens": completion_tokens,
             "total_tokens": prompt_tokens + completion_tokens,
-        },
-    }
+        }
+    return body
 
 
 async def _stream_response(response_text: str, model_alias: str, run_id: str) -> AsyncIterator[str]:
@@ -127,10 +175,10 @@ async def _stream_response(response_text: str, model_alias: str, run_id: str) ->
     chunk_id = f"chatcmpl-{run_id}"
     created = int(time.time())
 
-    # Stream word by word for a natural feel
-    words = response_text.split()
-    for i, word in enumerate(words):
-        delta_content = word + (" " if i < len(words) - 1 else "")
+    # Word-sized chunks, each word keeping the whitespace after it, so the
+    # concatenated stream equals the text exactly (newlines and indents too).
+    pieces = re.findall(r"\S+\s*|\s+", response_text)
+    for delta_content in pieces:
         chunk = {
             "id": chunk_id,
             "object": "chat.completion.chunk",
@@ -163,12 +211,20 @@ async def _poll_stage_events(
     started_at: float,
     last_seen_log_id: int,
     db_path: str,
+    run_id: Optional[str] = None,
+    redact: bool = False,
 ) -> tuple[list[dict], int]:
-    """BUG-018 — pull recent orchestrator_decision rows from the logs
+    """Pull recent orchestrator_decision rows from the logs
     table so the SSE layer can surface them as stage transitions.
 
     Returns a list of {stage, detail, ts} dicts and the highest log_id
-    seen so the next poll only fetches new rows.
+    seen so the next poll only fetches new rows. ``run_id`` limits the rows
+    to that run and its descendant runs (R3); without it every run's rows come back.
+
+    ``redact`` (planner ruling 37): each row first goes through
+    ``src.api.tasks.redact_event``, the rule the run view applies for a
+    non-admin while the lane is on, so a stage's ``msg`` and ``rationale``
+    reach the stream exactly as they reach the run view.
     """
     import aiosqlite
     events: list[dict] = []
@@ -176,24 +232,46 @@ async def _poll_stage_events(
     try:
         async with aiosqlite.connect(db_path) as db:
             db.row_factory = aiosqlite.Row
+            run_filter = ""
+            params: tuple = (last_seen_log_id, str(int(started_at)))
+            if run_id:
+                # The chat's own run plus every child run it started, so the
+                # stages of nested work show; other chats' runs stay out.
+                from src.db.state import get_descendant_run_ids  # noqa: PLC0415
+                try:
+                    wanted = [str(run_id)] + await get_descendant_run_ids(
+                        uuid.UUID(str(run_id)), db_path=db_path
+                    )
+                except Exception:
+                    wanted = [str(run_id)]
+                run_filter = f"AND run_id IN ({','.join('?' * len(wanted))})"
+                params += tuple(wanted)
             async with db.execute(
-                """SELECT log_id, model_id, decision_json, created_at
+                f"""SELECT log_id, event_type, envelope_id, model_id, decision_json, created_at
                    FROM logs
                    WHERE event_type = 'orchestrator_decision'
                      AND log_id > ?
                      AND strftime('%s', created_at) >= ?
+                     {run_filter}
                    ORDER BY log_id ASC
                    LIMIT 20""",
-                (last_seen_log_id, str(int(started_at))),
+                params,
             ) as cur:
                 rows = await cur.fetchall()
+        if redact:
+            from src.api.tasks import redact_event  # noqa: PLC0415
         for row in rows:
             new_max = max(new_max, row["log_id"])
+            ev = dict(row)
+            if redact:
+                ev = redact_event(ev)
             decision: dict = {}
             try:
-                decision = json.loads(row["decision_json"]) if row["decision_json"] else {}
+                decision = json.loads(ev["decision_json"]) if ev["decision_json"] else {}
             except Exception:
                 pass
+            if not isinstance(decision, dict):
+                decision = {}
             stage = decision.get("mode") or decision.get("code") or "orchestrator"
             detail = decision.get("msg") or decision.get("rationale") or row["model_id"] or ""
             events.append({
@@ -210,6 +288,8 @@ async def _stream_orchestration_with_heartbeats(
     user_instruction: str,
     thread_window: list,
     model_alias: str,
+    lane=None,
+    request=None,
 ) -> AsyncIterator[str]:
     """BRT-STR-01 — keep the SSE connection alive while the pipeline runs.
 
@@ -220,21 +300,24 @@ async def _stream_orchestration_with_heartbeats(
     word-stream the real response. Comments are ignored by SSE consumers
     but reset their idle timers.
 
-    BUG-018 — between heartbeats we poll the logs table for new
+    Between heartbeats we poll the logs table for new
     orchestrator_decision rows and emit them as stage events. The chat
     UI listens for `chunk.event === 'stage'` and updates a thinking
     indicator in place, so multi-stage runs show real progress instead
     of an opaque spinner.
     """
-    from src.db.schema import DB_PATH  # noqa: PLC0415
-
     heartbeat_every = float(os.getenv("BORG_STREAM_HEARTBEAT_SEC", "5"))
     started_at = time.time()
     last_log_id = 0
+    # Issue the run id here so stage polling can be limited to this run.
+    own_run_id = uuid.uuid4()
     pipeline_task = asyncio.create_task(
         run_pipeline(
             user_instruction=user_instruction,
             thread_window=thread_window,
+            run_id=own_run_id,
+            **_route_kwargs(model_alias),
+            **({"lane": lane} if lane is not None else {}),
         )
     )
 
@@ -245,13 +328,19 @@ async def _stream_orchestration_with_heartbeats(
                 timeout=heartbeat_every,
             )
         except asyncio.TimeoutError:
-            # BUG-018 — emit stage events found since the last poll;
+            # Emit stage events found since the last poll;
             # fall back to a heartbeat comment when nothing's new so
             # the connection still stays warm.
+            # Planner ruling 37: redacted exactly when the run view would be
+            # (not an admin, lane on), asked again on every poll.
+            from src.api.tasks import viewer_redacts  # noqa: PLC0415
+
             events, last_log_id = await _poll_stage_events(
                 started_at=started_at,
                 last_seen_log_id=last_log_id,
                 db_path=DB_PATH,
+                run_id=str(own_run_id),
+                redact=await viewer_redacts(request),
             )
             if events:
                 for ev in events:
@@ -285,12 +374,87 @@ async def _stream_orchestration_with_heartbeats(
         yield chunk
 
 
+def _usage_tokens(usage: Optional[dict]) -> Optional[tuple[int, int]]:
+    """(prompt, completion) tokens from a provider usage block, or None."""
+    if not isinstance(usage, dict):
+        return None
+    tin = usage.get("prompt_tokens")
+    tout = usage.get("completion_tokens")
+    if tin is None and tout is None:
+        return None
+    return int(tin or 0), int(tout or 0)
+
+
+async def _record_bypass_call(
+    matrix: CapabilityMatrix,
+    model_id: str,
+    run_id: str,
+    messages: list[ChatMessage],
+    text: str,
+    usage: Optional[dict],
+    latency_ms: int,
+    lane_mode: Optional[str] = None,
+) -> None:
+    """Log a direct-to-model call as a ``model_call`` row under its run id,
+    priced like any other call, and save the run's digest. Never raises: the
+    caller already has its answer."""
+    try:
+        from src.db.state import (  # noqa: PLC0415
+            compute_and_save_digest,
+            create_run,
+            lane_mode_of,
+            update_run_status,
+        )
+        from src.lane.context import current_lane  # noqa: PLC0415
+        from src.logging.writer import flush_pending, write_event  # noqa: PLC0415
+        from src.registry.cost import price_with_baseline  # noqa: PLC0415
+
+        db_path = DB_PATH
+        await create_all(db_path)
+        run_uuid = uuid.UUID(run_id)
+        last_user = next((m.content for m in reversed(messages) if m.role == "user"), "")
+        await create_run(
+            last_user or "(bypass)", db_path=db_path, run_id=run_uuid, kind="bypass",
+            lane_mode=lane_mode if lane_mode is not None else lane_mode_of(current_lane()),
+        )
+        await update_run_status(run_uuid, "completed", db_path=db_path)
+
+        tokens = _usage_tokens(usage)
+        model_info = matrix.get(model_id)
+        dollars = baseline = None
+        if tokens is not None:
+            dollars, baseline = await price_with_baseline(
+                model_info, tokens[0], tokens[1], db_path, matrix=matrix
+            )
+        await write_event(
+            "model_call",
+            run_id=run_uuid,
+            model_id=model_id,
+            tokens_input=tokens[0] if tokens else None,
+            tokens_output=tokens[1] if tokens else None,
+            dollars=dollars,
+            baseline_dollars=baseline,
+            latency_ms=latency_ms,
+            decision={"mode": "bypass"},
+            payload_in=json.dumps([{"role": m.role, "content": m.content} for m in messages])[:2000],
+            payload_out=text[:2000],
+            db_path=db_path,
+        )
+        await flush_pending()
+        await compute_and_save_digest(run_uuid, db_path=db_path)
+    except Exception:
+        pass
+
+
 async def _bypass_to_model(
     matrix: CapabilityMatrix,
     model_id: str,
     messages: list[ChatMessage],
-) -> str:
-    """Send the request directly to a specific model, bypassing orchestration."""
+) -> tuple[str, Optional[dict]]:
+    """Send the request directly to a specific model, bypassing orchestration.
+
+    Returns (reply text, the provider's ``usage`` block or None if it sent none).
+    """
     model_info = matrix.get(model_id)
     if not model_info:
         raise HTTPException(
@@ -311,11 +475,16 @@ async def _bypass_to_model(
         "messages": [{"role": m.role, "content": m.content} for m in messages],
         "max_tokens": max_tokens,
     }
-    async with httpx.AsyncClient(timeout=120) as client:
-        resp = await client.post(url, json=payload, headers=headers)
+    from src.lane.outbound import send_outbound  # noqa: PLC0415
+
+    # A plain POST with the lane off; with it on, recorded in the ledger.
+    resp = await send_outbound(
+        url, payload, headers, timeout=120, model=model_info,
+        purpose="bypass", destination=model_id,
+    )
     resp.raise_for_status()
     body = resp.json()
-    return body["choices"][0]["message"]["content"]
+    return body["choices"][0]["message"]["content"], body.get("usage")
 
 
 async def _stream_bypass_relay(
@@ -324,17 +493,19 @@ async def _stream_bypass_relay(
     model_alias: str,
     messages: list[ChatMessage],
     run_id: str,
+    lane_mode: Optional[str] = None,
 ) -> AsyncIterator[str]:
     """Relay actual SSE chunks from an underlying model endpoint.
 
     If the model endpoint does not support streaming, falls back to
     word-by-word simulation so the caller always gets a valid SSE stream.
     """
-    model_info = matrix.get(model_id)
-    if not model_info:
-        # Fallback: non-streaming fetch then simulate
+    async def _simulated() -> AsyncIterator[str]:
+        # Both callers got here because the model is not in the matrix or has no
+        # usable call, so _bypass_to_model repeats that lookup and raises: the
+        # client gets the BRT-API-013 chunk and nothing is recorded.
         try:
-            text = await _bypass_to_model(matrix, model_id, messages)
+            text, _usage = await _bypass_to_model(matrix, model_id, messages)
         except Exception as exc:
             err = {"id": f"chatcmpl-{run_id}", "object": "chat.completion.chunk",
                    "created": int(time.time()), "model": model_alias,
@@ -343,20 +514,17 @@ async def _stream_bypass_relay(
             return
         async for chunk in _stream_response(text, model_alias, run_id):
             yield chunk
+
+    model_info = matrix.get(model_id)
+    if not model_info:
+        async for chunk in _simulated():
+            yield chunk
         return
 
     try:
         url, headers, body_model = resolve_model_call(model_info)
     except ValueError:
-        try:
-            text = await _bypass_to_model(matrix, model_id, messages)
-        except Exception as exc:
-            err = {"id": f"chatcmpl-{run_id}", "object": "chat.completion.chunk",
-                   "created": int(time.time()), "model": model_alias,
-                   "choices": [{"index": 0, "delta": {"content": f"[BRT-API-013] {exc}"}, "finish_reason": "stop"}]}
-            yield f"data: {json.dumps(err)}\n\ndata: [DONE]\n\n"
-            return
-        async for chunk in _stream_response(text, model_alias, run_id):
+        async for chunk in _simulated():
             yield chunk
         return
 
@@ -367,32 +535,82 @@ async def _stream_bypass_relay(
         "stream": True,
         "max_tokens": max_tokens,
     }
+    t_stream = time.monotonic()
+    relay_usage: Optional[dict] = None
+    recorded = False
+    relay_text: list[str] = []
+    from src.lane.context import current_lane  # noqa: PLC0415
+    from src.lane.outbound import record_end, record_start, relay_client_for  # noqa: PLC0415
+
+    # With the lane on, the relay's request is in the ledger before it is sent.
+    relay_lane = current_lane()
+    relay_local = relay_lane is not None and relay_lane.is_local(model_info, url)
+    ledger_id = await record_start(
+        url, payload,
+        left_machine=not relay_local,
+        purpose="bypass", destination=model_id,
+    )
+
+    async def _record_relay() -> None:
+        nonlocal recorded
+        if recorded:
+            return
+        recorded = True
+        await _record_bypass_call(
+            matrix, model_id, run_id, messages, "".join(relay_text), relay_usage,
+            int((time.monotonic() - t_stream) * 1000), lane_mode,
+        )
+
     try:
-        async with httpx.AsyncClient(timeout=120) as client:
-            async with client.stream(
-                "POST", url, json=payload, headers=headers
-            ) as resp:
-                if resp.status_code != 200:
-                    # Fallback to non-stream
-                    text = await _bypass_to_model(matrix, model_id, messages)
-                    async for chunk in _stream_response(text, model_alias, run_id):
-                        yield chunk
-                    return
+        # A local target ignores proxy variables (trust_env=False), the same
+        # client every lane call builds; with the lane off, as in Phase 1.
+        # The client is shared (work order 1.12): not closed here.
+        client = await relay_client_for(relay_local, 120)
+        async with client.stream(
+            "POST", url, json=payload, headers=headers
+        ) as resp:
+            use_fallback = resp.status_code != 200
+            if not use_fallback:
                 async for line in resp.aiter_lines():
                     if not line:
                         continue
                     if line.startswith("data:"):
                         payload_str = line[5:].strip()
                         if payload_str == "[DONE]":
+                            await _record_relay()
                             yield "data: [DONE]\n\n"
                             return
                         # Re-emit with our model alias substituted
                         try:
                             chunk = json.loads(payload_str)
+                            # Providers that report usage send it on the last
+                            # chunk; if none does, usage stays absent.
+                            if isinstance(chunk.get("usage"), dict):
+                                relay_usage = chunk["usage"]
+                            for choice in chunk.get("choices") or []:
+                                piece = (choice.get("delta") or {}).get("content")
+                                if piece:
+                                    relay_text.append(piece)
                             chunk["model"] = model_alias
                             yield f"data: {json.dumps(chunk)}\n\n"
                         except json.JSONDecodeError:
                             yield f"data: {payload_str}\n\n"
+        if use_fallback:
+            # The stream response is closed (its pooled connection freed)
+            # before the fallback asks the same pool for another one.
+            t_fb = time.monotonic()
+            # Set before the fetch: if it raises, nothing is recorded (the
+            # non-streaming path writes no row on a 502 either); a success
+            # records once, below.
+            recorded = True
+            text, fb_usage = await _bypass_to_model(matrix, model_id, messages)
+            await _record_bypass_call(
+                matrix, model_id, run_id, messages, text, fb_usage,
+                int((time.monotonic() - t_fb) * 1000), lane_mode,
+            )
+            async for chunk in _stream_response(text, model_alias, run_id):
+                yield chunk
+            return
     except Exception as exc:
         err_chunk = {
             "id": f"chatcmpl-{run_id}", "object": "chat.completion.chunk",
@@ -400,6 +618,35 @@ async def _stream_bypass_relay(
             "choices": [{"index": 0, "delta": {"content": f"[BRT-API-013] Streaming relay failed: {exc}"}, "finish_reason": "stop"}],
         }
         yield f"data: {json.dumps(err_chunk)}\n\ndata: [DONE]\n\n"
+    finally:
+        # Normal end, provider error mid-stream and client disconnect
+        # (GeneratorExit) all record the call once, with whatever usage is known.
+        await record_end(ledger_id, "sent" if relay_text else "failed")
+        await _record_relay()
+
+
+@contextlib.contextmanager
+def _lane_call(lane, run_id: str):
+    """Run a bypass call inside the lane (ledger) and its run's scope."""
+    if lane is None:
+        yield
+        return
+    from src.lane.context import lane_scope  # noqa: PLC0415
+    from src.lane.outbound import call_scope  # noqa: PLC0415
+
+    with lane_scope(lane), call_scope(uuid.UUID(run_id)):
+        yield
+
+
+async def _lane_wrapped(lane, run_id: str, gen: AsyncIterator[str]) -> AsyncIterator[str]:
+    """Drive a streaming generator inside the lane's scope."""
+    if lane is None:
+        async for chunk in gen:
+            yield chunk
+        return
+    with _lane_call(lane, run_id):
+        async for chunk in gen:
+            yield chunk
 
 
 @router.post("/v1/chat/completions")
@@ -420,6 +667,16 @@ async def chat_completions(request: Request):
     model_alias = chat_req.model
     base_model, quality_req, specialty_hint, strategy = _parse_model_alias(model_alias)
 
+    # On-premise lane: settings and documents are checked before anything runs.
+    from src.lane.context import prepare_lane  # noqa: PLC0415
+    from src.lane.errors import LaneError  # noqa: PLC0415
+    from src.pipeline import runner as _runner  # noqa: PLC0415
+
+    try:
+        lane = await prepare_lane(chat_req.documents, _runner.DB_PATH)
+    except LaneError as exc:
+        raise HTTPException(status_code=400, detail={"error": exc.code, "message": str(exc)})
+
     # Determine user instruction from the last user message
     user_messages = [m for m in chat_req.messages if m.role == "user"]
     if not user_messages:
@@ -438,14 +695,42 @@ async def chat_completions(request: Request):
     # Bypass mode: exact model_id, not a borg_route alias
     if base_model != "borg_route":
         from main import matrix as app_matrix
+        if lane is not None and (lane.all_local or chat_req.documents):
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "error": "BRT-LANE-005",
+                    "message": (
+                        "a direct-to-model request is refused in lane_mode all_local"
+                        if lane.all_local else
+                        "documents cannot be sent with a direct-to-model request; "
+                        "use a borg_route model"
+                    ),
+                },
+            )
         run_id = str(uuid.uuid4())
+        from src.db.state import lane_mode_of as _mode_of  # noqa: PLC0415
+
+        run_lane_mode = _mode_of(lane)   # taken while the lane is known, not from a scope
+        if lane is not None:
+            # raw_local: the bypass call goes through the ledger; its rows are
+            # filed with the bypass run in this endpoint's database.
+            from dataclasses import replace as _replace  # noqa: PLC0415
+
+            await create_all(DB_PATH)
+            lane = _replace(lane, db_path=DB_PATH)
         if chat_req.stream:
             return StreamingResponse(
-                _stream_bypass_relay(app_matrix, base_model, model_alias, chat_req.messages, run_id),
+                _lane_wrapped(lane, run_id, _stream_bypass_relay(
+                    app_matrix, base_model, model_alias, chat_req.messages, run_id, run_lane_mode)),
                 media_type="text/event-stream",
             )
+        t_bypass = time.monotonic()
         try:
-            response_text = await _bypass_to_model(app_matrix, base_model, chat_req.messages)
+            with _lane_call(lane, run_id):
+                response_text, bypass_usage = await _bypass_to_model(
+                    app_matrix, base_model, chat_req.messages
+                )
         except HTTPException:
             raise
         except Exception as exc:
@@ -453,7 +738,17 @@ async def chat_completions(request: Request):
                 status_code=502,
                 detail={"error": "BRT-API-012", "message": f"Bypass model failed: {exc}"},
             )
-        return JSONResponse(content=_build_openai_response(run_id, model_alias, response_text))
+        await _record_bypass_call(
+            app_matrix, base_model, run_id, chat_req.messages, response_text,
+            bypass_usage, int((time.monotonic() - t_bypass) * 1000), run_lane_mode,
+        )
+        tokens = _usage_tokens(bypass_usage)
+        if tokens is None:
+            return JSONResponse(content=_build_openai_response(
+                run_id, model_alias, response_text, include_usage=False))
+        return JSONResponse(content=_build_openai_response(
+            run_id, model_alias, response_text,
+            prompt_tokens=tokens[0], completion_tokens=tokens[1]))
 
     # Full orchestration via pipeline runner.
     # BRT-STR-01 — streaming path uses heartbeats to keep the browser SSE
@@ -465,6 +760,8 @@ async def chat_completions(request: Request):
                 user_instruction=user_instruction,
                 thread_window=thread_window,
                 model_alias=model_alias,
+                lane=lane,
+                request=request,
             ),
             media_type="text/event-stream",
         )
@@ -473,6 +770,8 @@ async def chat_completions(request: Request):
         result = await run_pipeline(
             user_instruction=user_instruction,
             thread_window=thread_window,
+            **_route_kwargs(model_alias),
+            **({"lane": lane} if lane is not None else {}),
         )
     except Exception as exc:
         raise HTTPException(
@@ -493,4 +792,13 @@ async def chat_completions(request: Request):
     else:
         response_text = result["response"]
 
-    return JSONResponse(content=_build_openai_response(run_id, model_alias, response_text))
+    usage = result.get("usage") or {}
+    return JSONResponse(
+        content=_build_openai_response(
+            run_id,
+            model_alias,
+            response_text,
+            prompt_tokens=int(usage.get("prompt_tokens", 0)),
+            completion_tokens=int(usage.get("completion_tokens", 0)),
+        )
+    )

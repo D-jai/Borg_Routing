@@ -15,18 +15,37 @@ Error codes:
 - BRT-API-025: run list failed
 - BRT-API-028: stream run not found
 - BRT-API-029: stream DB error
+- BRT-LANE-001: a document path was refused (400, no run is created)
+- BRT-LANE-005: documents sent with the lane off, or a bad lane setting (400)
+- BRT-LANE-008: resume refused for a run that read documents, or when that
+  could not be checked (409, fails closed)
 """
 import asyncio
 import json
+import re
 from typing import Optional
 
 import aiosqlite
-from fastapi import APIRouter, BackgroundTasks, HTTPException
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
+from src.api.auth import is_admin
+from src.lane.settings import load_lane_settings
 from src.db.schema import DB_PATH
-from src.db.state import get_envelopes, get_run, get_runs_list, resume_run, set_run_rating
+from src.db.state import (
+    compute_and_save_digest,
+    get_descendant_run_ids,
+    get_envelopes,
+    get_outbound_requests,
+    get_run,
+    get_run_counts,
+    get_run_documents,
+    get_run_digest,
+    get_runs_list,
+    resume_run,
+    set_run_rating,
+)
 from src.pipeline.runner import run_pipeline
 
 router = APIRouter()
@@ -35,6 +54,20 @@ router = APIRouter()
 class TaskRequest(BaseModel):
     instruction: str
     inputs_ref: Optional[str] = None
+    # On-premise lane: {"folder": "<relative path>"} or {"files": [...]}
+    # under BORG_DOCS_ROOT. Refused while lane_mode is off.
+    documents: Optional[dict] = None
+
+
+def lane_admin_allowed(request=None) -> bool:
+    """THE single hook for the admin lock (work order 4.4).
+
+    True when the request is an admin: a valid ``BORG_ADMIN_TOKEN`` bearer
+    token, or loopback when no token is configured (see ``src/api/auth.py``).
+    GET /runs/{id} uses it to show outbound request bodies only to an admin.
+    A call with no request fails closed.
+    """
+    return is_admin(request)
 
 
 class RatingRequest(BaseModel):
@@ -45,8 +78,18 @@ async def _run_in_background(
     instruction: str,
     run_id_str: str,
     db_path: str,
+    root_instruction: Optional[str] = None,
+    route_options: Optional[dict] = None,
+    lane=None,
 ) -> None:
     """Background task: drive the pipeline for a submitted run.
+
+    ``lane`` is the on-premise lane state prepared when the task was
+    submitted (documents already checked and loaded), or None.
+
+    ``root_instruction`` is the operator's verbatim instruction when it
+    differs from ``instruction`` (a resumed child run); Law 1 governs every
+    call with it.
 
     Persists ``failure_reason`` on failure so ``GET /runs/<id>`` shows why
     the run failed (BRT-PIP-010). Also emits a trace-visible error event
@@ -66,9 +109,20 @@ async def _run_in_background(
 
     run_id = _uuid.UUID(run_id_str)
     max_run_seconds = await resolve_max_run_seconds(db_path=db_path)
+    # Visible as running from the moment the work starts, so a second resume
+    # of the same run is refused instead of racing this one.
+    await update_run_status(run_id, "running", db_path=db_path)
+    final_answer = None
     try:
-        await _asyncio.wait_for(
-            orchestrate_run(run_id=run_id, user_instruction=instruction, db_path=db_path),
+        final_answer = await _asyncio.wait_for(
+            orchestrate_run(
+                run_id=run_id,
+                user_instruction=instruction,
+                db_path=db_path,
+                root_instruction=root_instruction,
+                **({"route_options": route_options} if route_options else {}),
+                **({"lane": lane} if lane is not None else {}),
+            ),
             timeout=max_run_seconds,
         )
         await update_run_status(run_id, "completed", db_path=db_path)
@@ -117,6 +171,18 @@ async def _run_in_background(
             )
         except Exception:
             pass
+    finally:
+        # Digest for every background run, same as the pipeline does: wait for
+        # the fire-and-forget log writes, then total the logged rows.
+        try:
+            from src.logging.writer import flush_pending  # noqa: PLC0415
+
+            await flush_pending()
+            await compute_and_save_digest(
+                run_id, db_path=db_path,
+                answer_text=final_answer if isinstance(final_answer, str) else None)
+        except Exception:
+            pass
 
 
 @router.post("/v1/task", status_code=202)
@@ -134,10 +200,27 @@ async def submit_task(
             detail={"error": "BRT-API-020", "message": "instruction is required"},
         )
 
-    # Create run record synchronously so the caller gets a valid run_id
-    from src.db.state import create_run
+    # On-premise lane: check and load the documents before a run exists, so
+    # a refused path creates nothing and sends nothing.
+    from src.lane.context import prepare_lane
+    from src.lane.errors import LaneError
     try:
-        run_id = await create_run(task_req.instruction, db_path=DB_PATH)
+        lane = await prepare_lane(task_req.documents, DB_PATH)
+    except LaneError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail={"error": exc.code, "message": str(exc)},
+        )
+
+    # Create run record synchronously so the caller gets a valid run_id
+    from src.db.state import create_run, lane_mode_of
+    try:
+        run_id = await create_run(
+            task_req.instruction,
+            db_path=DB_PATH,
+            lane_mode=lane_mode_of(lane),
+            **({"documents": lane.manifest()} if lane is not None and lane.has_documents else {}),
+        )
     except Exception as exc:
         raise HTTPException(
             status_code=500,
@@ -150,6 +233,7 @@ async def submit_task(
         instruction=task_req.instruction,
         run_id_str=str(run_id),
         db_path=DB_PATH,
+        **({"lane": lane} if lane is not None else {}),
     )
 
     return JSONResponse(
@@ -158,15 +242,283 @@ async def submit_task(
     )
 
 
+_PACK_OUTCOME_KEYS = (
+    "mode", "step", "call", "items", "accepted", "declined", "missing", "duplicate",
+    "unknown_id", "invalid", "alone", "cut", "timed_out", "raised", "error_code",
+    "extra_missing",
+)
+
+
+def _extra_fields_note(decision: dict) -> dict:
+    """Ruling 35, reading 2: what a redacted viewer keeps of an
+    ``extra_fields_missing`` plan note: the step id and each field name with
+    its count (names cut at 40, at most 10 fields; a count that is not an
+    integer is dropped)."""
+    fields = decision.get("fields")
+    counts: dict = {}
+    for name, count in list(fields.items() if isinstance(fields, dict) else [])[:10]:
+        if isinstance(count, int) and not isinstance(count, bool):
+            counts[str(name)[:40]] = count
+    return {"mode": "extra_fields_missing", "step": str(decision.get("step", ""))[:40],
+            "fields": counts}
+
+
+def _redact_events(events: list[dict]) -> list[dict]:
+    """Drop the free text of log events for a non-admin while the lane is on.
+
+    The decision text of an error or other event can quote document content, so
+    it is removed. Type, model, tokens, dollars, latency and timestamps stay,
+    and so does a route decision (its routing data is also shown as ``routing``).
+    Each event goes through ``redact_event``, the one rule the run view and the
+    live chat stream share (planner ruling 37).
+    """
+    return [redact_event(ev) for ev in events]
+
+
+async def viewer_redacts(request=None) -> bool:
+    """THE condition for redaction (planner ruling 37): not an admin, and the lane
+    is on (or its setting cannot be read). ``GET /runs/{id}`` and the live chat
+    stream's stage events both ask here."""
+    return not lane_admin_allowed(request) and await _lane_is_on()
+
+
+def redact_event(ev: dict) -> dict:
+    """One log event as a non-admin sees it while the lane is on (see
+    ``_redact_events``); the input is not changed."""
+    if ev.get("event_type") in ("orchestrator_decision", "model_call"):
+        try:
+            decision = json.loads(ev.get("decision_json") or "null")
+        except (TypeError, ValueError):
+            decision = None
+        if not isinstance(decision, dict):
+            decision = {}
+        # A route decision is kept whole.
+        if ev.get("event_type") == "orchestrator_decision" and decision.get("mode") == "route":
+            return ev
+        # A packed post's outcome (planner ruling 23): its ids, counts,
+        # flags and error code only; any other field is dropped.
+        if ev.get("event_type") == "orchestrator_decision" and decision.get("mode") == "pack_outcome":
+            counts = {k: decision[k] for k in _PACK_OUTCOME_KEYS if k in decision}
+            return dict(ev, decision_json=json.dumps(counts))
+        if (ev.get("event_type") == "orchestrator_decision"
+                and decision.get("mode") == "extra_fields_missing"):
+            return dict(ev, decision_json=json.dumps(_extra_fields_note(decision)))
+        # Ruling 32c: the plan note for a skill field that was asked for and
+        # not produced (BRT-ORC-035), and ruling 32d: a key no node or skill
+        # takes, dropped (BRT-ORC-036). Built from the plan and the skill list
+        # only, so it stays: these five keys, each string cut at 40, at most
+        # 10 fields.
+        if (ev.get("event_type") == "orchestrator_decision"
+                and decision.get("code") in ("BRT-ORC-035", "BRT-ORC-036")
+                and decision.get("action") == "ran_without_fields"):
+            fields = decision.get("fields")
+            note = {
+                "code": decision["code"], "action": "ran_without_fields",
+                "node_id": str(decision.get("node_id", ""))[:40],
+                "skill_id": str(decision.get("skill_id", ""))[:40],
+                "fields": [str(f)[:40] for f in (fields if isinstance(fields, list) else [])[:10]],
+            }
+            return dict(ev, decision_json=json.dumps(note))
+        # A packed item's share (ids and numbers only) stays, so the page
+        # counts each packed post once; anything else in it is dropped.
+        if ev.get("event_type") == "model_call" and isinstance(decision.get("pack"), dict):
+            return dict(ev, decision_json=json.dumps({"pack": decision["pack"]}))
+    if ev.get("event_type") == "error":
+        probe = _speed_probe_warning(ev.get("decision_json"))
+        if probe is not None:
+            return dict(ev, decision_json=json.dumps(probe))
+        stopped = _planning_stopped(ev.get("decision_json")) or _plain_rows(ev.get("decision_json"))
+        if stopped is not None:
+            # Reading (2) under ruling 35: code, severity and action only,
+            # so the receipt can say planning stopped early.
+            return dict(ev, decision_json=json.dumps(stopped))
+        no_step = _no_step_counts(ev.get("decision_json"))
+        if no_step is not None:
+            return dict(ev, decision_json=json.dumps(no_step))
+        step_failure = _step_failure_ids(ev.get("decision_json"))
+        if step_failure is not None:
+            return dict(ev, decision_json=json.dumps(step_failure))
+    return dict(ev, decision_json=None)
+
+
+# A step failure code (the registry's shape) and document part ids as the lane
+# makes them (``doc_001``, ``doc_001#2``; src/lane/documents.py, joined with
+# commas by ``doc_label``). Anything else never leaves a redacted event.
+_CODE_RE = re.compile(r"^BRT-[A-Z]{2,5}-\d{3}$")
+_DOC_ID = r"doc_\d{3,}(#\d+)?"
+_DOC_IDS_RE = re.compile(rf"^{_DOC_ID}(,{_DOC_ID})*$")
+_NODE_ID_RE = re.compile(r"^[A-Za-z0-9_.:-]{1,64}$")
+_MODEL_ID_RE = re.compile(r"^[A-Za-z0-9_.:/-]{1,128}$")
+
+
+def _planning_stopped(decision_json: object) -> Optional[dict]:
+    """The "planning stopped early" warning (reading (2) under ruling 35;
+    BRT-ORC-002, or BRT-ORC-001 by the lead's ruling) as a redacted viewer
+    keeps it: code, severity and action; else None. Its message and error
+    text never leave."""
+    try:
+        decision = json.loads(decision_json or "null")
+    except (TypeError, ValueError):
+        return None
+    if (isinstance(decision, dict) and decision.get("code") in ("BRT-ORC-001", "BRT-ORC-002")
+            and decision.get("severity") == "warning" and decision.get("action") == "planning_stopped"):
+        return {"code": decision["code"], "severity": "warning", "action": "planning_stopped"}
+    return None
+
+
+def _plain_rows(decision_json: object) -> Optional[dict]:
+    """Planner ruling 39c: the BRT-ORC-037 warning of an answer kept with a
+    step's plain rows, as a redacted viewer keeps it: code, severity, action
+    and the fixed receipt line; else None."""
+    try:
+        decision = json.loads(decision_json or "null")
+    except (TypeError, ValueError):
+        return None
+    if (isinstance(decision, dict) and decision.get("code") == "BRT-ORC-037"
+            and decision.get("severity") == "warning" and decision.get("action") == "rows_placed_plain"):
+        from src.orchestrator.engine import PLAIN_ROWS_RECEIPT  # noqa: PLC0415
+
+        return {"code": "BRT-ORC-037", "severity": "warning", "action": "rows_placed_plain",
+                "receipt": PLAIN_ROWS_RECEIPT}
+    return None
+
+
+def _speed_probe_warning(decision_json: object) -> Optional[dict]:
+    """Ruling 28: what a redacted viewer keeps of a BRT-REG-016 run-start
+    speed-probe warning, else None: ``code``, ``severity`` "warning" and
+    ``model_id`` only, and ``model_id`` only when it has the shape of a model
+    id. The message (it quotes the probe's error text) never leaves."""
+    try:
+        decision = json.loads(decision_json or "null")
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(decision, dict) or decision.get("code") != "BRT-REG-016":
+        return None
+    out: dict = {"code": "BRT-REG-016", "severity": "warning"}
+    model_id = decision.get("model_id")
+    if isinstance(model_id, str) and _MODEL_ID_RE.match(model_id):
+        out["model_id"] = model_id
+    return out
+
+
+def _step_failure_ids(decision_json: object) -> Optional[dict]:
+    """Round 2 of 82d3da4: what a redacted viewer keeps of an error event
+    about one step (it carries ``node_id``), else None.
+
+    Only ``code`` and ``node_id`` (and ``severity`` when it is a warning), so
+    the receipt can count steps that failed before any call; plan step ids
+    are already shown in each envelope's ``outbound_payload``.
+    """
+    try:
+        decision = json.loads(decision_json or "null")
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(decision, dict):
+        return None
+    code, node_id = decision.get("code"), decision.get("node_id")
+    if not (isinstance(code, str) and _CODE_RE.match(code)
+            and isinstance(node_id, str) and _NODE_ID_RE.match(node_id)):
+        return None
+    out = {"code": code, "node_id": node_id}
+    if decision.get("severity") == "warning":
+        out["severity"] = "warning"
+    return out
+
+
+def _no_step_counts(decision_json: object) -> Optional[dict]:
+    """Ruling 26a: what a redacted viewer keeps of a BRT-ORC-033 event, else None.
+
+    Only ``code``, ``failed_steps`` (a whole number) and ``step_codes``; each
+    step code is kept only when it is a bare code, and a document step only
+    as its code and document ids. Anything else is dropped, so no message or
+    document text can leave.
+    """
+    try:
+        decision = json.loads(decision_json or "null")
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(decision, dict) or decision.get("code") != "BRT-ORC-033":
+        return None
+    out: dict = {"code": "BRT-ORC-033"}
+    failed = decision.get("failed_steps")
+    if isinstance(failed, int) and not isinstance(failed, bool) and failed >= 0:
+        out["failed_steps"] = failed
+    codes: list = []
+    for entry in decision.get("step_codes") or []:
+        if isinstance(entry, str) and _CODE_RE.match(entry):
+            codes.append(entry)
+        elif isinstance(entry, dict) and isinstance(entry.get("code"), str) \
+                and _CODE_RE.match(entry["code"]):
+            item = {"code": entry["code"]}
+            doc = entry.get("doc")
+            if isinstance(doc, str) and _DOC_IDS_RE.match(doc):
+                item["doc"] = doc
+            codes.append(item)
+    out["step_codes"] = codes
+    return out
+
+
+async def _lane_is_on() -> bool:
+    """True when the lane is on, or its setting cannot be read (fail closed)."""
+    try:
+        return (await load_lane_settings(DB_PATH)).on
+    except Exception:
+        return True
+
+
+def _attach_routing(envelopes: list[dict], events: list[dict]) -> None:
+    """Set ``routing`` on each envelope from its route event (else null).
+
+    An orchestrate step also gets ``child_run_id`` in its routing, read from
+    the envelope's recorded output once the step has finished.
+    """
+    routes: dict[str, dict] = {}
+    for ev in events:
+        if ev.get("event_type") != "orchestrator_decision" or not ev.get("envelope_id"):
+            continue
+        try:
+            decision = json.loads(ev.get("decision_json") or "null")
+        except (TypeError, ValueError):
+            continue
+        if isinstance(decision, dict) and decision.get("mode") == "route":
+            routes[ev["envelope_id"]] = decision
+    for env in envelopes:
+        routing = routes.get(env.get("envelope_id"))
+        if routing is not None and routing.get("served_by") == "child_run":
+            try:
+                inbound = json.loads(env.get("inbound_payload") or "null") or {}
+                child_id = (inbound.get("output") or {}).get("child_run_id")
+            except (TypeError, ValueError, AttributeError):
+                child_id = None
+            routing = dict(routing, child_run_id=child_id)
+        env["routing"] = routing
+
+
 @router.get("/runs/{run_id}")
-async def get_run_state(run_id: str) -> JSONResponse:
+async def get_run_state(run_id: str, request: Request = None) -> JSONResponse:
     """Return the full run state including envelopes and log events.
 
     Response shape:
     {
         "run": { ...run record... },
-        "envelopes": [ ...envelope records... ],
+        "envelopes": [ ...envelope records, each with "routing" (why its model
+                        was chosen, or null)... ],
+        "child_envelopes": [ ...envelopes of descendant (child) runs, same
+                        shape, each carrying its own run_id... ],
         "events": [ ...log events... ],
+        "digest": {cost_dollars, tokens_input, tokens_output, token_count, summary,
+                   direct_floor_dollars (the receipt's "one pass, at least" figure),
+                   direct_floor_model, direct_floor_ratio ([low, high]: round-1 real direct
+                   cost as a multiple of the floor), baseline_dollars (old rows only; new
+                   runs store null)} or null if no digest was saved yet,
+        "outbound": [ ...on-premise lane: every request this run and its child
+                     runs sent off this machine, oldest first, each with its
+                     run_id, url, destination, attempt, status and the exact
+                     body sent; empty when the lane was off... ],
+        "calls_left_machine": {count, source}: computed here; the ledger's
+                     count (source "ledger") or the locality of each logged
+                     call, child runs included (source "locality"); count
+                     null and source null when it cannot be known (never 0),
     }
     """
     import uuid as _uuid
@@ -210,10 +562,75 @@ async def get_run_state(run_id: str) -> JSONResponse:
     except Exception:
         pass
 
+    # Work order 1.5 - each envelope carries why its model was chosen.
+    # Only a routed step has a route event; any other envelope gets null.
+    _attach_routing(envelopes, events)
+    if await viewer_redacts(request):
+        events = _redact_events(events)
+
+    # Child runs (orchestrate nodes) choose their own models; show their steps
+    # too, each envelope tagged with its own run_id.
+    child_envelopes: list[dict] = []
+    tree_events: list[dict] = list(events)
+    try:
+        child_ids = await get_descendant_run_ids(run_uuid, db_path=DB_PATH)
+        for child_id in child_ids:
+            child_envs = await get_envelopes(_uuid.UUID(child_id), db_path=DB_PATH)
+            child_events: list[dict] = []
+            async with aiosqlite.connect(DB_PATH) as db:
+                db.row_factory = aiosqlite.Row
+                async with db.execute(
+                    "SELECT * FROM logs WHERE run_id=? ORDER BY created_at",
+                    (child_id,),
+                ) as cur:
+                    child_events = [dict(r) for r in await cur.fetchall()]
+            _attach_routing(child_envs, child_events)
+            child_envelopes.extend(child_envs)
+            tree_events.extend(child_events)
+    except Exception:
+        pass
+
+    try:
+        digest = await get_run_digest(run_uuid, db_path=DB_PATH)
+        if digest is not None:
+            from src.registry.cost import DIRECT_FLOOR_RATIO_RANGE  # noqa: PLC0415
+
+            digest["direct_floor_ratio"] = list(DIRECT_FLOOR_RATIO_RANGE)
+    except Exception:
+        digest = None
+
+    # On-premise lane (P3): what left this machine, for the run tree.
+    try:
+        outbound = await get_outbound_requests(run_uuid, db_path=DB_PATH)
+    except Exception:
+        outbound = []
+    if not lane_admin_allowed(request):
+        outbound = [dict(r, body=None) for r in outbound]
+
+    # Computed here, never by the page: the ledger count when there is one,
+    # else the locality of each logged call (child runs included); unknown is null.
+    from src.api.locality_view import calls_left_machine, locality_rules  # noqa: PLC0415
+    from src.api.models import get_matrix  # noqa: PLC0415
+    try:
+        left = calls_left_machine(
+            lane_mode=run.get("lane_mode"),
+            outbound=outbound,
+            events=tree_events,
+            envelopes=list(envelopes) + child_envelopes,
+            matrix=get_matrix(request) if request is not None else None,
+            rules=await locality_rules(DB_PATH),
+        )
+    except Exception:
+        left = {"count": None, "source": None}
+
     return JSONResponse(content={
         "run": run,
         "envelopes": envelopes,
+        "child_envelopes": child_envelopes,
         "events": events,
+        "digest": digest,
+        "outbound": outbound,
+        "calls_left_machine": left,
     })
 
 
@@ -290,13 +707,64 @@ async def stream_run_state(run_id: str) -> StreamingResponse:
     )
 
 
+_MAX_PARENT_HOPS = 32
+
+
+async def _run_instructions(run_uuid, db_path: str) -> tuple[str, str]:
+    """Return (this run's instruction, its root run's instruction).
+
+    Walks ``parent_run_id`` up to the top-level run, whose instruction is
+    the operator's. The walk stops at a missing parent or after
+    ``_MAX_PARENT_HOPS`` rows, keeping the highest instruction found.
+    """
+    run = await get_run(run_uuid, db_path=db_path)
+    own = run.get("user_instruction") or ""
+    root = own
+    parent = run.get("parent_run_id")
+    hops = 0
+    while parent and hops < _MAX_PARENT_HOPS:
+        try:
+            row = await get_run(parent, db_path=db_path)
+        except ValueError:
+            break
+        root = row.get("user_instruction") or root
+        parent = row.get("parent_run_id")
+        hops += 1
+    return own, root
+
+
+async def _stored_route_options(run_uuid, db_path: str) -> Optional[dict]:
+    """The chat alias the run (or, for a child run, its nearest ancestor that
+    has one) started with, or None."""
+    current = run_uuid
+    for _ in range(_MAX_PARENT_HOPS + 1):
+        try:
+            row = await get_run(current, db_path=db_path)
+        except ValueError:
+            return None
+        raw = row.get("route_options")
+        if raw:
+            try:
+                value = json.loads(raw)
+            except (TypeError, ValueError):
+                return None
+            return value if isinstance(value, dict) else None
+        current = row.get("parent_run_id")
+        if not current:
+            return None
+    return None
+
+
 @router.post("/runs/{run_id}/resume", status_code=202)
 async def resume_run_endpoint(
     run_id: str,
     background_tasks: BackgroundTasks,
 ) -> JSONResponse:
-    """Re-dispatch all failed or in-flight envelopes for a run.
+    """Run a failed run again: it is planned from the start, from the run's own
+    instruction (it does not continue where it stopped).
 
+    Refused: a running run (409), a completed run (400), a run that read
+    documents (409). A pending run with no saved steps has no pending work.
     Returns 202 immediately. Polling GET /runs/{id} shows updated status.
     """
     import uuid as _uuid
@@ -307,6 +775,76 @@ async def resume_run_endpoint(
             status_code=400,
             detail={"error": "BRT-API-021", "message": f"Invalid run_id format: {run_id}"},
         )
+
+    # A run that is still running is never resumed: a second copy would race
+    # the first. (A missing run falls through to the checks below.)
+    try:
+        current = await get_run(run_uuid, db_path=DB_PATH)
+    except ValueError:
+        current = None
+    if current is not None and current["status"] == "running":
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": "BRT-API-024",
+                "message": "this run is still running, so it cannot be run again; "
+                           "wait for it to finish or fail",
+            },
+        )
+    # A pending run with work in flight was submitted a moment ago and has
+    # not been marked running yet: it is just as busy.
+    if current is not None and current["status"] == "pending":
+        in_flight = [
+            e for e in await get_envelopes(run_uuid, db_path=DB_PATH)
+            if e.get("status") == "in_flight"
+        ]
+        if in_flight:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "error": "BRT-API-024",
+                    "message": "this run has work in flight, so it cannot be run "
+                               "again; wait for it to finish or fail",
+                },
+            )
+
+    # On-premise lane: a run that read documents is never resumed (design
+    # note 5.7); a resume would start a fresh run without its documents.
+    # Fails closed: if the lookup itself fails, the resume is refused.
+    try:
+        read_documents = await get_run_documents(run_uuid, db_path=DB_PATH)
+    except Exception:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": "BRT-LANE-008",
+                "message": "could not check whether this run read documents, so it "
+                           "is not resumed; try again, or start a new run",
+            },
+        )
+    if read_documents:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": "BRT-LANE-008",
+                "message": "this run read documents, so it cannot be resumed; "
+                           "start a new run with the same documents",
+            },
+        )
+
+    # The re-run takes the lane exactly as POST /v1/task does (no documents:
+    # a run that read some was refused above), so all_local stays local.
+    from src.lane.context import prepare_lane
+    from src.lane.errors import LaneError
+    try:
+        lane = await prepare_lane(None, DB_PATH)
+    except LaneError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail={"error": exc.code, "message": str(exc)},
+        )
+    # The run keeps the lane mode it first ran under (runs.lane_mode is never
+    # rewritten here), so its page keeps saying what that run really did.
 
     try:
         tasks_to_retry = await resume_run(run_uuid, db_path=DB_PATH)
@@ -321,17 +859,45 @@ async def resume_run_endpoint(
             detail={"error": "BRT-API-024", "message": f"Resume failed: {exc}"},
         )
 
-    if not tasks_to_retry:
+    # A failed run with no saved failed or unfinished step failed before it
+    # had steps (at planning, e.g. BRT-ORC-007): it is planned again from its
+    # own instruction. Anything else with nothing to do has no pending work.
+    replan = (
+        not tasks_to_retry
+        and current is not None
+        and current["status"] == "failed"
+    )
+    if not tasks_to_retry and not replan:
         return JSONResponse(
             status_code=202,
             content={"run_id": run_id, "status": "no_pending_work"},
         )
 
+    # Law 1 — the re-run is governed by the run row's own operator
+    # instruction, never by a step's text (envelopes saved before
+    # governance_instruction existed carry only the step text). A child run
+    # row also gets its root run's instruction as the governing one.
+    try:
+        run_instruction, root_instruction = await _run_instructions(
+            run_uuid, db_path=DB_PATH
+        )
+        route_options = await _stored_route_options(run_uuid, db_path=DB_PATH)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail={"error": "BRT-API-024", "message": f"Resume failed: {exc}"},
+        )
+
     background_tasks.add_task(
         _run_in_background,
-        instruction=tasks_to_retry[0].instruction if tasks_to_retry else "",
+        instruction=run_instruction,
         run_id_str=run_id,
         db_path=DB_PATH,
+        root_instruction=(
+            root_instruction if root_instruction != run_instruction else None
+        ),
+        route_options=route_options,
+        **({"lane": lane} if lane is not None else {}),
     )
 
     return JSONResponse(
@@ -376,11 +942,17 @@ async def rate_run(run_id: str, req: RatingRequest) -> JSONResponse:
 
 
 @router.get("/runs")
-async def list_runs(limit: int = 50) -> JSONResponse:
-    """Return recent runs ordered by created_at descending."""
+async def list_runs(limit: int = 50, include_bypass: bool = False) -> JSONResponse:
+    """Return recent runs ordered by created_at descending.
+
+    Direct-to-model (bypass) runs are left out unless ``include_bypass=true``.
+    """
     try:
-        runs = await get_runs_list(limit=limit, db_path=DB_PATH)
-        return JSONResponse(content={"runs": runs})
+        runs = await get_runs_list(
+            limit=limit, db_path=DB_PATH, include_bypass=include_bypass
+        )
+        counts = await get_run_counts(db_path=DB_PATH, include_bypass=include_bypass)
+        return JSONResponse(content={"runs": runs, "counts": counts})
     except Exception as exc:
         raise HTTPException(
             status_code=500,

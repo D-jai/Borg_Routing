@@ -1,0 +1,100 @@
+{
+ "sanity": [
+  {
+   "passed": true,
+   "rounds": [
+    {
+     "a_shown_as": "1",
+     "verdict": "1",
+     "winner": "a",
+     "reasked": false
+    },
+    {
+     "a_shown_as": "2",
+     "verdict": "2",
+     "winner": "a",
+     "reasked": false
+    }
+   ],
+   "dollars": 0.0024453
+  }
+ ],
+ "pairs": [
+  {
+   "id": "C_1",
+   "winner": "direct",
+   "judges": [
+    {
+     "winner": "direct",
+     "rounds": [
+      {
+       "a_shown_as": "1",
+       "verdict": "1",
+       "winner": "a",
+       "reasked": false
+      },
+      {
+       "a_shown_as": "2",
+       "verdict": "2",
+       "winner": "a",
+       "reasked": false
+      }
+     ]
+    }
+   ],
+   "rounds": [
+    {
+     "a_shown_as": "1",
+     "verdict": "1",
+     "winner": "a",
+     "reasked": false
+    },
+    {
+     "a_shown_as": "2",
+     "verdict": "2",
+     "winner": "a",
+     "reasked": false
+    }
+   ],
+   "answer_markers": {
+    "direct": {
+     "chars": 1049,
+     "words": 160,
+     "headings": 0,
+     "list_items": 11,
+     "code_blocks": 0,
+     "part_id_refs": 0
+    },
+    "borg": {
+     "chars": 145,
+     "words": 26,
+     "headings": 0,
+     "list_items": 9,
+     "code_blocks": 0,
+     "part_id_refs": 0
+    }
+   }
+  }
+ ],
+ "comparisons": 1,
+ "no_verdict": 0,
+ "direct_wins": 1,
+ "borg_wins": 0,
+ "ties": 0,
+ "direct_preferred_in_majority": true,
+ "dollars": 0.005757,
+ "status": "completed",
+ "job": "C",
+ "judge_models": [
+  "openrouter/qwen/qwen4-max"
+ ],
+ "estimate_dollars": 0.12112499999999998,
+ "cost_dollars": 0.005757,
+ "this_call_dollars": 0.005757,
+ "reused_pairs": [],
+ "incomplete_repeats": [],
+ "calls_logs": [
+  "bench/results/trial32g_r1data/dbs/judge_C.calls.jsonl"
+ ],
+ "calls_log": "bench/results/trial32g_r1data/dbs/judge_C.calls.jsonl"
+}

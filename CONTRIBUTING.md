@@ -1,0 +1,42 @@
+# Contributing to BORG_ROUTE
+
+Read `DESIGN_PRINCIPLES.md` first: the Two Laws and the architectural invariants are not up for change in a normal pull request.
+
+## Commit law
+
+Every `feat:` or `fix:` commit ships together:
+
+- the code
+- an error code, when the change adds a new failure mode (`docs/errors/error-registry.md`)
+- the user-guide lines (`docs/user-guide.md`)
+- a test for the working case and a test for the failing case
+- `.env.example`, when the change adds an environment variable
+
+The presentation deck is not part of the commit law: it is updated at release.
+
+One logical change per commit. If the message needs "and", split it. Commit only the files the change touched.
+
+## Commit messages
+
+`type: description`, where type is one of `feat`, `fix`, `refactor`, `test`, `docs`, `chore`, `security`.
+
+## Tests
+
+Run only the tests for the code you changed, locally. The whole suite is the CI run, once per ready batch of changes, never a local run, and never twice on one tree. Docker tests and Playwright run only in CI, never on the development laptop. CI minutes are paid: do not re-run a failed CI run without a local fix first, and put `[skip ci]` on docs-only commits, but never on the head of a push.
+
+## Pinned versions
+
+`constraints.txt` pins the runtime dependencies for the Dockerfile and the install guide. To refresh it: make a new venv, `pip install .`, `pip freeze --exclude-editable` (leave out the project itself) into `constraints.txt`, run the focused tests for anything the new versions touch, then commit it.
+
+## Never delete
+
+Do not delete files or data. Move them to an archive folder outside the repository and record what moved, and only with the owner's agreement. Inside git, use `git rm` only after the file is archived.
+
+## Rules that do not bend
+
+- Four step types only: `orchestrate`, `answerer`, `apply_to_each`, `state_op`. New behaviour is an attribute, never a new type.
+- No Coach or critic role.
+- Stack: FastAPI, aiosqlite, httpx, Pydantic, PyYAML, spaCy. No new runtime framework. Test-only tools (Playwright) are allowed as an optional extra.
+- Protected files: `src/prompts/*.py` and `data/skills.yaml`. `data/capability_matrix.yaml` changes only through the app's own Discover, Get Model Info and checkbox calls. If a change to one looks necessary, stop and raise it first.
+- Keys live in `.env` only. Never print, log or commit a key.
+- Structured logging: log IDs and codes, never secrets or personal data.
