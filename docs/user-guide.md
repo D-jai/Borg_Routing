@@ -473,6 +473,35 @@ Besides the `runs` page (`limit`, newest first), the response carries `counts`: 
 
 ---
 
+## Routes at a glance
+
+Read from the app's own route list on 18-Nov-2026. "Admin" means the admin lock above; every route that changes state returns 403 in replay mode (see "Replay demo").
+
+| Route | What it does | Who |
+|---|---|---|
+| `GET /health` | Liveness check | open |
+| `GET /`, `/ui`, `/ui/`, `/ui/chat.html` | Redirect to the Ask page | open |
+| `POST /v1/chat/completions` | OpenAI-compatible chat; streams | open |
+| `POST /v1/task` | Submit a task and get the run id | open |
+| `POST /mcp` | MCP tools: submit a task, read a run | open |
+| `GET /runs`, `GET /runs/{id}` | List runs; one run with its digest | open |
+| `GET /runs/{id}/stream` | Live events of a run | open |
+| `POST /runs/{id}/rating` | Rate a run | open |
+| `POST /runs/{id}/resume` | Run a failed run again | open |
+| `GET /models`, `GET /models/matrix` | The model pool | open |
+| `POST /models/discover`, `POST /models/research`, `PATCH /models/{id}/checked` | Discover, Get Model Info, tick a model | admin |
+| `POST /keys` | Save the OpenRouter key | admin |
+| `GET /keys/status`, `GET /status/local` | Key and local-server status for the Admin pages | open |
+| `GET /config`, `GET /config/effective`, `GET /config/rules` | Settings and rules, read | open |
+| `POST /config`, `POST /config/rules`, `POST /config/rules/{id}/retire` | Settings and rules, write | admin |
+| `GET /skills`, `GET /skills/{id}` | Skills library | open |
+| `POST /skills/{id}/version` | Add a skill version | admin |
+| `GET /logs`, `GET /logs/entities`, `GET /logs/export` | Events, entities, JSONL export | admin |
+| `GET /logs/cost-summary`, `GET /logs/outlier-runs` | Cost summary; outlier runs | open |
+| `GET /replay/status` | Whether replay mode is on | open |
+
+---
+
 ## Running a Failed Run Again
 
 If a run fails partway through (network error, model timeout, etc.), you can run it again from the Admin Overview.
