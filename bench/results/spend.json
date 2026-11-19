@@ -415,7 +415,31 @@
    "started_at": "2026-11-18T21:28:30+00:00",
    "dollars": 0.005757,
    "ended_at": "2026-11-18T21:28:39+00:00"
+  },
+  {
+   "id": "7710bc969c33",
+   "key": "A_borg_cloud_1",
+   "kind": "run",
+   "date": "trial35h_r2data",
+   "db_path": "bench/results/trial35h_r2data/dbs/A_borg_cloud_1.db",
+   "calls_log": null,
+   "status": "ended",
+   "started_at": "2026-11-19T00:52:26+00:00",
+   "dollars": 0.11503425,
+   "ended_at": "2026-11-19T00:53:10+00:00"
+  },
+  {
+   "id": "63b010333202",
+   "key": "A_borg_cloud_1",
+   "kind": "run",
+   "date": "trial35h_r1data",
+   "db_path": "bench/results/trial35h_r1data/dbs/A_borg_cloud_1.db",
+   "calls_log": null,
+   "status": "ended",
+   "started_at": "2026-11-19T00:53:26+00:00",
+   "dollars": 0.113771,
+   "ended_at": "2026-11-19T00:53:48+00:00"
   }
  ],
- "total_dollars": 6.6072711
+ "total_dollars": 6.83607635
 }

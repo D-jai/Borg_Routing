@@ -35,6 +35,23 @@ The trial win rule is the round's rule on one run: cost at most 70% of the store
 - Job B loses by one reference test.
 - The evidence on job A is in `docs/design/bench_round2_measurements.md`, section "trial 32g".
 
+## Re-runs of job A after ruling 35 (planner ruling 35h), 18-Nov-2026, 19:52 to 19:54
+
+Head `1913068`: rulings 35a to 35e built and reviewed, plus reading (2), where a missing extra field is retried and then kept. Cloud arm only. Spent US$0.2288, so the trial total is US$1.3580 of the US$5 cap.
+
+| Data | Cost (US$) | Share of direct | Quality (grader) | Worker results (stored) | Planner | Packing | Compose posts | Checks and notes | Verdict |
+|---|---|---|---|---|---|---|---|---|---|
+| round 2 | 0.1150 | 50% (direct 0.2294) | 200 of 200 answered; accuracy over all items 0.725 (category 1.00, urgency 0.725); over items with a result the same | 200 results, 0 failed; category 200 of 200 right; urgency on all 200: 145 exact, 54 off by one, 1 off by two | first plan used `extra_fields {"urgency": "integer 1-5"}`; output_schema {file, category, urgency}; one re_plan (compose) | 10 packs of 20; one pack accepted 0 (its 20 items retried alone) | 1 | 035 `ran_without_fields` {file, category} (renames, no re_plan); accepted_unused {concurrency_limit, output_schema}; no compose check fired | no win: urgency 0.725 is far below the 0.98 line |
+| round 1 | 0.1138 | 55% (direct 0.2085) | **0 of 200 answered** | 200 results, 0 failed; category 196 of 200 right; urgency on all 200: 147 exact, 52 off by one, 1 off by two | same as round 2 (extra_fields used) | 10 packs; two accepted 0 (retried alone) | 1 | same notes; **no check fired** | no win: compose typed 10 rows and then `// ... (full list of all 200 entries follows the exact pattern above)` instead of placing the rows; nothing caught it |
+
+Urgency in both runs came from the per-item worker, `gemini-3.1-flash-lite-preview` on the light tier, through `extra_fields`. Category came from the same calls.
+
+**Plain reading.** The fixes did what they were for. The planner used `extra_fields` (ruling 35c's catalogue line). The renames no longer cost a re_plan (35a). Every item got an urgency, the items were packed, and the cost fell to about half of direct. Category reached 1.00 on the round-2 data.
+
+Job A still loses on two counts:
+- The light-tier worker's urgency is 27 points short of direct's 1.00, and nearly all of the misses are off by one.
+- On the round-1 data, compose wrote a shortened list with a comment in place of 190 rows. No compose check catches that: C2 was dropped by the planner, and C4 covers only items with no result. The stored rows were right; the answer did not carry them.
+
 ## Files
 
 - `trial32g_r2data/` and `trial32g_r1data/`: the `*_borg_cloud_1.json` result files, `judge_C.json`, and the copied direct files. Run databases are under `dbs/` (git-ignored).
