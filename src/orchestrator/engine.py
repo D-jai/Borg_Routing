@@ -95,6 +95,7 @@ import logging
 import math
 import os
 import re
+import secrets
 import time
 from datetime import datetime, timezone
 from typing import Optional
@@ -994,7 +995,9 @@ async def _invoke_orchestrator_model(
 
     attempts = [0]
     # Ruling 35e: every priced event of this call carries its id.
-    call_id = uuid4().hex
+    # Logs only, never sent: drawn from secrets, not uuid4, so a call id does not
+    # shift the ids a run gives its envelopes and subtasks (the request-body pin).
+    call_id = secrets.token_hex(16)
     _last_orchestrator_call.set(call_id)
     reply_notes: dict = {}
 
