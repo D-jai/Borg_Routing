@@ -381,8 +381,8 @@
   }
 
   /* Planner reading (2) under ruling 35: a re_plan failed for good and the run composed from the
-   * steps finished so far (a BRT-ORC-002 warning event, action "planning_stopped"). One plain line,
-   * or null. */
+   * steps finished so far (a BRT-ORC-002 or BRT-ORC-001 warning event, action "planning_stopped").
+   * One plain line, or null. */
   var STOPPED_EARLY_NOTE = 'Planning stopped early: the planner’s last reply could not be used, so ' +
     'this answer uses only the steps finished so far and may be incomplete.';
   function stoppedEarlyNote(data) {
@@ -390,7 +390,7 @@
     (data && data.events || []).forEach(function (ev) {
       if (!ev || ev.event_type !== 'error') return;
       var d = decisionOf(ev);
-      if (d && d.code === 'BRT-ORC-002' && d.action === 'planning_stopped') found = true;
+      if (d && (d.code === 'BRT-ORC-002' || d.code === 'BRT-ORC-001') && d.action === 'planning_stopped') found = true;
     });
     return found ? STOPPED_EARLY_NOTE : null;
   }

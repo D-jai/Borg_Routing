@@ -7,7 +7,8 @@ Error codes:
 - BRT-ORC-001: orchestrator model call failed
 - BRT-ORC-002: orchestrator returned unparseable JSON
                (a re_plan one after a step resolved: a warning, and the run
-               composes from the finished steps; reading (2) under ruling 35)
+               composes from the finished steps; reading (2) under ruling 35;
+               BRT-ORC-001 on a re_plan likewise)
 - BRT-ORC-003: plan is empty or malformed
 - BRT-ORC-004: node dispatch failed (individual; the run continues)
 - BRT-ORC-005: maximum loop count exceeded (safety ceiling)
@@ -445,6 +446,9 @@ def _strip_reasoning_wrappers(text: str) -> str:
 # JSON but not an object (a list, a bare string) is treated as unparseable:
 # the JSON-only retry, then BRT-ORC-002. Compose keeps its own handling.
 _OBJECT_MODES = ("plan", "re_plan")
+# Reading (2) under ruling 35 and the lead's ruling: the re_plan failures that
+# end planning early (with kept work) instead of failing the run.
+_STOP_EARLY_CODES = ("BRT-ORC-001", "BRT-ORC-002")
 _NOT_AN_OBJECT = "BRT-ORC-002: orchestrator reply is JSON but not an object ({kind})"
 
 
@@ -3055,10 +3059,14 @@ async def _orchestrate_run(
                 raise
             except ValueError as exc:
                 # Planner reading (2) under ruling 35: a re_plan that fails
-                # for good (BRT-ORC-002 after its JSON-only retry) goes to
-                # compose with the finished steps, as MAX_LOOPS ends a run,
-                # when at least one step resolved; otherwise the run fails.
-                if not (str(exc).startswith("BRT-ORC-002")
+                # for good (BRT-ORC-002 after its JSON-only retry; by the
+                # lead's ruling also BRT-ORC-001, a failed call, the retry's
+                # own included) goes to compose with the finished steps, as
+                # MAX_LOOPS ends a run, when at least one step resolved
+                # (26f: _step_finished); otherwise the run fails. BRT-ORC-006
+                # (the planner chose "fail") is a verdict and never lands here.
+                code = str(exc)[:11]
+                if not (code in _STOP_EARLY_CODES
                         and any(_step_finished(env) for env in results.values())):
                     raise
                 planning_stopped = True
@@ -3067,7 +3075,7 @@ async def _orchestrate_run(
                         "error",
                         run_id=run_id,
                         decision={
-                            "code": "BRT-ORC-002",
+                            "code": code,
                             "severity": "warning",
                             "action": "planning_stopped",
                             "msg": "the re_plan reply could not be used; planning stopped "

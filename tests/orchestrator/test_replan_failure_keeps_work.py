@@ -10,6 +10,8 @@ the existing salvage runs.
 import json
 import sqlite3
 
+import httpx
+
 import pytest
 
 from src.db.schema import create_all
@@ -46,8 +48,8 @@ async def _answer_kind(db_path, run_id):
     return (await get_run(UUID(str(run_id)), db_path=db_path)).get("answer_kind")
 
 
-def _stopped(db_path):
-    return [d for d in _errors(db_path) if d.get("code") == "BRT-ORC-002"
+def _stopped(db_path, code="BRT-ORC-002"):
+    return [d for d in _errors(db_path) if d.get("code") == code
             and d.get("severity") == "warning" and d.get("action") == "planning_stopped"]
 
 
@@ -124,3 +126,76 @@ async def test_compose_failing_after_the_early_stop_is_salvaged(env):
     codes = {d.get("code") for d in _errors(db_path)}
     assert {"BRT-ORC-002", "BRT-ORC-030"} <= codes
     assert len(_stopped(db_path)) == 1
+
+
+# --- aeab92a review: 26f, and BRT-ORC-001 (lead ruling) --------------------------------
+
+@pytest.mark.asyncio
+async def test_an_apply_to_each_whose_every_item_failed_is_not_kept_work(env):
+    """Ruling 26f: its envelope is resolved with empty results, which is not a
+    finished step, so a failed re_plan keeps the failure path (BRT-PIP-002)."""
+    db_path, mp = env
+    step = {"type": "apply_to_each", "id": "n1", "instruction": "Tag this note.",
+            "items": ["note a", "note b"], "output_schema": {"tag": "string"}, "tier": "light"}
+    stub = StubModels(plan_nodes=[step], replan_for=lambda r: NOT_JSON,
+                      answer_for=lambda r: {}).install(mp)
+    result = await run_pipeline("Tag these.", db_path=db_path)
+    await drain_log_writes()
+    with sqlite3.connect(db_path) as conn:
+        rows = conn.execute("SELECT inbound_payload FROM envelopes WHERE type='apply_to_each'").fetchall()
+    agg = json.loads(rows[0][0])
+    assert agg["status"] == "resolved" and agg["output"]["results"] == []   # the 26f shape
+    assert result["status"] == "failed"
+    error = result.get("error") or ""
+    assert "BRT-PIP-002" in error and "BRT-ORC-002" in error, error
+    assert not stub.of_kind("compose") and not _stopped(db_path)
+
+
+def _http_500(req):
+    request = httpx.Request("POST", req.url)
+    return httpx.HTTPStatusError("500", request=request, response=httpx.Response(500, request=request))
+
+
+@pytest.mark.asyncio
+async def test_a_re_plan_http_500_composes_from_the_finished_steps(env):
+    db_path, mp = env
+    stub = StubModels(plan_nodes=[ANSWERER], answer_for=lambda r: {"result": "hi"},
+                      error_for=lambda r: _http_500(r) if r.kind == "re_plan" else None).install(mp)
+    result = await run_pipeline("Say hi.", db_path=db_path)
+    await drain_log_writes()
+    assert result["status"] == "completed", result.get("error")
+    assert row_markers.STOPPED_EARLY in stub.of_kind("compose")[0].user
+    warn = _stopped(db_path, "BRT-ORC-001")
+    assert len(warn) == 1 and "HTTP 500" in warn[0]["err"]
+
+
+@pytest.mark.asyncio
+async def test_a_prose_re_plan_whose_json_retry_times_out_composes_from_the_finished_steps(env):
+    db_path, mp = env
+    retry = "CRITICAL: Your entire reply must be valid JSON only."
+
+    def error_for(req):
+        if req.kind == "re_plan" and retry in req.system:
+            return httpx.ReadTimeout("slow")
+        return None
+
+    stub = StubModels(plan_nodes=[ANSWERER], replan_for=lambda r: NOT_JSON, error_for=error_for,
+                      answer_for=lambda r: {"result": "hi"}).install(mp)
+    result = await run_pipeline("Say hi.", db_path=db_path)
+    await drain_log_writes()
+    assert result["status"] == "completed", result.get("error")
+    assert len(stub.of_kind("re_plan")) == 2 and stub.of_kind("compose")
+    warn = _stopped(db_path, "BRT-ORC-001")
+    assert len(warn) == 1 and "timed out" in warn[0]["err"]
+
+
+@pytest.mark.asyncio
+async def test_a_planner_that_chooses_fail_still_fails_the_run(env):
+    """BRT-ORC-006 is a deliberate verdict, not a failed call."""
+    db_path, mp = env
+    stub = StubModels(plan_nodes=[ANSWERER], answer_for=lambda r: {"result": "hi"},
+                      replan_for=lambda r: {"action": "fail", "rationale": "cannot do it"}).install(mp)
+    result = await run_pipeline("Say hi.", db_path=db_path)
+    await drain_log_writes()
+    assert result["status"] == "failed" and "BRT-ORC-006" in (result.get("error") or "")
+    assert not stub.of_kind("compose") and not _stopped(db_path)

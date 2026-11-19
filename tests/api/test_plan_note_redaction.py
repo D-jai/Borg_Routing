@@ -42,3 +42,11 @@ def test_the_planning_stopped_warning_keeps_code_severity_and_action_only():
     ev = {"event_type": "error", "decision_json": json.dumps(d)}
     kept = json.loads(_redact_events([ev])[0]["decision_json"])
     assert kept == {"code": "BRT-ORC-002", "severity": "warning", "action": "planning_stopped"}
+
+
+def test_a_planning_stopped_warning_from_a_failed_call_is_kept_the_same_way():
+    """The lead's ruling: a re_plan that ends in BRT-ORC-001 stops planning too."""
+    d = {"code": "BRT-ORC-001", "severity": "warning", "action": "planning_stopped",
+         "err": "BRT-ORC-001: HTTP 500 from orchestrator"}
+    kept = json.loads(_redact_events([{"event_type": "error", "decision_json": json.dumps(d)}])[0]["decision_json"])
+    assert kept == {"code": "BRT-ORC-001", "severity": "warning", "action": "planning_stopped"}

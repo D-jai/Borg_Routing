@@ -320,10 +320,11 @@ def _redact_events(events: list[dict]) -> list[dict]:
             if probe is not None:
                 kept.append(dict(ev, decision_json=json.dumps(probe)))
                 continue
-            if _planning_stopped(ev.get("decision_json")):
+            stopped = _planning_stopped(ev.get("decision_json"))
+            if stopped is not None:
                 # Reading (2) under ruling 35: code, severity and action only,
                 # so the receipt can say planning stopped early.
-                kept.append(dict(ev, decision_json=json.dumps(_PLANNING_STOPPED)))
+                kept.append(dict(ev, decision_json=json.dumps(stopped)))
                 continue
             no_step = _no_step_counts(ev.get("decision_json"))
             if no_step is not None:
@@ -347,17 +348,19 @@ _NODE_ID_RE = re.compile(r"^[A-Za-z0-9_.:-]{1,64}$")
 _MODEL_ID_RE = re.compile(r"^[A-Za-z0-9_.:/-]{1,128}$")
 
 
-_PLANNING_STOPPED = {"code": "BRT-ORC-002", "severity": "warning", "action": "planning_stopped"}
-
-
-def _planning_stopped(decision_json: object) -> bool:
-    """True for the BRT-ORC-002 "planning stopped early" warning (reading (2)
-    under ruling 35); its message and error text never leave."""
+def _planning_stopped(decision_json: object) -> Optional[dict]:
+    """The "planning stopped early" warning (reading (2) under ruling 35;
+    BRT-ORC-002, or BRT-ORC-001 by the lead's ruling) as a redacted viewer
+    keeps it: code, severity and action; else None. Its message and error
+    text never leave."""
     try:
         decision = json.loads(decision_json or "null")
     except (TypeError, ValueError):
-        return False
-    return isinstance(decision, dict) and all(decision.get(k) == v for k, v in _PLANNING_STOPPED.items())
+        return None
+    if (isinstance(decision, dict) and decision.get("code") in ("BRT-ORC-001", "BRT-ORC-002")
+            and decision.get("severity") == "warning" and decision.get("action") == "planning_stopped"):
+        return {"code": decision["code"], "severity": "warning", "action": "planning_stopped"}
+    return None
 
 
 def _speed_probe_warning(decision_json: object) -> Optional[dict]:

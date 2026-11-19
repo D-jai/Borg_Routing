@@ -581,3 +581,10 @@ def test_receipt_says_planning_stopped_early_when_the_re_plan_failed_for_good(tm
     assert note == ("Planning stopped early: the planner’s last reply could not be used, so "
                     "this answer uses only the steps finished so far and may be incomplete.")
     assert js(tmp_path, f"return W.stoppedEarlyNote({json.dumps({'events': [plain]})});") is None
+
+
+def test_receipt_says_planning_stopped_early_after_a_failed_re_plan_call(tmp_path):
+    warn = {"event_type": "error", "decision_json": json.dumps({
+        "code": "BRT-ORC-001", "severity": "warning", "action": "planning_stopped"})}
+    note = js(tmp_path, f"return W.stoppedEarlyNote({json.dumps({'events': [warn]})});")
+    assert note and note.startswith("Planning stopped early")
