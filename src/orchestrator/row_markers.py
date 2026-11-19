@@ -131,6 +131,10 @@ S_TOO_LONG = "A marker is longer than 600 characters; name fewer fields."
 S_UNKNOWN = ("The marker for {target} names fields that step does not have: {names}. "
              "Write each pair as <new name>=<field>, where the field is one of: {fields}. "
              "No step produced the others; do not give values for them.")
+# Planner ruling 39 (narrower rule): a reversed pair whose written name is a
+# value the field holds is a filter attempt, not a column name.
+S_FILTER = ("The marker for {target} writes {name}={value}, and {value} is a value of {name}: "
+            "a rows marker cannot filter. Place all rows, or name the few items in your own text.")
 S_DUPLICATE = "The marker for {target} uses the name {name} twice; each name may appear once."
 S_EMPTY = "The marker for {target} has a bar but no fields after it."
 S_BRACKETS = ("The marker for {target} puts its fields in brackets; write them plainly after "
@@ -542,6 +546,38 @@ def _read_reversed_pairs(entries: list, known: list) -> tuple:
     return out, flipped
 
 
+def _norm_value(value: object) -> str:
+    """A stored value as the filter rule compares it: ``str``, trimmed, case
+    ignored (a boolean reads "true" / "false"; the job-3 demo rows hold the
+    strings "yes" / "no", so no yes/no mapping is made)."""
+    return str(value).strip().lower()
+
+
+def _filter_pair(flipped: list, entries: list, ids: list, steps: dict) -> Optional[tuple]:
+    """Planner ruling 39 (narrower rule): the first reversed pair whose right
+    side as written equals, trimmed and case ignored, a value its field holds
+    in the target's rows (for ``item``, the item labels), as
+    ``(written name, written value)``; else None. Only the reversed reading is
+    checked. Accepted oddity: a field whose values happen to include its own
+    display name (a ``status`` field holding the value "Status") is refused
+    when written ``status=Status``; the write-up must then name the column
+    another way."""
+    if not flipped:
+        return None
+    by_written = dict(zip([f for _, f in flipped], [n for n, _ in flipped]))
+    for col, real in entries:
+        if col not in by_written:
+            continue
+        held = set()
+        for sid in ids:
+            for row in steps[sid].rows:
+                if isinstance(row, dict) and real in row and row[real] is not None:
+                    held.add(_norm_value(row[real]))
+        if _norm_value(col) in held:
+            return by_written[col], col
+    return None
+
+
 def parse_target(keyword: str, capture: str, steps: dict, outputs: Optional[dict] = None) -> tuple:
     """``(Target, None)`` or ``(None, (code, sentence))`` for one strict marker.
 
@@ -605,6 +641,10 @@ def parse_target(keyword: str, capture: str, steps: dict, outputs: Optional[dict
     known_set = set(known) | {"item", "error"}
     entries, flipped = _read_reversed_pairs(
         entries, known + [f for f in ("item", "error") if f not in known])
+    filtered = _filter_pair(flipped, entries, ids, steps)
+    if filtered:
+        return None, (CODE_SPEC, S_FILTER.format(
+            target=target, name=_cut(filtered[0]), value=_cut(filtered[1])))
     if len({n for n, _ in entries}) != len(entries):
         dup = next(n for i, (n, _) in enumerate(entries) if n in {m for m, _ in entries[:i]})
         return None, (CODE_SPEC, S_DUPLICATE.format(target=target, name=_cut(dup)))

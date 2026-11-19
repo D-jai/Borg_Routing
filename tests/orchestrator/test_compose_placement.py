@@ -671,3 +671,44 @@ def test_failing_case_plain_target_needs_a_target_and_a_spec_problem():
     assert not rm.plain_fixable({"@@ROWS:n1 | line=x@@": 1}, steps, {}, [])   # in a key
     assert not rm.plain_fixable("@@ROWS:n1 | a=comment@@ and @@ROWS:nope@@", steps, {}, [])
     assert not rm.plain_fixable("no marker at all", steps, {}, [])
+
+
+# --- planner ruling 39, narrower rule: a reversed pair naming a value is a filter attempt ------
+
+def _notes_yes_no():
+    return _one([_ok(0, "job/a.txt", topic="Dock repairs", needs_follow_up="yes"),
+                 _ok(1, "job/b.txt", topic="Team lunch", needs_follow_up="No ")], sid="extract_notes")
+
+
+def test_failing_case_a_reversed_pair_naming_a_held_value_is_refused_as_a_filter():
+    steps = _notes_yes_no()
+    for spec, name, value in (("needs_follow_up=yes", "needs_follow_up", "yes"),
+                              ("needs_follow_up= NO", "needs_follow_up", "NO"),
+                              ("item=job/b.txt", "item", "job/b.txt")):
+        target, problem = rm.parse_target("ROWS", f"extract_notes | topic, {spec}", steps)
+        assert target is None and problem == ("BRT-ORC-037",
+            f"The marker for extract_notes writes {name}={value}, and {value} is a value of "
+            f"{name}: a rows marker cannot filter. Place all rows, or name the few items in "
+            "your own text."), spec
+    steps = _one([_ok(0, "a", bucket="billing"), _ok(1, "b", bucket="tech")])
+    _, problem = rm.parse_target("ROWS", "s1 | item, bucket=billing", steps)
+    assert problem[0] == "BRT-ORC-037" and "cannot filter" in problem[1]
+
+
+def test_reversed_names_that_are_not_held_values_still_place():
+    steps = _notes_yes_no()
+    target, problem = rm.parse_target(
+        "ROWS", "extract_notes | item=Item, needs_follow_up=Needs Follow-up", steps)
+    assert problem is None and target.spec == [("Item", "item"), ("Needs Follow-up", "needs_follow_up")]
+    # The one accepted oddity: a field whose values include its own display name is refused.
+    steps = _one([_ok(0, "a", status="Status"), _ok(1, "b", status="open")])
+    _, problem = rm.parse_target("ROWS", "s1 | status=Status", steps)
+    assert problem[0] == "BRT-ORC-037" and "cannot filter" in problem[1]
+
+
+def test_a_filter_attempt_after_the_reask_is_a_bad_spec_for_39c():
+    steps = _notes_yes_no()
+    marker = "@@ROWS:extract_notes | topic, needs_follow_up=yes@@"
+    assert rm.plain_fixable("These need follow-up:\n" + marker, steps, {}, [])
+    target = rm.plain_target("ROWS", marker[7:-2], steps)
+    assert target.spec is None and target.plain
