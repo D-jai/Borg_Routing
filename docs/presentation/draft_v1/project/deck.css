@@ -158,6 +158,8 @@
 /* Tables */
 .tbl { width: 1664px; font-size: 32px; color: #0F3B3F; }
 .tbl th, .tbl td { padding: 18px 24px; }
+.tbl.tight { font-size: 28px; }
+.tbl.tight th, .tbl.tight td { padding: 10px 20px; }
 .tbl .hd { background: #0F5257; }
 .tbl th { color: #F7F5EF; text-align: left; }
 .tbl .alt { background: #ECE7DA; }
@@ -183,7 +185,7 @@
 .r-job { font-size: 24px; line-height: 1.35; color: #4A5A5B; }
 .r-row { display: flex; gap: 16px; }
 .r-name { flex: 1; font-size: 24px; line-height: 1.3; color: #1C2B2C; }
-.r-who { width: 160px; font-size: 24px; line-height: 1.3; color: #4A5A5B; }
+.r-who { width: 212px; font-size: 24px; line-height: 1.3; color: #4A5A5B; }
 .r-amt { width: 110px; font-size: 24px; line-height: 1.3; color: #1C2B2C; text-align: right; }
 .r-total { display: flex; justify-content: space-between; }
 .r-tl, .r-ta { font-size: 32px; font-weight: 700; color: #1C2B2C; }

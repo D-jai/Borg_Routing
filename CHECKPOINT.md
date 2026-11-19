@@ -21,7 +21,16 @@ Lead session `borg-route-f1` (Opus 5.5) since 02:20 on 16-Nov-2026. Every work o
 
 If this session stopped abruptly: `git log` and `git status` show what landed; any uncommitted changes belong to an in-progress builder: read the diff, finish or stash it, record which in the build log.
 
-## Where I left off (19-Nov-2026, afternoon): deck text in, going public
+## Where I left off (19-Nov-2026, about 2:30 pm): public, deck finished
+
+- **The repository is public** since about 1:45 pm on 19-Nov-2026 (Deej's rulings 17 and 18; the planner switched it). Master is `40f94c2` plus this push; PR #1's CI run 44588021668 was green.
+- **Deck (6.1) finished:** round-3 figures with claim markers, the offer slide links the public repository, a browser check of every slide, PDF at `docs/presentation/borg_route_deck.pdf`, private deck artifact republished (version 9).
+- **Post images** (outside the repository, C:\Stage\LinkedInArticles\images): A the receipt, B the office, C the bars, D the numbers; a five-page carousel PDF is ordered next (ruling 50).
+- **Not ordered:** the hosted demo, the video script, posting anything. The post is approved and not yet published.
+- **Still with Deej:** the protected-file questions the planner holds. The old locked worktree `.claude/worktrees/agent-a19a671ce8c1a100d` and the `borg_36a` worktree are untouched.
+
+## Earlier waypoint (19-Nov-2026, afternoon): deck text in, going public
+
 
 - **Deck text done (planner rulings 44 to 46):** every slide figure comes from round 3 and carries a claim marker. The receipt is run A_borg_cloud_3 (plan $0.044, label and score $0.021, write the answer $0.060, total $0.125; one call to the top model $0.208). The why slide shows that step's real route record: the planner named the model. The README now says the planning model named every round-3 step except the document job's two (`route_reasons.json`, bound by `tests/bench/test_route_reasons.py`). The private deck artifact was republished from this source.
 - **Going public (Deej's rulings 17 and 18):** the history scan found no real key and the history stays as it is; the workflow uses hosted runners, no secrets and read-only permissions. The PR from showcase into master merges on green CI, then the planner switches visibility.
