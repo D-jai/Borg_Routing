@@ -1,7 +1,7 @@
 Hello support team,
 
-My subscription renewed at the old price although the new plan was agreed.
-A reply within the week would be fine.
+Your API returns error 500 on the items endpoint (request 26072).
+This is blocking my team today, please prioritise it.
 
-Regards,
-Pavel
+Thanks,
+Mei

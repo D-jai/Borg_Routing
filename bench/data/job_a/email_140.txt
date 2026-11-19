@@ -1,8 +1,7 @@
-Good morning,
+Hello,
 
-Two-factor codes are rejected even though my phone clock is right.
-I have been a customer for about two years.
-Please get back to me within two or three days.
+Your API returns error 500 on the items endpoint (request 98706).
+URGENT: our whole business is stopped, I need help right now.
 
-Kind regards,
-Noor
+Thanks,
+Mei

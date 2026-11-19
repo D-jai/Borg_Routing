@@ -1,8 +1,8 @@
-Hello support team,
+Hi team,
 
-Two-factor codes are rejected even though my phone clock is right.
-This is the first time I have had to write to you.
-This is blocking my team today, please prioritise it.
+Uploads above 20 MB fail with a timeout message.
+I already searched your help pages first.
+No rush at all, whenever you get a chance.
 
-Kind regards,
-Priya
+Thank you,
+Lucas

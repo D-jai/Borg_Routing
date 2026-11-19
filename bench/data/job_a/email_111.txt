@@ -1,8 +1,7 @@
-Hello,
+Good morning,
 
-It would help if invoices could be downloaded in bulk.
-I already searched your help pages first.
-I would appreciate a reply in the next couple of days.
+Your API returns error 500 on the items endpoint (request 10458).
+URGENT: our whole business is stopped, I need help right now.
 
-Kind regards,
-Amara
+Regards,
+Omar

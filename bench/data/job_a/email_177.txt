@@ -1,8 +1,7 @@
 Hello,
 
-Your API returns error 500 on the items endpoint (request 57847).
-This is the first time I have had to write to you.
-A reply within the week would be fine.
+A colleague left and I must remove their access to our workspace.
+This is blocking my team today, please prioritise it.
 
-Kind regards,
-Rafael
+Thanks,
+Dmitri

@@ -1,8 +1,7 @@
-Dear support,
+Hello,
 
-The refund for order 94702 has not reached my card.
-I am writing from my phone, sorry for typos.
+Uploads above 20 MB fail with a timeout message.
 A reply within the week would be fine.
 
-Thank you,
-Leila
+Regards,
+Dmitri

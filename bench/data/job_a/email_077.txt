@@ -1,8 +1,8 @@
-Good morning,
+Hi team,
 
-Your API returns error 500 on the items endpoint (request 24749).
+Your API returns error 500 on the items endpoint (request 50132).
 This is the first time I have had to write to you.
-No rush at all, whenever you get a chance.
+Nothing time critical, reply when convenient.
 
-Thank you,
-Marcus
+Regards,
+Hana

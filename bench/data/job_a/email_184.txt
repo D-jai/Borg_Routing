@@ -1,8 +1,8 @@
-Good morning,
+Dear support,
 
-Your API returns error 500 on the items endpoint (request 44740).
-My colleague suggested I contact you directly.
-URGENT: we are losing money every hour until this is fixed.
+I was charged twice for invoice 77247 this month.
+I am writing from my phone, sorry for typos.
+No rush at all, whenever you get a chance.
 
-Regards,
-Hana
+Best,
+Rafael

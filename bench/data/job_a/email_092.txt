@@ -1,8 +1,7 @@
-Dear support,
+Hi team,
 
-Sync with my calendar stopped working and no events come through.
-My colleague suggested I contact you directly.
-Please reply sometime this week.
+Your API returns error 500 on the items endpoint (request 50911).
+A reply within the week would be fine.
 
-Thank you,
-Hana
+Thanks,
+Priya

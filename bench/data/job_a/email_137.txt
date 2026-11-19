@@ -1,8 +1,7 @@
 Hello,
 
-It would help if invoices could be downloaded in bulk.
-This is the first time I have had to write to you.
-Please reply sometime this week.
+Uploads above 20 MB fail with a timeout message.
+URGENT: our whole business is stopped, I need help right now.
 
-Thanks,
+Thank you,
 Elena

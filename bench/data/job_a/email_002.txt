@@ -1,8 +1,8 @@
-Good morning,
+Hi team,
 
-The export button does nothing since the last update.
+Uploads above 20 MB fail with a timeout message.
 I already searched your help pages first.
 URGENT: we are losing money every hour until this is fixed.
 
-Best,
-Marcus
+Thank you,
+Ingrid

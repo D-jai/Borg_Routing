@@ -1,8 +1,7 @@
-Hello,
+Good morning,
 
-The courier left the package at a neighbour's door without telling me.
-I have been a customer for about two years.
-Please reply sometime this week.
+Tracking has shown in transit for nine days on order 51799.
+This is blocking my team today, please prioritise it.
 
-Best,
-Omar
+Kind regards,
+Callum

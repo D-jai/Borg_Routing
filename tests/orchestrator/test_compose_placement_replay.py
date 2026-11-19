@@ -10,6 +10,7 @@ bench grader as it stands. C2 was dropped by the planner: D is caught by C4
 (BRT-ORC-041) alone. C5 (BRT-ORC-039, ruling 36a) is tested in
 test_compose_placement_elided.py.
 """
+import functools
 import json
 import re
 from pathlib import Path
@@ -28,7 +29,6 @@ from src.orchestrator import engine
 
 ROOT = Path(__file__).resolve().parents[2]
 FIX = ROOT / "tests" / "fixtures"
-ANSWERS = ROOT / "bench" / "data" / "answers"
 
 # The block's fixed lines, as the note writes them (golden text, 2.3).
 INTRO = (
@@ -98,8 +98,19 @@ def _fixture(job):
     return json.loads((FIX / f"round2_compose_{job}.json").read_text(encoding="utf-8"))
 
 
+ROUND_2_SEED = 4132800769  # the stored replies are round 2's; bench/data now holds round 3's (ruling 40)
+
+
+@functools.lru_cache(maxsize=None)
+def _round_2_data():
+    """Round 2's data rebuilt in memory from its own seed by the same generator, so the
+    round-2 replays keep their answer keys after bench/data was reseeded for round 3."""
+    from bench import make_data
+    return make_data.build_all(ROUND_2_SEED)
+
+
 def _key(job):
-    return json.loads((ANSWERS / f"job_{job}_answers.json").read_text(encoding="utf-8"))
+    return json.loads(_round_2_data()[f"answers/job_{job}_answers.json"])
 
 
 def _lane(fx, manifest=None):

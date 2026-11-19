@@ -1,8 +1,8 @@
-Dear support,
+Hello,
 
-I need to change the email address on my account (ref 76231).
-My colleague suggested I contact you directly.
+Your API returns error 500 on the items endpoint (request 54820).
+I already searched your help pages first.
 Please reply sometime this week.
 
-Kind regards,
-Omar
+Thanks,
+Elena

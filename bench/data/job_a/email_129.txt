@@ -1,7 +1,7 @@
-Dear support,
+Good morning,
 
-Your API returns error 500 on the items endpoint (request 24549).
+The refund for order 66840 has not reached my card.
 Nothing time critical, reply when convenient.
 
 Regards,
-Callum
+Ingrid

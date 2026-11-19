@@ -1,8 +1,8 @@
-Hello,
+Hi team,
 
-Suggestion: please add a dark mode.
-I already searched your help pages first.
-Please get back to me within two or three days.
+Your API returns error 500 on the items endpoint (request 33065).
+This is the first time I have had to write to you.
+URGENT: we are losing money every hour until this is fixed.
 
-Kind regards,
-Aiko
+Regards,
+Omar
