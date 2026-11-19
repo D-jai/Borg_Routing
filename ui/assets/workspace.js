@@ -31,9 +31,10 @@
    * text is returned whole, so the character limits set by shortText still hold. */
   function fitText(full, maxPx, measure) {
     full = String(full === null || full === undefined ? '' : full);
-    if (typeof measure !== 'function' || !(maxPx > 0)) return full;
+    if (typeof measure !== 'function') return full;
     var w = measure(full);
     if (!(w > 0) || w <= maxPx) return full;
+    if (!(maxPx > 0)) return '…';
     var lo = 0, hi = full.length - 1;
     while (lo < hi) {
       var mid = Math.ceil((lo + hi) / 2);

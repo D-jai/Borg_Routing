@@ -23,8 +23,13 @@ def test_text_that_does_not_fit_is_cut_to_the_room_with_an_ellipsis(tmp_path):
 
 
 def test_without_a_measure_or_room_the_text_is_left_whole(tmp_path):
-    out = js(tmp_path, "return [W.fitText('abc', 10, () => 0), W.fitText('abc', 0, (t) => 99), W.fitText(null, 10, null)];")
-    assert out == ["abc", "abc", ""]
+    out = js(tmp_path, "return [W.fitText('abc', 10, () => 0), W.fitText(null, 10, null), W.fitText('abc', 10, null)];")
+    assert out == ["abc", "", "abc"]
+
+
+def test_with_no_room_left_only_the_ellipsis_is_shown(tmp_path):
+    out = js(tmp_path, "return [W.fitText('abc', 0, (t) => 99), W.fitText('abc', -12, (t) => 99)];")
+    assert out == ["…", "…"]
 
 
 def test_the_run_page_fits_model_names_against_the_cost_after_the_drawing_is_placed():
