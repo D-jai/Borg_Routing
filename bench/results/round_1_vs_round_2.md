@@ -45,12 +45,14 @@ Cost is the median of three runs for A, B and D, and the one run for C. "% of di
 | A | borg_cloud | 0.1242 (median of 3) | 59.6% | accuracy 0.65, 0.69, 0.78 (median 0.69); category median 0.99; urgency exact median 0.695, within one point 0.995 (within one is not part of the rule) | composed, all three | no win: quality worse in 3 of 3 comparisons |
 | A | borg_local_workers | not run (cloud side only) | not run | not run | not run | not run (neither pass nor fail) |
 | B | direct | 0.3187 (median of 3) | n/a | 18 of 18 checks on all three runs (each run's first attempt was cut at 7,000 output tokens; the retry finished) | n/a | n/a |
-| B | borg_cloud | 0.1728 (median of 3) | 54.2% | 16 of 18, 18 of 18, 18 of 18 checks (run 1 failed the OpenAPI path check and its own tests) | composed, all three | **win by the rule** (direct preferred 1 of 3, 2 ties); **not fresh**: same input as rounds 1 and 2 and the trial, and the fixes were built after seeing results on it |
+| B | borg_cloud | 0.1728 (median of 3) | 54.3% | 16 of 18, 18 of 18, 18 of 18 checks (run 1 failed the OpenAPI path check and its own tests) | composed, all three | **win by the rule** (direct preferred 1 of 3, 2 ties); **not fresh**: same input as rounds 1 and 2 and the trial, and the fixes were built after seeing results on it |
 | C | direct | 0.7980 (one run) | n/a | judge chose it | n/a | n/a |
 | C | borg_cloud | 0.2518 (one run) | 31.6% | judge chose direct (1 of 1, both orders); ran without the compare-items prompt line of ruling 33c | composed | no win, one run (thinner evidence) |
 | D | direct (on request, outside D's rule) | 0.0609 (median of 3) | n/a | accuracy 1.00 on all three runs | n/a | n/a |
 | D | borg_cloud | 0.0535 (median of 3) | 87.9% of the on-request direct arm | accuracy 0.90 on all three runs (within one label 1.00); 3 canaries sent to cloud models per run, 0 in the answer | composed, all three | reported, not judged (D's rule needs the local arm) |
 | D | borg_local_workers | not run (cloud side only) | not run | not run | not run | not run (neither pass nor fail) |
+
+Correction, 19-Nov-2026 (lead ruling on review of `ab50834`): job B's median share was first written 54.2%; 0.17278315 / 0.318664 is 0.5422, so 54.2% was rounded down, in BORG_ROUTE's favour, and it now reads 54.3%.
 
 Job B, round 3: By the rule both attempts count. Without the cut attempt, BORG's cost is about the same as direct's: direct's median with only the finishing attempt is US$0.175432 (runs: US$0.142452, US$0.175432, US$0.181432; the cut first attempt was US$0.143232 on every run), and BORG's median US$0.172783 is 98.5% of that.
 
@@ -61,7 +63,7 @@ No round-3 BORG answer was salvaged, `planner_only`, kept work (BRT-ORC-002) or 
 | Job | Round 1 | Round 2 | Round 3 |
 |---|---|---|---|
 | A | failed, no win | no win | no win (cost held at 59.6%; quality worse) |
-| B | no win (92%, over 70%) | void (Docker not serving) | **win by the rule** (54.2%, quality held), on an input that is not fresh. By the rule both attempts count. Without the cut attempt, BORG's cost is about the same as direct's (98.5% of direct's US$0.175432) |
+| B | no win (92%, over 70%) | void (Docker not serving) | **win by the rule** (54.3%, quality held), on an input that is not fresh. By the rule both attempts count. Without the cut attempt, BORG's cost is about the same as direct's (98.5% of direct's US$0.175432) |
 | C | failed, direct wins by default | no win (judge chose direct) | no win (31.6%; judge chose direct; one run) |
 | D | failed | no verdict (local arm not run) | reported, not judged (cloud side only) |
 

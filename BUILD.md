@@ -350,7 +350,7 @@ Make the repo public. Deploy the replay demo on the VPS with the HostingerVPS se
 
 Filled by 5.5. No claim leaves the building without a row. `python scripts/check_claims.py` checks it.
 
-Backing notation: `test:<file>::<test name>` (or `<file>::<Class>::<test name>`), or `result:<json file>#<dotted.path>=<value>`, or `text:<file>#<text on one line>=<value>` (a value may end in `%` to read a fraction as a percent, and in ` round` or ` round down` when the figure is rounded; `scripts/check_claims.py` gives the rules); several backings in one cell are separated by `;`. The checker only confirms the test exists; the full suite proves it passes. A marker in a document is `<!-- claim C01 -->` at the end of the claim's sentence. A value claim needs the number written just before its marker to equal the row's value, and the row's value is checked against its file. `docs/user-guide.md` and `README.md` carry markers (README rows C27 to C31 added 18-Nov-2026 with 5.1; the README states a number only where a value-backed marker follows it, by ruling 43, which replaced ruling 38a's no-number rule; rows C37 to C81 added 19-Nov-2026); deck rows come with 6.1.
+Backing notation: `test:<file>::<test name>` (or `<file>::<Class>::<test name>`), or `result:<json file>#<dotted.path>=<value>`, or `text:<file>#<text on one line>=<value>` (a value may end in `%` to read a fraction as a percent, and in ` round`, ` round up` or ` round down` when the figure is rounded: a cost or cost share is never rounded down and a BORG quality figure never up), and every value row also carries `near:<words>` (same clause as the figure) or `in:<words>` (same sentence or table row), so a marker moved to another figure fails; `scripts/check_claims.py` gives the rules; several backings in one cell are separated by `;`. The checker only confirms the test exists; the full suite proves it passes. A marker in a document is `<!-- claim C01 -->` at the end of the claim's sentence. A value claim needs the number written just before its marker to equal the row's value, and the row's value is checked against its file. `docs/user-guide.md` and `README.md` carry markers (README rows C27 to C31 added 18-Nov-2026 with 5.1; the README states a number only where a value-backed marker follows it, by ruling 43, which replaced ruling 38a's no-number rule; rows C37 to C81 added 19-Nov-2026); deck rows come with 6.1.
 
 | Id | Claim | Backing |
 |---|---|---|
@@ -389,51 +389,51 @@ Backing notation: `test:<file>::<test name>` (or `<file>::<Class>::<test name>`)
 | C34 | A short conversational message is answered by the Rule Zero shortcut without a plan, and the shortcut does not fire when documents are attached | test:tests/orchestrator/test_rule_zero_shortcut.py::test_short_greeting_takes_shortcut; test:tests/e2e/test_privacy_lane.py::test_the_trivial_shortcut_does_not_fire_with_documents |
 | C35 | Every page shows the replay notice, which says the run is a demo run, not a benchmark result, and that the data is made up | test:tests/ui/test_app_js.py::test_replay_notice_names_the_date_and_says_demo_run; test:tests/ui/test_app_js.py::test_every_page_carries_the_replay_banner |
 | C36 | In raw_local and all_local, every step that reads document text runs on a local model | test:tests/e2e/test_privacy_lane.py::test_a_raw_local_no_canary_reaches_a_cloud_model; test:tests/e2e/test_privacy_lane.py::test_b_raw_local_without_a_local_model_fails_and_sends_nothing; test:tests/e2e/test_privacy_lane.py::test_b_local_model_below_the_floor_never_falls_back_to_cloud; test:tests/e2e/test_privacy_lane.py::test_c_all_local_sends_nothing_off_the_machine |
-| C37 | Job A has 200 support emails | result:bench/results/2026_11_19/A_borg_cloud_2.json#quality.items_expected=200 |
-| C38 | Round 3, job A: BORG's median cost is 59.6% of the direct arm's | text:bench/results/2026_11_19/summary.md#Median 0.2085 0.1242 59.6%=59.6% |
-| C39 | Round 3, job A: BORG's median wall time 15.8 s | text:bench/results/2026_11_19/summary.md#A 47.0 15.8 3=15.8 |
-| C40 | Round 3, job A: the direct arm's median wall time 47.0 s | text:bench/results/2026_11_19/summary.md#A 47.0 15.8 3=47.0 |
-| C41 | Round 3, job A: BORG's category accuracy, median run, 99% | result:bench/results/2026_11_19/A_borg_cloud_2.json#quality.per_field_accuracy.category=99% |
-| C42 | Round 3, job A: BORG's exact urgency accuracy, median run, 69.5% | result:bench/results/2026_11_19/A_borg_cloud_2.json#quality.per_field_accuracy.urgency=69.5% |
-| C43 | Round 3, job A: BORG's urgency within one point, median, 99.5% | text:bench/results/2026_11_19/summary.md#Median 0.2085 0.1242 59.6% 1.00 0.690 0.990 0.695 0.995=99.5% |
-| C44 | Round 3, job A: the direct arm scored 100% on category and urgency in every run | result:bench/results/2026_11_19/A_direct_1.json#quality.per_field_accuracy.category=100%; result:bench/results/2026_11_19/A_direct_1.json#quality.per_field_accuracy.urgency=100%; result:bench/results/2026_11_19/A_direct_2.json#quality.per_field_accuracy.category=100%; result:bench/results/2026_11_19/A_direct_2.json#quality.per_field_accuracy.urgency=100%; result:bench/results/2026_11_19/A_direct_3.json#quality.per_field_accuracy.category=100%; result:bench/results/2026_11_19/A_direct_3.json#quality.per_field_accuracy.urgency=100% |
-| C45 | The rule for jobs A and D asks for accuracy within 2 points | text:bench/README.md#accuracy within 2 percentage points=2 |
-| C46 | Round 3, job B: BORG's median cost is 54.2% of the direct arm's, by the rule | text:bench/results/2026_11_19/summary.md#Median 0.3187 0.1728 54.2%=54.2% |
-| C47 | Round 3, job B: without the direct arm's cut first attempt, BORG's median cost is 98.5% of direct's | text:bench/results/2026_11_19/summary.md#BORG's median US$0.172783 is 98.5% of that=98.5% |
-| C48 | Round 3, job B: BORG's median wall time 70.1 s | text:bench/results/2026_11_19/summary.md#B 120.3 70.1 3=70.1 |
-| C49 | Round 3, job B: the direct arm's median wall time 120.3 s | text:bench/results/2026_11_19/summary.md#B 120.3 70.1 3=120.3 |
-| C50 | Round 3, job B: BORG passed all 18 checks in runs 2 and 3 | text:bench/results/2026_11_19/summary.md#2 0.3187 0.1286 40.3% 18 / 0 18 / 0 tie=18; text:bench/results/2026_11_19/summary.md#3 0.3247 0.1800 55.4% 18 / 0 18 / 0 tie=18 |
-| C51 | Round 3, job B: BORG passed 16 checks in run 1 | text:bench/results/2026_11_19/summary.md#1 0.2857 0.1728 60.5% 18 / 0 16 / 2=16 |
-| C52 | Round 3, job B: the direct arm passed 18 checks in every run | text:bench/results/2026_11_19/summary.md#1 0.2857 0.1728 60.5% 18 / 0=18; text:bench/results/2026_11_19/summary.md#2 0.3187 0.1286 40.3% 18 / 0=18; text:bench/results/2026_11_19/summary.md#3 0.3247 0.1800 55.4% 18 / 0=18 |
-| C53 | Job C reads 15 documents | text:bench/results/2026_11_19/summary.md#Job C, 15 documents, about 150,000 tokens=15 |
-| C54 | Job C's documents hold about 150,000 tokens | text:bench/results/2026_11_19/summary.md#Job C, 15 documents, about 150,000 tokens=150,000 |
-| C55 | Round 3, job C (one run): BORG's cost is 31.6% of the direct arm's | text:bench/results/2026_11_19/summary.md#1 (one run) 0.7980 0.2518 31.6%=31.6% |
-| C56 | Round 3, job C: BORG's wall time 22.3 s | text:bench/results/2026_11_19/summary.md#C 9.3 22.3 1=22.3 |
-| C57 | Round 3, job C: the direct arm's wall time 9.3 s | text:bench/results/2026_11_19/summary.md#C 9.3 22.3 1=9.3 |
-| C58 | Job D has 60 client notes | result:bench/results/2026_11_19/D_borg_cloud_2.json#quality.items_expected=60 |
-| C59 | Round 3, job D: BORG's median cost is 87.9% of the on-request direct arm's | text:bench/results/2026_11_19/summary.md#Median 0.0609 0.0535 87.9%=87.9% |
-| C60 | Round 3, job D: BORG's median wall time 15.8 s | text:bench/results/2026_11_19/summary.md#D 12.3 15.8 3=15.8 |
-| C61 | Round 3, job D: the direct arm's median wall time 12.3 s | text:bench/results/2026_11_19/summary.md#D 12.3 15.8 3=12.3 |
-| C62 | Round 3, job D: BORG's risk accuracy 90% in every run | result:bench/results/2026_11_19/D_borg_cloud_1.json#quality.accuracy=90%; result:bench/results/2026_11_19/D_borg_cloud_2.json#quality.accuracy=90%; result:bench/results/2026_11_19/D_borg_cloud_3.json#quality.accuracy=90% |
-| C63 | Round 3, job D: the direct arm's risk accuracy 100% in every run | result:bench/results/2026_11_19/D_direct_1.json#quality.accuracy=100%; result:bench/results/2026_11_19/D_direct_2.json#quality.accuracy=100%; result:bench/results/2026_11_19/D_direct_3.json#quality.accuracy=100% |
-| C64 | Round 3, job A: items went to the worker model in packs of 20 | text:bench/results/2026_11_19/summary.md#10 pack posts of 20=20 |
-| C65 | Round 3, job A: the lowest per-run worker cost for the 200 emails, US$0.020789 (run 3) | result:bench/results/2026_11_19/cost_split_A.json#runs.2.worker_dollars=0.0208 round |
-| C66 | Round 3, job A: the highest per-run worker cost, US$0.04018225 (run 1) | result:bench/results/2026_11_19/cost_split_A.json#runs.0.worker_dollars=0.0402 round |
-| C67 | Round 3, job A: the lowest per-run planner, re_plan and compose cost, US$0.073875 (run 2) | result:bench/results/2026_11_19/cost_split_A.json#runs.1.planner_compose_dollars=0.0739 round |
-| C68 | Round 3, job A: the highest per-run planner, re_plan and compose cost, US$0.10343625 (run 1) | result:bench/results/2026_11_19/cost_split_A.json#runs.0.planner_compose_dollars=0.1034 round |
-| C69 | Round 3, job A: the lowest planner share of a run's bill, 0.707913 (run 2) | result:bench/results/2026_11_19/cost_split_A.json#runs.1.planner_compose_share=70.8% round |
-| C70 | Round 3, job A: the highest planner share of a run's bill, 0.832614 (run 3) | result:bench/results/2026_11_19/cost_split_A.json#runs.2.planner_compose_share=83.3% round |
-| C71 | Demo job 1 holds 60 feedback lines | text:demo/runs/job1_c882e3c9.json#Below are 60 customer feedback lines=60 |
-| C72 | Demo job 1 cost US$0.0503625, shown as US$0.0504 | result:demo/runs/job1_c882e3c9.json#view.digest.cost_dollars=0.0504 round |
-| C73 | Demo job 1's one-pass floor is US$0.030962, shown at least US$0.0309 as the UI's floorMoney shows it (rounded down) | result:demo/runs/job1_c882e3c9.json#view.digest.direct_floor_dollars=0.0309 round down |
-| C74 | Round 3, job A: emails one point off on urgency, 68, 60 and 40; the middle value is 60 | text:bench/results/2026_11_19/summary.md#Emails one point off on urgency: 68, 60 and 40=60 |
-| C75 | In raw_local no canary from a document reaches a cloud model, and a raw task headed to a non-local address is blocked | test:tests/e2e/test_privacy_lane.py::test_a_raw_local_no_canary_reaches_a_cloud_model; test:tests/e2e/test_privacy_lane.py::test_guard_blocks_a_raw_task_headed_off_the_machine |
-| C76 | Round 3's start-of-stage probe measured the local model at 5.337 tok/s on the development laptop | text:bench/results/2026_11_19/summary.md#measured 5.337 tok/s=5 round |
-| C77 | Round 2's probe measured the local model at 7.062 tok/s on the development laptop | text:bench/results/2026_11_18/summary.md#measured llama3.2:3b at 7.062 tok/s=7 round |
-| C78 | Round 2's job D has 60 client notes | text:bench/results/2026_11_18/summary.md#D, 60 client notes=60 |
-| C79 | Round 2's stopped local run of job D answered 12 of 32 item calls in about 67 minutes | text:bench/results/2026_11_18/summary.md#12 of 32 item calls in about 67 minutes=12 |
-| C80 | (the same run) of 32 item calls | text:bench/results/2026_11_18/summary.md#12 of 32 item calls in about 67 minutes=32 |
-| C81 | (the same run) in about 67 minutes | text:bench/results/2026_11_18/summary.md#12 of 32 item calls in about 67 minutes=67 |
+| C37 | Job A has 200 support emails | result:bench/results/2026_11_19/A_borg_cloud_2.json#quality.items_expected=200; in:emails |
+| C38 | Round 3, job A: BORG's median cost is 59.6% of the direct arm's (0.5958, shown rounded up) | text:bench/results/2026_11_19/summary.md#Median 0.2085 0.1242 59.6%=59.6%; in:support emails |
+| C39 | Round 3, job A: BORG's median wall time 15.781 s, shown rounded up | result:bench/results/2026_11_19/A_borg_cloud_3.json#wall_seconds=15.8 round up; in:support emails |
+| C40 | Round 3, job A: the direct arm's median wall time 46.999 s, shown rounded down | result:bench/results/2026_11_19/A_direct_3.json#wall_seconds=46.9 round down; in:support emails |
+| C41 | Round 3, job A: BORG's category accuracy, median run, 99% | result:bench/results/2026_11_19/A_borg_cloud_2.json#quality.per_field_accuracy.category=99%; near:categor |
+| C42 | Round 3, job A: BORG's exact urgency accuracy, median run, 69.5% | result:bench/results/2026_11_19/A_borg_cloud_2.json#quality.per_field_accuracy.urgency=69.5%; near:urgency exact |
+| C43 | Round 3, job A: BORG's urgency within one point, median, 99.5% | text:bench/results/2026_11_19/summary.md#Median 0.2085 0.1242 59.6% 1.00 0.690 0.990 0.695 0.995=99.5%; near:within one point |
+| C44 | Round 3, job A: the direct arm scored 100% on category and urgency in every run | result:bench/results/2026_11_19/A_direct_1.json#quality.per_field_accuracy.category=100%; result:bench/results/2026_11_19/A_direct_1.json#quality.per_field_accuracy.urgency=100%; result:bench/results/2026_11_19/A_direct_2.json#quality.per_field_accuracy.category=100%; result:bench/results/2026_11_19/A_direct_2.json#quality.per_field_accuracy.urgency=100%; result:bench/results/2026_11_19/A_direct_3.json#quality.per_field_accuracy.category=100%; result:bench/results/2026_11_19/A_direct_3.json#quality.per_field_accuracy.urgency=100%; near:the top model scored; in:support emails |
+| C45 | The rule for jobs A and D asks for accuracy within 2 points | text:bench/README.md#accuracy within 2 percentage points=2; near:accuracy within |
+| C46 | Round 3, job B: BORG's median cost is 54.3% of the direct arm's, by the rule (0.5422, shown rounded up; the report first said 54.2%) | text:bench/results/2026_11_19/summary.md#Median 0.3187 0.1728 54.3%=54.3%; in:Python service; near:by the rule |
+| C47 | Round 3, job B: without the direct arm's cut first attempt, BORG's median cost is 98.5% of direct's (0.9849, rounded up) | text:bench/results/2026_11_19/summary.md#BORG's median US$0.172783 is 98.5% of that=98.5%; near:cut-off attempt is left out |
+| C48 | Round 3, job B: BORG's median wall time 70.126 s, shown rounded up | result:bench/results/2026_11_19/B_borg_cloud_2.json#wall_seconds=70.2 round up; in:Python service |
+| C49 | Round 3, job B: the direct arm's median wall time 120.323 s, shown rounded down | result:bench/results/2026_11_19/B_direct_2.json#wall_seconds=120.3 round down; in:Python service |
+| C50 | Round 3, job B: BORG passed all 18 checks in runs 2 and 3 | text:bench/results/2026_11_19/summary.md#2 0.3187 0.1286 40.3% 18 / 0 18 / 0 tie=18; text:bench/results/2026_11_19/summary.md#3 0.3247 0.1800 55.4% 18 / 0 18 / 0 tie=18; near:in two runs; in:Python service |
+| C51 | Round 3, job B: BORG passed 16 checks in run 1 | text:bench/results/2026_11_19/summary.md#1 0.2857 0.1728 60.5% 18 / 0 16 / 2=16; near:in one; in:Python service |
+| C52 | Round 3, job B: the direct arm passed 18 checks in every run | text:bench/results/2026_11_19/summary.md#1 0.2857 0.1728 60.5% 18 / 0=18; text:bench/results/2026_11_19/summary.md#2 0.3187 0.1286 40.3% 18 / 0=18; text:bench/results/2026_11_19/summary.md#3 0.3247 0.1800 55.4% 18 / 0=18; near:the top model passed; in:Python service |
+| C53 | Job C reads 15 documents | text:bench/results/2026_11_19/summary.md#Job C, 15 documents, about 150,000 tokens=15; near:documents |
+| C54 | Job C's documents hold about 150,000 tokens | text:bench/results/2026_11_19/summary.md#Job C, 15 documents, about 150,000 tokens=150,000; near:tokens |
+| C55 | Round 3, job C (one run): BORG's cost is 31.6% of the direct arm's (0.3155, rounded up) | text:bench/results/2026_11_19/summary.md#1 (one run) 0.7980 0.2518 31.6%=31.6%; in:Eight questions |
+| C56 | Round 3, job C: BORG's wall time 22.292 s, shown rounded up | result:bench/results/2026_11_19/C_borg_cloud_1.json#wall_seconds=22.3 round up; in:Eight questions |
+| C57 | Round 3, job C: the direct arm's wall time 9.35 s, shown rounded down | result:bench/results/2026_11_19/C_direct_1.json#wall_seconds=9.3 round down; in:Eight questions |
+| C58 | Job D has 60 client notes | result:bench/results/2026_11_19/D_borg_cloud_2.json#quality.items_expected=60; in:client notes |
+| C59 | Round 3, job D: BORG's median cost is 87.9% of the on-request direct arm's (0.8787, rounded up) | text:bench/results/2026_11_19/summary.md#Median 0.0609 0.0535 87.9%=87.9%; in:client notes |
+| C60 | Round 3, job D: BORG's median wall time 15.756 s, shown rounded up | result:bench/results/2026_11_19/D_borg_cloud_1.json#wall_seconds=15.8 round up; in:client notes |
+| C61 | Round 3, job D: the direct arm's median wall time 12.298 s, shown rounded down | result:bench/results/2026_11_19/D_direct_2.json#wall_seconds=12.2 round down; in:client notes |
+| C62 | Round 3, job D: BORG's risk accuracy 90% in every run | result:bench/results/2026_11_19/D_borg_cloud_1.json#quality.accuracy=90%; result:bench/results/2026_11_19/D_borg_cloud_2.json#quality.accuracy=90%; result:bench/results/2026_11_19/D_borg_cloud_3.json#quality.accuracy=90%; near:right against; in:client notes |
+| C63 | Round 3, job D: the direct arm's risk accuracy 100% in every run | result:bench/results/2026_11_19/D_direct_1.json#quality.accuracy=100%; result:bench/results/2026_11_19/D_direct_2.json#quality.accuracy=100%; result:bench/results/2026_11_19/D_direct_3.json#quality.accuracy=100%; near:right against; in:client notes |
+| C64 | Round 3, job A: items went to the worker model in packs of 20 | text:bench/results/2026_11_19/summary.md#10 pack posts of 20=20; near:packs of |
+| C65 | Round 3, job A: the lowest per-run worker cost for the 200 emails, US$0.020789 (run 3), rounded up | result:bench/results/2026_11_19/cost_split_A.json#runs.2.worker_dollars=0.0208 round up; near:worker calls |
+| C66 | Round 3, job A: the highest per-run worker cost, US$0.04018225 (run 1), rounded up | result:bench/results/2026_11_19/cost_split_A.json#runs.0.worker_dollars=0.0402 round up; near:worker calls |
+| C67 | Round 3, job A: the lowest per-run planner, re_plan and compose cost, US$0.073875 (run 2), rounded up | result:bench/results/2026_11_19/cost_split_A.json#runs.1.planner_compose_dollars=0.0739 round up; near:planning the job |
+| C68 | Round 3, job A: the highest per-run planner, re_plan and compose cost, US$0.10343625 (run 1), rounded up | result:bench/results/2026_11_19/cost_split_A.json#runs.0.planner_compose_dollars=0.1035 round up; near:planning the job |
+| C69 | Round 3, job A: the lowest planner share of a run's bill, 0.707913 (run 2), rounded up | result:bench/results/2026_11_19/cost_split_A.json#runs.1.planner_compose_share=70.8% round up; near:of the bill |
+| C70 | Round 3, job A: the highest planner share of a run's bill, 0.832614 (run 3), rounded up | result:bench/results/2026_11_19/cost_split_A.json#runs.2.planner_compose_share=83.3% round up; near:of the bill |
+| C71 | Demo job 1 holds 60 feedback lines | text:demo/runs/job1_c882e3c9.json#Below are 60 customer feedback lines=60; near:lines of feedback |
+| C72 | Demo job 1 cost US$0.0503625, shown rounded up as US$0.0504 | result:demo/runs/job1_c882e3c9.json#view.digest.cost_dollars=0.0504 round up; near:demo run |
+| C73 | Demo job 1's one-pass floor is US$0.030962, shown at least US$0.0309 as the UI's floorMoney shows it (rounded down) | result:demo/runs/job1_c882e3c9.json#view.digest.direct_floor_dollars=0.0309 round down; near:at least |
+| C74 | Round 3, job A: emails one point off on urgency, 68, 60 and 40; the middle value is 60 | text:bench/results/2026_11_19/summary.md#Emails one point off on urgency: 68, 60 and 40=60; near:one point off |
+| C75 | In raw_local no planted canary string from a document reaches a cloud model; file names (the manifest) and steps that read only guarded outputs may go to a cloud model | test:tests/e2e/test_privacy_lane.py::test_a_raw_local_no_canary_reaches_a_cloud_model |
+| C76 | Round 3's start-of-stage probe measured the local model at 5.337 tok/s on the development laptop | text:bench/results/2026_11_19/summary.md#measured 5.337 tok/s=5 round; near:tokens a second |
+| C77 | Round 2's probe measured the local model at 7.062 tok/s on the development laptop | text:bench/results/2026_11_18/summary.md#measured llama3.2:3b at 7.062 tok/s=7 round; near:tokens a second |
+| C78 | Round 2's job D has 60 client notes | text:bench/results/2026_11_18/summary.md#D, 60 client notes=60; near:notes answered |
+| C79 | Round 2's stopped local run of job D answered 12 of 32 item calls in about 67 minutes | text:bench/results/2026_11_18/summary.md#12 of 32 item calls in about 67 minutes=12; near:item calls |
+| C80 | (the same run) of 32 item calls | text:bench/results/2026_11_18/summary.md#12 of 32 item calls in about 67 minutes=32; near:item calls |
+| C81 | (the same run) in about 67 minutes | text:bench/results/2026_11_18/summary.md#12 of 32 item calls in about 67 minutes=67; near:minutes and was then stopped |
 
 ## 8. Rulings log
 

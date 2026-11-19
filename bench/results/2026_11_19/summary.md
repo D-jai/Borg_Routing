@@ -68,7 +68,9 @@ Direct arm: one call to `anthropic/claude-opus-5.5` (US$4 / US$20 per million to
 | 1 | 0.2857 | 0.1728 | 60.5% | 18 / 0 | 16 / 2 | direct preferred |
 | 2 | 0.3187 | 0.1286 | 40.3% | 18 / 0 | 18 / 0 | tie |
 | 3 | 0.3247 | 0.1800 | 55.4% | 18 / 0 | 18 / 0 | tie |
-| **Median** | **0.3187** | **0.1728** | **54.2%** | **18** | **18** | |
+| **Median** | **0.3187** | **0.1728** | **54.3%** | **18** | **18** | |
+
+Correction, 19-Nov-2026 (lead ruling on review of `ab50834`): job B's median share was first written 54.2%; 0.17278315 / 0.318664 is 0.5422, so 54.2% was rounded down, in BORG_ROUTE's favour, and it now reads 54.3%.
 
 - Docker served for every job B run; every container check ran; no run is void.
 - BORG run 1 failed two checks: `spec_openapi_paths` (the OpenAPI file lacks `POST /notes`) and `tests_pass_in_container` (its own test `test_create_note_with_tags` failed with `sqlite3.OperationalError`). It passed all 11 reference tests.
@@ -83,7 +85,7 @@ Direct arm: one call to `anthropic/claude-opus-5.5` (US$4 / US$20 per million to
 - Planner, re_plan and compose: `x-ai/grok-4.20`. No warning fired. All three answers are the normal composed kind.
 - Wall time: direct 105.5, 120.3, 124.0 s; BORG 74.5, 70.1, 63.7 s.
 
-**Verdict, job B: win by the rule.** Cost holds (median 54.2% of direct's). Quality holds: direct is preferred in 1 of 3 comparisons, with 2 ties, which is not a majority. All three BORG answers are normal composed answers, so ruling 40e does not bar the win. `bench/aggregate.py` gives `wins: true`. Beside it, plainly: job B's input is the same as in rounds 1 and 2 and in the trial, and the fixes were built after seeing results on it, so this is not a result on fresh data. By the rule both attempts count. Without the cut attempt, BORG's cost is about the same as direct's: direct's median with only the finishing attempt is US$0.175432 (runs: US$0.142452, US$0.175432, US$0.181432; the cut first attempt was US$0.143232 on every run), and BORG's median US$0.172783 is 98.5% of that.
+**Verdict, job B: win by the rule.** Cost holds (median 54.3% of direct's). Quality holds: direct is preferred in 1 of 3 comparisons, with 2 ties, which is not a majority. All three BORG answers are normal composed answers, so ruling 40e does not bar the win. `bench/aggregate.py` gives `wins: true`. Beside it, plainly: job B's input is the same as in rounds 1 and 2 and in the trial, and the fixes were built after seeing results on it, so this is not a result on fresh data. By the rule both attempts count. Without the cut attempt, BORG's cost is about the same as direct's: direct's median with only the finishing attempt is US$0.175432 (runs: US$0.142452, US$0.175432, US$0.181432; the cut first attempt was US$0.143232 on every run), and BORG's median US$0.172783 is 98.5% of that.
 
 ### Job C, 15 documents, about 150,000 tokens (one run, thinner evidence)
 
@@ -159,7 +161,7 @@ Ruling 40e: only a normal composed answer can win. Every BORG answer in this rou
 | Job | Verdict |
 |---|---|
 | A | no win: cost 59.6% of direct's, quality worse in 3 of 3 comparisons |
-| B | **win by the rule**: cost 54.2% of direct's, quality held (direct preferred 1 of 3, 2 ties). Same input as rounds 1 and 2 and the trial; the fixes were built after seeing results on it By the rule both attempts count. Without the cut attempt, BORG's cost is about the same as direct's (98.5% of US$0.175432). |
+| B | **win by the rule**: cost 54.3% of direct's, quality held (direct preferred 1 of 3, 2 ties). Same input as rounds 1 and 2 and the trial; the fixes were built after seeing results on it By the rule both attempts count. Without the cut attempt, BORG's cost is about the same as direct's (98.5% of US$0.175432). |
 | C | no win, one run (thinner evidence): cost 31.6% of direct's, the judge chose direct |
 | D | reported, not judged: no local arm; the direct arm is outside D's rule |
 

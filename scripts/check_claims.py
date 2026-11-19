@@ -29,6 +29,9 @@ The row's value is checked against the source first:
 - ``=V round``: the source value rounded half up to V's decimal places equals V;
 - ``=V round down``: the source value cut to V's decimal places equals V (the UI's
   ``floorMoney`` shows an "at least" figure this way);
+- ``=V round up``: the source value raised to V's decimal places equals V (a cost or
+  cost share is never shown rounded down: bench/README.md, nothing is rounded in
+  BORG_ROUTE's favour);
 - ``V%`` with a source written without ``%``: the source is a fraction, so it is
   multiplied by 100 first (``0.695`` backs ``69.5%``).
 
@@ -39,6 +42,17 @@ can be quoted without its pipes. One number in that text must give V by the rule
 above. The text may not hold ``;`` or ``|``.
 
 ``US$`` before a number is read as part of the number (``US$0.0309``).
+
+A row with a value backing must also say where the figure stands, so that a marker
+moved to another figure or another job fails (lead ruling on review of ab50834):
+
+    near:<words>   the words stand in the same clause as the number (the clause ends
+                   at ``|``, ``;`` or the end of a sentence)
+    in:<words>     the words stand in the same sentence as the number (a table row,
+                   with no sentence end in it, is one sentence)
+
+Words are matched ignoring letter case, after claim markers are taken out. Every
+``near:`` and ``in:`` backing of the row must hold at every marker of the row.
 Lines inside ``` fences are skipped.
 
 Exit 0 when everything holds (warnings may print). Exit 1 on any error.
@@ -53,7 +67,7 @@ import ast
 import json
 import re
 import sys
-from decimal import ROUND_DOWN, ROUND_HALF_UP, Decimal, InvalidOperation
+from decimal import ROUND_DOWN, ROUND_HALF_UP, ROUND_UP, Decimal, InvalidOperation
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
@@ -62,7 +76,9 @@ ANY_CLAIM_COMMENT = re.compile(r"<!--\s*claim\b", re.I)
 ROW_START = re.compile(r"^\|\s*[Cc]")
 ID_OK = re.compile(r"^C\d+$")
 NUM_TOKEN = re.compile(r"[-+]?(?:US)?\$?\d[\d,]*(?:\.\d+)?%?")
-VALUE_SPEC = re.compile(r"^(?P<value>\S+?)(?:\s+(?P<mode>round down|round))?$")
+VALUE_SPEC = re.compile(r"^(?P<value>\S+?)(?:\s+(?P<mode>round down|round up|round))?$")
+CONTEXT_KINDS = ("near:", "in:")
+SENTENCE_END = re.compile(r"[.!?]\**\s+")
 
 
 def default_docs(root: Path) -> list[Path]:
@@ -199,7 +215,7 @@ def source_gives(source_value, source_text: str, want: Decimal, mode: str, pct: 
     if mode == "exact":
         return got == want
     places = Decimal(1).scaleb(want.as_tuple().exponent)
-    rounding = ROUND_DOWN if mode == "round down" else ROUND_HALF_UP
+    rounding = {"round down": ROUND_DOWN, "round up": ROUND_UP}.get(mode, ROUND_HALF_UP)
     return got.quantize(places, rounding=rounding) == want
 
 
@@ -290,10 +306,35 @@ def number_before(line: str, column: int) -> Decimal | None:
     return span[2] if span else None
 
 
+def _segment(line: str, pos: int, clause: bool) -> str:
+    """The sentence (or, with clause, the clause) of the line that holds position pos."""
+    cuts = [m.end() for m in SENTENCE_END.finditer(line)]
+    if clause:
+        cuts += [i + 1 for i, ch in enumerate(line) if ch in "|;"]
+    start = max([c for c in cuts if c <= pos], default=0)
+    end = min([c for c in cuts if c > pos], default=len(line))
+    return MARKER.sub(" ", line[start:end])
+
+
+def context_problems(line: str, pos: int, backings: list[str]) -> list[str]:
+    """near:/in: backings that do not hold for the number at position pos."""
+    out = []
+    for b in backings:
+        for kind in CONTEXT_KINDS:
+            if b.startswith(kind):
+                words = " ".join(b[len(kind):].split()).lower()
+                seg = " ".join(_segment(line, pos, kind == "near:").split()).lower()
+                if not words or words not in seg:
+                    where = "clause" if kind == "near:" else "sentence"
+                    out.append(f"'{b[len(kind):].strip()}' is not in the same {where} as the number")
+    return out
+
+
 def verified_number_spans(line: str, rows: dict[str, dict], root: Path) -> list[tuple[int, int]]:
     """Spans of the numbers on this line that a claim marker right after them backs:
     the marker's row has at least one value backing, every value backing checks
-    against its source, and the number equals each row value. Used by the README guard."""
+    against its source, the number equals each row value, and every near:/in:
+    backing of the row holds for it. Used by the README guard."""
     spans = []
     for m in MARKER.finditer(line):
         row = rows.get(m.group(1))
@@ -303,8 +344,10 @@ def verified_number_spans(line: str, rows: dict[str, dict], root: Path) -> list[
         checked = [c for c in checked if c is not None]
         if not checked or any(err for err, _v in checked):
             continue
+        if not any(b.startswith(CONTEXT_KINDS) for b in row["backings"]):
+            continue
         span = number_span(line, m.start())
-        if span and all(span[2] == v for _e, v in checked):
+        if span and all(span[2] == v for _e, v in checked)                 and not context_problems(line, span[0], row["backings"]):
             spans.append((span[0], span[1]))
     return spans
 
@@ -340,6 +383,9 @@ def check(build_path: Path, doc_paths: list[Path], root: Path) -> tuple[list[str
                 err = check_test_backing(b[5:].strip(), root)
                 if err:
                     errors.append(f"{cid}: {err}")
+            elif b.startswith(CONTEXT_KINDS):
+                if not b.split(":", 1)[1].strip():
+                    errors.append(f"{cid}: '{b}' names no words")
             elif b.startswith(("result:", "text:")):
                 err, val = value_backing(b, root)
                 if err:
@@ -347,7 +393,9 @@ def check(build_path: Path, doc_paths: list[Path], root: Path) -> tuple[list[str
                 elif val is not None:
                     json_values.append(val)
             else:
-                errors.append(f"{cid}: backing '{b}' must start with 'test:', 'result:' or 'text:'")
+                errors.append(f"{cid}: backing '{b}' must start with 'test:', 'result:', 'text:', 'near:' or 'in:'")
+        if json_values and not any(b.startswith(CONTEXT_KINDS) for b in row["backings"]):
+            errors.append(f"{cid}: a value row needs a near: or in: backing naming the words around its figure")
         if json_values:
             for mid, doc, n, line, col in markers:
                 if mid != cid:
@@ -356,6 +404,9 @@ def check(build_path: Path, doc_paths: list[Path], root: Path) -> tuple[list[str
                 if shown is None:
                     errors.append(f"{cid}: {doc.name}:{n}: no number just before the marker to compare")
                     continue
+                span = number_span(line, col)
+                for prob in context_problems(line, span[0], row["backings"]):
+                    errors.append(f"{cid}: {doc.name}:{n}: {prob}")
                 for val in json_values:
                     if shown != val:
                         errors.append(f"{cid}: {doc.name}:{n}: the document says {shown}, "

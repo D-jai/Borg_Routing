@@ -102,7 +102,7 @@ def test_results_value_mismatch_fails(tree, capsys):
 
 
 def test_results_value_match_passes(tree, capsys):
-    row = "| C03 | Costs 42.5 | `result:bench/res.json#a.b.1=42.5` |"
+    row = "| C03 | Costs 42.5 | `result:bench/res.json#a.b.1=42.5; near:per run` |"
     code, out = run(tree, [ROW1, ROW2, row], DOC + "It costs $42.50 per run. <!-- claim C03 -->\n", capsys)
     assert code == 0, out
 
@@ -205,12 +205,12 @@ def test_a_method_must_sit_in_the_named_class(tree, capsys):
 
 
 def test_a_number_with_an_attached_dash_is_not_the_number(tree, capsys):
-    row = "| C03 | Costs 42.5 | result:bench/res.json#a.b.1=42.5 |"
+    row = "| C03 | Costs 42.5 | result:bench/res.json#a.b.1=42.5; near:costs |"
     doc = DOC + "Warns BRT-ORC-019 and costs 42.5 <!-- claim C03 -->\n"
     code, out = run(tree, [ROW1, ROW2, row], doc, capsys)
     assert code == 0, out
     # and the code-like token alone does not count as the number
-    doc2 = DOC + "Warns BRT-ORC-019 <!-- claim C03 -->\n"
+    doc2 = DOC + "Warns BRT-ORC-019 costs <!-- claim C03 -->\n"
     code, out = run(tree, [ROW1, ROW2, row], doc2, capsys)
     assert code == 1 and "no number" in out
 
@@ -260,7 +260,7 @@ def test_a_file_ending_inside_a_fence_fails(tree, capsys):
 
 @pytest.mark.parametrize("shown", ["**42.5**", "`42.5`", "*42.5*", "(`42.5`)"])
 def test_a_number_in_bold_or_code_still_counts(tree, capsys, shown):
-    row = "| C03 | x | result:bench/res.json#a.b.1=42.5 |"
+    row = "| C03 | x | result:bench/res.json#a.b.1=42.5; near:costs |"
     code, out = run(tree, [ROW1, ROW2, row], DOC + f"Costs {shown} <!-- claim C03 -->\n", capsys)
     assert code == 0, out
     code, out = run(tree, [ROW1, ROW2, row], DOC + f"Costs {shown.replace('42.5', '41')} <!-- claim C03 -->\n", capsys)
@@ -273,8 +273,10 @@ BANNED_PHRASES = (
     "twice", "half as", "a half", "a third", "a quarter", "double", "percent", "per cent",
     "factor of", "less than", "costs less", "cheaper", "saves", "saved", "saving",
     "fraction", "faster", "lower cost", "lower spend", "less spend", "less cost",
-    "as good as",
+    "as good as", "half", "beats", "beat", "won", "outperforms", "cuts", "drops", "better", "worse",
 )
+# Phrases the README may use although they hold a banned word; taken out before the check.
+ALLOWED_PHRASES = ("won no job",)
 NUMBER_WORDS = (
     "one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen "
     "sixteen seventeen eighteen nineteen twenty thirty forty fifty sixty seventy eighty ninety hundred"
@@ -293,8 +295,9 @@ def readme_problems(text: str, rows: dict | None = None, root: Path | None = Non
     stripping what may carry them (comments, fences, inline code, link targets, claim ids,
     codes, dates, list numbers, local addresses, round names such as "rounds 1 and 2").
     Banned phrases are whole words, any letter case. "fast", "cheap" and "lower" alone are
-    allowed; "times" is refused after a number word (except "tested three times") or before a
-    comparison word."""
+    allowed; "times" is refused after a number word (except the exact phrase "tested three times
+    against") or before a comparison word. Lead ruling on review of ab50834: a freed number must
+    also sit where its row's near:/in: words say, so a marker moved to another figure fails."""
     rows, root = rows or {}, root or REPO
     lines = []
     for line in text.split("\n"):
@@ -313,15 +316,17 @@ def readme_problems(text: str, rows: dict | None = None, root: Path | None = Non
     s = re.sub(r"(?:localhost|127\.0\.0\.1):\d+", "", s)
     s = re.sub(r"\b[Rr]ounds?\s+[1-9](?:\s+and\s+[1-9])?\b", "round", s)
     problems += [f"number left in prose: {m.group(0)!r}" for m in re.finditer(r".{0,12}\d+.{0,12}", s)]
+    for ph in ALLOWED_PHRASES:
+        s = re.sub(r"\b" + re.escape(ph) + r"\b", " ", s, flags=re.I)
     for ph in BANNED_PHRASES:
         if re.search(r"\b" + re.escape(ph) + r"\b", s, re.I):
             problems.append(f"banned phrase: {ph}")
     nums = "|".join(NUMBER_WORDS)
     if re.search(rf"\b(?:{nums})\s+(?:percent|%)", s, re.I):
         problems.append("number word before percent")
-    for m in re.finditer(rf"(?:\b(\w+)\s+)?\b(?:{nums})\s+times\b", s, re.I):
-        if (m.group(1) or "").lower() != "tested":
-            problems.append("number word before times")
+    s = re.sub(r"\btested three times against\b", "tested against", s, flags=re.I)
+    if re.search(rf"\b(?:{nums})\s+times\b", s, re.I):
+        problems.append("number word before times")
     if re.search(r"\btimes\s+(?:as|more|less|lower|higher|cheaper|faster|slower|smaller|bigger|over|the)\b", s, re.I):
         problems.append("times before a comparison")
     return problems
@@ -359,12 +364,40 @@ PLANTED = [
     "It was tested three times as fast.",
     "Round 3 cost 40 on job A.",
     "It is as good as one call to a top model.",
+    "It cuts the bill by 59.6% <!-- claim C38 -->.",
+    "It costs half of one call.",
+    "It beats the top model.",
+    "It was tested three times better.",
+    "It was tested three times.",
+    "BORG_ROUTE won job B.",
+    "It outperforms one call and drops the bill; answers were better, never worse.",
 ]
 
 
 @pytest.mark.parametrize("planted", PLANTED)
 def test_the_readme_guard_fails_on_a_planted_example(planted):
     assert readme_problems("# Title\n\n" + planted + "\n") != []
+    assert readme_problems("# Title\n\n" + planted + "\n", _real_rows(), REPO) != []
+
+
+# The reviewer's swaps of ab50834: each marker moved onto another figure of the same value.
+SWAPS = [
+    ("15.8 s <!-- claim C60 -->", "15.8 s <!-- claim C39 -->"),       # job A's time on job D's
+    ("against 100% <!-- claim C63 -->", "against 100% <!-- claim C44 -->"),  # job A's 100% on job D
+    ("all 18 <!-- claim C50 --> checks in two runs", "all 18 <!-- claim C52 --> checks in all three runs"),
+]
+
+
+@pytest.mark.parametrize("old,new", SWAPS)
+def test_a_marker_moved_to_another_figure_of_the_same_value_fails(old, new, tmp_path, capsys):
+    text = (REPO / "README.md").read_text(encoding="utf-8")
+    assert text.count(old) == 1
+    swapped = text.replace(old, new)
+    assert readme_problems(swapped, _real_rows(), REPO) != []
+    doc = tmp_path / "README.md"
+    doc.write_text(swapped, encoding="utf-8")
+    assert cc.main(["--root", str(REPO), "--doc", str(doc)]) == 1
+    assert "not in the same" in capsys.readouterr().out
 
 
 def test_the_readme_guard_lets_dates_codes_ids_and_ports_through():
@@ -392,12 +425,13 @@ def test_the_readme_guard_lets_the_lead_paragraph_through():
 
 
 GUARD_ROWS = {
-    "C03": "| C03 | Costs 42.5 | result:bench/res.json#a.b.1=42.5 |",
-    "C04": "| C04 | Share | result:bench/res.json#a.share=69.5% |",
-    "C05": "| C05 | Floor | result:bench/res.json#a.floor=0.0309 round down |",
-    "C06": "| C06 | From a report | text:bench/report.md#Median 0.2085 59.6%=59.6% |",
+    "C03": "| C03 | Costs 42.5 | result:bench/res.json#a.b.1=42.5; near:a run |",
+    "C04": "| C04 | Share | result:bench/res.json#a.share=69.5%; near:share of |",
+    "C05": "| C05 | Floor | result:bench/res.json#a.floor=0.0309 round down; near:at least |",
+    "C06": "| C06 | From a report | text:bench/report.md#Median 0.2085 59.6%=59.6%; in:job A |",
     "C07": "| C07 | Test only | test:tests/test_sample.py::test_alpha |",
-    "C08": "| C08 | Wrong source | result:bench/res.json#a.b.1=40 |",
+    "C08": "| C08 | Wrong source | result:bench/res.json#a.b.1=40; near:a run |",
+    "C09": "| C09 | No context | result:bench/res.json#a.b.1=42.5 |",
 }
 
 
@@ -415,7 +449,7 @@ def guard_tree(tree):
     "It cost US$42.50 a run. <!-- claim C03 -->",
     "A share of 69.5% <!-- claim C04 --> of one call.",
     "At least US$0.0309 <!-- claim C05 --> for one pass.",
-    "| A | 59.6% <!-- claim C06 --> | x |",
+    "| Job A | 59.6% <!-- claim C06 --> | x |",
 ])
 def test_a_number_backed_by_a_checked_value_row_passes_the_guard(guard_tree, line):
     tree, rows = guard_tree
@@ -429,6 +463,9 @@ def test_a_number_backed_by_a_checked_value_row_passes_the_guard(guard_tree, lin
     "It took 12 s. <!-- claim C07 -->",                 # a test-backed row frees no number
     "It cost 40 a run. <!-- claim C08 -->",             # the row disagrees with its file
     "It cost 40 a run. <!-- claim C99 -->",             # no row at all
+    "It cost 42.5 a run. <!-- claim C09 -->",           # a value row without near: or in:
+    "A run; a share of 42.5 <!-- claim C03 -->.",        # the words are in another clause
+    "It cost 42.5; it ran a run. <!-- claim C03 -->",
     "Runs 7 and 42.5 <!-- claim C03 -->",               # only the number right before the marker
     "It cost US$42.50 a run.",                          # no marker
 ])
@@ -448,11 +485,11 @@ def test_the_guard_checks_the_source_not_only_the_row(guard_tree):
 
 def test_a_text_backing_needs_the_text_on_one_line_and_the_number_in_it(tree, capsys):
     (tree / "bench" / "report.md").write_text("| **Median** | 0.2085 | **59.6%** |\n", encoding="utf-8")
-    ok = "| C03 | x | text:bench/report.md#Median 0.2085 59.6%=59.6% |"
+    ok = "| C03 | x | text:bench/report.md#Median 0.2085 59.6%=59.6%; near:share |"
     code, out = run(tree, [ROW1, ROW2, ok], DOC + "Share 59.6% <!-- claim C03 -->\n", capsys)
     assert code == 0, out
     for bad, word in [("Median 0.2086 59.6%=59.6%", "no line"), ("Median 0.2085 59.6%=59.7%", "no number")]:
-        row = f"| C03 | x | text:bench/report.md#{bad} |"
+        row = f"| C03 | x | text:bench/report.md#{bad}; near:share |"
         code, out = run(tree, [ROW1, ROW2, row], DOC + "Share 59.6% <!-- claim C03 -->\n", capsys)
         assert code == 1 and word in out, out
 
@@ -460,9 +497,10 @@ def test_a_text_backing_needs_the_text_on_one_line_and_the_number_in_it(tree, ca
 def test_rounding_must_be_named_and_goes_the_named_way(tree, capsys):
     (tree / "bench" / "res.json").write_text(json.dumps({"v": 0.030962}), encoding="utf-8")
     cases = [("=0.0310", 1), ("=0.0310 round", 0), ("=0.0309 round", 1),
-             ("=0.0309 round down", 0), ("=0.0310 round down", 1)]
+             ("=0.0309 round down", 0), ("=0.0310 round down", 1),
+             ("=0.0310 round up", 0), ("=0.0309 round up", 1)]
     for spec, want in cases:
         shown = spec.split()[0][1:]
-        row = f"| C03 | x | result:bench/res.json#v{spec} |"
+        row = f"| C03 | x | result:bench/res.json#v{spec}; near:floor |"
         code, out = run(tree, [ROW1, ROW2, row], DOC + f"Floor US${shown} <!-- claim C03 -->\n", capsys)
         assert code == want, (spec, out)
