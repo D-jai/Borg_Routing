@@ -96,7 +96,7 @@ def _play(c, export, speed=FAST):
 
 def test_the_committed_exports_are_the_ruling_24_runs():
     ids = {e["run_id"][:8] for e in _exports()}
-    assert {"d04e0d8a", "e535b654", "e31a5330"} <= ids
+    assert {"c882e3c9", "6c83c9c7", "e31a5330"} <= ids
     assert not ids & {"230b0186", "19f56430", "ece3d973"}
 
 
@@ -129,7 +129,7 @@ def test_the_run_stream_plays_envelope_updates_then_the_end(client, outbound):
 
 
 def test_mid_play_the_run_is_running_and_shows_only_what_had_happened(client, monkeypatch):
-    export = next(e for e in _exports() if e["run_id"].startswith("d04e0d8a"))
+    export = next(e for e in _exports() if e["run_id"].startswith("c882e3c9"))
     clock = {"now": 1000.0}
     monkeypatch.setattr(replay, "_now", lambda: clock["now"])
     session = replay.start_session(export["run_id"], speed=1.0)

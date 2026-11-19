@@ -26,7 +26,7 @@ def _documents():
 
 def test_the_three_ruling_24_runs_are_exported_and_the_dropped_ones_are_not():
     names = [p.name for p in EXPORTS]
-    assert names == ["job1_d04e0d8a.json", "job2_e535b654.json", "job3_e31a5330.json"]
+    assert names == ["job1_c882e3c9.json", "job2_6c83c9c7.json", "job3_e31a5330.json"]
 
 
 @pytest.mark.parametrize("path", EXPORTS, ids=lambda p: p.name)
