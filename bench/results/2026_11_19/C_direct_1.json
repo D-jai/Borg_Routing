@@ -1,0 +1,124 @@
+{
+ "job": "C",
+ "arm": "direct",
+ "repeat": 1,
+ "date": "2026_11_19",
+ "status": "completed",
+ "error": null,
+ "lane_mode": "n/a (direct call)",
+ "run_id": null,
+ "cost_dollars": 0.7980119999999999,
+ "wall_seconds": 9.35,
+ "tokens": {
+  "prompt_tokens": 196783,
+  "completion_tokens": 544,
+  "total_tokens": 197327
+ },
+ "models": [
+  "openrouter/anthropic/claude-opus-5.5"
+ ],
+ "models_per_step": [
+  {
+   "step": "direct_call_1",
+   "chosen": "openrouter/anthropic/claude-opus-5.5",
+   "dollars": 0.7980119999999999,
+   "finish_reason": "stop",
+   "attempts": [
+    {
+     "max_tokens": 6000,
+     "tokens_in": 196783,
+     "tokens_out": 544,
+     "dollars": 0.7980119999999999,
+     "finish_reason": "stop"
+    }
+   ]
+  }
+ ],
+ "model_calls": 1,
+ "answer": "1. **14 March 2027** (doc_03)\n2. **412 loading bays** (doc_05)\n3. **Ingrid Vassallo** (doc_06)\n4. **US$3.85 million**, released in four tranches (doc_07)\n5. **2,317 days** (doc_09)\n6. **Brannock Cryogenics** (doc_10)\n7. **juniper-lantern** (doc_12)\n8. **Every 19 days**, by an outside engineer (doc_14)\n9. Yes, in two places:\n   - **Kessler Falls depot opening year:** doc_02 says it \"opened in 2011,\" while doc_11 says it \"opened in 2014.\"\n   - **Project Osprey steering committee size:** doc_07 says it \"has seven members,\" while doc_13 says it has \"nine members.\"",
+ "routing_config": {
+  "leaf_floors": {
+   "light": 6.0,
+   "mid": 7.5,
+   "heavy": 9.0
+  },
+  "time_cost_per_sec": 0.0001,
+  "pool": [
+   "ollama/llama3.2:3b",
+   "openrouter/anthropic/claude-opus-4.7",
+   "openrouter/anthropic/claude-sonnet-4.6",
+   "openrouter/deepseek/deepseek-v3.2",
+   "openrouter/google/gemini-3.1-flash-lite-preview",
+   "openrouter/google/gemini-3.1-pro-preview",
+   "openrouter/moonshotai/kimi-k2-thinking",
+   "openrouter/openai/gpt-5.3-codex",
+   "openrouter/openai/gpt-5.4-nano",
+   "openrouter/x-ai/grok-4.20"
+  ],
+  "lane_mode": "n/a (direct call)",
+  "max_run_seconds": 7200,
+  "direct_timeout_seconds": 7200.0,
+  "answerer_call_timeout_seconds": 7200.0,
+  "orchestrator_call_timeout_seconds": 7200.0,
+  "tools_enabled": false,
+  "env": {
+   "ANSWERER_MAX_TOKENS": "6000",
+   "ORCHESTRATOR_MAX_TOKENS": "6000",
+   "ORCHESTRATOR_QUALITY_REQUIREMENT": "9.0",
+   "BORG_RULE_ZERO_SHORTCUT": "true",
+   "LEAF_QUALITY_LIGHT": "6.0",
+   "LEAF_QUALITY_MID": "7.5",
+   "LEAF_QUALITY_HEAVY": "9.0",
+   "TIME_COST_PER_SEC": "0.0001",
+   "BORG_LANE_MAX_OUTPUT_CHARS": "1500",
+   "BORG_LANE_MAX_VERBATIM_CHARS": "120",
+   "BORG_LANE_MAX_NGRAM_SHARE": "0.10",
+   "BORG_LANE_MANIFEST": "names",
+   "BORG_LANE_PART_CHARS": "8000",
+   "BORG_LANE_LOCAL_ALLOWLIST": null,
+   "BORG_LOCAL_HOSTS": null,
+   "BORG_ANSWERER_CALL_TIMEOUT": "7200",
+   "BORG_ORCHESTRATOR_CALL_TIMEOUT": "7200",
+   "BORG_LANE_MODE": null,
+   "BORG_MAX_RUN_SECONDS": "7200",
+   "BASELINE_MODEL_ID": "openrouter/anthropic/claude-opus-5.5"
+  },
+  "baseline_model_id": "openrouter/anthropic/claude-opus-5.5",
+  "baseline_resolved_by_engine": true,
+  "baseline_note": "the bench baseline; the engine resolves it from the matrix it is given"
+ },
+ "db_path": null,
+ "calls_log": "bench/results/2026_11_19/dbs/C_direct_1.calls.jsonl",
+ "attempt": 1,
+ "ledger_dollars": 0.7980119999999999,
+ "aborted_attempts": [],
+ "estimate_dollars": 0.7787999999999999,
+ "quality": {
+  "informational_fact_score": {
+   "facts_found": 8,
+   "facts_total": 8,
+   "contradictions_found": 2,
+   "contradictions_total": 2,
+   "facts_matched": [
+    "On what date does the Tamarack pilot end?",
+    "How many loading bays does the Kessler Falls depot have?",
+    "Who is the group compliance contact for regulatory filings?",
+    "What is the approved budget for Project Osprey?",
+    "For how many days must audit logs be kept?",
+    "Which vendor will supply the refrigeration units for the new cold store?",
+    "What is the code word for an emergency shutdown?",
+    "How often is the Pell Harbour crane inspected?"
+   ],
+   "contradictions_matched": [
+    "Kessler Falls depot opening year",
+    "Project Osprey steering committee size"
+   ]
+  },
+  "informational_only": true,
+  "note": "informational only, never quoted: the pairwise judge decides job C"
+ },
+ "data_root": "C:\\Stage\\BORG_ROUTE\\bench\\data",
+ "local_speed": {
+  "ollama/llama3.2:3b": 5.337
+ }
+}

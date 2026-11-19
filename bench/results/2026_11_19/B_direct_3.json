@@ -1,0 +1,195 @@
+{
+ "job": "B",
+ "arm": "direct",
+ "repeat": 3,
+ "date": "2026_11_19",
+ "status": "completed",
+ "error": null,
+ "lane_mode": "n/a (direct call)",
+ "run_id": null,
+ "cost_dollars": 0.32466400000000006,
+ "wall_seconds": 123.992,
+ "tokens": {
+  "prompt_tokens": 1616,
+  "completion_tokens": 15910,
+  "total_tokens": 17526
+ },
+ "models": [
+  "openrouter/anthropic/claude-opus-5.5"
+ ],
+ "models_per_step": [
+  {
+   "step": "direct_call_1",
+   "chosen": "openrouter/anthropic/claude-opus-5.5",
+   "dollars": 0.32466400000000006,
+   "finish_reason": "stop",
+   "attempts": [
+    {
+     "max_tokens": 7000,
+     "tokens_in": 808,
+     "tokens_out": 7000,
+     "dollars": 0.14323200000000003,
+     "finish_reason": "length"
+    },
+    {
+     "max_tokens": 14000,
+     "tokens_in": 808,
+     "tokens_out": 8910,
+     "dollars": 0.18143200000000004,
+     "finish_reason": "stop"
+    }
+   ]
+  }
+ ],
+ "model_calls": 1,
+ "answer": "=== FILE: schema.sql ===\n```sql\n-- SQLite schema for the notes service.\n-- Foreign key enforcement must be enabled per connection with\n-- \"PRAGMA foreign_keys = ON\"; app.py does this for every connection.\n\nCREATE TABLE IF NOT EXISTS notes (\n    id         INTEGER PRIMARY KEY AUTOINCREMENT,\n    title      TEXT    NOT NULL CHECK (length(title) BETWEEN 1 AND 120),\n    body       TEXT    NOT NULL DEFAULT '',\n    created_at TEXT    NOT NULL\n);\n\nCREATE TABLE IF NOT EXISTS tags (\n    id   INTEGER PRIMARY KEY AUTOINCREMENT,\n    name TEXT    NOT NULL CHECK (length(name) BETWEEN 1 AND 30),\n    CONSTRAINT uq_tags_name UNIQUE (name)\n);\n\nCREATE TABLE IF NOT EXISTS note_tags (\n    note_id INTEGER NOT NULL,\n    tag_id  INTEGER NOT NULL,\n    PRIMARY KEY (note_id, tag_id),\n    FOREIGN KEY (note_id) REFERENCES notes (id) ON DELETE CASCADE,\n    FOREIGN KEY (tag_id)  REFERENCES tags (id)  ON DELETE CASCADE\n);\n\nCREATE INDEX IF NOT EXISTS idx_note_tags_tag_id ON note_tags (tag_id);\nCREATE INDEX IF NOT EXISTS idx_notes_created_at ON notes (created_at);\n```\n\n=== FILE: app.py ===\n```python\n\"\"\"Notes service: FastAPI + sqlite3.\"\"\"\n\nimport os\nimport re\nimport sqlite3\nfrom contextlib import asynccontextmanager\nfrom datetime import datetime, timezone\nfrom pathlib import Path\nfrom typing import List, Optional\n\nfrom fastapi import FastAPI, HTTPException, Response\nfrom pydantic import BaseModel\n\nSCHEMA_PATH = Path(__file__).resolve().with_name(\"schema.sql\")\nTAG_RE = re.compile(r\"[a-z0-9]{1,30}\")\nTITLE_MAX = 120\n\n\ndef db_path() -> str:\n    return os.environ.get(\"NOTES_DB\", \"notes.db\")\n\n\ndef connect() -> sqlite3.Connection:\n    conn = sqlite3.connect(db_path())\n    conn.row_factory = sqlite3.Row\n    conn.execute(\"PRAGMA foreign_keys = ON\")\n    return conn\n\n\ndef init_db() -> None:\n    schema = SCHEMA_PATH.read_text(encoding=\"utf-8\")\n    conn = connect()\n    try:\n        conn.executescript(schema)\n        conn.commit()\n    finally:\n        conn.close()\n\n\n@asynccontextmanager\nasync def lifespan(_app: FastAPI):\n    init_db()\n    yield\n\n\napp = FastAPI(title=\"Notes service\", version=\"1.0.0\", lifespan=lifespan)\n\n\nclass NoteIn(BaseModel):\n    title: str\n    body: Optional[str] = \"\"\n    tags: Optional[List[str]] = None\n\n\ndef utc_now_iso() -> str:\n    return datetime.now(timezone.utc).strftime(\"%Y-%m-%dT%H:%M:%S.%fZ\")\n\n\ndef validate_note(note: NoteIn):\n    title = note.title\n    if not 1 <= len(title) <= TITLE_MAX:\n        raise HTTPException(\n            status_code=422,\n            detail=\"title must be between 1 and 120 characters\",\n        )\n    body = note.body if note.body is not None else \"\"\n    tags: List[str] = []\n    for tag in note.tags or []:\n        if not TAG_RE.fullmatch(tag):\n            raise HTTPException(\n                status_code=422,\n                detail=\"tag %r must be 1 to 30 lowercase letters or digits\" % tag,\n            )\n        if tag not in tags:\n            tags.append(tag)\n    return title, body, tags\n\n\ndef fetch_tags(conn: sqlite3.Connection, note_id: int) -> List[str]:\n    rows = conn.execute(\n        \"SELECT t.name FROM tags t \"\n        \"JOIN note_tags nt ON nt.tag_id = t.id \"\n        \"WHERE nt.note_id = ? ORDER BY t.name\",\n        (note_id,),\n    ).fetchall()\n    return [row[\"name\"] for row in rows]\n\n\ndef row_to_note(conn: sqlite3.Connection, row: sqlite3.Row) -> dict:\n    return {\n        \"id\": row[\"id\"],\n        \"title\": row[\"title\"],\n        \"body\": row[\"body\"],\n        \"created_at\": row[\"created_at\"],\n        \"tags\": fetch_tags(conn, row[\"id\"]),\n    }\n\n\ndef load_note(conn: sqlite3.Connection, note_id: int) -> Optional[dict]:\n    row = conn.execute(\n        \"SELECT id, title, body, created_at FROM notes WHERE id = ?\",\n        (note_id,),\n    ).fetchone()\n    if row is None:\n        return None\n    return row_to_note(conn, row)\n\n\n@app.post(\"/notes\", status_code=201)\ndef create_note(note: NoteIn):\n    title, body, tags = validate_note(note)\n    conn = connect()\n    try:\n        with conn:\n            cur = conn.execute(\n                \"INSERT INTO notes (title, body, created_at) VALUES (?, ?, ?)\",\n                (title, body, utc_now_iso()),\n            )\n            note_id = cur.lastrowid\n            for name in tags:\n                conn.execute(\"INSERT OR IGNORE INTO tags (name) VALUES (?)\", (name,))\n                tag_id = conn.execute(\n                    \"SELECT id FROM tags WHERE name = ?\", (name,)\n                ).fetchone()[\"id\"]\n                conn.execute(\n                    \"INSERT OR IGNORE INTO note_tags (note_id, tag_id) VALUES (?, ?)\",\n                    (note_id, tag_id),\n                )\n        return load_note(conn, note_id)\n    finally:\n        conn.close()\n\n\n@app.get(\"/notes\")\ndef list_notes(tag: Optional[str] = None):\n    conn = connect()\n    try:\n        if tag is None:\n            rows = conn.execute(\n                \"SELECT id, title, body, created_at FROM notes \"\n                \"ORDER BY created_at DESC, id DESC\"\n            ).fetchall()\n        else:\n            rows = conn.execute(\n                \"SELECT n.id, n.title, n.body, n.created_at FROM notes n \"\n                \"JOIN note_tags nt ON nt.note_id = n.id \"\n                \"JOIN tags t ON t.id = nt.tag_id \"\n                \"WHERE t.name = ? \"\n                \"ORDER BY n.created_at DESC, n.id DESC\",\n                (tag,),\n            ).fetchall()\n        return [row_to_note(conn, row) for row in rows]\n    finally:\n        conn.close()\n\n\n@app.get(\"/notes/{note_id}\")\ndef get_note(note_id: int):\n    conn = connect()\n    try:\n        note = load_note(conn, note_id)\n    finally:\n        conn.close()\n    if note is None:\n        raise HTTPException(status_code=404, detail=\"note not found\")\n    return note\n\n\n@app.delete(\"/notes/{note_id}\", status_code=204, response_class=Response)\ndef delete_note(note_id: int):\n    conn = connect()\n    try:\n        with conn:\n            conn.execute(\"DELETE FROM note_tags WHERE note_id = ?\", (note_id,))\n            cur = conn.execute(\"DELETE FROM notes WHERE id = ?\", (note_id,))\n            deleted = cur.rowcount\n    finally:\n        conn.close()\n    if deleted == 0:\n        raise HTTPException(status_code=404, detail=\"note not found\")\n    return Response(status_code=204)\n```\n\n=== FILE: openapi.yaml ===\n```yaml\nopenapi: 3.0.3\ninfo:\n  title: Notes service\n  version: 1.0.0\npaths:\n  /notes:\n    post:\n      summary: Create a note\n      operationId: createNote\n      requestBody:\n        required: true\n        content:\n          application/json:\n            schema:\n              $ref: '#/components/schemas/NoteIn'\n      responses:\n        '201':\n          description: Note created\n          content:\n            application/json:\n              schema:\n                $ref: '#/components/schemas/Note'\n        '422':\n          description: Invalid title or tag\n          content:\n            application/json:\n              schema:\n                $ref: '#/components/schemas/Error'\n    get:\n      summary: List notes, newest first, optionally filtered by tag\n      operationId: listNotes\n      parameters:\n        - name: tag\n          in: query\n          required: false\n          schema:\n            type: string\n      responses:\n        '200':\n          description: List of notes\n          content:\n            application/json:\n              schema:\n                type: array\n                items:\n                  $ref: '#/components/schemas/Note'\n  /notes/{id}:\n    parameters:\n      - name: id\n        in: path\n        required: true\n        schema:\n          type: integer\n    get:\n      summary: Get a note with its tags\n      operationId: getNote\n      responses:\n        '200':\n          description: The note\n          content:\n            application/json:\n              schema:\n                $ref: '#/components/schemas/Note'\n        '404':\n          description: Note not found\n          content:\n            application/json:\n              schema:\n                $ref: '#/components/schemas/Error'\n    delete:\n      summary: Delete a note and its tag links\n      operationId: deleteNote\n      responses:\n        '204':\n          description: Note deleted\n        '404':\n          description: Note not found\n          content:\n            application/json:\n              schema:\n                $ref: '#/components/schemas/Error'\ncomponents:\n  schemas:\n    Tag:\n      type: string\n      pattern: '^[a-z0-9]{1,30}$'\n    NoteIn:\n      type: object\n      required:\n        - title\n      properties:\n        title:\n          type: string\n          minLength: 1\n          maxLength: 120\n        body:\n          type: string\n          default: ''\n        tags:\n          type: array\n          items:\n            $ref: '#/components/schemas/Tag'\n    Note:\n      type: object\n      required:\n        - id\n        - title\n        - body\n        - created_at\n        - tags\n      properties:\n        id:\n          type: integer\n        title:\n          type: string\n          minLength: 1\n          maxLength: 120\n        body:\n          type: string\n        created_at:\n          type: string\n          format: date-time\n        tags:\n          type: array\n          items:\n            $ref: '#/components/schemas/Tag'\n    Error:\n      type: object\n      properties:\n        detail: {}\n```\n\n=== FILE: test_app.py ===\n```python\nimport sqlite3\n\nimport pytest\nfrom fastapi.testclient import TestClient\n\nfrom app import app\n\n\n@pytest.fixture\ndef db_file(tmp_path, monkeypatch):\n    path = tmp_path / \"test_notes.db\"\n    monkeypatch.setenv(\"NOTES_DB\", str(path))\n    return path\n\n\n@pytest.fixture\ndef client(db_file):\n    with TestClient(app) as test_client:\n        yield test_client\n\n\ndef create(client, title=\"A note\", body=\"\", tags=None):\n    payload = {\"title\": title, \"body\": body, \"tags\": tags or []}\n    return client.post(\"/notes\", json=payload)\n\n\ndef count_rows(db_file, table):\n    conn = sqlite3.connect(str(db_file))\n    try:\n        return conn.execute(\"SELECT COUNT(*) FROM %s\" % table).fetchone()[0]\n    finally:\n        conn.close()\n\n\ndef test_create_note(client):\n    resp = create(client, title=\"Hello\", body=\"World\", tags=[\"work\", \"idea1\"])\n    assert resp.status_code == 201\n    data = resp.json()\n    assert isinstance(data[\"id\"], int)\n    assert data[\"title\"] == \"Hello\"\n    assert data[\"body\"] == \"World\"\n    assert sorted(data[\"tags\"]) == [\"idea1\", \"work\"]\n    assert data[\"created_at\"].endswith(\"Z\")\n    assert \"T\" in data[\"created_at\"]\n\n\ndef test_create_note_without_body_or_tags(client):\n    resp = client.post(\"/notes\", json={\"title\": \"Only title\"})\n    assert resp.status_code == 201\n    data = resp.json()\n    assert data[\"body\"] == \"\"\n    assert data[\"tags\"] == []\n\n\ndef test_get_note(client):\n    created = create(client, title=\"Get me\", tags=[\"x\"]).json()\n    resp = client.get(\"/notes/%d\" % created[\"id\"])\n    assert resp.status_code == 200\n    assert resp.json() == created\n\n\ndef test_get_missing_note_returns_404(client):\n    resp = client.get(\"/notes/9999\")\n    assert resp.status_code == 404\n\n\ndef test_list_all_newest_first(client):\n    first = create(client, title=\"first\").json()\n    second = create(client, title=\"second\").json()\n    third = create(client, title=\"third\").json()\n    resp = client.get(\"/notes\")\n    assert resp.status_code == 200\n    ids = [note[\"id\"] for note in resp.json()]\n    assert ids == [third[\"id\"], second[\"id\"], first[\"id\"]]\n\n\ndef test_list_by_tag(client):\n    a = create(client, title=\"a\", tags=[\"red\"]).json()\n    create(client, title=\"b\", tags=[\"blue\"])\n    c = create(client, title=\"c\", tags=[\"red\", \"blue\"]).json()\n    resp = client.get(\"/notes\", params={\"tag\": \"red\"})\n    assert resp.status_code == 200\n    ids = [note[\"id\"] for note in resp.json()]\n    assert ids == [c[\"id\"], a[\"id\"]]\n    assert client.get(\"/notes\", params={\"tag\": \"green\"}).json() == []\n\n\ndef test_tags_are_stored_once(client, db_file):\n    create(client, title=\"one\", tags=[\"shared\", \"shared\"])\n    create(client, title=\"two\", tags=[\"shared\"])\n    assert count_rows(db_file, \"tags\") == 1\n    assert count_rows(db_file, \"note_tags\") == 2\n\n\ndef test_delete_note(client, db_file):\n    created = create(client, title=\"bye\", tags=[\"gone\"]).json()\n    resp = client.delete(\"/notes/%d\" % created[\"id\"])\n    assert resp.status_code == 204\n    assert resp.content == b\"\"\n    assert client.get(\"/notes/%d\" % created[\"id\"]).status_code == 404\n    assert client.get(\"/notes\", params={\"tag\": \"gone\"}).json() == []\n    assert count_rows(db_file, \"note_tags\") == 0\n\n\ndef test_delete_missing_note_returns_404(client):\n    resp = client.delete(\"/notes/12345\")\n    assert resp.status_code == 404\n\n\ndef test_empty_title_returns_422(client):\n    assert create(client, title=\"\").status_code == 422\n\n\ndef test_missing_title_returns_422(client):\n    assert client.post(\"/notes\", json={\"body\": \"no title\"}).status_code == 422\n\n\ndef test_long_title_returns_422(client):\n    assert create(client, title=\"x\" * 121).status_code == 422\n    assert create(client, title=\"x\" * 120).status_code == 201\n\n\n@pytest.mark.parametrize(\n    \"bad_tag\",\n    [\"\", \"Upper\", \"has space\", \"dash-tag\", \"a\" * 31, \"\u00fcn\u00ef\"],\n)\ndef test_invalid_tag_returns_422(client, bad_tag):\n    resp = create(client, title=\"tagged\", tags=[bad_tag])\n    assert resp.status_code == 422\n\n\ndef test_invalid_request_does_not_create_note(client):\n    create(client, title=\"ok\", tags=[\"BAD\"])\n    assert client.get(\"/notes\").json() == []\n\n\ndef test_valid_tag_boundaries(client):\n    resp = create(client, title=\"tags\", tags=[\"a\", \"b\" * 30, \"abc123\"])\n    assert resp.status_code == 201\n    assert sorted(resp.json()[\"tags\"]) == sorted([\"a\", \"b\" * 30, \"abc123\"])\n```",
+ "routing_config": {
+  "leaf_floors": {
+   "light": 6.0,
+   "mid": 7.5,
+   "heavy": 9.0
+  },
+  "time_cost_per_sec": 0.0001,
+  "pool": [
+   "ollama/llama3.2:3b",
+   "openrouter/anthropic/claude-opus-4.7",
+   "openrouter/anthropic/claude-sonnet-4.6",
+   "openrouter/deepseek/deepseek-v3.2",
+   "openrouter/google/gemini-3.1-flash-lite-preview",
+   "openrouter/google/gemini-3.1-pro-preview",
+   "openrouter/moonshotai/kimi-k2-thinking",
+   "openrouter/openai/gpt-5.3-codex",
+   "openrouter/openai/gpt-5.4-nano",
+   "openrouter/x-ai/grok-4.20"
+  ],
+  "lane_mode": "n/a (direct call)",
+  "max_run_seconds": 7200,
+  "direct_timeout_seconds": 7200.0,
+  "answerer_call_timeout_seconds": 7200.0,
+  "orchestrator_call_timeout_seconds": 7200.0,
+  "tools_enabled": false,
+  "env": {
+   "ANSWERER_MAX_TOKENS": "6000",
+   "ORCHESTRATOR_MAX_TOKENS": "6000",
+   "ORCHESTRATOR_QUALITY_REQUIREMENT": "9.0",
+   "BORG_RULE_ZERO_SHORTCUT": "true",
+   "LEAF_QUALITY_LIGHT": "6.0",
+   "LEAF_QUALITY_MID": "7.5",
+   "LEAF_QUALITY_HEAVY": "9.0",
+   "TIME_COST_PER_SEC": "0.0001",
+   "BORG_LANE_MAX_OUTPUT_CHARS": "1500",
+   "BORG_LANE_MAX_VERBATIM_CHARS": "120",
+   "BORG_LANE_MAX_NGRAM_SHARE": "0.10",
+   "BORG_LANE_MANIFEST": "names",
+   "BORG_LANE_PART_CHARS": "8000",
+   "BORG_LANE_LOCAL_ALLOWLIST": null,
+   "BORG_LOCAL_HOSTS": null,
+   "BORG_ANSWERER_CALL_TIMEOUT": "7200",
+   "BORG_ORCHESTRATOR_CALL_TIMEOUT": "7200",
+   "BORG_LANE_MODE": null,
+   "BORG_MAX_RUN_SECONDS": "7200",
+   "BASELINE_MODEL_ID": "openrouter/anthropic/claude-opus-5.5"
+  },
+  "baseline_model_id": "openrouter/anthropic/claude-opus-5.5",
+  "baseline_resolved_by_engine": true,
+  "baseline_note": "the bench baseline; the engine resolves it from the matrix it is given"
+ },
+ "db_path": null,
+ "calls_log": "bench/results/2026_11_19/dbs/B_direct_3.calls.jsonl",
+ "attempt": 1,
+ "ledger_dollars": 0.32466400000000006,
+ "aborted_attempts": [],
+ "estimate_dollars": 0.32,
+ "quality": {
+  "files": [
+   "app.py",
+   "openapi.yaml",
+   "schema.sql",
+   "test_app.py"
+  ],
+  "checks": {
+   "files_present": {
+    "status": "pass",
+    "detail": "all four files"
+   },
+   "sql_executes": {
+    "status": "pass",
+    "detail": "1 sql file(s) executed in SQLite"
+   },
+   "python_parses": {
+    "status": "pass",
+    "detail": "2 python file(s) parse"
+   },
+   "openapi_loads": {
+    "status": "pass",
+    "detail": "1 yaml file(s) load with openapi and paths"
+   },
+   "spec_tables": {
+    "status": "pass",
+    "detail": "all required tables"
+   },
+   "spec_openapi_paths": {
+    "status": "pass",
+    "detail": "every required path and method"
+   },
+   "tests_pass_in_container": {
+    "status": "pass",
+    "detail": "stclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead. |     from starlette.testclient import TestClient as TestClient  # noqa |  | -- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html | 20 passed, 1 warning in 0.70s"
+   },
+   "ref_test_create_returns_201_and_the_note": {
+    "status": "pass",
+    "detail": "passed"
+   },
+   "ref_test_get_returns_the_note_with_its_tags": {
+    "status": "pass",
+    "detail": "passed"
+   },
+   "ref_test_get_missing_note_is_404": {
+    "status": "pass",
+    "detail": "passed"
+   },
+   "ref_test_list_by_tag_returns_only_tagged_notes": {
+    "status": "pass",
+    "detail": "passed"
+   },
+   "ref_test_list_without_tag_returns_all_newest_first": {
+    "status": "pass",
+    "detail": "passed"
+   },
+   "ref_test_a_tag_shared_by_two_notes_is_stored_once_and_lists_both": {
+    "status": "pass",
+    "detail": "passed"
+   },
+   "ref_test_delete_returns_204_then_the_note_is_gone": {
+    "status": "pass",
+    "detail": "passed"
+   },
+   "ref_test_delete_missing_note_is_404": {
+    "status": "pass",
+    "detail": "passed"
+   },
+   "ref_test_empty_title_is_422": {
+    "status": "pass",
+    "detail": "passed"
+   },
+   "ref_test_title_over_120_characters_is_422": {
+    "status": "pass",
+    "detail": "passed"
+   },
+   "ref_test_bad_tag_is_422": {
+    "status": "pass",
+    "detail": "passed"
+   }
+  },
+  "passed": 18,
+  "failed": 0,
+  "skipped": 0,
+  "machine_checks_passed": 18,
+  "void": false,
+  "void_reason": null
+ },
+ "data_root": "C:\\Stage\\BORG_ROUTE\\bench\\data",
+ "local_speed": {
+  "ollama/llama3.2:3b": 6.93
+ }
+}

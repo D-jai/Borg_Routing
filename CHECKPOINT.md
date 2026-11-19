@@ -21,7 +21,12 @@ Lead session `borg-route-f1` (Opus 5.5) since 02:20 on 16-Nov-2026. Every work o
 
 If this session stopped abruptly: `git log` and `git status` show what landed; any uncommitted changes belong to an in-progress builder: read the diff, finish or stash it, record which in the build log.
 
-## Where I left off (19-Nov-2026, about 00:10): round-3 freeze
+## Where I left off (19-Nov-2026, about 00:40): round 3 done, report with the planner
+
+- **Round 3 is run and reported** (rulings 40, 41): 20 runs, US$3.8507 of US$6. By the rule job B won (its input is not fresh), A and C did not, D is reported only. Report: `bench/results/2026_11_19/summary.md`; side-by-side page `bench/results/round_1_vs_round_2.md` (three rounds). README, deck and posts cite nothing until the planner sends wording after Deej has seen it.
+- **Next:** the planner's reading of the report; the README screenshot (CI run 44458986061's ui-check artifact); the STAGE_MEMORY row; remove the borg_pack worktree.
+
+## Earlier waypoint (19-Nov-2026, about 00:10): round-3 freeze
 
 - **This commit is the round-3 freeze** (Deej's ruling 15, planner ruling 40, BUILD.md section 8). It sits on `d8cf3b3`, which CI run 44458986061 passed in full: the suite on Python 3.11 and 3.13, compose replay install, interface check.
 - **The showcase batch is pushed.** It holds `constraints.txt`, the README's non-Docker demo, plan-node text, the stale model removed, playback (4 s gap cap, recorded times), ruling 39 (reversed marker pairs, filter attempts refused, plain rows on a bad spec), and the final demo set (job 1 `c882e3c9`, job 2 `6c83c9c7`, job 3 `e31a5330`; demo spend US$0.7145 of US$1).

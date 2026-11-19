@@ -1,0 +1,16 @@
+{
+ "stage": 2,
+ "tripped_by": "B_direct_3",
+ "cost": 0.32466400000000006,
+ "spend_with_aborted_attempts": 0.32466400000000006,
+ "estimate": 0.32,
+ "worst_ratio": 1.098841379310345,
+ "remaining": {
+  "B_borg_cloud_3": 0.18
+ },
+ "ledger_spent": 10.83574645,
+ "judge_tail": 0.0,
+ "total_if_all_run": 11.01574645,
+ "cap": 20.0,
+ "decision": "continue"
+}
