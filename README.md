@@ -107,6 +107,11 @@ Read "What is not promised" in the user guide before you rely on the lane.
 - Admin pages and keys are locked by `BORG_ADMIN_TOKEN`. Without a token, only the machine itself may use them, which in Docker is nobody, so the live Docker setup needs a token. Running `uvicorn` directly on the host is the one case where the loopback rule works without one. <!-- claim C18 -->
 - The replay demo cannot change anything: every route that changes state is refused. <!-- claim C28 -->
 
+## Related projects
+
+- [The_Borg_DB](https://github.com/D-jai/The_Borg_DB-public): a local-first knowledge base that turns your meetings, emails and documents into searchable facts and mines them for patterns.
+- [openclaw-openwebui-pipe](https://github.com/D-jai/openclaw-openwebui-pipe): connects Open WebUI's chat to an OpenClaw agent.
+
 ## Licence
 
 MIT. See `LICENSE`.
