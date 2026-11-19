@@ -84,6 +84,6 @@ MIT. See `LICENSE`.
 
 ## Contact
 
-Dhananjay Raol, Aliud Inquisito Inc.
+Dhananjay Raol, Aliud Inquisito Inc. Questions and problems: open an issue at https://github.com/D-jai/Borg_Routing/issues.
 
-<!-- TODO (planner): add a contact address or web link for the README contact line. -->
+<!-- TODO (planner): the owner chooses what other contact to show when the repository is made public. -->
