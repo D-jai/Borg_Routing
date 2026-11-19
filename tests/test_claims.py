@@ -269,24 +269,39 @@ def test_a_number_in_bold_or_code_still_counts(tree, capsys, shown):
 
 
 
-BANNED_WORDS = ("cheaper", "saving", "saves", "fraction", "faster", "lower cost", "less spend", "less cost")
+BANNED_PHRASES = (
+    "twice", "half as", "a half", "a third", "a quarter", "double", "percent", "per cent",
+    "factor of", "times", "less than", "costs less", "cheaper", "saves", "saved", "saving",
+    "fraction", "faster", "lower cost", "lower spend", "less spend", "less cost",
+)
+NUMBER_WORDS = (
+    "one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen "
+    "sixteen seventeen eighteen nineteen twenty thirty forty fifty sixty seventy eighty ninety hundred"
+).split()
 
 
 def readme_problems(text: str) -> list[str]:
     """Planner ruling 38a: the README states no result number and no saving.
 
-    Strips what may carry digits (comments, fences, inline code, claim ids, codes, dates,
-    list numbers, local addresses), then fails on any digit left and on the banned words."""
+    `%` and `$` fail anywhere, inside code spans too. Other digits are checked after
+    stripping what may carry them (comments, fences, inline code, claim ids, codes, dates,
+    list numbers, local addresses). Banned phrases are whole words, any letter case.
+    "fast", "cheap" and "lower" alone are allowed."""
     s = re.sub(r"<!--.*?-->", "", text, flags=re.S)
     s = re.sub(r"```.*?```", "", s, flags=re.S)
+    problems = [f"symbol {c!r} in README" for c in "%$" if c in s]
     s = re.sub(r"`[^`]*`", "", s)
     s = re.sub(r"\bBRT-[A-Z]+-\d+\b|\bC\d+\b", "", s)
     s = re.sub(r"\b\d{1,2}-[A-Za-z]{3}-\d{4}\b", "", s)
     s = re.sub(r"(?m)^\s*\d+\.\s", "", s)
     s = re.sub(r"(?:localhost|127\.0\.0\.1):\d+", "", s)
-    problems = [f"number left in prose: {m.group(0)!r}" for m in re.finditer(r".{0,12}\d+.{0,12}", s)]
-    low = s.lower()
-    problems += [f"banned word: {w}" for w in BANNED_WORDS if w in low]
+    problems += [f"number left in prose: {m.group(0)!r}" for m in re.finditer(r".{0,12}\d+.{0,12}", s)]
+    for ph in BANNED_PHRASES:
+        if re.search(r"\b" + re.escape(ph) + r"\b", s, re.I):
+            problems.append(f"banned phrase: {ph}")
+    nums = "|".join(NUMBER_WORDS)
+    if re.search(rf"\b(?:{nums})\s+(?:times|percent|%)", s, re.I):
+        problems.append("number word before times or percent")
     return problems
 
 
@@ -294,15 +309,28 @@ def test_the_readme_carries_no_result_number_or_saving_claim():
     assert readme_problems((REPO / "README.md").read_text(encoding="utf-8")) == []
 
 
-@pytest.mark.parametrize("planted", [
+PLANTED = [
+    "Runs are twice as fast.",
+    "It costs half as much as one call.",
+    "Ten times lower spend.",
+    "It cuts cost by forty percent.",
+    "It costs less than one direct call.",
+    "It is cheap, a third of the price.",
+    "Spend drops by a factor of three.",
+    "Saved `40%` on job A.",
     "It cuts spend by 40 % on long lists.",
     "It costs 3x less than one call.",
-    "Runs are twice as fast, a fraction of the price.",
-    "Steps are faster and cost lower cost.",
     "A run took 12 seconds.",
     "That is cheaper than calling a model directly.",
-    "A less spend pattern.",
-])
+    "Cost is a quarter, a fraction of the price.",
+    "The cap is double.",
+    "Runs are faster and it saves money, a real saving.",
+    "It costs `$5` a run.",
+    "Five % off.",
+]
+
+
+@pytest.mark.parametrize("planted", PLANTED)
 def test_the_readme_guard_fails_on_a_planted_example(planted):
     assert readme_problems("# Title\n\n" + planted + "\n") != []
 
@@ -310,3 +338,11 @@ def test_the_readme_guard_fails_on_a_planted_example(planted):
 def test_the_readme_guard_lets_dates_codes_ids_and_ports_through():
     ok = "1. Step one <!-- claim C01 -->\n\nBRT-ORC-019 on 18-Nov-2026 at localhost:8000, see C27.\n"
     assert readme_problems(ok) == []
+
+
+def test_the_readme_guard_lets_the_routing_line_through():
+    line = ('"Cheapest" means the lowest cost counting both dollars and waiting time, among the '
+            "models that clear the step's quality floor. A slow local model can lose to a fast "
+            "cheap cloud model unless the private lane or the local-first setting "
+            "(`borg_route:local`) is on.")
+    assert readme_problems("# T\n\n" + line + "\n") == []

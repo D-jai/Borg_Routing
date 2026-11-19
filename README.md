@@ -73,7 +73,7 @@ Read "What is not promised" in the user guide before you rely on the lane.
 
 ## Limits
 
-- A reply cut off by the token cap is retried once at double the cap, then fails. <!-- claim C22 -->
+- A reply cut off by the token cap is retried once with a larger cap, then fails. <!-- claim C22 -->
 - If every planned step fails and the planning model still writes an answer, the receipt says so in plain words. Treat that answer as unchecked. <!-- claim C26 -->
 - Admin pages and keys are locked by `BORG_ADMIN_TOKEN`. Without a token, only the machine itself may use them, which in Docker is nobody, so the live Docker setup needs a token. Running `uvicorn` directly on the host is the one case where the loopback rule works without one. <!-- claim C18 -->
 - The replay demo cannot change anything: every route that changes state is refused. <!-- claim C28 -->
