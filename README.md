@@ -2,7 +2,7 @@
 
 Breaks a job into steps and sends each step to the cheapest model that can do it, local or cloud. <!-- claim C01 --> With the private lane on (`raw_local` or `all_local`), the steps that read your documents run only on your own machines. <!-- claim C36 -->
 
-<!-- TODO (planner): add the Run-view screenshot here. docs/design/screens/ does not exist yet; the CI interface check (work order 4.6) produces the images. Do not invent an image path before then. -->
+<!-- TODO (planner): add the Run-view screenshot here. the CI interface check (work order 4.6) produces the images; the lead commits one to docs/design/screens/ after the final demo re-record. -->
 
 ## Who it is for
 
@@ -14,6 +14,14 @@ You need Docker with the Compose plugin. No key, no `.env` file and no model are
 
 ```
 docker compose up -d --build
+```
+
+Without Docker, with Python installed, from the cloned folder:
+
+```
+python -m pip install -c constraints.txt -e .
+BORG_DEMO_MODE=replay python -m uvicorn main:app          # Linux, macOS, Git Bash
+$env:BORG_DEMO_MODE="replay"; python -m uvicorn main:app  # Windows PowerShell
 ```
 
 Open `http://localhost:8000`. The default compose service sets replay mode and needs no env file. <!-- claim C27 --> In replay mode the app plays back runs recorded earlier, and no model, key or network call is made. <!-- claim C28 --> Choose a recorded job on the Ask page, watch the steps appear, and read the receipt at the end. Every page says the recorded jobs are made-up demo data and not benchmark results. <!-- claim C35 --> The install guide has the details: `docs/install-guide.md`.
