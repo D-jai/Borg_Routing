@@ -212,6 +212,7 @@ async def _poll_stage_events(
     last_seen_log_id: int,
     db_path: str,
     run_id: Optional[str] = None,
+    redact: bool = False,
 ) -> tuple[list[dict], int]:
     """Pull recent orchestrator_decision rows from the logs
     table so the SSE layer can surface them as stage transitions.
@@ -219,6 +220,11 @@ async def _poll_stage_events(
     Returns a list of {stage, detail, ts} dicts and the highest log_id
     seen so the next poll only fetches new rows. ``run_id`` limits the rows
     to that run and its descendant runs (R3); without it every run's rows come back.
+
+    ``redact`` (planner ruling 37): each row first goes through
+    ``src.api.tasks.redact_event``, the rule the run view applies for a
+    non-admin while the lane is on, so a stage's ``msg`` and ``rationale``
+    reach the stream exactly as they reach the run view.
     """
     import aiosqlite
     events: list[dict] = []
@@ -241,7 +247,7 @@ async def _poll_stage_events(
                 run_filter = f"AND run_id IN ({','.join('?' * len(wanted))})"
                 params += tuple(wanted)
             async with db.execute(
-                f"""SELECT log_id, model_id, decision_json, created_at
+                f"""SELECT log_id, event_type, envelope_id, model_id, decision_json, created_at
                    FROM logs
                    WHERE event_type = 'orchestrator_decision'
                      AND log_id > ?
@@ -252,13 +258,20 @@ async def _poll_stage_events(
                 params,
             ) as cur:
                 rows = await cur.fetchall()
+        if redact:
+            from src.api.tasks import redact_event  # noqa: PLC0415
         for row in rows:
             new_max = max(new_max, row["log_id"])
+            ev = dict(row)
+            if redact:
+                ev = redact_event(ev)
             decision: dict = {}
             try:
-                decision = json.loads(row["decision_json"]) if row["decision_json"] else {}
+                decision = json.loads(ev["decision_json"]) if ev["decision_json"] else {}
             except Exception:
                 pass
+            if not isinstance(decision, dict):
+                decision = {}
             stage = decision.get("mode") or decision.get("code") or "orchestrator"
             detail = decision.get("msg") or decision.get("rationale") or row["model_id"] or ""
             events.append({
@@ -276,6 +289,7 @@ async def _stream_orchestration_with_heartbeats(
     thread_window: list,
     model_alias: str,
     lane=None,
+    request=None,
 ) -> AsyncIterator[str]:
     """BRT-STR-01 — keep the SSE connection alive while the pipeline runs.
 
@@ -317,11 +331,16 @@ async def _stream_orchestration_with_heartbeats(
             # Emit stage events found since the last poll;
             # fall back to a heartbeat comment when nothing's new so
             # the connection still stays warm.
+            # Planner ruling 37: redacted exactly when the run view would be
+            # (not an admin, lane on), asked again on every poll.
+            from src.api.tasks import viewer_redacts  # noqa: PLC0415
+
             events, last_log_id = await _poll_stage_events(
                 started_at=started_at,
                 last_seen_log_id=last_log_id,
                 db_path=DB_PATH,
                 run_id=str(own_run_id),
+                redact=await viewer_redacts(request),
             )
             if events:
                 for ev in events:
@@ -742,6 +761,7 @@ async def chat_completions(request: Request):
                 thread_window=thread_window,
                 model_alias=model_alias,
                 lane=lane,
+                request=request,
             ),
             media_type="text/event-stream",
         )

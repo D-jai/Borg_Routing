@@ -594,6 +594,10 @@ The planner never sees the text. It gets a list: an id per document (`doc_001`),
 - Every request a run makes while the lane is on is written to the `outbound_requests` table before it is sent, with its exact body (secret fields such as `api_key` are blanked in the stored copy), and whether it left the machine. If that write fails, the request is not sent (**BRT-LANE-007**). <!-- claim C14 --> A retry is its own row. Many steps sending at once (a document in dozens of parts) take turns writing: each write waits for the database (up to 30 seconds) and is tried up to 5 times, so only a write that truly fails blocks a request.
 - Local calls ignore proxy settings (`HTTP_PROXY` and the like), so a proxy cannot carry them off the machine.
 
+### What you will see on screen
+
+The short fields a local step derives from your documents (such as a topic or an owner name) appear in the run view, because they passed the output check. An output that the check refused appears only as a code and the document ids (for example `BRT-LANE-004` and `doc_003`), never as text. While the lane is on, a viewer who is not the admin sees the same text for each stage in the Ask page's progress line as on the Run page: both hide the planner's notes and messages the same way.
+
 ### Using the lane from the API
 
 - `POST /v1/task`: add `"documents": {"folder": "..."}` (or `"files"`) to the body. A refused path returns 400 with **BRT-LANE-001** and creates no run; documents while `lane_mode` is `off` return 400 with **BRT-LANE-005**.

@@ -269,73 +269,76 @@ def _redact_events(events: list[dict]) -> list[dict]:
     The decision text of an error or other event can quote document content, so
     it is removed. Type, model, tokens, dollars, latency and timestamps stay,
     and so does a route decision (its routing data is also shown as ``routing``).
+    Each event goes through ``redact_event``, the one rule the run view and the
+    live chat stream share (planner ruling 37).
     """
-    kept = []
-    for ev in events:
-        if ev.get("event_type") in ("orchestrator_decision", "model_call"):
-            try:
-                decision = json.loads(ev.get("decision_json") or "null")
-            except (TypeError, ValueError):
-                decision = None
-            if not isinstance(decision, dict):
-                decision = {}
-            # A route decision is kept whole.
-            if ev.get("event_type") == "orchestrator_decision" and decision.get("mode") == "route":
-                kept.append(ev)
-                continue
-            # A packed post's outcome (planner ruling 23): its ids, counts,
-            # flags and error code only; any other field is dropped.
-            if ev.get("event_type") == "orchestrator_decision" and decision.get("mode") == "pack_outcome":
-                counts = {k: decision[k] for k in _PACK_OUTCOME_KEYS if k in decision}
-                kept.append(dict(ev, decision_json=json.dumps(counts)))
-                continue
-            if (ev.get("event_type") == "orchestrator_decision"
-                    and decision.get("mode") == "extra_fields_missing"):
-                kept.append(dict(ev, decision_json=json.dumps(_extra_fields_note(decision))))
-                continue
-            # Ruling 32c: the plan note for a skill field that was asked for and
-            # not produced (BRT-ORC-035), and ruling 32d: a key no node or skill
-            # takes, dropped (BRT-ORC-036). Built from the plan and the skill list
-            # only, so it stays: these five keys, each string cut at 40, at most
-            # 10 fields.
-            if (ev.get("event_type") == "orchestrator_decision"
-                    and decision.get("code") in ("BRT-ORC-035", "BRT-ORC-036")
-                    and decision.get("action") == "ran_without_fields"):
-                fields = decision.get("fields")
-                note = {
-                    "code": decision["code"], "action": "ran_without_fields",
-                    "node_id": str(decision.get("node_id", ""))[:40],
-                    "skill_id": str(decision.get("skill_id", ""))[:40],
-                    "fields": [str(f)[:40] for f in (fields if isinstance(fields, list) else [])[:10]],
-                }
-                kept.append(dict(ev, decision_json=json.dumps(note)))
-                continue
-            # A packed item's share (ids and numbers only) stays, so the page
-            # counts each packed post once; anything else in it is dropped.
-            if ev.get("event_type") == "model_call" and isinstance(decision.get("pack"), dict):
-                kept.append(dict(ev, decision_json=json.dumps({"pack": decision["pack"]})))
-                continue
-        if ev.get("event_type") == "error":
-            probe = _speed_probe_warning(ev.get("decision_json"))
-            if probe is not None:
-                kept.append(dict(ev, decision_json=json.dumps(probe)))
-                continue
-            stopped = _planning_stopped(ev.get("decision_json"))
-            if stopped is not None:
-                # Reading (2) under ruling 35: code, severity and action only,
-                # so the receipt can say planning stopped early.
-                kept.append(dict(ev, decision_json=json.dumps(stopped)))
-                continue
-            no_step = _no_step_counts(ev.get("decision_json"))
-            if no_step is not None:
-                kept.append(dict(ev, decision_json=json.dumps(no_step)))
-                continue
-            step_failure = _step_failure_ids(ev.get("decision_json"))
-            if step_failure is not None:
-                kept.append(dict(ev, decision_json=json.dumps(step_failure)))
-                continue
-        kept.append(dict(ev, decision_json=None))
-    return kept
+    return [redact_event(ev) for ev in events]
+
+
+async def viewer_redacts(request=None) -> bool:
+    """THE condition for redaction (planner ruling 37): not an admin, and the lane
+    is on (or its setting cannot be read). ``GET /runs/{id}`` and the live chat
+    stream's stage events both ask here."""
+    return not lane_admin_allowed(request) and await _lane_is_on()
+
+
+def redact_event(ev: dict) -> dict:
+    """One log event as a non-admin sees it while the lane is on (see
+    ``_redact_events``); the input is not changed."""
+    if ev.get("event_type") in ("orchestrator_decision", "model_call"):
+        try:
+            decision = json.loads(ev.get("decision_json") or "null")
+        except (TypeError, ValueError):
+            decision = None
+        if not isinstance(decision, dict):
+            decision = {}
+        # A route decision is kept whole.
+        if ev.get("event_type") == "orchestrator_decision" and decision.get("mode") == "route":
+            return ev
+        # A packed post's outcome (planner ruling 23): its ids, counts,
+        # flags and error code only; any other field is dropped.
+        if ev.get("event_type") == "orchestrator_decision" and decision.get("mode") == "pack_outcome":
+            counts = {k: decision[k] for k in _PACK_OUTCOME_KEYS if k in decision}
+            return dict(ev, decision_json=json.dumps(counts))
+        if (ev.get("event_type") == "orchestrator_decision"
+                and decision.get("mode") == "extra_fields_missing"):
+            return dict(ev, decision_json=json.dumps(_extra_fields_note(decision)))
+        # Ruling 32c: the plan note for a skill field that was asked for and
+        # not produced (BRT-ORC-035), and ruling 32d: a key no node or skill
+        # takes, dropped (BRT-ORC-036). Built from the plan and the skill list
+        # only, so it stays: these five keys, each string cut at 40, at most
+        # 10 fields.
+        if (ev.get("event_type") == "orchestrator_decision"
+                and decision.get("code") in ("BRT-ORC-035", "BRT-ORC-036")
+                and decision.get("action") == "ran_without_fields"):
+            fields = decision.get("fields")
+            note = {
+                "code": decision["code"], "action": "ran_without_fields",
+                "node_id": str(decision.get("node_id", ""))[:40],
+                "skill_id": str(decision.get("skill_id", ""))[:40],
+                "fields": [str(f)[:40] for f in (fields if isinstance(fields, list) else [])[:10]],
+            }
+            return dict(ev, decision_json=json.dumps(note))
+        # A packed item's share (ids and numbers only) stays, so the page
+        # counts each packed post once; anything else in it is dropped.
+        if ev.get("event_type") == "model_call" and isinstance(decision.get("pack"), dict):
+            return dict(ev, decision_json=json.dumps({"pack": decision["pack"]}))
+    if ev.get("event_type") == "error":
+        probe = _speed_probe_warning(ev.get("decision_json"))
+        if probe is not None:
+            return dict(ev, decision_json=json.dumps(probe))
+        stopped = _planning_stopped(ev.get("decision_json"))
+        if stopped is not None:
+            # Reading (2) under ruling 35: code, severity and action only,
+            # so the receipt can say planning stopped early.
+            return dict(ev, decision_json=json.dumps(stopped))
+        no_step = _no_step_counts(ev.get("decision_json"))
+        if no_step is not None:
+            return dict(ev, decision_json=json.dumps(no_step))
+        step_failure = _step_failure_ids(ev.get("decision_json"))
+        if step_failure is not None:
+            return dict(ev, decision_json=json.dumps(step_failure))
+    return dict(ev, decision_json=None)
 
 
 # A step failure code (the registry's shape) and document part ids as the lane
@@ -545,7 +548,7 @@ async def get_run_state(run_id: str, request: Request = None) -> JSONResponse:
     # Work order 1.5 - each envelope carries why its model was chosen.
     # Only a routed step has a route event; any other envelope gets null.
     _attach_routing(envelopes, events)
-    if not lane_admin_allowed(request) and await _lane_is_on():
+    if await viewer_redacts(request):
         events = _redact_events(events)
 
     # Child runs (orchestrate nodes) choose their own models; show their steps
