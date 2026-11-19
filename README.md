@@ -58,6 +58,8 @@ Round 3, middle value of three runs unless noted:
 
 By the bench's own rule, then: one win in round 3, on a job whose input was not fresh, and none in rounds 1 and 2. All three rounds side by side: [`bench/results/round_1_vs_round_2.md`](bench/results/round_1_vs_round_2.md).
 
+In round 3 the planning model named the model for every step of the email, code and notes jobs; the router's own rule (the lowest effective cost that clears the floor) chose the two steps of the document job. <!-- claim C103 -->
+
 ## Where the cost goes
 
 **Many similar items.** Items go to a low-cost model in packs of 20. <!-- claim C64 --> In round 3 the worker calls for all 200 <!-- claim C37 --> emails cost between US$0.0208 <!-- claim C65 --> and US$0.0402 <!-- claim C66 --> per run. On that job the quality fell outside the bench's rule (see the table above).
@@ -112,5 +114,3 @@ MIT. See `LICENSE`.
 ## Contact
 
 Dhananjay Raol, Aliud Inquisito Inc. Questions and problems: open an issue at https://github.com/D-jai/Borg_Routing/issues.
-
-<!-- TODO (planner): the owner chooses what other contact to show when the repository is made public. -->

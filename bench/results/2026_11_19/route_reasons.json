@@ -1,0 +1,1148 @@
+{
+  "what": "Round 3: for every BORG run and every routed step, the route record's reason (planner_pick: the planning model named the model; routed: the router's own rule, the lowest effective cost that clears the floor), the chosen model, and the candidates with their scores and estimates.",
+  "source": "bench/results/2026_11_19/dbs/<run>.db (git-ignored, kept locally), table logs, event_type orchestrator_decision with mode route",
+  "units": "est_cost is the router's estimate for one call (one item for an apply_to_each step), in US dollars: est_dollars (token price) plus est_time_cost (estimated waiting time priced at the run's time cost). It is an estimate made before the call, not the bill.",
+  "written": "2026-11-19, planner ruling 46, read from the run databases, nothing re-run",
+  "runs": [
+    {
+      "run": "A_borg_cloud_1",
+      "steps": [
+        {
+          "node_id": "classify_emails",
+          "task_type": "extraction",
+          "tier": "light",
+          "floor": 6.0,
+          "reason": "planner_pick",
+          "chosen": "openrouter/google/gemini-3.1-flash-lite-preview",
+          "est_cost": 0.00115,
+          "candidates": [
+            {
+              "model_id": "openrouter/openai/gpt-5.4-nano",
+              "score": 8.0,
+              "est_cost": 0.001053888888888889,
+              "est_dollars": 0.000665,
+              "est_time_cost": 0.0003888888888888889
+            },
+            {
+              "model_id": "openrouter/google/gemini-3.1-flash-lite-preview",
+              "score": 8.8,
+              "est_cost": 0.00115,
+              "est_dollars": 0.0008,
+              "est_time_cost": 0.00035
+            },
+            {
+              "model_id": "openrouter/deepseek/deepseek-v3.2",
+              "score": 8.2,
+              "est_cost": 0.001242,
+              "est_dollars": 0.000242,
+              "est_time_cost": 0.001
+            },
+            {
+              "model_id": "openrouter/moonshotai/kimi-k2-thinking",
+              "score": 8.1,
+              "est_cost": 0.002642727272727273,
+              "est_dollars": 0.0013700000000000001,
+              "est_time_cost": 0.0012727272727272728
+            },
+            {
+              "model_id": "openrouter/x-ai/grok-4.20",
+              "score": 8.8,
+              "est_cost": 0.0029,
+              "est_dollars": 0.0015,
+              "est_time_cost": 0.0014
+            },
+            {
+              "model_id": "openrouter/google/gemini-3.1-pro-preview",
+              "score": 9.7,
+              "est_cost": 0.007275,
+              "est_dollars": 0.0064,
+              "est_time_cost": 0.000875
+            },
+            {
+              "model_id": "openrouter/openai/gpt-5.3-codex",
+              "score": 9.0,
+              "est_cost": 0.008516666666666667,
+              "est_dollars": 0.00735,
+              "est_time_cost": 0.0011666666666666668
+            },
+            {
+              "model_id": "openrouter/anthropic/claude-sonnet-4.6",
+              "score": 9.2,
+              "est_cost": 0.0091,
+              "est_dollars": 0.008100000000000001,
+              "est_time_cost": 0.001
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "run": "A_borg_cloud_2",
+      "steps": [
+        {
+          "node_id": "classify_emails",
+          "task_type": "extraction",
+          "tier": "light",
+          "floor": 6.0,
+          "reason": "planner_pick",
+          "chosen": "openrouter/google/gemini-3.1-flash-lite-preview",
+          "est_cost": 0.00115,
+          "candidates": [
+            {
+              "model_id": "openrouter/openai/gpt-5.4-nano",
+              "score": 8.0,
+              "est_cost": 0.001053888888888889,
+              "est_dollars": 0.000665,
+              "est_time_cost": 0.0003888888888888889
+            },
+            {
+              "model_id": "openrouter/google/gemini-3.1-flash-lite-preview",
+              "score": 8.8,
+              "est_cost": 0.00115,
+              "est_dollars": 0.0008,
+              "est_time_cost": 0.00035
+            },
+            {
+              "model_id": "openrouter/deepseek/deepseek-v3.2",
+              "score": 8.2,
+              "est_cost": 0.001242,
+              "est_dollars": 0.000242,
+              "est_time_cost": 0.001
+            },
+            {
+              "model_id": "openrouter/moonshotai/kimi-k2-thinking",
+              "score": 8.1,
+              "est_cost": 0.002642727272727273,
+              "est_dollars": 0.0013700000000000001,
+              "est_time_cost": 0.0012727272727272728
+            },
+            {
+              "model_id": "openrouter/x-ai/grok-4.20",
+              "score": 8.8,
+              "est_cost": 0.0029,
+              "est_dollars": 0.0015,
+              "est_time_cost": 0.0014
+            },
+            {
+              "model_id": "openrouter/google/gemini-3.1-pro-preview",
+              "score": 9.7,
+              "est_cost": 0.007275,
+              "est_dollars": 0.0064,
+              "est_time_cost": 0.000875
+            },
+            {
+              "model_id": "openrouter/openai/gpt-5.3-codex",
+              "score": 9.0,
+              "est_cost": 0.008516666666666667,
+              "est_dollars": 0.00735,
+              "est_time_cost": 0.0011666666666666668
+            },
+            {
+              "model_id": "openrouter/anthropic/claude-sonnet-4.6",
+              "score": 9.2,
+              "est_cost": 0.0091,
+              "est_dollars": 0.008100000000000001,
+              "est_time_cost": 0.001
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "run": "A_borg_cloud_3",
+      "steps": [
+        {
+          "node_id": "classify_emails",
+          "task_type": "extraction",
+          "tier": "light",
+          "floor": 6.0,
+          "reason": "planner_pick",
+          "chosen": "openrouter/google/gemini-3.1-flash-lite-preview",
+          "est_cost": 0.00115,
+          "candidates": [
+            {
+              "model_id": "openrouter/openai/gpt-5.4-nano",
+              "score": 8.0,
+              "est_cost": 0.001053888888888889,
+              "est_dollars": 0.000665,
+              "est_time_cost": 0.0003888888888888889
+            },
+            {
+              "model_id": "openrouter/google/gemini-3.1-flash-lite-preview",
+              "score": 8.8,
+              "est_cost": 0.00115,
+              "est_dollars": 0.0008,
+              "est_time_cost": 0.00035
+            },
+            {
+              "model_id": "openrouter/deepseek/deepseek-v3.2",
+              "score": 8.2,
+              "est_cost": 0.001242,
+              "est_dollars": 0.000242,
+              "est_time_cost": 0.001
+            },
+            {
+              "model_id": "openrouter/moonshotai/kimi-k2-thinking",
+              "score": 8.1,
+              "est_cost": 0.002642727272727273,
+              "est_dollars": 0.0013700000000000001,
+              "est_time_cost": 0.0012727272727272728
+            },
+            {
+              "model_id": "openrouter/x-ai/grok-4.20",
+              "score": 8.8,
+              "est_cost": 0.0029,
+              "est_dollars": 0.0015,
+              "est_time_cost": 0.0014
+            },
+            {
+              "model_id": "openrouter/google/gemini-3.1-pro-preview",
+              "score": 9.7,
+              "est_cost": 0.007275,
+              "est_dollars": 0.0064,
+              "est_time_cost": 0.000875
+            },
+            {
+              "model_id": "openrouter/openai/gpt-5.3-codex",
+              "score": 9.0,
+              "est_cost": 0.008516666666666667,
+              "est_dollars": 0.00735,
+              "est_time_cost": 0.0011666666666666668
+            },
+            {
+              "model_id": "openrouter/anthropic/claude-sonnet-4.6",
+              "score": 9.2,
+              "est_cost": 0.0091,
+              "est_dollars": 0.008100000000000001,
+              "est_time_cost": 0.001
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "run": "B_borg_cloud_1",
+      "steps": [
+        {
+          "node_id": "n2",
+          "task_type": "coding",
+          "tier": "heavy",
+          "floor": 9.0,
+          "reason": "planner_pick",
+          "chosen": "openrouter/openai/gpt-5.3-codex",
+          "est_cost": 0.008516666666666667,
+          "candidates": [
+            {
+              "model_id": "openrouter/x-ai/grok-4.20",
+              "score": 9.0,
+              "est_cost": 0.0029,
+              "est_dollars": 0.0015,
+              "est_time_cost": 0.0014
+            },
+            {
+              "model_id": "openrouter/google/gemini-3.1-pro-preview",
+              "score": 9.3,
+              "est_cost": 0.007275,
+              "est_dollars": 0.0064,
+              "est_time_cost": 0.000875
+            },
+            {
+              "model_id": "openrouter/openai/gpt-5.3-codex",
+              "score": 10.0,
+              "est_cost": 0.008516666666666667,
+              "est_dollars": 0.00735,
+              "est_time_cost": 0.0011666666666666668
+            },
+            {
+              "model_id": "openrouter/anthropic/claude-sonnet-4.6",
+              "score": 9.2,
+              "est_cost": 0.0091,
+              "est_dollars": 0.008100000000000001,
+              "est_time_cost": 0.001
+            },
+            {
+              "model_id": "openrouter/anthropic/claude-opus-4.7",
+              "score": 9.8,
+              "est_cost": 0.015055555555555558,
+              "est_dollars": 0.013500000000000002,
+              "est_time_cost": 0.0015555555555555557
+            }
+          ]
+        },
+        {
+          "node_id": "n3",
+          "task_type": "coding",
+          "tier": "light",
+          "floor": 6.0,
+          "reason": "planner_pick",
+          "chosen": "openrouter/openai/gpt-5.4-nano",
+          "est_cost": 0.001053888888888889,
+          "candidates": [
+            {
+              "model_id": "openrouter/openai/gpt-5.4-nano",
+              "score": 8.8,
+              "est_cost": 0.001053888888888889,
+              "est_dollars": 0.000665,
+              "est_time_cost": 0.0003888888888888889
+            },
+            {
+              "model_id": "openrouter/google/gemini-3.1-flash-lite-preview",
+              "score": 7.8,
+              "est_cost": 0.00115,
+              "est_dollars": 0.0008,
+              "est_time_cost": 0.00035
+            },
+            {
+              "model_id": "openrouter/deepseek/deepseek-v3.2",
+              "score": 8.7,
+              "est_cost": 0.001242,
+              "est_dollars": 0.000242,
+              "est_time_cost": 0.001
+            },
+            {
+              "model_id": "openrouter/moonshotai/kimi-k2-thinking",
+              "score": 8.3,
+              "est_cost": 0.002642727272727273,
+              "est_dollars": 0.0013700000000000001,
+              "est_time_cost": 0.0012727272727272728
+            },
+            {
+              "model_id": "openrouter/x-ai/grok-4.20",
+              "score": 9.0,
+              "est_cost": 0.0029,
+              "est_dollars": 0.0015,
+              "est_time_cost": 0.0014
+            },
+            {
+              "model_id": "openrouter/google/gemini-3.1-pro-preview",
+              "score": 9.3,
+              "est_cost": 0.007275,
+              "est_dollars": 0.0064,
+              "est_time_cost": 0.000875
+            },
+            {
+              "model_id": "openrouter/openai/gpt-5.3-codex",
+              "score": 10.0,
+              "est_cost": 0.008516666666666667,
+              "est_dollars": 0.00735,
+              "est_time_cost": 0.0011666666666666668
+            },
+            {
+              "model_id": "openrouter/anthropic/claude-sonnet-4.6",
+              "score": 9.2,
+              "est_cost": 0.0091,
+              "est_dollars": 0.008100000000000001,
+              "est_time_cost": 0.001
+            }
+          ]
+        },
+        {
+          "node_id": "n1",
+          "task_type": "coding",
+          "tier": "light",
+          "floor": 6.0,
+          "reason": "planner_pick",
+          "chosen": "openrouter/openai/gpt-5.4-nano",
+          "est_cost": 0.001053888888888889,
+          "candidates": [
+            {
+              "model_id": "openrouter/openai/gpt-5.4-nano",
+              "score": 8.8,
+              "est_cost": 0.001053888888888889,
+              "est_dollars": 0.000665,
+              "est_time_cost": 0.0003888888888888889
+            },
+            {
+              "model_id": "openrouter/google/gemini-3.1-flash-lite-preview",
+              "score": 7.8,
+              "est_cost": 0.00115,
+              "est_dollars": 0.0008,
+              "est_time_cost": 0.00035
+            },
+            {
+              "model_id": "openrouter/deepseek/deepseek-v3.2",
+              "score": 8.7,
+              "est_cost": 0.001242,
+              "est_dollars": 0.000242,
+              "est_time_cost": 0.001
+            },
+            {
+              "model_id": "openrouter/moonshotai/kimi-k2-thinking",
+              "score": 8.3,
+              "est_cost": 0.002642727272727273,
+              "est_dollars": 0.0013700000000000001,
+              "est_time_cost": 0.0012727272727272728
+            },
+            {
+              "model_id": "openrouter/x-ai/grok-4.20",
+              "score": 9.0,
+              "est_cost": 0.0029,
+              "est_dollars": 0.0015,
+              "est_time_cost": 0.0014
+            },
+            {
+              "model_id": "openrouter/google/gemini-3.1-pro-preview",
+              "score": 9.3,
+              "est_cost": 0.007275,
+              "est_dollars": 0.0064,
+              "est_time_cost": 0.000875
+            },
+            {
+              "model_id": "openrouter/openai/gpt-5.3-codex",
+              "score": 10.0,
+              "est_cost": 0.008516666666666667,
+              "est_dollars": 0.00735,
+              "est_time_cost": 0.0011666666666666668
+            },
+            {
+              "model_id": "openrouter/anthropic/claude-sonnet-4.6",
+              "score": 9.2,
+              "est_cost": 0.0091,
+              "est_dollars": 0.008100000000000001,
+              "est_time_cost": 0.001
+            }
+          ]
+        },
+        {
+          "node_id": "n4",
+          "task_type": "coding",
+          "tier": "mid",
+          "floor": 7.5,
+          "reason": "planner_pick",
+          "chosen": "openrouter/openai/gpt-5.3-codex",
+          "est_cost": 0.008516666666666667,
+          "candidates": [
+            {
+              "model_id": "openrouter/openai/gpt-5.4-nano",
+              "score": 8.8,
+              "est_cost": 0.001053888888888889,
+              "est_dollars": 0.000665,
+              "est_time_cost": 0.0003888888888888889
+            },
+            {
+              "model_id": "openrouter/google/gemini-3.1-flash-lite-preview",
+              "score": 7.8,
+              "est_cost": 0.00115,
+              "est_dollars": 0.0008,
+              "est_time_cost": 0.00035
+            },
+            {
+              "model_id": "openrouter/deepseek/deepseek-v3.2",
+              "score": 8.7,
+              "est_cost": 0.001242,
+              "est_dollars": 0.000242,
+              "est_time_cost": 0.001
+            },
+            {
+              "model_id": "openrouter/moonshotai/kimi-k2-thinking",
+              "score": 8.3,
+              "est_cost": 0.002642727272727273,
+              "est_dollars": 0.0013700000000000001,
+              "est_time_cost": 0.0012727272727272728
+            },
+            {
+              "model_id": "openrouter/x-ai/grok-4.20",
+              "score": 9.0,
+              "est_cost": 0.0029,
+              "est_dollars": 0.0015,
+              "est_time_cost": 0.0014
+            },
+            {
+              "model_id": "openrouter/google/gemini-3.1-pro-preview",
+              "score": 9.3,
+              "est_cost": 0.007275,
+              "est_dollars": 0.0064,
+              "est_time_cost": 0.000875
+            },
+            {
+              "model_id": "openrouter/openai/gpt-5.3-codex",
+              "score": 10.0,
+              "est_cost": 0.008516666666666667,
+              "est_dollars": 0.00735,
+              "est_time_cost": 0.0011666666666666668
+            },
+            {
+              "model_id": "openrouter/anthropic/claude-sonnet-4.6",
+              "score": 9.2,
+              "est_cost": 0.0091,
+              "est_dollars": 0.008100000000000001,
+              "est_time_cost": 0.001
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "run": "B_borg_cloud_2",
+      "steps": [
+        {
+          "node_id": "n1",
+          "task_type": "coding",
+          "tier": "heavy",
+          "floor": 9.0,
+          "reason": "planner_pick",
+          "chosen": "openrouter/openai/gpt-5.3-codex",
+          "est_cost": 0.008516666666666667,
+          "candidates": [
+            {
+              "model_id": "openrouter/x-ai/grok-4.20",
+              "score": 9.0,
+              "est_cost": 0.0029,
+              "est_dollars": 0.0015,
+              "est_time_cost": 0.0014
+            },
+            {
+              "model_id": "openrouter/google/gemini-3.1-pro-preview",
+              "score": 9.3,
+              "est_cost": 0.007275,
+              "est_dollars": 0.0064,
+              "est_time_cost": 0.000875
+            },
+            {
+              "model_id": "openrouter/openai/gpt-5.3-codex",
+              "score": 10.0,
+              "est_cost": 0.008516666666666667,
+              "est_dollars": 0.00735,
+              "est_time_cost": 0.0011666666666666668
+            },
+            {
+              "model_id": "openrouter/anthropic/claude-sonnet-4.6",
+              "score": 9.2,
+              "est_cost": 0.0091,
+              "est_dollars": 0.008100000000000001,
+              "est_time_cost": 0.001
+            },
+            {
+              "model_id": "openrouter/anthropic/claude-opus-4.7",
+              "score": 9.8,
+              "est_cost": 0.015055555555555558,
+              "est_dollars": 0.013500000000000002,
+              "est_time_cost": 0.0015555555555555557
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "run": "B_borg_cloud_3",
+      "steps": [
+        {
+          "node_id": "n1",
+          "task_type": "coding",
+          "tier": "light",
+          "floor": 6.0,
+          "reason": "planner_pick",
+          "chosen": "openrouter/openai/gpt-5.3-codex",
+          "est_cost": 0.008516666666666667,
+          "candidates": [
+            {
+              "model_id": "openrouter/openai/gpt-5.4-nano",
+              "score": 8.8,
+              "est_cost": 0.001053888888888889,
+              "est_dollars": 0.000665,
+              "est_time_cost": 0.0003888888888888889
+            },
+            {
+              "model_id": "openrouter/google/gemini-3.1-flash-lite-preview",
+              "score": 7.8,
+              "est_cost": 0.00115,
+              "est_dollars": 0.0008,
+              "est_time_cost": 0.00035
+            },
+            {
+              "model_id": "openrouter/deepseek/deepseek-v3.2",
+              "score": 8.7,
+              "est_cost": 0.001242,
+              "est_dollars": 0.000242,
+              "est_time_cost": 0.001
+            },
+            {
+              "model_id": "openrouter/moonshotai/kimi-k2-thinking",
+              "score": 8.3,
+              "est_cost": 0.002642727272727273,
+              "est_dollars": 0.0013700000000000001,
+              "est_time_cost": 0.0012727272727272728
+            },
+            {
+              "model_id": "openrouter/x-ai/grok-4.20",
+              "score": 9.0,
+              "est_cost": 0.0029,
+              "est_dollars": 0.0015,
+              "est_time_cost": 0.0014
+            },
+            {
+              "model_id": "openrouter/google/gemini-3.1-pro-preview",
+              "score": 9.3,
+              "est_cost": 0.007275,
+              "est_dollars": 0.0064,
+              "est_time_cost": 0.000875
+            },
+            {
+              "model_id": "openrouter/openai/gpt-5.3-codex",
+              "score": 10.0,
+              "est_cost": 0.008516666666666667,
+              "est_dollars": 0.00735,
+              "est_time_cost": 0.0011666666666666668
+            },
+            {
+              "model_id": "openrouter/anthropic/claude-sonnet-4.6",
+              "score": 9.2,
+              "est_cost": 0.0091,
+              "est_dollars": 0.008100000000000001,
+              "est_time_cost": 0.001
+            }
+          ]
+        },
+        {
+          "node_id": "n2",
+          "task_type": "coding",
+          "tier": "heavy",
+          "floor": 9.0,
+          "reason": "planner_pick",
+          "chosen": "openrouter/openai/gpt-5.3-codex",
+          "est_cost": 0.008516666666666667,
+          "candidates": [
+            {
+              "model_id": "openrouter/x-ai/grok-4.20",
+              "score": 9.0,
+              "est_cost": 0.0029,
+              "est_dollars": 0.0015,
+              "est_time_cost": 0.0014
+            },
+            {
+              "model_id": "openrouter/google/gemini-3.1-pro-preview",
+              "score": 9.3,
+              "est_cost": 0.007275,
+              "est_dollars": 0.0064,
+              "est_time_cost": 0.000875
+            },
+            {
+              "model_id": "openrouter/openai/gpt-5.3-codex",
+              "score": 10.0,
+              "est_cost": 0.008516666666666667,
+              "est_dollars": 0.00735,
+              "est_time_cost": 0.0011666666666666668
+            },
+            {
+              "model_id": "openrouter/anthropic/claude-sonnet-4.6",
+              "score": 9.2,
+              "est_cost": 0.0091,
+              "est_dollars": 0.008100000000000001,
+              "est_time_cost": 0.001
+            },
+            {
+              "model_id": "openrouter/anthropic/claude-opus-4.7",
+              "score": 9.8,
+              "est_cost": 0.015055555555555558,
+              "est_dollars": 0.013500000000000002,
+              "est_time_cost": 0.0015555555555555557
+            }
+          ]
+        },
+        {
+          "node_id": "n4",
+          "task_type": "coding",
+          "tier": "mid",
+          "floor": 7.5,
+          "reason": "planner_pick",
+          "chosen": "openrouter/openai/gpt-5.3-codex",
+          "est_cost": 0.008516666666666667,
+          "candidates": [
+            {
+              "model_id": "openrouter/openai/gpt-5.4-nano",
+              "score": 8.8,
+              "est_cost": 0.001053888888888889,
+              "est_dollars": 0.000665,
+              "est_time_cost": 0.0003888888888888889
+            },
+            {
+              "model_id": "openrouter/google/gemini-3.1-flash-lite-preview",
+              "score": 7.8,
+              "est_cost": 0.00115,
+              "est_dollars": 0.0008,
+              "est_time_cost": 0.00035
+            },
+            {
+              "model_id": "openrouter/deepseek/deepseek-v3.2",
+              "score": 8.7,
+              "est_cost": 0.001242,
+              "est_dollars": 0.000242,
+              "est_time_cost": 0.001
+            },
+            {
+              "model_id": "openrouter/moonshotai/kimi-k2-thinking",
+              "score": 8.3,
+              "est_cost": 0.002642727272727273,
+              "est_dollars": 0.0013700000000000001,
+              "est_time_cost": 0.0012727272727272728
+            },
+            {
+              "model_id": "openrouter/x-ai/grok-4.20",
+              "score": 9.0,
+              "est_cost": 0.0029,
+              "est_dollars": 0.0015,
+              "est_time_cost": 0.0014
+            },
+            {
+              "model_id": "openrouter/google/gemini-3.1-pro-preview",
+              "score": 9.3,
+              "est_cost": 0.007275,
+              "est_dollars": 0.0064,
+              "est_time_cost": 0.000875
+            },
+            {
+              "model_id": "openrouter/openai/gpt-5.3-codex",
+              "score": 10.0,
+              "est_cost": 0.008516666666666667,
+              "est_dollars": 0.00735,
+              "est_time_cost": 0.0011666666666666668
+            },
+            {
+              "model_id": "openrouter/anthropic/claude-sonnet-4.6",
+              "score": 9.2,
+              "est_cost": 0.0091,
+              "est_dollars": 0.008100000000000001,
+              "est_time_cost": 0.001
+            }
+          ]
+        },
+        {
+          "node_id": "n3",
+          "task_type": "coding",
+          "tier": "light",
+          "floor": 6.0,
+          "reason": "planner_pick",
+          "chosen": "openrouter/openai/gpt-5.3-codex",
+          "est_cost": 0.008516666666666667,
+          "candidates": [
+            {
+              "model_id": "openrouter/openai/gpt-5.4-nano",
+              "score": 8.8,
+              "est_cost": 0.001053888888888889,
+              "est_dollars": 0.000665,
+              "est_time_cost": 0.0003888888888888889
+            },
+            {
+              "model_id": "openrouter/google/gemini-3.1-flash-lite-preview",
+              "score": 7.8,
+              "est_cost": 0.00115,
+              "est_dollars": 0.0008,
+              "est_time_cost": 0.00035
+            },
+            {
+              "model_id": "openrouter/deepseek/deepseek-v3.2",
+              "score": 8.7,
+              "est_cost": 0.001242,
+              "est_dollars": 0.000242,
+              "est_time_cost": 0.001
+            },
+            {
+              "model_id": "openrouter/moonshotai/kimi-k2-thinking",
+              "score": 8.3,
+              "est_cost": 0.002642727272727273,
+              "est_dollars": 0.0013700000000000001,
+              "est_time_cost": 0.0012727272727272728
+            },
+            {
+              "model_id": "openrouter/x-ai/grok-4.20",
+              "score": 9.0,
+              "est_cost": 0.0029,
+              "est_dollars": 0.0015,
+              "est_time_cost": 0.0014
+            },
+            {
+              "model_id": "openrouter/google/gemini-3.1-pro-preview",
+              "score": 9.3,
+              "est_cost": 0.007275,
+              "est_dollars": 0.0064,
+              "est_time_cost": 0.000875
+            },
+            {
+              "model_id": "openrouter/openai/gpt-5.3-codex",
+              "score": 10.0,
+              "est_cost": 0.008516666666666667,
+              "est_dollars": 0.00735,
+              "est_time_cost": 0.0011666666666666668
+            },
+            {
+              "model_id": "openrouter/anthropic/claude-sonnet-4.6",
+              "score": 9.2,
+              "est_cost": 0.0091,
+              "est_dollars": 0.008100000000000001,
+              "est_time_cost": 0.001
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "run": "C_borg_cloud_1",
+      "steps": [
+        {
+          "node_id": "extract_q1_to_q8",
+          "task_type": "extraction",
+          "tier": "light",
+          "floor": 6.0,
+          "reason": "routed",
+          "chosen": "openrouter/openai/gpt-5.4-nano",
+          "est_cost": 0.0025748222222222224,
+          "candidates": [
+            {
+              "model_id": "openrouter/openai/gpt-5.4-nano",
+              "score": 8.0,
+              "est_cost": 0.0025748222222222224,
+              "est_dollars": 0.0010676,
+              "est_time_cost": 0.0015072222222222223
+            },
+            {
+              "model_id": "openrouter/google/gemini-3.1-flash-lite-preview",
+              "score": 8.8,
+              "est_cost": 0.00265975,
+              "est_dollars": 0.00130325,
+              "est_time_cost": 0.0013565
+            },
+            {
+              "model_id": "openrouter/deepseek/deepseek-v3.2",
+              "score": 8.2,
+              "est_cost": 0.004641094285714286,
+              "est_dollars": 0.00076538,
+              "est_time_cost": 0.003875714285714286
+            },
+            {
+              "model_id": "openrouter/moonshotai/kimi-k2-thinking",
+              "score": 8.1,
+              "est_cost": 0.0075105272727272725,
+              "est_dollars": 0.0025778,
+              "est_time_cost": 0.004932727272727273
+            },
+            {
+              "model_id": "openrouter/x-ai/grok-4.20",
+              "score": 8.8,
+              "est_cost": 0.00944225,
+              "est_dollars": 0.00401625,
+              "est_time_cost": 0.005426
+            },
+            {
+              "model_id": "openrouter/google/gemini-3.1-pro-preview",
+              "score": 9.7,
+              "est_cost": 0.01381725,
+              "est_dollars": 0.010426,
+              "est_time_cost": 0.00339125
+            },
+            {
+              "model_id": "openrouter/openai/gpt-5.3-codex",
+              "score": 9.0,
+              "est_cost": 0.015394416666666667,
+              "est_dollars": 0.01087275,
+              "est_time_cost": 0.004521666666666667
+            },
+            {
+              "model_id": "openrouter/anthropic/claude-sonnet-4.6",
+              "score": 9.2,
+              "est_cost": 0.018014714285714287,
+              "est_dollars": 0.014139,
+              "est_time_cost": 0.003875714285714286
+            }
+          ]
+        },
+        {
+          "node_id": "extract_contradictions",
+          "task_type": "extraction",
+          "tier": "light",
+          "floor": 6.0,
+          "reason": "routed",
+          "chosen": "openrouter/openai/gpt-5.4-nano",
+          "est_cost": 0.002456955555555556,
+          "candidates": [
+            {
+              "model_id": "openrouter/openai/gpt-5.4-nano",
+              "score": 8.0,
+              "est_cost": 0.002456955555555556,
+              "est_dollars": 0.0010364,
+              "est_time_cost": 0.0014205555555555555
+            },
+            {
+              "model_id": "openrouter/google/gemini-3.1-flash-lite-preview",
+              "score": 8.8,
+              "est_cost": 0.00254275,
+              "est_dollars": 0.00126425,
+              "est_time_cost": 0.0012785000000000001
+            },
+            {
+              "model_id": "openrouter/deepseek/deepseek-v3.2",
+              "score": 8.2,
+              "est_cost": 0.004377677142857144,
+              "est_dollars": 0.0007248199999999999,
+              "est_time_cost": 0.0036528571428571435
+            },
+            {
+              "model_id": "openrouter/moonshotai/kimi-k2-thinking",
+              "score": 8.1,
+              "est_cost": 0.007133290909090909,
+              "est_dollars": 0.0024841999999999998,
+              "est_time_cost": 0.004649090909090909
+            },
+            {
+              "model_id": "openrouter/x-ai/grok-4.20",
+              "score": 8.8,
+              "est_cost": 0.00893525,
+              "est_dollars": 0.00382125,
+              "est_time_cost": 0.0051140000000000005
+            },
+            {
+              "model_id": "openrouter/google/gemini-3.1-pro-preview",
+              "score": 9.7,
+              "est_cost": 0.01331025,
+              "est_dollars": 0.010114,
+              "est_time_cost": 0.00319625
+            },
+            {
+              "model_id": "openrouter/openai/gpt-5.3-codex",
+              "score": 9.0,
+              "est_cost": 0.014861416666666667,
+              "est_dollars": 0.01059975,
+              "est_time_cost": 0.004261666666666667
+            },
+            {
+              "model_id": "openrouter/anthropic/claude-sonnet-4.6",
+              "score": 9.2,
+              "est_cost": 0.017323857142857144,
+              "est_dollars": 0.013671,
+              "est_time_cost": 0.0036528571428571435
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "run": "D_borg_cloud_1",
+      "steps": [
+        {
+          "node_id": "classify_notes",
+          "task_type": "extraction",
+          "tier": "light",
+          "floor": 6.0,
+          "reason": "planner_pick",
+          "chosen": "openrouter/google/gemini-3.1-flash-lite-preview",
+          "est_cost": 0.00115,
+          "candidates": [
+            {
+              "model_id": "openrouter/openai/gpt-5.4-nano",
+              "score": 8.0,
+              "est_cost": 0.001053888888888889,
+              "est_dollars": 0.000665,
+              "est_time_cost": 0.0003888888888888889
+            },
+            {
+              "model_id": "openrouter/google/gemini-3.1-flash-lite-preview",
+              "score": 8.8,
+              "est_cost": 0.00115,
+              "est_dollars": 0.0008,
+              "est_time_cost": 0.00035
+            },
+            {
+              "model_id": "openrouter/deepseek/deepseek-v3.2",
+              "score": 8.2,
+              "est_cost": 0.001242,
+              "est_dollars": 0.000242,
+              "est_time_cost": 0.001
+            },
+            {
+              "model_id": "openrouter/moonshotai/kimi-k2-thinking",
+              "score": 8.1,
+              "est_cost": 0.002642727272727273,
+              "est_dollars": 0.0013700000000000001,
+              "est_time_cost": 0.0012727272727272728
+            },
+            {
+              "model_id": "openrouter/x-ai/grok-4.20",
+              "score": 8.8,
+              "est_cost": 0.0029,
+              "est_dollars": 0.0015,
+              "est_time_cost": 0.0014
+            },
+            {
+              "model_id": "openrouter/google/gemini-3.1-pro-preview",
+              "score": 9.7,
+              "est_cost": 0.007275,
+              "est_dollars": 0.0064,
+              "est_time_cost": 0.000875
+            },
+            {
+              "model_id": "openrouter/openai/gpt-5.3-codex",
+              "score": 9.0,
+              "est_cost": 0.008516666666666667,
+              "est_dollars": 0.00735,
+              "est_time_cost": 0.0011666666666666668
+            },
+            {
+              "model_id": "openrouter/anthropic/claude-sonnet-4.6",
+              "score": 9.2,
+              "est_cost": 0.0091,
+              "est_dollars": 0.008100000000000001,
+              "est_time_cost": 0.001
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "run": "D_borg_cloud_2",
+      "steps": [
+        {
+          "node_id": "classify_notes",
+          "task_type": "extraction",
+          "tier": "light",
+          "floor": 6.0,
+          "reason": "planner_pick",
+          "chosen": "openrouter/google/gemini-3.1-flash-lite-preview",
+          "est_cost": 0.00115,
+          "candidates": [
+            {
+              "model_id": "openrouter/openai/gpt-5.4-nano",
+              "score": 8.0,
+              "est_cost": 0.001053888888888889,
+              "est_dollars": 0.000665,
+              "est_time_cost": 0.0003888888888888889
+            },
+            {
+              "model_id": "openrouter/google/gemini-3.1-flash-lite-preview",
+              "score": 8.8,
+              "est_cost": 0.00115,
+              "est_dollars": 0.0008,
+              "est_time_cost": 0.00035
+            },
+            {
+              "model_id": "openrouter/deepseek/deepseek-v3.2",
+              "score": 8.2,
+              "est_cost": 0.001242,
+              "est_dollars": 0.000242,
+              "est_time_cost": 0.001
+            },
+            {
+              "model_id": "openrouter/moonshotai/kimi-k2-thinking",
+              "score": 8.1,
+              "est_cost": 0.002642727272727273,
+              "est_dollars": 0.0013700000000000001,
+              "est_time_cost": 0.0012727272727272728
+            },
+            {
+              "model_id": "openrouter/x-ai/grok-4.20",
+              "score": 8.8,
+              "est_cost": 0.0029,
+              "est_dollars": 0.0015,
+              "est_time_cost": 0.0014
+            },
+            {
+              "model_id": "openrouter/google/gemini-3.1-pro-preview",
+              "score": 9.7,
+              "est_cost": 0.007275,
+              "est_dollars": 0.0064,
+              "est_time_cost": 0.000875
+            },
+            {
+              "model_id": "openrouter/openai/gpt-5.3-codex",
+              "score": 9.0,
+              "est_cost": 0.008516666666666667,
+              "est_dollars": 0.00735,
+              "est_time_cost": 0.0011666666666666668
+            },
+            {
+              "model_id": "openrouter/anthropic/claude-sonnet-4.6",
+              "score": 9.2,
+              "est_cost": 0.0091,
+              "est_dollars": 0.008100000000000001,
+              "est_time_cost": 0.001
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "run": "D_borg_cloud_3",
+      "steps": [
+        {
+          "node_id": "classify_notes",
+          "task_type": "extraction",
+          "tier": "light",
+          "floor": 6.0,
+          "reason": "planner_pick",
+          "chosen": "openrouter/google/gemini-3.1-flash-lite-preview",
+          "est_cost": 0.00115,
+          "candidates": [
+            {
+              "model_id": "openrouter/openai/gpt-5.4-nano",
+              "score": 8.0,
+              "est_cost": 0.001053888888888889,
+              "est_dollars": 0.000665,
+              "est_time_cost": 0.0003888888888888889
+            },
+            {
+              "model_id": "openrouter/google/gemini-3.1-flash-lite-preview",
+              "score": 8.8,
+              "est_cost": 0.00115,
+              "est_dollars": 0.0008,
+              "est_time_cost": 0.00035
+            },
+            {
+              "model_id": "openrouter/deepseek/deepseek-v3.2",
+              "score": 8.2,
+              "est_cost": 0.001242,
+              "est_dollars": 0.000242,
+              "est_time_cost": 0.001
+            },
+            {
+              "model_id": "openrouter/moonshotai/kimi-k2-thinking",
+              "score": 8.1,
+              "est_cost": 0.002642727272727273,
+              "est_dollars": 0.0013700000000000001,
+              "est_time_cost": 0.0012727272727272728
+            },
+            {
+              "model_id": "openrouter/x-ai/grok-4.20",
+              "score": 8.8,
+              "est_cost": 0.0029,
+              "est_dollars": 0.0015,
+              "est_time_cost": 0.0014
+            },
+            {
+              "model_id": "openrouter/google/gemini-3.1-pro-preview",
+              "score": 9.7,
+              "est_cost": 0.007275,
+              "est_dollars": 0.0064,
+              "est_time_cost": 0.000875
+            },
+            {
+              "model_id": "openrouter/openai/gpt-5.3-codex",
+              "score": 9.0,
+              "est_cost": 0.008516666666666667,
+              "est_dollars": 0.00735,
+              "est_time_cost": 0.0011666666666666668
+            },
+            {
+              "model_id": "openrouter/anthropic/claude-sonnet-4.6",
+              "score": 9.2,
+              "est_cost": 0.0091,
+              "est_dollars": 0.008100000000000001,
+              "est_time_cost": 0.001
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "reasons_by_job": {
+    "A": [
+      "planner_pick"
+    ],
+    "B": [
+      "planner_pick"
+    ],
+    "C": [
+      "routed"
+    ],
+    "D": [
+      "planner_pick"
+    ]
+  }
+}
