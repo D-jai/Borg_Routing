@@ -215,3 +215,77 @@ def test_the_ci_job_shape():
     assert order == sorted(order)
     up = next(s for s in job["steps"] if str(s.get("uses", "")).startswith("actions/upload-artifact"))
     assert up["if"] == "always()" and up["with"]["name"] == "ui-check" and "ui_check_out" in up["with"]["path"]
+
+
+# --- review fixes (4.6 review) ------------------------------------------------------------------
+
+def test_replay_ask_requires_no_free_text():
+    req = {r["css"]: r for r in check.PAGES["ask"]["required"]}
+    assert req["#q"].get("hidden") is True and req["#send"].get("hidden") is True
+
+
+def test_hidden_and_visible_together_is_malformed():
+    bad = {"x": {"required": [{"css": "#a", "hidden": True, "visible": False}], "api_ok": [], "expected_failures": []}}
+    assert check.spec_problems(bad) == ["x: required[0] cannot be both hidden and visible"]
+
+
+def test_the_probe_does_not_rely_on_the_handler_running():
+    src = (ROOT / "scripts" / "check_ui.py").read_text(encoding="utf-8")
+    assert 'evaluate("() => window.__borgXss")' not in src
+    assert "/^on/i.test(a.name)" in check._XSS_JS
+
+
+@pytest.mark.parametrize("page", sorted(check.PAGES))
+def test_every_page_lists_its_reads(page):
+    assert ("GET", "/replay/status") in check.PAGES[page]["api_ok"]
+
+
+def test_a_listed_read_must_be_made_and_answered_200():
+    reads = [("GET", "/replay/status"), ("GET", "/runs/abc")]
+    assert check.classify([("GET", B + "/replay/status", 200), ("GET", B + "/runs/abc", 200)], [], [], [], [],
+                          reads=reads) == []
+    out = check.classify([("GET", B + "/replay/status", 200)], [], [], [], [], reads=reads)
+    assert out == ["expected read not answered 200: GET /runs/abc (never made)"]
+    out = check.classify([("GET", B + "/replay/status", 200), ("GET", B + "/runs/abc", 404)], [], [], [], [],
+                         reads=reads)
+    assert "expected read not answered 200: GET /runs/abc (got 404)" in out
+
+
+def test_reads_for_fills_the_run_id():
+    assert ("GET", "/runs/r1") in check.reads_for("run", "r1")
+
+
+def test_dark_must_change_the_body_background():
+    bg = {("ask", 390, "light"): "rgb(1, 2, 3)", ("ask", 390, "dark"): "rgb(1, 2, 3)",
+          ("run", 390, "light"): "rgb(1, 2, 3)", ("run", 390, "dark"): "rgb(9, 9, 9)",
+          ("keys", 390, "light"): None, ("keys", 390, "dark"): "rgb(9, 9, 9)"}
+    assert check.theme_problems(bg) == [("ask", 390, "body background is the same in light and dark (rgb(1, 2, 3))")]
+
+
+def _narrow_block() -> str:
+    css = (UI / "assets" / "app.css").read_text(encoding="utf-8")
+    start = css.index("@media (max-width: 860px) {")
+    depth, i = 0, css.index("{", start)
+    for j in range(i, len(css)):
+        depth += {"{": 1, "}": -1}.get(css[j], 0)
+        if depth == 0:
+            return css[i:j]
+    raise AssertionError("unclosed 860 px block")
+
+
+@pytest.mark.parametrize("cls", ["layout", "split"])
+def test_narrow_grids_can_shrink_below_their_content(cls):
+    """A plain 1fr track keeps a wide child (the plan SVG, a table) at its full width and the
+    page scrolls sideways at 390 px; minmax(0, 1fr) lets the child's own scroller take it."""
+    block = _narrow_block()
+    rule = re.search(r"\." + cls + r"\s*\{([^}]*)\}", block)
+    assert rule, cls
+    assert re.search(r"grid-template-columns:\s*minmax\(0,\s*1fr\)", rule.group(1)), rule.group(1)
+
+
+def test_the_top_bar_wraps_the_replay_notice_on_phones():
+    css = (UI / "assets" / "app.css").read_text(encoding="utf-8")
+    block = css[css.index("@media (max-width: 600px)"):]
+    block = block[:block.index("\n}")]
+    assert re.search(r"\.topbar\s*\{[^}]*flex-wrap:\s*wrap", block)
+    assert re.search(r"#replay-chip\s*\{[^}]*flex:\s*1 1 100%", block)

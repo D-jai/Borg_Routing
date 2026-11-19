@@ -125,10 +125,15 @@ dl.kv dt { color: var(--ink-3); } dl.kv dd { margin: 0; }
 
 /* ---------- Narrow screens ---------- */
 @media (max-width: 860px) {
-  .layout { grid-template-columns: 1fr; }
+  .layout { grid-template-columns: minmax(0, 1fr); }
   .side { border-right: 0; border-bottom: 1px solid var(--line); display: flex; gap: var(--s1); overflow-x: auto; padding: var(--s2) var(--s4); }
   .side h3 { display: none; } .side a { white-space: nowrap; }
-  .main { padding: var(--s4); } .split { grid-template-columns: 1fr; } .tagline { display: none; }
+  .main { padding: var(--s4); } .split { grid-template-columns: minmax(0, 1fr); } .tagline { display: none; }
+}
+/* Phones: the replay notice takes its own full-width row under the logo and the Theme button. */
+@media (max-width: 600px) {
+  .topbar { flex-wrap: wrap; row-gap: var(--s2); }
+  #replay-chip { order: 1; flex: 1 1 100%; max-width: none; }
 }
 
 /* ---------- Shared additions (4.1) ---------- */

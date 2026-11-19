@@ -12,13 +12,16 @@ For each page in PAGES, at 390 and 1280 px wide, light and dark:
     browser logs each refusal as a console error. Those exact requests are allowed, and each
     must happen: a listed refusal that does not happen fails too, so the list cannot go stale;
   - a required element missing, hidden, or without its expected words (PAGES[...]["required"]);
+  - an API read the page lists (PAGES[...]["api_ok"]) that was not made or not answered 200;
   - horizontal scroll at 390 px;
+  - (after both themes) a body background that is the same in light and dark;
   then save a full-page screenshot.
 Then, once (1280 px, light):
   - Ask: play one recorded run to the end and check the receipt (at least three steps);
   - Run: open that playback and check the header tiles and at least three step nodes;
   - Ask: render hostile markdown through Borg.markdown (the real marked + DOMPurify path) and
-    check that no on* attribute and no javascript: link reaches the DOM.
+    check that no on* attribute and no javascript: link reaches the DOM (the attribute scan is
+    the test: whether an injected handler ran proves nothing, since the CSP blocks it anyway).
 
 Every failure prints one line: FAIL <page> <width> <theme>: <what failed>. Exit 1 on any
 failure, 2 when the server cannot be reached. A JSON report and the screenshots go to --out.
@@ -54,8 +57,8 @@ SHELL = [
 ]
 
 # One entry per page in ui/. "required": what a replay visitor sees once the page has loaded
-# (css selector, at least "min" matches (default 1), visible unless "visible" is False, and,
-# when "text" is given, one match containing it). "api_ok": the API reads the page makes on
+# (css selector, at least "min" matches (default 1), visible unless "visible" is False, every
+# match hidden when "hidden" is True, and, when "text" is given, one match containing it). "api_ok": the API reads the page makes on
 # load that replay answers. "expected_failures": the reads replay refuses, as
 # (method, path?query, status), exactly as the page's script sends them.
 PAGES: dict = {
@@ -65,8 +68,8 @@ PAGES: dict = {
             {"css": "#replay-runs button", "min": 3, "text": "Play Job"},
             {"css": "#thread", "visible": False},
             {"css": "#thread p.muted", "text": "Choose a recorded demo run"},
-            {"css": "#q", "visible": False},
-            {"css": "#send", "visible": False},
+            {"css": "#q", "hidden": True},            # replay: no free text (work order 4.5)
+            {"css": "#send", "hidden": True},
             {"css": "#clear"},
         ],
         "api_ok": [("GET", "/replay/status"), ("GET", "/models/matrix")],
@@ -181,7 +184,7 @@ XSS_MARKDOWN = ('Before.\n\n<img src=x onerror="window.__borgXss=1">\n\n'
                 '<a href="javascript:window.__borgXss=3">y</a> <a href=" JaVaScRiPt:window.__borgXss=4">z</a>\n')
 XSS_ALLOWED = {("GET", "/ui/x", 404)}
 
-REQUIRED_KEYS = {"css", "min", "text", "visible"}
+REQUIRED_KEYS = {"css", "min", "text", "visible", "hidden"}
 
 
 # --- pure parts (tested in tests/scripts/test_check_ui.py) ------------------------------------
@@ -223,6 +226,8 @@ def spec_problems(pages: dict = PAGES) -> list:
                 out.append(f"{name}: required[{i}] has unknown keys {sorted(set(r) - REQUIRED_KEYS)}")
             if not isinstance(r.get("min", 1), int) or r.get("min", 1) < 1:
                 out.append(f"{name}: required[{i}] min must be a whole number >= 1")
+            if r.get("hidden") and r.get("visible") is not None:
+                out.append(f"{name}: required[{i}] cannot be both hidden and visible")
             if "text" in r and (not isinstance(r["text"], str) or not r["text"]):
                 out.append(f"{name}: required[{i}] text must be non-empty words")
         for key in ("api_ok", "expected_failures"):
@@ -245,14 +250,17 @@ def path_of(url: str) -> str:
 
 
 def classify(responses: Iterable, request_failures: Iterable, console_errors: Iterable,
-             page_errors: Iterable, expected: Iterable, tolerated: Iterable = TOLERATED) -> list:
+             page_errors: Iterable, expected: Iterable, tolerated: Iterable = TOLERATED,
+             reads: Iterable = ()) -> list:
     """What went wrong on one page load, as plain sentences ([] when nothing did).
 
     responses: (method, url, status) of every response; request_failures: (method, url, error)
     of every request that got no response; console_errors: (text, url the console names or "");
     page_errors: uncaught script errors. A response >= 400 is allowed only when listed in
     `expected` or `tolerated`; every `expected` refusal must also have happened. A console error
-    is allowed only when it is the browser's own line for an allowed response."""
+    is allowed only when it is the browser's own line for an allowed response. Every
+    (method, path?query) in `reads` must have been made and answered 200."""
+    responses = list(responses)
     expected, tolerated = set(expected), set(tolerated)
     out, allowed_paths, allowed_status, seen = [], set(), set(), set()
     for method, url, status in responses:
@@ -265,6 +273,12 @@ def classify(responses: Iterable, request_failures: Iterable, console_errors: It
             allowed_status.add(int(status))
         else:
             out.append(f"failed request: {key[0]} {key[1]} -> {key[2]}")
+    answered = {(m.upper(), path_of(u)) for m, u, st in responses if st == 200}
+    for method, path in reads:
+        if (method.upper(), path) not in answered:
+            made = sorted({st for m, u, st in responses if (m.upper(), path_of(u)) == (method.upper(), path)})
+            out.append(f"expected read not answered 200: {method.upper()} {path} "
+                       + (f"(got {', '.join(map(str, made))})" if made else "(never made)"))
     for key in sorted(expected - seen):
         out.append(f"expected refusal did not happen: {key[0]} {key[1]} -> {key[2]} (update PAGES)")
     for method, url, error in request_failures:
@@ -279,6 +293,26 @@ def classify(responses: Iterable, request_failures: Iterable, console_errors: It
         out.append("console error: " + " ".join(text.split())[:300])
     for err in page_errors:
         out.append("uncaught script error: " + " ".join(str(err).split())[:300])
+    return out
+
+
+def reads_for(name: str, run_id: str) -> list:
+    """The page's api_ok reads with the run id filled in."""
+    return [(m, path.format(run_id=run_id)) for m, path in PAGES[name]["api_ok"]]
+
+
+def theme_problems(backgrounds: dict) -> list:
+    """(page, width, line) for each page whose body background is the same in light and dark.
+    backgrounds: {(page, width, theme): computed colour or None}."""
+    out = []
+    for (page, width, theme), colour in sorted(backgrounds.items(), key=lambda kv: tuple(map(str, kv[0]))):
+        if theme != "dark":
+            continue
+        light = backgrounds.get((page, width, "light"))
+        if colour is None or light is None:
+            continue                       # that load already failed and said why
+        if colour == light:
+            out.append((page, width, f"body background is the same in light and dark ({colour})"))
     return out
 
 
@@ -297,6 +331,11 @@ _CHECK_JS = """(reqs) => {
     let found;
     try { found = Array.from(document.querySelectorAll(r.css)); } catch (err) { return 'bad selector ' + r.css; }
     const min = r.min || 1;
+    if (r.hidden) {
+      if (found.length < min) return r.css + ': ' + found.length + ' found, at least ' + min + ' required';
+      const seen = found.filter(shown).length;
+      return seen ? r.css + ': must be hidden, ' + seen + ' shown' : null;
+    }
     const want = r.visible === false ? found : found.filter(shown);
     if (want.length < min) {
       return found.length >= min ? r.css + ': present but hidden (' + want.length + ' of ' + min + ' shown)'
@@ -347,13 +386,14 @@ class Recorder:
             loc = msg.location or {}
             self.console_errors.append((msg.text, loc.get("url") or ""))
 
-    def problems(self, expected) -> list:
-        return classify(self.responses, self.request_failures, self.console_errors, self.page_errors, expected)
+    def problems(self, expected, reads=(), tolerated=TOLERATED) -> list:
+        return classify(self.responses, self.request_failures, self.console_errors, self.page_errors,
+                        expected, tolerated, reads)
 
 
 class Report:
     def __init__(self, out: Path):
-        self.out, self.checks, self.failures = out, [], 0
+        self.out, self.checks, self.failures, self.backgrounds = out, [], 0, {}
 
     def add(self, page: str, width, theme: str, problems: list, **extra) -> None:
         for p in problems:
@@ -389,6 +429,7 @@ def check_page(ctx, report: Report, args, name: str, width: int, theme: str, run
         applied = page.evaluate("() => document.documentElement.getAttribute('data-theme')")
         if applied != theme:
             problems.append(f"theme not applied (data-theme is {applied!r})")
+        report.backgrounds[(name, width, theme)] = page.evaluate("() => getComputedStyle(document.body).backgroundColor")
         if width == PHONE:
             extra = page.evaluate(_SCROLL_JS)
             if extra > 1:
@@ -396,8 +437,9 @@ def check_page(ctx, report: Report, args, name: str, width: int, theme: str, run
         page.screenshot(path=str(shot), full_page=True)
     except Exception as exc:  # a timeout or a crash is a failure of this page, not of the run
         problems.append(f"{type(exc).__name__}: {' '.join(str(exc).split())[:300]}")
-    problems += rec.problems(PAGES[name]["expected_failures"])
-    report.add(name, width, theme, problems, screenshot=shot.name if shot.exists() else None)
+    problems += rec.problems(PAGES[name]["expected_failures"], reads_for(name, run_id))
+    report.add(name, width, theme, problems, screenshot=shot.name if shot.exists() else None,
+               background=report.backgrounds.get((name, width, theme)))
     page.close()
 
 
@@ -441,7 +483,7 @@ def play_run(ctx, report: Report, args, run: dict) -> Optional[str]:
         page.screenshot(path=str(shot), full_page=True)
     except Exception as exc:
         problems.append(f"play: {type(exc).__name__}: {' '.join(str(exc).split())[:300]}")
-    problems += rec.problems([])
+    problems += rec.problems([], reads_for("ask", ""))
     report.add("ask (play)", 1280, "light", problems, screenshot=shot.name if shot.exists() else None, run_id=sid)
     page.close()
     return sid
@@ -458,7 +500,7 @@ def check_played_run(ctx, report: Report, args, sid: str) -> None:
         page.screenshot(path=str(shot), full_page=True)
     except Exception as exc:
         problems.append(f"{type(exc).__name__}: {' '.join(str(exc).split())[:300]}")
-    problems += rec.problems([])
+    problems += rec.problems([], reads_for("run", sid))
     report.add("run (played)", 1280, "light", problems, screenshot=shot.name if shot.exists() else None)
     page.close()
 
@@ -476,13 +518,9 @@ def check_markdown(ctx, report: Report, args) -> None:
         problems += [f"sanitiser: {b}" for b in result["bad"]]
         if result["imgs"] < 1:
             problems.append("sanitiser probe: the <img> was dropped entirely, so the onerror test proved nothing")
-        fired = page.evaluate("() => window.__borgXss")
-        if fired is not None:
-            problems.append(f"sanitiser: injected script ran (window.__borgXss = {fired!r})")
     except Exception as exc:
         problems.append(f"markdown: {type(exc).__name__}: {' '.join(str(exc).split())[:300]}")
-    problems += classify(rec.responses, rec.request_failures, rec.console_errors, rec.page_errors,
-                         expected=[], tolerated=TOLERATED | XSS_ALLOWED)
+    problems += rec.problems([], reads_for("ask", ""), tolerated=TOLERATED | XSS_ALLOWED)
     report.add("ask (markdown)", 1280, "light", problems, sanitised=(result or {}).get("html"))
     page.close()
 
@@ -527,6 +565,8 @@ def main(argv: Optional[list] = None) -> int:
                     for name in args.pages:
                         check_page(ctx, report, args, name, width, theme, run["run_id"])
                     ctx.close()
+            for page_name, width, line in theme_problems(report.backgrounds):
+                report.add(page_name + " (theme)", width, "dark", [line])
             ctx = _new_context(browser, 1280, "light")
             if "ask" in args.pages:
                 sid = play_run(ctx, report, args, run)
