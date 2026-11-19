@@ -328,7 +328,7 @@ your own pool.
 | Recipe | When | Ticked rows |
 |---|---|---|
 | **Local-only dev** | iteration, no external spend | 1 mid-tier local model (as shown on the Models page) as both planner and step model |
-| **OpenRouter mixed** | you have a key and want to try the router | 1 premium row for planning (e.g. `openrouter/anthropic/claude-sonnet-4.6`) + 2-3 cheaper rows for steps (e.g. `openrouter/deepseek/deepseek-v3.2`, `openrouter/x-ai/grok-4.1-fast`) |
+| **OpenRouter mixed** | you have a key and want to try the router | 1 premium row for planning (e.g. `openrouter/anthropic/claude-sonnet-4.6`) + 2-3 cheaper rows for steps (e.g. `openrouter/deepseek/deepseek-v3.2`, `openrouter/openai/gpt-5.4-nano`) |
 | **Premium planner, cheap steps** | a bulk workload | one frontier planner + one or two cheaper step models; pin the planner on the Admin Settings page (`orchestrator_endpoint` and `orchestrator_model_name`) for determinism |
 
 ### Rule Zero shortcut — what it fixes (BRT-ZERO-01)
