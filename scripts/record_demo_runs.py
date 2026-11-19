@@ -36,6 +36,7 @@ import os
 import sys
 from datetime import datetime
 from pathlib import Path
+from typing import Optional
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
@@ -232,6 +233,18 @@ def _add_manifest(entry: dict) -> None:
     MANIFEST.write_text(json.dumps(data, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
 
 
+def save_answer(run_id: str, text: object, folder: Path = DB_FILE.parent / "answers") -> Optional[Path]:
+    """Keep the run's final answer beside the demo database (``answers/<run_id>.md``, git-ignored
+    with it): the run database does not store it, and the replay export (scripts/export_run.py,
+    work order 4.5) reads it from here. Written byte for byte (no newline translation)."""
+    if not run_id or not isinstance(text, str):
+        return None
+    folder.mkdir(parents=True, exist_ok=True)
+    path = folder / f"{run_id}.md"
+    path.write_text(text, encoding="utf-8", newline="")
+    return path
+
+
 async def record(jobs: list[str]) -> int:
     from bench.budget import Ledger, logged_dollars
     from src.agents import executor
@@ -290,6 +303,7 @@ async def record(jobs: list[str]) -> int:
                 with run_bench._Env(**env), run_bench.tools_off():
                     result = await run_pipeline(r["instruction"], db_path=db, documents=r["documents"])
                 run_id, status = result.get("run_id"), result.get("status")
+                save_answer(run_id, result.get("response"))
                 spend = float(result.get("cost_dollars") or 0.0)
                 note = result.get("error")
                 print(f"[{LABEL}] job {r['job']}: status {status}, run {run_id}, "

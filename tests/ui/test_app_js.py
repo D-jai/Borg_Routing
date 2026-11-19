@@ -452,3 +452,17 @@ def test_an_external_markdown_link_keeps_its_address_visible_as_text(tmp_path):
 def test_an_external_image_is_still_dropped_and_not_turned_into_text(tmp_path):
     out = run_js(tmp_path, STANDIN + "return [Borg.markdown('![alt](https://x.example/p.png)')];")
     assert "x.example" not in out[0] and "src=" not in out[0]
+
+
+# ---- replay notice (work order 4.5) ----
+
+def test_replay_notice_names_the_date_and_says_demo_run(tmp_path):
+    st = {"mode": "replay", "notice": "Replay of a recorded run on 18-Nov-2026"}
+    text = call(tmp_path, "replayNotice", [st])   # the pipe's code page mangles the middle dot
+    assert text.startswith("Replay of a recorded run on 18-Nov-2026 ")
+    assert text.endswith(" demo run, not a benchmark result")
+
+
+def test_no_replay_notice_in_live_mode_or_on_a_bad_answer(tmp_path):
+    for st in ({"mode": "live"}, None, "replay", {}):
+        assert call(tmp_path, "replayNotice", [st]) is None

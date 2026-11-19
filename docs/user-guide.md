@@ -858,3 +858,31 @@ Open `http://localhost:8000/` (or `/ui/`); it goes to the Ask page. The old chat
 ### Runs (`/ui/runs.html`)
 
 The history of runs, newest first, with status and rating. Direct-to-model questions (bypass runs) are left out unless **Include direct-to-model questions** is ticked.
+
+---
+
+## Replay demo (work order 4.5)
+
+Replay mode shows what BORG_ROUTE does without a key, a model or a network: the server plays back runs that were recorded earlier. The runs it ships with are **demo runs** (planner ruling 24): fictional data, and they back no claim or benchmark number.
+
+### How to use it
+
+1. Set `BORG_DEMO_MODE=replay` in `.env` (or the environment) and start the server as usual. No key is needed.
+2. Every page shows a chip in the top bar: "Replay of a recorded run on 18-Nov-2026 · demo run, not a benchmark result".
+3. On **Ask** the text box is gone. Each recorded run is a button ("Play Job 1: bulk small items (demo run, 1:31 as recorded)"). Choosing one plays the run as it was recorded: the progress line shows each stage at the moment it happened, then the recorded answer arrives with its receipt (steps, models, time, cost, the one-pass floor, calls that left the machine). **See how it was done** opens the Run page, which fills in step by step while the playback runs and ends with the recorded totals.
+4. Playback runs at recorded speed. `BORG_REPLAY_SPEED` divides the recorded times (2 plays twice as fast); a client may send its own `replay_speed` with the request. The lane run (job 3) took about 14 minutes when it was recorded.
+5. **Runs** lists the recorded runs; each opens finished.
+
+While replay mode is on, every route that changes state (new tasks, resume, ratings, keys, settings, rules, models, skills, MCP) and every route that could read a key or call out (local status probes, Discover, the admin pages' data) returns 403 with BRT-RPL-001. The Admin pages therefore show that their data is not available. Nothing is written to any database.
+
+### Making the replay files
+
+`python scripts/export_run.py <run_id> --db <run database> [--out demo/runs] [--docs-root <documents folder>] [--canary <text>]` writes one file per run: the run, its steps with their routing decisions, its events with times relative to the run's start, its costs, the stage timeline and the answer. It never writes to the run database (it works on a copy). It strips keys and absolute local paths, drops the machine id, and never exports the text of a request. For a run with the lane on, the file holds what a non-admin viewer sees while the lane is on (the same redaction as the Run page), and request bodies are left out for every run. The answer is not stored in the run database: the demo recorder keeps it in `answers/<run_id>.md` beside the database, and otherwise the script rebuilds it from the run's last compose reply; either way its length must match the one the run's stored floor was priced on.
+
+The script refuses and writes nothing when the file would hold a canary (BRT-RPL-010), raw document text or documents it cannot read to check (BRT-RPL-011), a key or path left after stripping (BRT-RPL-012), an answer it cannot recover exactly (BRT-RPL-013), or a run that is missing or not finished (BRT-RPL-014).
+
+### If something goes wrong
+
+- **The Ask page says no recorded run was found:** check `BORG_REPLAY_DIR` (default `demo/runs`); the server log names any file it skipped (BRT-RPL-003).
+- **403 with BRT-RPL-002:** the prompt was not one of the recorded ones. Use the buttons.
+- **A mistyped `BORG_DEMO_MODE`:** any value other than empty, `off` or `replay` is treated as replay (BRT-RPL-005 in the log), so a typo never opens the live app. Set it to `off` or remove it to run for real.

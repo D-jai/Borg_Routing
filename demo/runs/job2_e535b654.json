@@ -1,0 +1,564 @@
+{
+ "format": "borg_route.replay/1",
+ "label": "demo run",
+ "job": "2",
+ "title": "mixed job",
+ "run_id": "e535b654-ca7b-43b2-8462-6c37a76a85d4",
+ "recorded_on": "2026-11-18",
+ "lane_mode": "off",
+ "redaction": "viewer",
+ "prompt": "A company is weighing two remote work policies. Compare them point by point, pick out the risks and costs of the proposed one (work out the yearly cost difference per person for the allowances and equipment), and draft a short recommendation memo for the leadership team with a comparison table.\n\nPOLICY A (current):\nLarkspur Outfitters Remote Work Policy (current, version 1)\n\n1. Eligibility. Staff in office-based roles may work from home up to two days a week once they have finished their first three months.\n2. Approval. The team lead approves a fixed weekly pattern. Changes need two working days of notice.\n3. Core hours. Everyone is reachable between 10:00 and 15:00 local time on every working day.\n4. Equipment. The company provides a laptop and a monitor. Other equipment is paid by the employee.\n5. Expenses. A flat home-office allowance of 20 dollars a month is paid with payroll.\n6. Security. Company data may only be opened on company laptops, over the company VPN.\n7. Review. The policy is reviewed once a year by the people team.\n\nPOLICY B (proposed):\nLarkspur Outfitters Flexible Work Proposal (draft, version 2)\n\n1. Eligibility. All staff in office-based roles may work from home up to three days a week from their first day.\n2. Approval. Staff agree a pattern with their team lead once a quarter. Short-notice changes are allowed when the team lead is told by 09:00 the same day.\n3. Core hours. Everyone is reachable between 11:00 and 14:00 local time. Team meetings are held on the two shared office days.\n4. Equipment. The company provides a laptop, a monitor and a chair on request, up to 400 dollars per person every three years.\n5. Expenses. A home-office allowance of 45 dollars a month is paid with payroll; internet costs are not covered separately.\n6. Security. Company data may only be opened on company laptops, over the company VPN. A short yearly security course becomes compulsory.\n7. Review. The policy is reviewed every six months for the first year, then yearly. A fifteen percent drop in a team's shared-day attendance triggers an early review.",
+ "view": {
+  "run": {
+   "run_id": "e535b654-ca7b-43b2-8462-6c37a76a85d4",
+   "parent_run_id": null,
+   "thread_id": null,
+   "status": "completed",
+   "user_instruction": "A company is weighing two remote work policies. Compare them point by point, pick out the risks and costs of the proposed one (work out the yearly cost difference per person for the allowances and equipment), and draft a short recommendation memo for the leadership team with a comparison table.\n\nPOLICY A (current):\nLarkspur Outfitters Remote Work Policy (current, version 1)\n\n1. Eligibility. Staff in office-based roles may work from home up to two days a week once they have finished their first three months.\n2. Approval. The team lead approves a fixed weekly pattern. Changes need two working days of notice.\n3. Core hours. Everyone is reachable between 10:00 and 15:00 local time on every working day.\n4. Equipment. The company provides a laptop and a monitor. Other equipment is paid by the employee.\n5. Expenses. A flat home-office allowance of 20 dollars a month is paid with payroll.\n6. Security. Company data may only be opened on company laptops, over the company VPN.\n7. Review. The policy is reviewed once a year by the people team.\n\nPOLICY B (proposed):\nLarkspur Outfitters Flexible Work Proposal (draft, version 2)\n\n1. Eligibility. All staff in office-based roles may work from home up to three days a week from their first day.\n2. Approval. Staff agree a pattern with their team lead once a quarter. Short-notice changes are allowed when the team lead is told by 09:00 the same day.\n3. Core hours. Everyone is reachable between 11:00 and 14:00 local time. Team meetings are held on the two shared office days.\n4. Equipment. The company provides a laptop, a monitor and a chair on request, up to 400 dollars per person every three years.\n5. Expenses. A home-office allowance of 45 dollars a month is paid with payroll; internet costs are not covered separately.\n6. Security. Company data may only be opened on company laptops, over the company VPN. A short yearly security course becomes compulsory.\n7. Review. The policy is reviewed every six months for the first year, then yearly. A fifteen percent drop in a team's shared-day attendance triggers an early review.",
+   "created_at": "2026-11-18 09:47:38",
+   "completed_at": "2026-11-18 09:54:19",
+   "user_rating": null,
+   "failure_reason": null,
+   "kind": "orchestrated",
+   "route_options": null,
+   "documents": null,
+   "answer_kind": "composed",
+   "lane_mode": "off"
+  },
+  "envelopes": [
+   {
+    "envelope_id": "d6c1e289-f33b-40e6-ad12-5436e69a22c0",
+    "run_id": "e535b654-ca7b-43b2-8462-6c37a76a85d4",
+    "subtask_id": "6cf57b6a-9cf4-4099-8608-8e84e91e4c19",
+    "type": "answerer",
+    "level_path": "1a",
+    "model_id": "ollama/llama3.2:3b",
+    "trigger_reason": "initial_plan",
+    "skill_id": null,
+    "skill_version": null,
+    "status": "resolved",
+    "outbound_payload": "{\"envelope_id\":\"d6c1e289-f33b-40e6-ad12-5436e69a22c0\",\"run_id\":\"e535b654-ca7b-43b2-8462-6c37a76a85d4\",\"parent_run_id\":null,\"subtask_id\":\"6cf57b6a-9cf4-4099-8608-8e84e91e4c19\",\"type\":\"answerer\",\"current_depth\":1,\"max_depth\":5,\"level_path\":\"1a\",\"model_endpoint\":\"http://localhost:11434\",\"model_name\":\"ollama/llama3.2:3b\",\"instruction\":\"Compare POLICY A and POLICY B point-by-point across all 7 sections. Highlight every material difference in eligibility, approval, core hours, equipment, expenses, security, and review. Be precise and exhaustive.\",\"governance_instruction\":\"A company is weighing two remote work policies. Compare them point by point, pick out the risks and costs of the proposed one (work out the yearly cost difference per person for the allowances and equipment), and draft a short recommendation memo for the leadership team with a comparison table.\\n\\nPOLICY A (current):\\nLarkspur Outfitters Remote Work Policy (current, version 1)\\n\\n1. Eligibility. Staff in office-based roles may work from home up to two days a week once they have finished their first three months.\\n2. Approval. The team lead approves a fixed weekly pattern. Changes need two working days of notice.\\n3. Core hours. Everyone is reachable between 10:00 and 15:00 local time on every working day.\\n4. Equipment. The company provides a laptop and a monitor. Other equipment is paid by the employee.\\n5. Expenses. A flat home-office allowance of 20 dollars a month is paid with payroll.\\n6. Security. Company data may only be opened on company laptops, over the company VPN.\\n7. Review. The policy is reviewed once a year by the people team.\\n\\nPOLICY B (proposed):\\nLarkspur Outfitters Flexible Work Proposal (draft, version 2)\\n\\n1. Eligibility. All staff in office-based roles may work from home up to three days a week from their first day.\\n2. Approval. Staff agree a pattern with their team lead once a quarter. Short-notice changes are allowed when the team lead is told by 09:00 the same day.\\n3. Core hours. Everyone is reachable between 11:00 and 14:00 local time. Team meetings are held on the two shared office days.\\n4. Equipment. The company provides a laptop, a monitor and a chair on request, up to 400 dollars per person every three years.\\n5. Expenses. A home-office allowance of 45 dollars a month is paid with payroll; internet costs are not covered separately.\\n6. Security. Company data may only be opened on company laptops, over the company VPN. A short yearly security course becomes compulsory.\\n7. Review. The policy is reviewed every six months for the first year, then yearly. A fifteen percent drop in a team's shared-day attendance triggers an early review.\",\"context\":\"POLICY A (current) and POLICY B (proposed) are provided in the user message above. Use only these texts.\",\"state_query\":null,\"side_effects\":[],\"tool_requests\":[],\"dependency_input\":{},\"output_schema\":{\"point_by_point_comparison\":\"array of objects, each with section (string), policy_a (string), policy_b (string), key_differences (string)\"},\"max_output_tokens\":4000,\"trigger_reason\":\"initial_plan\",\"node_id\":\"n1\",\"skill_id\":null,\"skill_version\":null,\"skill_args\":null,\"data_scope\":\"derived\",\"documents\":[]}",
+    "inbound_payload": "{\"envelope_id\":\"d6c1e289-f33b-40e6-ad12-5436e69a22c0\",\"subtask_id\":\"6cf57b6a-9cf4-4099-8608-8e84e91e4c19\",\"status\":\"resolved\",\"confidence\":0.99,\"output\":{\"point_by_point_comparison\":[{\"section\":\"Eligibility\",\"policy_a\":\"Staff in office-based roles may work from home up to two days a week once they have finished their first three months.\",\"policy_b\":\"All staff in office-based roles may work from home up to three days a week from their first day.\",\"key_differences\":\"policy_b is more lenient\"},{\"section\":\"Approval\",\"policy_a\":\"The team lead approves a fixed weekly pattern. Changes need two working days of notice.\",\"policy_b\":\"Staff agree a pattern with their team lead once a quarter. Short-notice changes are allowed when the team lead is told by 09:00 the same day.\",\"key_differences\":\"policy_b is more flexible\"},{\"section\":\"Core hours\",\"policy_a\":\"Everyone is reachable between 10:00 and 15:00 local time on every working day.\",\"policy_b\":\"Everyone is reachable between 11:00 and 14:00 local time. Team meetings are held on the two shared office days.\",\"key_differences\":\"policy_b has different core hours and team meeting times\"},{\"section\":\"Equipment\",\"policy_a\":\"The company provides a laptop and a monitor. Other equipment is paid by the employee.\",\"policy_b\":\"The company provides a laptop, a monitor and a chair on request, up to 400 dollars per person every three years.\",\"key_differences\":\"policy_b offers more equipment\"},{\"section\":\"Expenses\",\"policy_a\":\"A flat home-office allowance of 20 dollars a month is paid with payroll.\",\"policy_b\":\"A home-office allowance of 45 dollars a month is paid with payroll; internet costs are not covered separately.\",\"key_differences\":\"policy_b has a higher allowance and different internet costs\"},{\"section\":\"Security\",\"policy_a\":\"Company data may only be opened on company laptops, over the company VPN.\",\"policy_b\":\"Company data may only be opened on company laptops, over the company VPN. A short yearly security course becomes compulsory.\",\"key_differences\":\"policy_b requires a security course\"},{\"section\":\"Review\",\"policy_a\":\"The policy is reviewed once a year by the people team.\",\"policy_b\":\"The policy is reviewed every six months for the first year, then yearly. A fifteen percent drop in a team's shared-day attendance triggers an early review.\",\"key_differences\":\"policy_b has different review intervals and attendance triggers\"}]},\"failure_reason\":\"\",\"tokens_used\":{\"input\":1755,\"output\":689},\"dollars\":0.0,\"baseline_dollars\":0.0208,\"scratch_writes\":[],\"scratch_cleanup\":[{\"table\":\"point_by_point_comparison\",\"action\":\"delete\",\"row_id\":null,\"ids\":[\"6cf57b6a-9cf4-4099-8608-8e84e91e4c19\"]}],\"tool_results\":{},\"lane_guarded\":null}",
+    "tokens_input": 1755,
+    "tokens_output": 689,
+    "dollars": 0,
+    "latency_ms": 384991,
+    "created_at": "2026-11-18 09:47:43",
+    "completed_at": "2026-11-18 09:54:08",
+    "baseline_dollars": 0.0208,
+    "routing": {
+     "mode": "route",
+     "node_id": "n1",
+     "msg": "n1 -> ollama/llama3.2:3b (routed)",
+     "task_type": "extraction",
+     "tier": "light",
+     "floor": 6.0,
+     "est_input_tokens": 200,
+     "est_output_tokens": 500,
+     "candidates": [
+      {
+       "model_id": "ollama/llama3.2:3b",
+       "score": 6.8,
+       "est_cost": 0.0,
+       "est_dollars": 0.0
+      },
+      {
+       "model_id": "openrouter/openai/gpt-5.4-nano",
+       "score": 8.0,
+       "est_cost": 0.001053888888888889,
+       "est_dollars": 0.000665
+      },
+      {
+       "model_id": "openrouter/google/gemini-3.1-flash-lite-preview",
+       "score": 8.8,
+       "est_cost": 0.00115,
+       "est_dollars": 0.0008
+      },
+      {
+       "model_id": "openrouter/deepseek/deepseek-v3.2",
+       "score": 8.2,
+       "est_cost": 0.001242,
+       "est_dollars": 0.000242
+      },
+      {
+       "model_id": "openrouter/moonshotai/kimi-k2-thinking",
+       "score": 8.1,
+       "est_cost": 0.002642727272727273,
+       "est_dollars": 0.0013700000000000001
+      },
+      {
+       "model_id": "openrouter/x-ai/grok-4.20",
+       "score": 8.8,
+       "est_cost": 0.0029,
+       "est_dollars": 0.0015
+      },
+      {
+       "model_id": "openrouter/google/gemini-3.1-pro-preview",
+       "score": 9.7,
+       "est_cost": 0.007275,
+       "est_dollars": 0.0064
+      },
+      {
+       "model_id": "openrouter/openai/gpt-5.3-codex",
+       "score": 9.0,
+       "est_cost": 0.008516666666666667,
+       "est_dollars": 0.00735
+      }
+     ],
+     "notes": [],
+     "reason": "routed",
+     "chosen": "ollama/llama3.2:3b",
+     "est_cost": 0.0,
+     "est_dollars": 0.0,
+     "baseline": "openrouter/anthropic/claude-opus-5.5",
+     "baseline_est_cost": 0.0108
+    },
+    "t_ms": 5000,
+    "t_done_ms": 390000
+   },
+   {
+    "envelope_id": "950c2049-38f3-4870-9432-e41c10679975",
+    "run_id": "e535b654-ca7b-43b2-8462-6c37a76a85d4",
+    "subtask_id": "cad46a12-df99-42ce-9273-82361b3bf499",
+    "type": "answerer",
+    "level_path": "1b",
+    "model_id": "openrouter/openai/gpt-5.4-nano",
+    "trigger_reason": "initial_plan",
+    "skill_id": null,
+    "skill_version": null,
+    "status": "resolved",
+    "outbound_payload": "{\"envelope_id\":\"950c2049-38f3-4870-9432-e41c10679975\",\"run_id\":\"e535b654-ca7b-43b2-8462-6c37a76a85d4\",\"parent_run_id\":null,\"subtask_id\":\"cad46a12-df99-42ce-9273-82361b3bf499\",\"type\":\"answerer\",\"current_depth\":1,\"max_depth\":5,\"level_path\":\"1b\",\"model_endpoint\":\"https://openrouter.ai/api\",\"model_name\":\"openrouter/openai/gpt-5.4-nano\",\"instruction\":\"Identify all risks and downsides of adopting POLICY B (the proposed policy) compared to POLICY A. Focus on operational, managerial, productivity, security, culture, and compliance risks. Be specific and list them clearly.\",\"governance_instruction\":\"A company is weighing two remote work policies. Compare them point by point, pick out the risks and costs of the proposed one (work out the yearly cost difference per person for the allowances and equipment), and draft a short recommendation memo for the leadership team with a comparison table.\\n\\nPOLICY A (current):\\nLarkspur Outfitters Remote Work Policy (current, version 1)\\n\\n1. Eligibility. Staff in office-based roles may work from home up to two days a week once they have finished their first three months.\\n2. Approval. The team lead approves a fixed weekly pattern. Changes need two working days of notice.\\n3. Core hours. Everyone is reachable between 10:00 and 15:00 local time on every working day.\\n4. Equipment. The company provides a laptop and a monitor. Other equipment is paid by the employee.\\n5. Expenses. A flat home-office allowance of 20 dollars a month is paid with payroll.\\n6. Security. Company data may only be opened on company laptops, over the company VPN.\\n7. Review. The policy is reviewed once a year by the people team.\\n\\nPOLICY B (proposed):\\nLarkspur Outfitters Flexible Work Proposal (draft, version 2)\\n\\n1. Eligibility. All staff in office-based roles may work from home up to three days a week from their first day.\\n2. Approval. Staff agree a pattern with their team lead once a quarter. Short-notice changes are allowed when the team lead is told by 09:00 the same day.\\n3. Core hours. Everyone is reachable between 11:00 and 14:00 local time. Team meetings are held on the two shared office days.\\n4. Equipment. The company provides a laptop, a monitor and a chair on request, up to 400 dollars per person every three years.\\n5. Expenses. A home-office allowance of 45 dollars a month is paid with payroll; internet costs are not covered separately.\\n6. Security. Company data may only be opened on company laptops, over the company VPN. A short yearly security course becomes compulsory.\\n7. Review. The policy is reviewed every six months for the first year, then yearly. A fifteen percent drop in a team's shared-day attendance triggers an early review.\",\"context\":\"POLICY A (current) and POLICY B (proposed) are provided in the user message above. Use only these texts.\",\"state_query\":null,\"side_effects\":[],\"tool_requests\":[],\"dependency_input\":{},\"output_schema\":{\"risks_of_b\":\"array of strings, each a distinct risk with a short explanation\"},\"max_output_tokens\":4000,\"trigger_reason\":\"initial_plan\",\"node_id\":\"n2\",\"skill_id\":null,\"skill_version\":null,\"skill_args\":null,\"data_scope\":\"derived\",\"documents\":[]}",
+    "inbound_payload": "{\"envelope_id\":\"950c2049-38f3-4870-9432-e41c10679975\",\"subtask_id\":\"cad46a12-df99-42ce-9273-82361b3bf499\",\"status\":\"resolved\",\"confidence\":0.88,\"output\":{\"risks_of_b\":[\"Reduced eligibility barrier could increase managerial workload: POLICY B expands eligibility to all office-based roles from day one and allows up to three days/week, potentially raising the volume of remote arrangements requiring oversight.\",\"More complex approval cadence and coordination: POLICY B requires agreeing on a pattern once a quarter (vs. fixed weekly pattern with changes needing two working days notice in POLICY A), increasing the likelihood of misalignment across quarters and requiring more frequent renegotiation.\",\"Short-notice changes increase operational disruption: POLICY B allows short-notice changes when the team lead is told by 09:00 the same day, which can disrupt scheduling, meeting planning, and workload handoffs.\",\"Core hours window is narrower and may reduce collaboration flexibility: POLICY B’s core hours are 11:00–14:00 (3 hours) vs POLICY A’s 10:00–15:00 (5 hours), increasing the risk of reduced overlap, especially for teams with cross-time-zone work.\",\"Team meeting dependence on shared office days may create bottlenecks: POLICY B states meetings are held on the two shared office days, concentrating critical discussions into fewer days and raising the impact of absences or conflicts.\",\"Attendance-based early review can create measurement and fairness disputes: POLICY B triggers an early review if shared-day attendance drops by 15%, which could lead to disagreements about tracking accuracy, root causes, and whether the threshold unfairly penalizes certain teams.\",\"Expense policy change may create unexpected employee dissatisfaction: POLICY B increases the allowance to $45/month but removes separate coverage for internet costs; employees who need higher internet expenditures may perceive the policy as less supportive despite the higher flat allowance.\",\"Equipment reimbursement timing may shift costs risk to employees: POLICY B provides chair on request and reimburses up to $400 every three years, which can leave employees without replacement/upgrades for longer periods or force fronting costs until the reimbursement cycle.\",\"Chair provision is on request, not guaranteed: POLICY B’s chair is available on request, which may lead to inequities in workstation quality if employees are unaware, face approval friction, or delay requesting.\",\"Potential productivity variability due to longer remote allowance: Allowing up to three days/week (vs two) increases the chance of reduced spontaneous collaboration, slower resolution of minor issues, and slower informal knowledge transfer.\",\"Security compliance burden increases: POLICY B makes a short yearly security course compulsory (vs annual policy review only in POLICY A), increasing compliance overhead and risk of course non-completion leading to workflow friction or access restrictions (not explicitly stated but implied by compulsion).\",\"Security education may be unevenly adopted: Compulsory training introduces the risk that employees treat it as a checkbox, potentially reducing the effectiveness of security improvements and increasing human-factor vulnerability if not reinforced.\",\"Potential ambiguity and enforcement risk in security/data access: While both policies restrict data to company laptops over the VPN, POLICY B adds training requirements; without clear enforcement details in the text, there is a risk of inconsistent application and confusion about compliance expectations.\",\"More frequent policy reviews may create instability: POLICY B reviews every six months for the first year (then yearly) vs POLICY A’s annual review, increasing the chance of midstream changes and uncertainty affecting planning.\",\"Policy change governance could be perceived as less stable by staff: Increased review frequency plus attendance-triggered early review can cause employees to feel the policy is in flux, potentially reducing trust and long-term buy-in.\",\"Cross-functional coordination challenges if patterns change more dynamically: POLICY B’s same-day change mechanism (09:00 notice) can complicate coordination across teams, especially for shared resources, customer-facing schedules, or interdependent projects.\",\"Core-hours misalignment risk for managers scheduling leadership coverage: Managers who need coverage across different teams may struggle to ensure availability during the narrower 11:00–14:00 window and the reduced total overlap compared to POLICY A.\",\"Compliance risk from documenting/monitoring attendance metrics: The 15% shared-day attendance trigger implies tracking attendance; if tracking or definitions of 'shared-day attendance' are unclear, compliance and accountability disputes may arise.\"]},\"failure_reason\":\"\",\"tokens_used\":{\"input\":1709,\"output\":903},\"dollars\":0.0014705500000000002,\"baseline_dollars\":0.024896,\"scratch_writes\":[],\"scratch_cleanup\":[],\"tool_results\":{},\"lane_guarded\":null}",
+    "tokens_input": 1709,
+    "tokens_output": 903,
+    "dollars": 0.0014705500000000002,
+    "latency_ms": 6980,
+    "created_at": "2026-11-18 09:47:43",
+    "completed_at": "2026-11-18 09:47:50",
+    "baseline_dollars": 0.024896,
+    "routing": {
+     "mode": "route",
+     "node_id": "n2",
+     "msg": "n2 -> openrouter/openai/gpt-5.4-nano (routed)",
+     "task_type": "reasoning",
+     "tier": "mid",
+     "floor": 7.5,
+     "est_input_tokens": 200,
+     "est_output_tokens": 500,
+     "candidates": [
+      {
+       "model_id": "openrouter/openai/gpt-5.4-nano",
+       "score": 8.2,
+       "est_cost": 0.001053888888888889,
+       "est_dollars": 0.000665
+      },
+      {
+       "model_id": "openrouter/google/gemini-3.1-flash-lite-preview",
+       "score": 8.4,
+       "est_cost": 0.00115,
+       "est_dollars": 0.0008
+      },
+      {
+       "model_id": "openrouter/deepseek/deepseek-v3.2",
+       "score": 8.8,
+       "est_cost": 0.001242,
+       "est_dollars": 0.000242
+      },
+      {
+       "model_id": "openrouter/moonshotai/kimi-k2-thinking",
+       "score": 8.7,
+       "est_cost": 0.002642727272727273,
+       "est_dollars": 0.0013700000000000001
+      },
+      {
+       "model_id": "openrouter/x-ai/grok-4.20",
+       "score": 9.4,
+       "est_cost": 0.0029,
+       "est_dollars": 0.0015
+      },
+      {
+       "model_id": "openrouter/google/gemini-3.1-pro-preview",
+       "score": 9.7,
+       "est_cost": 0.007275,
+       "est_dollars": 0.0064
+      },
+      {
+       "model_id": "openrouter/openai/gpt-5.3-codex",
+       "score": 9.6,
+       "est_cost": 0.008516666666666667,
+       "est_dollars": 0.00735
+      },
+      {
+       "model_id": "openrouter/anthropic/claude-sonnet-4.6",
+       "score": 9.1,
+       "est_cost": 0.0091,
+       "est_dollars": 0.008100000000000001
+      }
+     ],
+     "notes": [],
+     "reason": "routed",
+     "chosen": "openrouter/openai/gpt-5.4-nano",
+     "est_cost": 0.001053888888888889,
+     "est_dollars": 0.000665,
+     "baseline": "openrouter/anthropic/claude-opus-5.5",
+     "baseline_est_cost": 0.0108
+    },
+    "t_ms": 5000,
+    "t_done_ms": 12000
+   },
+   {
+    "envelope_id": "165f0a44-05bc-48de-8947-3106e6ed9815",
+    "run_id": "e535b654-ca7b-43b2-8462-6c37a76a85d4",
+    "subtask_id": "b62b18e7-3b97-40fc-b8f8-18c9c20717c3",
+    "type": "answerer",
+    "level_path": "1c",
+    "model_id": "openrouter/openai/gpt-5.4-nano",
+    "trigger_reason": "initial_plan",
+    "skill_id": null,
+    "skill_version": null,
+    "status": "resolved",
+    "outbound_payload": "{\"envelope_id\":\"165f0a44-05bc-48de-8947-3106e6ed9815\",\"run_id\":\"e535b654-ca7b-43b2-8462-6c37a76a85d4\",\"parent_run_id\":null,\"subtask_id\":\"b62b18e7-3b97-40fc-b8f8-18c9c20717c3\",\"type\":\"answerer\",\"current_depth\":1,\"max_depth\":5,\"level_path\":\"1c\",\"model_endpoint\":\"https://openrouter.ai/api\",\"model_name\":\"openrouter/openai/gpt-5.4-nano\",\"instruction\":\"Calculate the yearly cost difference per person between POLICY B and POLICY A for allowances and equipment only. Assume: (a) the chair in B costs the full $400 cap and is requested by every employee, (b) amortize equipment over exactly 3 years, (c) ignore laptop/monitor as they are common to both, (d) use 12 months per year. Show the exact math and final per-employee annual delta.\",\"governance_instruction\":\"A company is weighing two remote work policies. Compare them point by point, pick out the risks and costs of the proposed one (work out the yearly cost difference per person for the allowances and equipment), and draft a short recommendation memo for the leadership team with a comparison table.\\n\\nPOLICY A (current):\\nLarkspur Outfitters Remote Work Policy (current, version 1)\\n\\n1. Eligibility. Staff in office-based roles may work from home up to two days a week once they have finished their first three months.\\n2. Approval. The team lead approves a fixed weekly pattern. Changes need two working days of notice.\\n3. Core hours. Everyone is reachable between 10:00 and 15:00 local time on every working day.\\n4. Equipment. The company provides a laptop and a monitor. Other equipment is paid by the employee.\\n5. Expenses. A flat home-office allowance of 20 dollars a month is paid with payroll.\\n6. Security. Company data may only be opened on company laptops, over the company VPN.\\n7. Review. The policy is reviewed once a year by the people team.\\n\\nPOLICY B (proposed):\\nLarkspur Outfitters Flexible Work Proposal (draft, version 2)\\n\\n1. Eligibility. All staff in office-based roles may work from home up to three days a week from their first day.\\n2. Approval. Staff agree a pattern with their team lead once a quarter. Short-notice changes are allowed when the team lead is told by 09:00 the same day.\\n3. Core hours. Everyone is reachable between 11:00 and 14:00 local time. Team meetings are held on the two shared office days.\\n4. Equipment. The company provides a laptop, a monitor and a chair on request, up to 400 dollars per person every three years.\\n5. Expenses. A home-office allowance of 45 dollars a month is paid with payroll; internet costs are not covered separately.\\n6. Security. Company data may only be opened on company laptops, over the company VPN. A short yearly security course becomes compulsory.\\n7. Review. The policy is reviewed every six months for the first year, then yearly. A fifteen percent drop in a team's shared-day attendance triggers an early review.\",\"context\":\"POLICY A: $20/month allowance. POLICY B: $45/month allowance + chair up to $400 every 3 years. Use only these numbers.\",\"state_query\":null,\"side_effects\":[],\"tool_requests\":[],\"dependency_input\":{},\"output_schema\":{\"allowance_a_annual\":\"number\",\"allowance_b_annual\":\"number\",\"equipment_b_annual\":\"number\",\"total_b_annual\":\"number\",\"yearly_difference_per_person\":\"number\",\"calculation_steps\":\"array of strings\"},\"max_output_tokens\":4000,\"trigger_reason\":\"initial_plan\",\"node_id\":\"n3\",\"skill_id\":null,\"skill_version\":null,\"skill_args\":null,\"data_scope\":\"derived\",\"documents\":[]}",
+    "inbound_payload": "{\"envelope_id\":\"165f0a44-05bc-48de-8947-3106e6ed9815\",\"subtask_id\":\"b62b18e7-3b97-40fc-b8f8-18c9c20717c3\",\"status\":\"resolved\",\"confidence\":0.98,\"output\":{\"allowance_a_annual\":240,\"allowance_b_annual\":540,\"equipment_b_annual\":133.33333333333334,\"total_b_annual\":673.3333333333334,\"yearly_difference_per_person\":433.33333333333337,\"calculation_steps\":[\"Allowance A annual = 20 * 12 = 240\",\"Allowance B annual = 45 * 12 = 540\",\"Equipment B: chair cost assumed at full cap = 400 per 3 years\",\"Equipment B annualized = 400 / 3 = 133.33333333333334\",\"Total B annual (allowance + equipment) = 540 + 133.33333333333334 = 673.3333333333334\",\"Yearly difference per person (B - A) = 673.3333333333334 - 240 = 433.33333333333337\"]},\"failure_reason\":\"\",\"tokens_used\":{\"input\":1812,\"output\":266},\"dollars\":0.0006949,\"baseline_dollars\":0.012568,\"scratch_writes\":[],\"scratch_cleanup\":[],\"tool_results\":{},\"lane_guarded\":null}",
+    "tokens_input": 1812,
+    "tokens_output": 266,
+    "dollars": 0.0006949,
+    "latency_ms": 2357,
+    "created_at": "2026-11-18 09:47:43",
+    "completed_at": "2026-11-18 09:47:46",
+    "baseline_dollars": 0.012568,
+    "routing": {
+     "mode": "route",
+     "node_id": "n3",
+     "msg": "n3 -> openrouter/openai/gpt-5.4-nano (routed)",
+     "task_type": "reasoning",
+     "tier": "light",
+     "floor": 6.0,
+     "est_input_tokens": 200,
+     "est_output_tokens": 500,
+     "candidates": [
+      {
+       "model_id": "openrouter/openai/gpt-5.4-nano",
+       "score": 8.2,
+       "est_cost": 0.001053888888888889,
+       "est_dollars": 0.000665
+      },
+      {
+       "model_id": "openrouter/google/gemini-3.1-flash-lite-preview",
+       "score": 8.4,
+       "est_cost": 0.00115,
+       "est_dollars": 0.0008
+      },
+      {
+       "model_id": "openrouter/deepseek/deepseek-v3.2",
+       "score": 8.8,
+       "est_cost": 0.001242,
+       "est_dollars": 0.000242
+      },
+      {
+       "model_id": "openrouter/moonshotai/kimi-k2-thinking",
+       "score": 8.7,
+       "est_cost": 0.002642727272727273,
+       "est_dollars": 0.0013700000000000001
+      },
+      {
+       "model_id": "openrouter/x-ai/grok-4.20",
+       "score": 9.4,
+       "est_cost": 0.0029,
+       "est_dollars": 0.0015
+      },
+      {
+       "model_id": "openrouter/google/gemini-3.1-pro-preview",
+       "score": 9.7,
+       "est_cost": 0.007275,
+       "est_dollars": 0.0064
+      },
+      {
+       "model_id": "openrouter/openai/gpt-5.3-codex",
+       "score": 9.6,
+       "est_cost": 0.008516666666666667,
+       "est_dollars": 0.00735
+      },
+      {
+       "model_id": "openrouter/anthropic/claude-sonnet-4.6",
+       "score": 9.1,
+       "est_cost": 0.0091,
+       "est_dollars": 0.008100000000000001
+      }
+     ],
+     "notes": [],
+     "reason": "routed",
+     "chosen": "openrouter/openai/gpt-5.4-nano",
+     "est_cost": 0.001053888888888889,
+     "est_dollars": 0.000665,
+     "baseline": "openrouter/anthropic/claude-opus-5.5",
+     "baseline_est_cost": 0.0108
+    },
+    "t_ms": 5000,
+    "t_done_ms": 8000
+   }
+  ],
+  "child_envelopes": [],
+  "events": [
+   {
+    "log_id": 14,
+    "run_id": "e535b654-ca7b-43b2-8462-6c37a76a85d4",
+    "envelope_id": null,
+    "event_type": "orchestrator_decision",
+    "model_id": "openrouter/x-ai/grok-4.20",
+    "tokens_input": 7897,
+    "tokens_output": 611,
+    "dollars": 0.011398750000000003,
+    "latency_ms": 4674,
+    "decision_json": "{\"mode\": \"plan\", \"parsed\": {\"direct_answer\": null, \"plan\": {\"nodes\": [{\"type\": \"answerer\", \"id\": \"n1\", \"instruction\": \"Compare POLICY A and POLICY B point-by-point across all 7 sections. Highlight every material difference in eligibility, approval, core hours, equipment, expenses, security, and review. Be precise and exhaustive.\", \"context\": \"POLICY A (current) and POLICY B (proposed) are provided in the user message above. Use only these texts.\", \"output_schema\": {\"point_by_point_comparison\": \"array of objects, each with section (string), policy_a (string), policy_b (string), key_differences (string)\"}, \"tier\": \"light\", \"task_type\": \"extraction\"}, {\"type\": \"answerer\", \"id\": \"n2\", \"instruction\": \"Identify all risks and downsides of adopting POLICY B (the proposed policy) compared to POLICY A. Focus on operational, managerial, productivity, security, culture, and compliance risks. Be specific and list them clearly.\", \"context\": \"POLICY A (current) and POLICY B (proposed) are provided in the user message above. Use only these texts.\", \"output_schema\": {\"risks_of_b\": \"array of strings, each a distinct risk with a short explanation\"}, \"tier\": \"mid\", \"task_type\": \"reasoning\"}, {\"type\": \"answerer\", \"id\": \"n3\", \"instruction\": \"Calculate the yearly cost difference per person between POLICY B and POLICY A for allowances and equipment only. Assume: (a) the chair in B costs the full $400 cap and is requested by every employee, (b) amortize equipment over exactly 3 years, (c) ignore laptop/monitor as they are common to both, (d) use 12 months per year. Show the exact math and final per-employee annual delta.\", \"context\": \"POLICY A: $20/month allowance. POLICY B: $45/month allowance + chair up to $400 every 3 years. Use only these numbers.\", \"output_schema\": {\"allowance_a_annual\": \"number\", \"allowance_b_annual\": \"number\", \"equipment_b_annual\": \"number\", \"total_b_annual\": \"number\", \"yearly_difference_per_person\": \"number\", \"calculation_steps\": \"array of strings\"}, \"tier\": \"light\", \"task_type\": \"reasoning\"}]}, \"rationale\": \"Task requires point-by-point comparison, risk identification, precise cost math, and a final memo with table. Decomposed into three parallel atomic nodes (extraction, reasoning, calculation) using cheapest suitable tiers. Will synthesize into recommendation memo in compose mode.\"}, \"rationale\": \"Task requires point-by-point comparison, risk identification, precise cost math, and a final memo with table. Decomposed into three parallel atomic nodes (extraction, reasoning, calculation) using cheapest suitable tiers. Will synthesize into recommendation memo in compose mode.\", \"parse_error\": null, \"finish_reason\": \"stop\"}",
+    "created_at": "2026-11-18 09:47:43",
+    "baseline_dollars": 0.043808,
+    "source_version": "git:f221eb0",
+    "domain_profile": "general",
+    "t_ms": 5000
+   },
+   {
+    "log_id": 15,
+    "run_id": "e535b654-ca7b-43b2-8462-6c37a76a85d4",
+    "envelope_id": "d6c1e289-f33b-40e6-ad12-5436e69a22c0",
+    "event_type": "orchestrator_decision",
+    "model_id": "ollama/llama3.2:3b",
+    "tokens_input": null,
+    "tokens_output": null,
+    "dollars": null,
+    "latency_ms": null,
+    "decision_json": "{\"mode\": \"route\", \"node_id\": \"n1\", \"msg\": \"n1 -> ollama/llama3.2:3b (routed)\", \"task_type\": \"extraction\", \"tier\": \"light\", \"floor\": 6.0, \"est_input_tokens\": 200, \"est_output_tokens\": 500, \"candidates\": [{\"model_id\": \"ollama/llama3.2:3b\", \"score\": 6.8, \"est_cost\": 0.0, \"est_dollars\": 0.0}, {\"model_id\": \"openrouter/openai/gpt-5.4-nano\", \"score\": 8.0, \"est_cost\": 0.001053888888888889, \"est_dollars\": 0.000665}, {\"model_id\": \"openrouter/google/gemini-3.1-flash-lite-preview\", \"score\": 8.8, \"est_cost\": 0.00115, \"est_dollars\": 0.0008}, {\"model_id\": \"openrouter/deepseek/deepseek-v3.2\", \"score\": 8.2, \"est_cost\": 0.001242, \"est_dollars\": 0.000242}, {\"model_id\": \"openrouter/moonshotai/kimi-k2-thinking\", \"score\": 8.1, \"est_cost\": 0.002642727272727273, \"est_dollars\": 0.0013700000000000001}, {\"model_id\": \"openrouter/x-ai/grok-4.20\", \"score\": 8.8, \"est_cost\": 0.0029, \"est_dollars\": 0.0015}, {\"model_id\": \"openrouter/google/gemini-3.1-pro-preview\", \"score\": 9.7, \"est_cost\": 0.007275, \"est_dollars\": 0.0064}, {\"model_id\": \"openrouter/openai/gpt-5.3-codex\", \"score\": 9.0, \"est_cost\": 0.008516666666666667, \"est_dollars\": 0.00735}], \"notes\": [], \"reason\": \"routed\", \"chosen\": \"ollama/llama3.2:3b\", \"est_cost\": 0.0, \"est_dollars\": 0.0, \"baseline\": \"openrouter/anthropic/claude-opus-5.5\", \"baseline_est_cost\": 0.0108}",
+    "created_at": "2026-11-18 09:47:43",
+    "baseline_dollars": null,
+    "source_version": "git:f221eb0",
+    "domain_profile": "general",
+    "t_ms": 5000
+   },
+   {
+    "log_id": 16,
+    "run_id": "e535b654-ca7b-43b2-8462-6c37a76a85d4",
+    "envelope_id": "950c2049-38f3-4870-9432-e41c10679975",
+    "event_type": "orchestrator_decision",
+    "model_id": "openrouter/openai/gpt-5.4-nano",
+    "tokens_input": null,
+    "tokens_output": null,
+    "dollars": null,
+    "latency_ms": null,
+    "decision_json": "{\"mode\": \"route\", \"node_id\": \"n2\", \"msg\": \"n2 -> openrouter/openai/gpt-5.4-nano (routed)\", \"task_type\": \"reasoning\", \"tier\": \"mid\", \"floor\": 7.5, \"est_input_tokens\": 200, \"est_output_tokens\": 500, \"candidates\": [{\"model_id\": \"openrouter/openai/gpt-5.4-nano\", \"score\": 8.2, \"est_cost\": 0.001053888888888889, \"est_dollars\": 0.000665}, {\"model_id\": \"openrouter/google/gemini-3.1-flash-lite-preview\", \"score\": 8.4, \"est_cost\": 0.00115, \"est_dollars\": 0.0008}, {\"model_id\": \"openrouter/deepseek/deepseek-v3.2\", \"score\": 8.8, \"est_cost\": 0.001242, \"est_dollars\": 0.000242}, {\"model_id\": \"openrouter/moonshotai/kimi-k2-thinking\", \"score\": 8.7, \"est_cost\": 0.002642727272727273, \"est_dollars\": 0.0013700000000000001}, {\"model_id\": \"openrouter/x-ai/grok-4.20\", \"score\": 9.4, \"est_cost\": 0.0029, \"est_dollars\": 0.0015}, {\"model_id\": \"openrouter/google/gemini-3.1-pro-preview\", \"score\": 9.7, \"est_cost\": 0.007275, \"est_dollars\": 0.0064}, {\"model_id\": \"openrouter/openai/gpt-5.3-codex\", \"score\": 9.6, \"est_cost\": 0.008516666666666667, \"est_dollars\": 0.00735}, {\"model_id\": \"openrouter/anthropic/claude-sonnet-4.6\", \"score\": 9.1, \"est_cost\": 0.0091, \"est_dollars\": 0.008100000000000001}], \"notes\": [], \"reason\": \"routed\", \"chosen\": \"openrouter/openai/gpt-5.4-nano\", \"est_cost\": 0.001053888888888889, \"est_dollars\": 0.000665, \"baseline\": \"openrouter/anthropic/claude-opus-5.5\", \"baseline_est_cost\": 0.0108}",
+    "created_at": "2026-11-18 09:47:43",
+    "baseline_dollars": null,
+    "source_version": "git:f221eb0",
+    "domain_profile": "general",
+    "t_ms": 5000
+   },
+   {
+    "log_id": 17,
+    "run_id": "e535b654-ca7b-43b2-8462-6c37a76a85d4",
+    "envelope_id": "165f0a44-05bc-48de-8947-3106e6ed9815",
+    "event_type": "orchestrator_decision",
+    "model_id": "openrouter/openai/gpt-5.4-nano",
+    "tokens_input": null,
+    "tokens_output": null,
+    "dollars": null,
+    "latency_ms": null,
+    "decision_json": "{\"mode\": \"route\", \"node_id\": \"n3\", \"msg\": \"n3 -> openrouter/openai/gpt-5.4-nano (routed)\", \"task_type\": \"reasoning\", \"tier\": \"light\", \"floor\": 6.0, \"est_input_tokens\": 200, \"est_output_tokens\": 500, \"candidates\": [{\"model_id\": \"openrouter/openai/gpt-5.4-nano\", \"score\": 8.2, \"est_cost\": 0.001053888888888889, \"est_dollars\": 0.000665}, {\"model_id\": \"openrouter/google/gemini-3.1-flash-lite-preview\", \"score\": 8.4, \"est_cost\": 0.00115, \"est_dollars\": 0.0008}, {\"model_id\": \"openrouter/deepseek/deepseek-v3.2\", \"score\": 8.8, \"est_cost\": 0.001242, \"est_dollars\": 0.000242}, {\"model_id\": \"openrouter/moonshotai/kimi-k2-thinking\", \"score\": 8.7, \"est_cost\": 0.002642727272727273, \"est_dollars\": 0.0013700000000000001}, {\"model_id\": \"openrouter/x-ai/grok-4.20\", \"score\": 9.4, \"est_cost\": 0.0029, \"est_dollars\": 0.0015}, {\"model_id\": \"openrouter/google/gemini-3.1-pro-preview\", \"score\": 9.7, \"est_cost\": 0.007275, \"est_dollars\": 0.0064}, {\"model_id\": \"openrouter/openai/gpt-5.3-codex\", \"score\": 9.6, \"est_cost\": 0.008516666666666667, \"est_dollars\": 0.00735}, {\"model_id\": \"openrouter/anthropic/claude-sonnet-4.6\", \"score\": 9.1, \"est_cost\": 0.0091, \"est_dollars\": 0.008100000000000001}], \"notes\": [], \"reason\": \"routed\", \"chosen\": \"openrouter/openai/gpt-5.4-nano\", \"est_cost\": 0.001053888888888889, \"est_dollars\": 0.000665, \"baseline\": \"openrouter/anthropic/claude-opus-5.5\", \"baseline_est_cost\": 0.0108}",
+    "created_at": "2026-11-18 09:47:43",
+    "baseline_dollars": null,
+    "source_version": "git:f221eb0",
+    "domain_profile": "general",
+    "t_ms": 5000
+   },
+   {
+    "log_id": 18,
+    "run_id": "e535b654-ca7b-43b2-8462-6c37a76a85d4",
+    "envelope_id": "165f0a44-05bc-48de-8947-3106e6ed9815",
+    "event_type": "model_call",
+    "model_id": "openrouter/openai/gpt-5.4-nano",
+    "tokens_input": 1812,
+    "tokens_output": 266,
+    "dollars": 0.0006949,
+    "latency_ms": 2321,
+    "decision_json": null,
+    "created_at": "2026-11-18 09:47:46",
+    "baseline_dollars": 0.012568,
+    "source_version": "git:f221eb0",
+    "domain_profile": "general",
+    "t_ms": 8000
+   },
+   {
+    "log_id": 19,
+    "run_id": "e535b654-ca7b-43b2-8462-6c37a76a85d4",
+    "envelope_id": "950c2049-38f3-4870-9432-e41c10679975",
+    "event_type": "model_call",
+    "model_id": "openrouter/openai/gpt-5.4-nano",
+    "tokens_input": 1709,
+    "tokens_output": 903,
+    "dollars": 0.0014705500000000002,
+    "latency_ms": 6914,
+    "decision_json": null,
+    "created_at": "2026-11-18 09:47:50",
+    "baseline_dollars": 0.024896,
+    "source_version": "git:f221eb0",
+    "domain_profile": "general",
+    "t_ms": 12000
+   },
+   {
+    "log_id": 20,
+    "run_id": "e535b654-ca7b-43b2-8462-6c37a76a85d4",
+    "envelope_id": "d6c1e289-f33b-40e6-ad12-5436e69a22c0",
+    "event_type": "model_call",
+    "model_id": "ollama/llama3.2:3b",
+    "tokens_input": 1755,
+    "tokens_output": 689,
+    "dollars": 0,
+    "latency_ms": 384909,
+    "decision_json": null,
+    "created_at": "2026-11-18 09:54:08",
+    "baseline_dollars": 0.0208,
+    "source_version": "git:f221eb0",
+    "domain_profile": "general",
+    "t_ms": 390000
+   },
+   {
+    "log_id": 21,
+    "run_id": "e535b654-ca7b-43b2-8462-6c37a76a85d4",
+    "envelope_id": null,
+    "event_type": "orchestrator_decision",
+    "model_id": "openrouter/x-ai/grok-4.20",
+    "tokens_input": 9129,
+    "tokens_output": 65,
+    "dollars": 0.01157375,
+    "latency_ms": 1310,
+    "decision_json": "{\"mode\": \"re_plan\", \"parsed\": {\"action\": \"compose\", \"next_nodes\": null, \"rationale\": \"All required pieces (point-by-point comparison, risks of Policy B, and precise yearly cost difference) have been delivered by the prior stages. No gaps remain; ready to synthesize into the final memo with comparison table.\"}, \"rationale\": \"All required pieces (point-by-point comparison, risks of Policy B, and precise yearly cost difference) have been delivered by the prior stages. No gaps remain; ready to synthesize into the final memo with comparison table.\", \"parse_error\": null, \"finish_reason\": \"stop\"}",
+    "created_at": "2026-11-18 09:54:09",
+    "baseline_dollars": 0.037816,
+    "source_version": "git:f221eb0",
+    "domain_profile": "general",
+    "t_ms": 391000
+   },
+   {
+    "log_id": 22,
+    "run_id": "e535b654-ca7b-43b2-8462-6c37a76a85d4",
+    "envelope_id": null,
+    "event_type": "orchestrator_decision",
+    "model_id": "openrouter/x-ai/grok-4.20",
+    "tokens_input": 9126,
+    "tokens_output": 1235,
+    "dollars": 0.014495000000000001,
+    "latency_ms": 9827,
+    "decision_json": "{\"mode\": \"compose\", \"parsed\": {\"response\": \"## Policy Comparison: Larkspur Outfitters Remote Work Policies A (Current) vs. B (Proposed)\\n\\n**Point-by-point comparison**\\n\\n- **Eligibility**: Policy A limits office-based staff to 2 remote days/week after a 3-month probation. Policy B extends this to 3 remote days/week from day one for all office-based staff. (B is significantly more permissive.)\\n- **Approval**: Policy A requires team-lead approval of a fixed weekly pattern; changes need 2 working days\\u2019 notice. Policy B requires quarterly pattern agreement with the lead and allows same-day changes if notified by 09:00. (B offers far greater flexibility.)\\n- **Core hours**: Policy A mandates reachability 10:00\\u201315:00 local time (5-hour window). Policy B shortens this to 11:00\\u201314:00 (3-hour window) and schedules team meetings on the two shared office days. (B reduces overlap time.)\\n- **Equipment**: Policy A supplies a laptop and monitor; employees cover everything else. Policy B adds a chair on request (up to $400 per person every 3 years). (B increases company-provided support.)\\n- **Expenses**: Policy A pays a flat $20/month home-office allowance. Policy B raises this to $45/month but does not cover internet costs separately. (B increases the allowance while removing itemized internet support.)\\n- **Security**: Both require company data to be accessed only on company laptops via VPN. Policy B adds a compulsory short yearly security course. (B adds a training burden.)\\n- **Review**: Policy A is reviewed annually. Policy B is reviewed every 6 months in year one, then annually; a 15% drop in a team\\u2019s shared-office-day attendance triggers an early review. (B introduces more frequent oversight and an attendance trigger.)\\n\\n**Risks and costs of proposed Policy B**\\n\\n**Key risks** (drawn from detailed analysis):\\n- Increased managerial workload from earlier eligibility, quarterly renegotiations, and same-day change requests.\\n- Reduced collaboration due to narrower core hours, concentrated team meetings on only two office days, and up to 3 remote days/week.\\n- Potential for attendance-tracking disputes and perceived unfairness from the 15% shared-day trigger.\\n- Employee dissatisfaction if the higher $45 allowance does not offset uncovered internet costs for high-usage staff.\\n- Greater security and compliance overhead from mandatory annual training.\\n- Policy instability from more frequent reviews and attendance-based triggers, which may erode staff trust.\\n- Coordination challenges across teams due to dynamic scheduling.\\n\\n**Yearly cost difference per person** (allowances + equipment only):\\n\\n| Item                  | Policy A | Policy B     | Difference (B \\u2013 A) |\\n|-----------------------|----------|--------------|--------------------|\\n| Home-office allowance | $240     | $540         | +$300              |\\n| Equipment (chair)     | $0       | $133.33      | +$133.33           |\\n| **Total per person**  | **$240** | **$673.33**  | **+$433.33**       |\\n\\n*Calculation notes*: Allowance A = $20 \\u00d7 12. Allowance B = $45 \\u00d7 12. Equipment B assumes full $400 cap amortized over 3 years ($400 \\u00f7 3). Laptop/monitor costs are identical in both policies and excluded. Internet is not separately reimbursed in B.\\n\\n**Recommendation Memo**\\n\\n**To**: Leadership Team  \\n**From**: [Your Name/HR Analytics]  \\n**Date**: 18 November 2026  \\n**Subject**: Recommendation on Proposed Flexible Remote Work Policy (v2)\\n\\nAfter a side-by-side review, the proposed Policy B offers meaningful improvements in employee flexibility and support (earlier eligibility, higher allowance, chair provision, and easier schedule changes). These changes are likely to improve recruitment, retention, and satisfaction.\\n\\nHowever, they come with material risks: reduced team overlap and collaboration, higher managerial coordination burden, added compliance overhead, potential cost creep, and governance complexity from frequent reviews and attendance triggers. The direct per-person cost increase is approximately **$433 per year**.\\n\\n**Recommendation**: Approve Policy B with two modifications \\u2014 (1) retain the original 5-hour core-hours window (10:00\\u201315:00) to protect collaboration, and (2) pilot the policy with 4\\u20136 teams for six months before full rollout, monitoring productivity, engagement, and actual attendance metrics. This balances employee desires with operational needs while containing cost and risk exposure.\\n\\nHappy to discuss the detailed comparison table or run further scenario modelling.\\n\\n**Comparison Table Summary**\\n\\n| Aspect       | Policy A (Current)                  | Policy B (Proposed)                          | Net Impact of B                  |\\n|--------------|-------------------------------------|----------------------------------------------|----------------------------------|\\n| Flexibility  | Moderate (2 days, after 3 mo)      | High (3 days, from day 1)                   | Strongly positive               |\\n| Collaboration| Stronger core hours & fixed pattern| Narrower hours, meeting concentration       | Negative                        |\\n| Cost/person  | $240/yr                            | $673/yr (+$433)                             | +$433/yr increase               |\\n| Risk level   | Baseline                           | Elevated (coordination, compliance, stability) | Increased risk                  |\\n| Governance   | Annual review                      | 6-mo initial reviews + attendance trigger   | More oversight, less stability  |\", \"confidence\": 0.85, \"rationale\": \"Synthesised the three prior stage results (comparison, risks, costs) directly into a concise, structured memo with table as requested. All content is grounded in the provided stage outputs; no external data needed. Minor formatting and phrasing polished for clarity and professionalism while preserving all key points.\"}, \"rationale\": \"Synthesised the three prior stage results (comparison, risks, costs) directly into a concise, structured memo with table as requested. All content is grounded in the provided stage outputs; no external data needed. Minor formatting and phrasing polished for clarity and professionalism while preserving all key points.\", \"parse_error\": null, \"finish_reason\": \"stop\"}",
+    "created_at": "2026-11-18 09:54:19",
+    "baseline_dollars": 0.06120400000000001,
+    "source_version": "git:f221eb0",
+    "domain_profile": "general",
+    "t_ms": 401000
+   }
+  ],
+  "digest": {
+   "summary": "3 envelope(s) dispatched; 35,197 tokens; $0.0396 cost.",
+   "cost_dollars": 0.03963295000000001,
+   "baseline_dollars": null,
+   "tokens_input": 31428,
+   "tokens_output": 3769,
+   "token_count": 35197,
+   "direct_floor_dollars": 0.029197000000000004,
+   "direct_floor_model": "openrouter/anthropic/claude-opus-5.5",
+   "direct_floor_ratio": [
+    1.3,
+    4.4
+   ]
+  },
+  "outbound": [],
+  "calls_left_machine": {
+   "count": 5,
+   "source": "locality"
+  }
+ },
+ "timeline": {
+  "stages": [
+   {
+    "t_ms": 5000,
+    "stage": "plan",
+    "detail": "Task requires point-by-point comparison, risk identification, precise cost math, and a final memo with table. Decomposed into three parallel atomic nodes (extraction, reasoning, calculation) using che"
+   },
+   {
+    "t_ms": 5000,
+    "stage": "route",
+    "detail": "n1 -> ollama/llama3.2:3b (routed)"
+   },
+   {
+    "t_ms": 5000,
+    "stage": "route",
+    "detail": "n2 -> openrouter/openai/gpt-5.4-nano (routed)"
+   },
+   {
+    "t_ms": 5000,
+    "stage": "route",
+    "detail": "n3 -> openrouter/openai/gpt-5.4-nano (routed)"
+   },
+   {
+    "t_ms": 391000,
+    "stage": "re_plan",
+    "detail": "All required pieces (point-by-point comparison, risks of Policy B, and precise yearly cost difference) have been delivered by the prior stages. No gaps remain; ready to synthesize into the final memo "
+   },
+   {
+    "t_ms": 401000,
+    "stage": "compose",
+    "detail": "Synthesised the three prior stage results (comparison, risks, costs) directly into a concise, structured memo with table as requested. All content is grounded in the provided stage outputs; no externa"
+   }
+  ],
+  "end_ms": 401000
+ },
+ "answer": "## Policy Comparison: Larkspur Outfitters Remote Work Policies A (Current) vs. B (Proposed)\n\n**Point-by-point comparison**\n\n- **Eligibility**: Policy A limits office-based staff to 2 remote days/week after a 3-month probation. Policy B extends this to 3 remote days/week from day one for all office-based staff. (B is significantly more permissive.)\n- **Approval**: Policy A requires team-lead approval of a fixed weekly pattern; changes need 2 working days’ notice. Policy B requires quarterly pattern agreement with the lead and allows same-day changes if notified by 09:00. (B offers far greater flexibility.)\n- **Core hours**: Policy A mandates reachability 10:00–15:00 local time (5-hour window). Policy B shortens this to 11:00–14:00 (3-hour window) and schedules team meetings on the two shared office days. (B reduces overlap time.)\n- **Equipment**: Policy A supplies a laptop and monitor; employees cover everything else. Policy B adds a chair on request (up to $400 per person every 3 years). (B increases company-provided support.)\n- **Expenses**: Policy A pays a flat $20/month home-office allowance. Policy B raises this to $45/month but does not cover internet costs separately. (B increases the allowance while removing itemized internet support.)\n- **Security**: Both require company data to be accessed only on company laptops via VPN. Policy B adds a compulsory short yearly security course. (B adds a training burden.)\n- **Review**: Policy A is reviewed annually. Policy B is reviewed every 6 months in year one, then annually; a 15% drop in a team’s shared-office-day attendance triggers an early review. (B introduces more frequent oversight and an attendance trigger.)\n\n**Risks and costs of proposed Policy B**\n\n**Key risks** (drawn from detailed analysis):\n- Increased managerial workload from earlier eligibility, quarterly renegotiations, and same-day change requests.\n- Reduced collaboration due to narrower core hours, concentrated team meetings on only two office days, and up to 3 remote days/week.\n- Potential for attendance-tracking disputes and perceived unfairness from the 15% shared-day trigger.\n- Employee dissatisfaction if the higher $45 allowance does not offset uncovered internet costs for high-usage staff.\n- Greater security and compliance overhead from mandatory annual training.\n- Policy instability from more frequent reviews and attendance-based triggers, which may erode staff trust.\n- Coordination challenges across teams due to dynamic scheduling.\n\n**Yearly cost difference per person** (allowances + equipment only):\n\n| Item                  | Policy A | Policy B     | Difference (B – A) |\n|-----------------------|----------|--------------|--------------------|\n| Home-office allowance | $240     | $540         | +$300              |\n| Equipment (chair)     | $0       | $133.33      | +$133.33           |\n| **Total per person**  | **$240** | **$673.33**  | **+$433.33**       |\n\n*Calculation notes*: Allowance A = $20 × 12. Allowance B = $45 × 12. Equipment B assumes full $400 cap amortized over 3 years ($400 ÷ 3). Laptop/monitor costs are identical in both policies and excluded. Internet is not separately reimbursed in B.\n\n**Recommendation Memo**\n\n**To**: Leadership Team  \n**From**: [Your Name/HR Analytics]  \n**Date**: 18 November 2026  \n**Subject**: Recommendation on Proposed Flexible Remote Work Policy (v2)\n\nAfter a side-by-side review, the proposed Policy B offers meaningful improvements in employee flexibility and support (earlier eligibility, higher allowance, chair provision, and easier schedule changes). These changes are likely to improve recruitment, retention, and satisfaction.\n\nHowever, they come with material risks: reduced team overlap and collaboration, higher managerial coordination burden, added compliance overhead, potential cost creep, and governance complexity from frequent reviews and attendance triggers. The direct per-person cost increase is approximately **$433 per year**.\n\n**Recommendation**: Approve Policy B with two modifications — (1) retain the original 5-hour core-hours window (10:00–15:00) to protect collaboration, and (2) pilot the policy with 4–6 teams for six months before full rollout, monitoring productivity, engagement, and actual attendance metrics. This balances employee desires with operational needs while containing cost and risk exposure.\n\nHappy to discuss the detailed comparison table or run further scenario modelling.\n\n**Comparison Table Summary**\n\n| Aspect       | Policy A (Current)                  | Policy B (Proposed)                          | Net Impact of B                  |\n|--------------|-------------------------------------|----------------------------------------------|----------------------------------|\n| Flexibility  | Moderate (2 days, after 3 mo)      | High (3 days, from day 1)                   | Strongly positive               |\n| Collaboration| Stronger core hours & fixed pattern| Narrower hours, meeting concentration       | Negative                        |\n| Cost/person  | $240/yr                            | $673/yr (+$433)                             | +$433/yr increase               |\n| Risk level   | Baseline                           | Elevated (coordination, compliance, stability) | Increased risk                  |\n| Governance   | Annual review                      | 6-mo initial reviews + attendance trigger   | More oversight, less stability  |",
+ "answer_source": "rebuilt",
+ "answer_check": "matches the stored floor",
+ "models": [
+  {
+   "model_id": "ollama/llama3.2:3b",
+   "is_local": true
+  },
+  {
+   "model_id": "openrouter/anthropic/claude-sonnet-4.6",
+   "is_local": false
+  },
+  {
+   "model_id": "openrouter/deepseek/deepseek-v3.2",
+   "is_local": false
+  },
+  {
+   "model_id": "openrouter/google/gemini-3.1-flash-lite-preview",
+   "is_local": false
+  },
+  {
+   "model_id": "openrouter/google/gemini-3.1-pro-preview",
+   "is_local": false
+  },
+  {
+   "model_id": "openrouter/moonshotai/kimi-k2-thinking",
+   "is_local": false
+  },
+  {
+   "model_id": "openrouter/openai/gpt-5.3-codex",
+   "is_local": false
+  },
+  {
+   "model_id": "openrouter/openai/gpt-5.4-nano",
+   "is_local": false
+  },
+  {
+   "model_id": "openrouter/x-ai/grok-4.20",
+   "is_local": false
+  }
+ ],
+ "totals": {
+  "cost_dollars": 0.03963295000000001,
+  "tokens_input": 31428,
+  "tokens_output": 3769,
+  "envelopes": 3,
+  "events": 9
+ },
+ "stripped": {
+  "keys": 0,
+  "paths": 0,
+  "machine_ids": 10
+ }
+}

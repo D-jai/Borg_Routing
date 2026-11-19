@@ -347,9 +347,36 @@
   var readyFns = [], isReady = false;
   function ready(fn) { if (isReady) fn(); else readyFns.push(fn); }
 
+  /* Replay mode (work order 4.5): GET /replay/status says whether this server only plays
+   * recorded demo runs. replayNotice(status) is the line every page shows then, or null in
+   * live mode. replayStatus() asks once per page and resolves {mode: 'live'} on any failure. */
+  function replayNotice(status) {
+    if (!status || status.mode !== 'replay') return null;
+    var text = typeof status.notice === 'string' && status.notice ? status.notice : 'Replay of a recorded run';
+    return text + ' · demo run, not a benchmark result';
+  }
+  var replayAsk = null;
+  function replayStatus() {
+    if (!replayAsk) {
+      replayAsk = api('/replay/status', { quiet: true }).then(function (st) {
+        return st && typeof st === 'object' ? st : { mode: 'live' };
+      }, function () { return { mode: 'live' }; });
+    }
+    return replayAsk;
+  }
+  function showReplayChip() {
+    replayStatus().then(function (st) {
+      var text = replayNotice(st), chip = document.getElementById('replay-chip');
+      if (!text || !chip) return;
+      chip.textContent = text;
+      chip.classList.remove('hidden');
+    });
+  }
+
   function init() {
     applySavedTheme();
     buildShell();
+    showReplayChip();
     isReady = true;
     readyFns.splice(0).forEach(function (fn) { fn(); });
   }
@@ -377,7 +404,7 @@
     api: api, download: download, notify: notify, clearNotices: clearNotices, ready: ready,
     money: money, duration: duration, parseWhen: parseWhen, dateTime: dateTime, timeOnly: timeOnly,
     markdown: markdown, escapeHtml: escapeHtml, el: el, dropExternalLoads: dropExternalLoads,
-    getToken: getToken, setToken: setToken,
+    getToken: getToken, setToken: setToken, replayNotice: replayNotice, replayStatus: replayStatus,
     storage: { get: safeGet, set: safeSet },
     nav: NAV
   };

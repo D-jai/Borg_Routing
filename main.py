@@ -37,11 +37,13 @@ async def lifespan(app: FastAPI):
         matrix.load()
     except FileNotFoundError:
         pass  # Matrix will be empty until discovery runs; non-fatal.
+    from src.api.replay import demo_mode
     from src.db.schema import create_all
-    try:
-        await create_all()
-    except Exception:
-        pass  # DB init failure is non-fatal on startup; logged by caller.
+    if demo_mode() is None:  # replay mode (work order 4.5) touches no database
+        try:
+            await create_all()
+        except Exception:
+            pass  # DB init failure is non-fatal on startup; logged by caller.
     yield
     # Shutdown: nothing to clean up yet.
 
@@ -86,6 +88,11 @@ class CSPHeaderMiddleware:
         return await self.inner(scope, receive, send_with_csp)
 
 
+# Replay mode (work order 4.5, BORG_DEMO_MODE=replay): recorded runs only, every other route
+# 403. Added before the CSP middleware, so the CSP header wraps its answers too.
+from src.api.replay import ReplayMiddleware, live_router as replay_status_router  # noqa: E402
+
+app.add_middleware(ReplayMiddleware)
 app.add_middleware(CSPHeaderMiddleware)
 
 # Serve static UI files if the ui/ directory exists. The Ask page is the front
@@ -130,6 +137,7 @@ app.include_router(admin_router)
 app.include_router(logs_router)
 app.include_router(skills_router)
 app.include_router(status_router)
+app.include_router(replay_status_router)
 
 
 @app.get("/health")
