@@ -21,7 +21,14 @@ Lead session `borg-route-f1` (Opus 5.5) since 02:20 on 16-Nov-2026. Every work o
 
 If this session stopped abruptly: `git log` and `git status` show what landed; any uncommitted changes belong to an in-progress builder: read the diff, finish or stash it, record which in the build log.
 
-## Where I left off (19-Nov-2026, about 01:10): proof work closed
+## Where I left off (19-Nov-2026, afternoon): deck text in, going public
+
+- **Deck text done (planner rulings 44 to 46):** every slide figure comes from round 3 and carries a claim marker. The receipt is run A_borg_cloud_3 (plan $0.044, label and score $0.021, write the answer $0.060, total $0.125; one call to the top model $0.208). The why slide shows that step's real route record: the planner named the model. The README now says the planning model named every round-3 step except the document job's two (`route_reasons.json`, bound by `tests/bench/test_route_reasons.py`). The private deck artifact was republished from this source.
+- **Going public (Deej's rulings 17 and 18):** the history scan found no real key and the history stays as it is; the workflow uses hosted runners, no secrets and read-only permissions. The PR from showcase into master merges on green CI, then the planner switches visibility.
+- **Next:** the two links on the offer slide (the planner sends the text after the switch), a browser check of every slide, the PDF export. The video script is not ordered.
+- **Still with Deej:** the protected-file questions the planner holds. The old locked worktree `.claude/worktrees/agent-a19a671ce8c1a100d` and the `borg_36a` worktree are untouched.
+
+## Earlier waypoint (19-Nov-2026, about 01:10): proof work closed
 
 - **Round 3 is done and the report is accepted** (planner ruling 42). Proof work is closed by Deej's ruling 15: there are no more rounds and no trials. By the rule job B won (its input is not fresh; without direct's cut first attempt BORG costs 98.5% of direct). A and C did not win; D is reported only. Report: `bench/results/2026_11_19/summary.md`; side-by-side page: `bench/results/round_1_vs_round_2.md`.
 - **Closing chores done:**

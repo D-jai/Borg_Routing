@@ -4,7 +4,7 @@ Written 15-Nov-2026 by the planner for work order 6.1. Nine slides. Audience: an
 
 ## Update, 19-Nov-2026: the story the deck tells (planner rulings 44 and 45)
 
-The deck now matches the LinkedIn post the owner approved on 19-Nov-2026 (his ruling 16). Its story is a measured trade-off, with no claim of a win beyond what the README table "What was measured" says. Routing is "the cheapest model that can do it, local or cloud", where cheapest counts the token price and the waiting time. The private lane is a setting you turn on and appears on the building slide only. The first cut's "local models go first" and its local run of 200 emails, which never happened, are gone.
+The deck now matches the LinkedIn post the owner approved on 19-Nov-2026 (his ruling 16). Its story is a measured trade-off, with no claim of a win beyond what the README table "What was measured" says. Routing: the planner names a model for each step from the pool's scorecard; when it names none, the step goes to the cheapest model that is good enough, local or cloud, counting the token price and the waiting time (ruling 46). In round 3 the planner named the model for every step except the document job's two. The private lane is a setting you turn on and appears on the building slide only. The first cut's "local models go first" and its local run of 200 emails, which never happened, are gone.
 
 - **The hook stays: "Your AI should come with a receipt."** The receipt on the cover and the receipt slide is a real run: round 3, the email job, the run with the middle cost (A_borg_cloud_3), with the one-call cost of the top model under it.
 - **The office image and the offer stay.** The offer slide keeps its two bracketed links until the owner makes the repository public; no PDF export and nothing shared before then.
@@ -12,7 +12,9 @@ The deck now matches the LinkedIn post the owner approved on 19-Nov-2026 (his ru
 
 Slide order: cover, problem, idea, office, flow, receipt, why, building, numbers, limits, offer. Every figure on a slide carries a claim marker checked by `scripts/check_claims.py` and its claim id in the slide notes. Figures are rounded against BORG_ROUTE.
 
-What 6.1 still has to do: the why slide (waiting on the planner: the run record shows the planner named the labelling model), the two links on the offer slide after the switch to public, a browser check of every slide and the PDF export.
+The why slide shows the labelling step's real route record: the planner named the model, and the cheapest model that cleared the bar was not used (ruling 46).
+
+What 6.1 still has to do: the two links on the offer slide after the switch to public, a browser check of every slide and the PDF export.
 
 Voice: the owner's voice rules apply to every word (no em dashes, plain words, Canadian spelling, no Oxford comma, each idea said once).
 
