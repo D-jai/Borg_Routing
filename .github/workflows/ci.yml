@@ -93,3 +93,52 @@ jobs:
       - name: Stop and remove
         if: always()
         run: docker compose down -v
+
+  # Work order 4.6: every page in a real browser against the replay server, phone and desktop
+  # width, light and dark (scripts/check_ui.py). Runs once, after the tests, on GitHub's hosted
+  # runner. Playwright and a browser never run on the maintainer's laptop (planner ruling 38a).
+  # On a failure, read the log lines and the ui-check artifact; fix locally, never re-run blind.
+  ui_check:
+    name: interface check
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install (with the ui_test extra)
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[ui_test]"
+          python -m playwright install chromium --with-deps
+
+      - name: Start the app in replay mode
+        run: |
+          PORT=$(python -c "import socket; s=socket.socket(); s.bind(('127.0.0.1', 0)); print(s.getsockname()[1]); s.close()")
+          echo "UI_PORT=$PORT" >> "$GITHUB_ENV"
+          BORG_DEMO_MODE=replay nohup python -m uvicorn main:app --host 127.0.0.1 --port "$PORT" > uvicorn.log 2>&1 &
+          curl -fsS --retry 30 --retry-delay 1 --retry-connrefused --retry-all-errors "http://127.0.0.1:$PORT/health"
+
+      - name: Interface check
+        run: python scripts/check_ui.py --base-url "http://127.0.0.1:$UI_PORT" --out ui_check_out
+
+      - name: Server log on failure
+        if: failure()
+        run: cat uvicorn.log
+
+      - name: Upload screenshots and report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-check
+          path: |
+            ui_check_out/
+            uvicorn.log
+          if-no-files-found: warn
+          retention-days: 14
