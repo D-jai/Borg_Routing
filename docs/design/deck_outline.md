@@ -2,17 +2,17 @@
 
 Written 15-Nov-2026 by the planner for work order 6.1. Nine slides. Audience: an owner or IT lead at a company that wants AI on its own machines, and the technical person they forward it to. They have two minutes and no background in agent systems.
 
-## Update, 15-Nov-2026: a first cut exists and it changes the story
+## Update, 19-Nov-2026: the story the deck tells (planner rulings 44 and 45)
 
-The owner asked for a catchy way in. The first cut (11 slides, source in `docs/presentation/draft_v1/project/`, also published as a private slide artifact on the owner's account) is built on three things. Work order 6.1 finishes **that** deck; where it differs from the nine-slide outline below, the first cut wins.
+The deck now matches the LinkedIn post the owner approved on 19-Nov-2026 (his ruling 16). Its story is a measured trade-off, with no claim of a win beyond what the README table "What was measured" says. Routing is "the cheapest model that can do it, local or cloud", where cheapest counts the token price and the waiting time. The private lane is a setting you turn on and appears on the building slide only. The first cut's "local models go first" and its local run of 200 emails, which never happened, are gone.
 
-- **The hook: "Your AI should come with a receipt."** A till receipt for one AI job, step by step, is the image for the cover, the post and the video thumbnail.
-- **The one explaining image: an office.** Clerk, associate, partner for light, mid and heavy work. "Most companies have the senior partner sorting the mail." No second metaphor anywhere.
-- **The offer: "Bring one job you run every week. I will send back two receipts."** This is the call to action in the deck and the post.
+- **The hook stays: "Your AI should come with a receipt."** The receipt on the cover and the receipt slide is a real run: round 3, the email job, the run with the middle cost (A_borg_cloud_3), with the one-call cost of the top model under it.
+- **The office image and the offer stay.** The offer slide keeps its two bracketed links until the owner makes the repository public; no PDF export and nothing shared before then.
+- **Numbers and limits** carry the round-3 table and its losses: one win by the rule (job B, on input that was not fresh), none in rounds 1 and 2.
 
-Slide order of the first cut: cover, problem, idea, office, flow, receipt, why (the reason for each choice), building (documents stay local), numbers, limits, offer.
+Slide order: cover, problem, idea, office, flow, receipt, why, building, numbers, limits, offer. Every figure on a slide carries a claim marker checked by `scripts/check_claims.py` and its claim id in the slide notes. Figures are rounded against BORG_ROUTE.
 
-What 6.1 still has to do: fill every bracketed amount from `bench/results/.../summary.md` (cover, receipt, numbers), replace the April "about 21 times" figure on the limits slide with the fresh short-prompt measurement, add the Run view screenshot and the Aliud Inquisito logo, add the two links on the offer slide once they exist, check every slide in a browser, run the claims check, export the PDF. No bracket may survive into anything shared.
+What 6.1 still has to do: the why slide (waiting on the planner: the run record shows the planner named the labelling model), the two links on the offer slide after the switch to public, a browser check of every slide and the PDF export.
 
 Voice: the owner's voice rules apply to every word (no em dashes, plain words, Canadian spelling, no Oxford comma, each idea said once).
 

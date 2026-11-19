@@ -1,7 +1,7 @@
 {
-  "what": "Job A, round 3: each BORG run's logged dollars split into worker calls (the item calls for the 200 emails) and planner calls (plan, re_plan and compose).",
+  "what": "Job A, round 3: each BORG run's logged dollars split into worker calls (the item calls for the 200 emails) and planner calls (plan, re_plan and compose). The fields plan_and_re_plan_dollars and compose_dollars were added on 19-Nov-2026 from the same databases.",
   "source": "bench/results/2026_11_19/dbs/A_borg_cloud_N.db (git-ignored, kept locally), table logs, rows with dollars not null",
-  "method": "worker_dollars = sum(dollars) where event_type = 'model_call'; planner_compose_dollars = sum(dollars) where event_type = 'orchestrator_decision' (modes plan, re_plan, compose); planner_compose_share = planner_compose_dollars / (worker_dollars + planner_compose_dollars). logged_dollars equals the result file's cost_dollars on every run.",
+  "method": "worker_dollars = sum(dollars) where event_type = 'model_call'; planner_compose_dollars = sum(dollars) where event_type = 'orchestrator_decision' (modes plan, re_plan, compose); planner_compose_share = planner_compose_dollars / (worker_dollars + planner_compose_dollars). logged_dollars equals the result file's cost_dollars on every run. plan_and_re_plan_dollars and compose_dollars split planner_compose_dollars by mode (added 2026-11-19 for the deck receipt, planner ruling 44; read from the same databases).",
   "written": "2026-11-19, for the README section 'Where it pays and where it does not' (planner ruling 43); figures read from the run databases, nothing re-run",
   "runs": [
     {
@@ -10,7 +10,9 @@
       "logged_dollars": 0.1436185,
       "worker_dollars": 0.04018225,
       "planner_compose_dollars": 0.10343625,
-      "planner_compose_share": 0.720215
+      "planner_compose_share": 0.720215,
+      "plan_and_re_plan_dollars": 0.04355875000000001,
+      "compose_dollars": 0.05987750000000001
     },
     {
       "run": "A_borg_cloud_2",
@@ -18,7 +20,9 @@
       "logged_dollars": 0.104356,
       "worker_dollars": 0.030481,
       "planner_compose_dollars": 0.073875,
-      "planner_compose_share": 0.707913
+      "planner_compose_share": 0.707913,
+      "plan_and_re_plan_dollars": 0.04355375000000001,
+      "compose_dollars": 0.03032125
     },
     {
       "run": "A_borg_cloud_3",
@@ -26,7 +30,9 @@
       "logged_dollars": 0.12419775,
       "worker_dollars": 0.020789,
       "planner_compose_dollars": 0.10340875,
-      "planner_compose_share": 0.832614
+      "planner_compose_share": 0.832614,
+      "plan_and_re_plan_dollars": 0.04353625,
+      "compose_dollars": 0.0598725
     }
   ]
 }
