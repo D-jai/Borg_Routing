@@ -806,12 +806,14 @@ def _examples(keys: list, model: ItemModel) -> str:
 # --- all checks -----------------------------------------------------------------------
 
 def check(value: object, steps: dict, outputs: dict, model: Optional[ItemModel], asked: list,
-          quoted, step_ids, declined: bool = False) -> list:
+          quoted, step_ids, declined: bool = False, resolver: Optional[rm.Resolver] = None) -> list:
     """``[(code, sentence)]`` for a reply's chosen answer (or a declined
     rationale), in the order 032, 037, 038, 039, 040, 041. On a decline only the
-    marker checks and C1 run (lead ruling 16)."""
+    marker checks and C1 run (lead ruling 16). ``resolver`` replaces the
+    plain one: ruling 39c passes ``Resolver(plain_fallback=True)`` so C1 and
+    the other checks see the markers it would place."""
     problems = list(rm.marker_problems(value, steps, outputs, quoted))
-    resolver = rm.Resolver(steps, outputs)
+    resolver = resolver or rm.Resolver(steps, outputs)
     for kind, key in nested_markers(value, resolver):
         problems.append((CODE_NESTED, S_NESTED.format(kw=_kw(kind), target=key)))
     if not declined:

@@ -303,6 +303,16 @@ async def test_39c_failing_case_an_unknown_target_still_salvages(monkeypatch):
     assert not run.answer.startswith(A_SUMMARY)
 
 
+async def test_39c_failing_case_a_plain_marker_under_typed_table_rows_still_salvages(monkeypatch):
+    fx = _fixture("a")
+    bad = {"response": A_SUMMARY + "\n\n| file | bucket |\n|---|---|\n| job_a/email_001.txt | x |\n"
+                       "@@ROWS_TABLE:classify_emails | file=item, category=label@@"}
+    run = await _replay(fx, [bad, bad], monkeypatch)
+    assert run.kind == "salvaged" and run.warning[0]["code"] == "BRT-ORC-037"
+    assert not [d for d in run.warning if d.get("action") == "rows_placed_plain"]
+    assert not run.answer.startswith(A_SUMMARY)
+
+
 async def test_39c_failing_case_a_bad_spec_beside_another_problem_still_salvages(monkeypatch):
     fx = _fixture("a")
     first = {"response": A_SUMMARY + "\n\n@@ROWS:classify_emails | file=item, category=label@@"}

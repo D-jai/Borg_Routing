@@ -538,7 +538,14 @@ def _read_reversed_pairs(entries: list, known: list) -> tuple:
     out: list = []
     flipped: list = []
     for name, fld in entries:
-        real = None if fld in known else _known_name(name, known)
+        # A right side that names a field, case ignored, is never flipped
+        # (review of f0aa4db): ``Item=Sentiment`` keeps its written order with
+        # the real field name, and a bare ``Topic`` is not a reversed pair.
+        straight = _known_name(fld, known)
+        if straight is not None:
+            out.append((name, straight))
+            continue
+        real = _known_name(name, known)
         if real is not None:
             flipped.append((name, fld))
             name, fld = fld, real
@@ -559,9 +566,10 @@ def _filter_pair(flipped: list, entries: list, ids: list, steps: dict) -> Option
     in the target's rows (for ``item``, the item labels), as
     ``(written name, written value)``; else None. Only the reversed reading is
     checked. Accepted oddity: a field whose values happen to include its own
-    display name (a ``status`` field holding the value "Status") is refused
-    when written ``status=Status``; the write-up must then name the column
-    another way."""
+    display name (a ``follow_up`` field holding the value "Follow-up") is
+    refused when written ``follow_up=Follow-up``; the write-up must then name
+    the column another way. (A name equal to the field with case ignored,
+    ``status=Status``, reads straight and never reaches this check.)"""
     if not flipped:
         return None
     by_written = dict(zip([f for _, f in flipped], [n for n, _ in flipped]))

@@ -3642,12 +3642,13 @@ class _RowContext:
             "pointer_lines": row_markers.pointer_lines(self.steps, self.outputs) or None,
         }
 
-    def problems(self, value, declined: bool = False) -> list:
+    def problems(self, value, declined: bool = False, resolver=None) -> list:
         """``[(code, sentence)]`` for one reply (compose_checks.check)."""
         from src.orchestrator import compose_checks  # noqa: PLC0415
 
         return compose_checks.check(value, self.steps, self.outputs, self.model, self.asked,
-                                    self.quoted, self.step_ids, declined=declined)
+                                    self.quoted, self.step_ids, declined=declined,
+                                    resolver=resolver)
 
     def guard(self):
         """The rows-block guard (ruling 21b), or None when it does not run."""
@@ -3788,7 +3789,13 @@ async def _handle_compose_result(
         plain = False
         if problems and after_repair and text and all(
                 code == row_markers.CODE_SPEC for code, _ in problems) and row_markers.plain_fixable(
-                value, rows.steps, rows.outputs, rows.quoted):
+                value, rows.steps, rows.outputs, rows.quoted) and all(
+                code == row_markers.CODE_SPEC for code, _ in rows.problems(
+                    value, resolver=row_markers.Resolver(rows.steps, rows.outputs,
+                                                         plain_fallback=True))):
+            # The checks run again seeing the markers 39c would place (review
+            # of f0aa4db): any problem besides the 037s themselves (a 038
+            # position, say) still salvages.
             plain, problems = True, []
         if problems:
             codes = list(dict.fromkeys(code for code, _ in problems))

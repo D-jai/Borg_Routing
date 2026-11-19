@@ -590,12 +590,13 @@ def test_recorded_marker_job3_places_under_the_written_headings():
     value, placed = rm.place("Notes:\n" + REC_JOB3, steps)
     assert placed == {"extract_notes": 1}
     rows = _placed_rows(value)
-    assert rows[0] == {"Item": "job/a.txt", "Topic": "Dock repairs", "Owner": "Mara Quill",
+    # item=Item, topic=Topic, owner=Owner fit both ways once case is ignored, so they keep
+    # the written order (review of f0aa4db): the column is the left side.
+    assert rows[0] == {"item": "job/a.txt", "topic": "Dock repairs", "owner": "Mara Quill",
                        "Needs Follow-up": True, "Reason": "parts on order"}
-    assert rows[1] == {"Item": "job/b.txt", "error": "BRT-ANS-005"}
+    assert rows[1] == {"item": "job/b.txt", "error": "BRT-ANS-005"}
     target, _ = rm.parse_target("ROWS", REC_JOB3[7:-2], steps)
-    assert target.reversed_pairs == [("item", "Item"), ("topic", "Topic"), ("owner", "Owner"),
-                                     ("needs_follow_up", "Needs Follow-up"),
+    assert target.reversed_pairs == [("needs_follow_up", "Needs Follow-up"),
                                      ("follow_up_reason", "Reason")]
 
 
@@ -699,10 +700,12 @@ def test_reversed_names_that_are_not_held_values_still_place():
     steps = _notes_yes_no()
     target, problem = rm.parse_target(
         "ROWS", "extract_notes | item=Item, needs_follow_up=Needs Follow-up", steps)
-    assert problem is None and target.spec == [("Item", "item"), ("Needs Follow-up", "needs_follow_up")]
+    assert problem is None and target.spec == [("item", "item"), ("Needs Follow-up", "needs_follow_up")]
+    assert target.reversed_pairs == [("needs_follow_up", "Needs Follow-up")]
     # The one accepted oddity: a field whose values include its own display name is refused.
-    steps = _one([_ok(0, "a", status="Status"), _ok(1, "b", status="open")])
-    _, problem = rm.parse_target("ROWS", "s1 | status=Status", steps)
+    # (status=Status is not one: it fits both ways once case is ignored and reads straight.)
+    steps = _one([_ok(0, "a", follow_up="Follow-up"), _ok(1, "b", follow_up="none")])
+    _, problem = rm.parse_target("ROWS", "s1 | follow_up=Follow-up", steps)
     assert problem[0] == "BRT-ORC-037" and "cannot filter" in problem[1]
 
 
@@ -712,3 +715,24 @@ def test_a_filter_attempt_after_the_reask_is_a_bad_spec_for_39c():
     assert rm.plain_fixable("These need follow-up:\n" + marker, steps, {}, [])
     target = rm.plain_target("ROWS", marker[7:-2], steps)
     assert target.spec is None and target.plain
+
+
+# --- review of f0aa4db ------------------------------------------------------------------------
+
+def test_a_pair_fitting_both_ways_once_case_is_ignored_is_never_flipped():
+    steps = _feedback()
+    target, problem = rm.parse_target("ROWS", "n1 | Item=Sentiment", steps)
+    assert problem is None and target.spec == [("Item", "sentiment")] and target.reversed_pairs == []
+    target, _ = rm.parse_target("ROWS", "n1 | Sentiment, feature", steps)   # bare entries
+    assert target.spec == [("Sentiment", "sentiment"), ("feature", "feature")]
+    assert target.reversed_pairs == []
+
+
+def test_failing_case_39c_checks_see_the_plain_marker_under_typed_table_rows():
+    steps = _feedback()
+    reply = "| item | s |\n|---|---|\n| a | b |\n@@ROWS_TABLE:n1 | line=comment@@"
+    assert [c for c, _ in cc.check(reply, steps, {}, None, [], set(), ["n1"])] == ["BRT-ORC-037"]
+    assert rm.plain_fixable(reply, steps, {}, [])
+    again = cc.check(reply, steps, {}, None, [], set(), ["n1"],
+                     resolver=rm.Resolver(steps, plain_fallback=True))
+    assert [c for c, _ in again] == ["BRT-ORC-037", "BRT-ORC-038"]
