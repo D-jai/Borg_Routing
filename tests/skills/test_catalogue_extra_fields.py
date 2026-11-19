@@ -133,24 +133,27 @@ async def test_every_packed_request_asks_for_urgency_in_the_task_and_the_schema(
         assert req.system.count("urgency") >= 2  # the task line and the per-item schema
 
 
-async def test_a_packed_item_reply_without_urgency_fails_the_contract_check(pk):
+async def test_a_packed_item_reply_without_urgency_is_retried_then_kept(pk):
+    """Ruling 35, reading 2 (replaces the 35c pin "fails the contract check"): an
+    item without its extra field is retried once alone, then kept with the fields
+    it has; urgency is left with no value."""
     def reply(req, text):
         return {"bucket": "a", "confidence": 0.9}
 
     stub, env = await _run(pk, _from_node(_node(_items(40))),
                            pack_item_for=reply, answer_for=lambda r: reply(r, ""))
-    assert env.output["success_count"] == 0 and env.output["failure_count"] == 40
-    text = str(env.output["failures"])
-    assert "BRT-ENV-011" in text or "BRT-ANS-005" in text
+    assert [len(r.pack_ids) for r in stub.of_kind("packed")] == [20, 20]
+    assert env.output["success_count"] == 40 and env.output["failure_count"] == 0
+    assert all("urgency" not in r["output"] for r in env.output["results"])
 
 
-async def test_deferred_item_without_an_extra_field_fails_today(pk):
-    """Current behaviour, pinned (planner to decide whether it should change): a
-    deferred item has no urgency, and the step's check requires it."""
+async def test_a_deferred_item_without_an_extra_field_is_kept_with_no_retry(pk):
+    """Ruling 35, reading 2 (replaces the 35c pin "fails today"): a deferred item
+    needs no extra field, causes no retry and is kept."""
     defer = {"bucket": "defer", "confidence": 0.2, "defer_reason": "no bucket fits"}
     stub, env = await _run(pk, _from_node(_node(_items(40))),
                            pack_item_for=lambda r, t: dict(defer),
                            answer_for=lambda r: dict(defer))
-    assert env.output["success_count"] == 0 and env.output["failure_count"] == 40
-    text = str(env.output["failures"])
-    assert ("BRT-ENV-011" in text or "BRT-ANS-005" in text) and "urgency" in text
+    assert [len(r.pack_ids) for r in stub.of_kind("packed")] == [20, 20]
+    assert env.output["success_count"] == 40 and env.output["failure_count"] == 0
+    assert all(r["output"]["bucket"] == "defer" for r in env.output["results"])
