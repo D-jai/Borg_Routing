@@ -40,3 +40,9 @@ bench/results/*/dbs/
 
 # Demo runs (ruling 24): the recorder's own database
 demo/runs/db/
+
+# Local launcher scripts and their logs, and the recorder's local manifest (planner ruling 45 B.5)
+demo/runs/*.ps1
+demo/runs/*.log
+demo/runs/*.log.*
+demo/runs/manifest.json
