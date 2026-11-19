@@ -610,14 +610,14 @@ def _classify_step():
 @pytest.mark.parametrize("answer, resolved", [
     ({"bucket": "good", "confidence": 0.9, "defer_reason": "", "urgency": 2,
       "category": "good"}, 3),
-    ({"bucket": "good", "confidence": 0.9, "defer_reason": "", "category": "good"}, 0),
+    ({"bucket": "good", "confidence": 0.9, "defer_reason": "", "category": "good"}, 3),
 ])
 @pytest.mark.asyncio
 async def test_r4_classify_step_asks_for_its_extra_fields_and_checks_them(env, answer, resolved):
     """TC-SKL-036: every item prompt asks for urgency (its extra_fields; the
-    node's output_schema is not read, R1-R4 review 6); an item answer
-    without urgency fails the inbound check (BRT-ENV-011) instead of passing
-    without it."""
+    node's output_schema is not read, R1-R4 review 6). Superseded in part by
+    ruling 35 reading 2: an item answer without urgency is no longer failed;
+    it is kept with urgency left with no value, which compose is told."""
     db_path, mp = env
     stub = StubModels(plan_nodes=[_classify_step()], answer_for=lambda r: answer).install(mp)
     result = await run_pipeline("Classify each review with its urgency.", db_path=db_path)
@@ -630,8 +630,10 @@ async def test_r4_classify_step_asks_for_its_extra_fields_and_checks_them(env, a
         assert '"urgency": "integer from 1 to 5"' in req.system
     compose = stub.of_kind("compose")[-1].system
     assert f'"success_count": {resolved}' in compose
-    if not resolved:
-        assert "BRT-ENV-011" in compose
+    assert "BRT-ENV-011" not in compose
+    if "urgency" not in answer:
+        block = stub.of_kind("compose")[-1].user   # the code-side block is in the user message
+        assert "Rows with no value" in block and "urgency 3" in block
 
 
 # --- R1-R4 review (6): the lead's final focused fix -------------------------
