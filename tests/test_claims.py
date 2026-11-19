@@ -267,10 +267,46 @@ def test_a_number_in_bold_or_code_still_counts(tree, capsys, shown):
     assert code == 1
 
 
+
+
+BANNED_WORDS = ("cheaper", "saving", "saves", "fraction", "faster", "lower cost", "less spend", "less cost")
+
+
+def readme_problems(text: str) -> list[str]:
+    """Planner ruling 38a: the README states no result number and no saving.
+
+    Strips what may carry digits (comments, fences, inline code, claim ids, codes, dates,
+    list numbers, local addresses), then fails on any digit left and on the banned words."""
+    s = re.sub(r"<!--.*?-->", "", text, flags=re.S)
+    s = re.sub(r"```.*?```", "", s, flags=re.S)
+    s = re.sub(r"`[^`]*`", "", s)
+    s = re.sub(r"\bBRT-[A-Z]+-\d+\b|\bC\d+\b", "", s)
+    s = re.sub(r"\b\d{1,2}-[A-Za-z]{3}-\d{4}\b", "", s)
+    s = re.sub(r"(?m)^\s*\d+\.\s", "", s)
+    s = re.sub(r"(?:localhost|127\.0\.0\.1):\d+", "", s)
+    problems = [f"number left in prose: {m.group(0)!r}" for m in re.finditer(r".{0,12}\d+.{0,12}", s)]
+    low = s.lower()
+    problems += [f"banned word: {w}" for w in BANNED_WORDS if w in low]
+    return problems
+
+
 def test_the_readme_carries_no_result_number_or_saving_claim():
-    """Planner ruling 38a: until the planner sends wording, the README points to bench/results."""
-    text = (REPO / "README.md").read_text(encoding="utf-8")
-    prose = re.sub(r"<!--.*?-->", "", text, flags=re.S)
-    assert "%" not in prose
-    assert "US$" not in prose and "$" not in prose
-    assert "cheaper" not in prose.lower() and "saving" not in prose.lower() and "saves" not in prose.lower()
+    assert readme_problems((REPO / "README.md").read_text(encoding="utf-8")) == []
+
+
+@pytest.mark.parametrize("planted", [
+    "It cuts spend by 40 % on long lists.",
+    "It costs 3x less than one call.",
+    "Runs are twice as fast, a fraction of the price.",
+    "Steps are faster and cost lower cost.",
+    "A run took 12 seconds.",
+    "That is cheaper than calling a model directly.",
+    "A less spend pattern.",
+])
+def test_the_readme_guard_fails_on_a_planted_example(planted):
+    assert readme_problems("# Title\n\n" + planted + "\n") != []
+
+
+def test_the_readme_guard_lets_dates_codes_ids_and_ports_through():
+    ok = "1. Step one <!-- claim C01 -->\n\nBRT-ORC-019 on 18-Nov-2026 at localhost:8000, see C27.\n"
+    assert readme_problems(ok) == []

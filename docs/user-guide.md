@@ -475,7 +475,7 @@ Besides the `runs` page (`limit`, newest first), the response carries `counts`: 
 
 ## Routes at a glance
 
-Read from the app's own route list on 18-Nov-2026. "Admin" means the admin lock above; every route that changes state returns 403 in replay mode (see "Replay demo").
+Read from the app's own route list on 18-Nov-2026. "Admin" means the admin lock above; every route that changes state returns 403 in replay mode, and so do the four read routes marked "closed in replay" (see "Replay demo").
 
 | Route | What it does | Who |
 |---|---|---|
@@ -491,14 +491,15 @@ Read from the app's own route list on 18-Nov-2026. "Admin" means the admin lock 
 | `GET /models`, `GET /models/matrix` | The model pool | open |
 | `POST /models/discover`, `POST /models/research`, `PATCH /models/{id}/checked` | Discover, Get Model Info, tick a model | admin |
 | `POST /keys` | Save the OpenRouter key | admin |
-| `GET /keys/status`, `GET /status/local` | Key and local-server status for the Admin pages | open |
-| `GET /config`, `GET /config/effective`, `GET /config/rules` | Settings and rules, read | open |
+| `GET /keys/status`, `GET /status/local` | Key and local-server status for the Admin pages | open; closed (403) in replay |
+| `GET /config`, `GET /config/effective`, `GET /config/rules` | Settings and rules, read (`/config/effective` is closed in replay) | open |
 | `POST /config`, `POST /config/rules`, `POST /config/rules/{id}/retire` | Settings and rules, write | admin |
 | `GET /skills`, `GET /skills/{id}` | Skills library | open |
 | `POST /skills/{id}/version` | Add a skill version | admin |
 | `GET /logs`, `GET /logs/entities`, `GET /logs/export` | Events, entities, JSONL export | admin |
-| `GET /logs/cost-summary`, `GET /logs/outlier-runs` | Cost summary; outlier runs | open |
+| `GET /logs/cost-summary`, `GET /logs/outlier-runs` | Cost summary (closed in replay); outlier runs | open |
 | `GET /replay/status` | Whether replay mode is on | open |
+| `GET /openapi.json` | The app's own route description | open |
 
 ---
 
@@ -924,3 +925,9 @@ While replay mode is on, every route that changes state (new tasks, resume, rati
 - **The Ask page says no recorded run was found:** check `BORG_REPLAY_DIR` (default `demo/runs`); the server log names any file it skipped (BRT-RPL-003).
 - **403 with BRT-RPL-002:** the prompt was not one of the recorded ones. Use the buttons.
 - **A mistyped `BORG_DEMO_MODE`:** any value other than empty, `off` or `replay` is treated as replay (BRT-RPL-005 in the log), so a typo never opens the live app. Set it to `off` or remove it to run for real.
+
+---
+
+## Interface check (work order 4.6, CI only)
+
+`scripts/check_ui.py` opens every page (10 pages) in a real browser against the app in replay mode, at 390 and 1280 pixels wide, in light and dark. It fails on console errors, failed requests nobody expected and required parts that are missing. It saves screenshots and a report, uploaded as the CI artifact `ui-check`. It runs only in CI, on GitHub's hosted runner; it is never run on the development laptop.

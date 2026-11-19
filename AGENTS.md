@@ -47,6 +47,6 @@ Do not delete files or data. Move them to an archive folder outside the reposito
 
 ## Session End Hygiene
 
-1. Run only the tests for what you changed, locally (planner ruling 30d, the owner's machine rule of 18-Nov-2026). The full suite is the CI run, once per ready batch of changes, never a local run. Docker tests and Playwright never run on the ThinkPad. Say which tests do not pass.
+1. Run only the tests for what you changed, locally (planner ruling 30d, the owner's machine rule of 18-Nov-2026). The full suite is the CI run, once per ready batch of changes, never a local run. Docker tests and Playwright never run on the development laptop. Say which tests do not pass.
 2. Commit scoped, descriptive changes. One logical change per commit.
 3. Do not push unless asked.
