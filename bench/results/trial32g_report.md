@@ -52,6 +52,26 @@ Job A still loses on two counts:
 - The light-tier worker's urgency is 27 points short of direct's 1.00, and nearly all of the misses are off by one.
 - On the round-1 data, compose wrote a shortened list with a comment in place of 190 rows. No compose check catches that: C2 was dropped by the planner, and C4 covers only items with no result. The stored rows were right; the answer did not carry them.
 
+## Known and left alone (planner ruling 36d)
+
+- **Compose can alter values for items that have results.** In the round-1-data re-run, compose's 10 typed rows carried urgencies unlike the stored ones. No check compares typed values with stored ones (a stated limit of the 32e note). Placing rows with a marker avoids it.
+- **A pack can be rejected whole and retried as singles.** Three packs across the two re-runs came back with all 20 items invalid (one in the round-2-data run, two in the round-1-data run). Each item was then retried alone (rulings 23 and 35). The singles cost US$0.0098 and US$0.0197, against US$0.0205 and US$0.0203 for all the packed item calls of each run: about 9% and 17% of the run cost.
+
+## Trial closed (planner ruling 36c)
+
+Closed at **US$1.358 of the US$5 cap**. The fixed path is the head after rulings 32 and 35. Direct figures are the stored direct results for the same data.
+
+| Job | Data | Fixed-path cost share of direct | Quality on the fixed path | Standing |
+|---|---|---|---|---|
+| A | round 2 | 50% | category 1.00, urgency 0.725 (accuracy 0.725) | no win by the rule (urgency short of 0.98) |
+| A | round 1 | 55% | 0 answered (compose elided the list); stored rows: category 0.98, urgency about 0.735 | no win by the rule |
+| B | round 2 (same input as round 1) | 40% | 17 of 18 checks against direct's 18 of 18 | no win by the rule (one check worse) |
+| C | round 2 | 31% (understated by one compose call) | judge chose direct | no win by the rule |
+| C | round 1 | 30% (understated by one compose call) | judge chose direct | no win by the rule |
+| D | round 2 | no direct arm (US$0.0605) | accuracy 1.00 | cannot win cloud-only (no direct arm by rule) |
+
+The B, C and D rows are from the 32g runs, which predate the ruling-35 fixes. A's rows are from the 35h re-runs.
+
 ## Files
 
 - `trial32g_r2data/` and `trial32g_r1data/`: the `*_borg_cloud_1.json` result files, `judge_C.json`, and the copied direct files. Run databases are under `dbs/` (git-ignored).
