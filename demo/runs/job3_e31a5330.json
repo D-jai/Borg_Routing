@@ -537,10 +537,7 @@
    "token_count": 67967,
    "direct_floor_dollars": 0.011994000000000001,
    "direct_floor_model": "openrouter/anthropic/claude-opus-5.5",
-   "direct_floor_ratio": [
-    1.3,
-    4.4
-   ]
+   "direct_floor_ratio": null
   },
   "outbound": [
    {

@@ -11,15 +11,19 @@ answer. Replay mode (``BORG_DEMO_MODE=replay``, ``src/api/replay.py``) plays the
 The source database is never written: it is opened read-only and copied to a temporary file,
 and the run view is built there by the same handler that serves ``GET /runs/{id}``, as a
 non-admin viewer sees it. For a run with the lane on (``lane_mode`` not ``off``) the view is
-the one a non-admin gets while the lane is on (``_redact_events`` in ``src/api/tasks.py``), and
-request bodies are never exported, whatever the run's lane mode.
+the one a non-admin gets while the lane is on (``_redact_events`` in ``src/api/tasks.py``). The
+view is kept whole, envelope payloads included (a local step's derived fields are shown by
+design, planner ruling 37); the bodies of outbound requests (``outbound[].body``, admin only)
+are removed whatever the run's lane mode, and so is the round-1 benchmark ratio
+(``digest.direct_floor_ratio``).
 
 Stripped from every string, also inside JSON held as text: keys (``[key]``) and absolute local
-paths (``[local path]``); the ``instance_id`` machine marker is dropped. The script REFUSES and
-writes nothing (exit 2) when the export would hold a canary (BRT-RPL-010), raw document text or
-documents it cannot read to check against (BRT-RPL-011), a key or path left after stripping
-(BRT-RPL-012), an answer it cannot recover exactly (BRT-RPL-013), or a run that is missing or
-not finished (BRT-RPL-014).
+paths (``[local path]``); the ``instance_id`` machine marker is dropped. The script then runs the
+strong check (``problems``) and REFUSES and writes nothing (exit 2) when the export would hold a
+canary, whole or as its bare body, any case (BRT-RPL-010), any 24-character window of a run
+document, any case and spacing, or documents it cannot read to check against (BRT-RPL-011), a
+key or path left after stripping (BRT-RPL-012), an answer it cannot check (BRT-RPL-013: the
+length check always applies), or a run that is missing or not finished (BRT-RPL-014).
 
 The answer: the run database does not store the final answer. It is read from
 ``<db folder>/answers/<run_id>.md`` when the recorder saved one, else rebuilt from the run's
@@ -62,9 +66,11 @@ ABS_PATH_RE = re.compile(
     r"(?<![A-Za-z0-9])[A-Za-z]:[\\/][^\s\"'<>|]*"                     # C:\x, C:/x
     r"|\\\\[A-Za-z0-9_.$-]+\\[^\s\"'<>|]*"                             # \\server\share
     r"|(?<![\w.:/-])/(?:home|Users|root|tmp|var|etc|opt|mnt|srv|usr|private|Volumes)/[^\s\"'<>]*")
-CANARY_RE = re.compile(r"CANARY-[A-Za-z0-9]")
+CANARY_RE = re.compile(r"CANARY-[A-Za-z0-9]", re.IGNORECASE)
+CANARY_TOKEN = re.compile(r"[A-Za-z0-9_-]*CANARY-([A-Za-z0-9_-]+)", re.IGNORECASE)
+MIN_CANARY_BODY = 6
 DROPPED_KEYS = {"instance_id"}
-MIN_PROBE = 24          # a document line this long or longer must not appear in an export
+WINDOW = 24             # no 24-character run of a document may appear in an export (lead ruling)
 
 
 class ExportRefused(Exception):
@@ -141,20 +147,55 @@ def scrub(value: object, stripped: dict) -> object:
     return value
 
 
+def canary_forms(texts: list, extra: Optional[list] = None) -> list:
+    """Every canary to refuse, lower case: each ``...CANARY-<body>`` token found in ``texts``
+    (the run's documents) or given in ``extra``, both whole and as its bare body."""
+    forms = set()
+    for text in list(texts) + list(extra or []):
+        for m in CANARY_TOKEN.finditer(text or ""):
+            whole, body = m.group(0).strip("-_"), m.group(1).strip("-_")
+            forms.add(whole.lower())
+            if len(body) >= MIN_CANARY_BODY:
+                forms.add(body.lower())
+    for c in extra or []:
+        if c and c.strip():
+            forms.add(c.strip().lower())
+    return sorted(forms)
+
+
+def _windows(text: str) -> set:
+    t = _norm(text).lower()
+    return {t[i:i + WINDOW] for i in range(len(t) - WINDOW + 1)}
+
+
 def problems(doc: dict, documents: dict, canaries: list) -> list:
     """``[(code, sentence)]`` for an export; empty when it may be written. ``documents`` maps
-    each run document's name to its text. Sentences name a code and a document, never text."""
+    each run document's name to its text. Sentences name a code and a document, never text.
+
+    BRT-RPL-010: a ``CANARY-`` marker, or any canary of ``canary_forms`` (whole or bare body),
+    anywhere, case-insensitively. BRT-RPL-011: any 24-character window of a document
+    (whitespace normalised, case-insensitive) inside any exported string, JSON held as text
+    included. BRT-RPL-012: a key or an absolute local path."""
     leaves = list(_decoded(doc))
-    joined = "\n".join(leaves)
+    lowered = [_norm(s).lower() for s in leaves]
+    joined = "\n".join(lowered)
     found = []
-    if CANARY_RE.search(joined) or any(c and c in joined for c in canaries):
+    forms = canary_forms(list(documents.values()), canaries)
+    if CANARY_RE.search(joined) or any(c in joined for c in forms):
         found.append(("BRT-RPL-010", "the export holds a canary"))
-    normed = _norm(joined)
+    owner: dict = {}
     for name, text in documents.items():
-        probes = [_norm(line) for line in text.splitlines() if len(line.strip()) >= MIN_PROBE]
-        probes.append(_norm(text)[:60] if len(_norm(text)) >= MIN_PROBE else "")
-        if any(p and p in normed for p in probes):
-            found.append(("BRT-RPL-011", f"the export holds raw text of document {name}"))
+        for w in _windows(text):
+            owner.setdefault(w, name)
+    hit: list = []
+    if owner:
+        for s in lowered:
+            for i in range(len(s) - WINDOW + 1):
+                name = owner.get(s[i:i + WINDOW])
+                if name is not None and name not in hit:
+                    hit.append(name)
+    for name in hit:
+        found.append(("BRT-RPL-011", f"the export holds raw text of document {name}"))
     if any(KEY_RE.search(s) for s in leaves):
         found.append(("BRT-RPL-012", "a key is left after stripping"))
     if any(ABS_PATH_RE.search(s) for s in leaves):
@@ -171,6 +212,13 @@ def _when(value: object) -> Optional[datetime]:
         return datetime.fromisoformat(value.replace("Z", "+00:00")).replace(tzinfo=None)
     except ValueError:
         return None
+
+
+def toronto_day(utc: datetime) -> str:
+    """The Toronto calendar date (YYYY-MM-DD) of a UTC time stored by SQLite."""
+    from src.api.replay import toronto_date  # noqa: PLC0415
+
+    return toronto_date(utc).isoformat()
 
 
 def _rel(value: object, start: datetime) -> Optional[int]:
@@ -467,8 +515,6 @@ async def build_export(run_id: str, db_path: str, matrix, docs_root: Optional[st
             lane_mode = run.get("lane_mode") or "off"
             documents = _read_documents(run, docs_root)
             found_canaries = list(canaries or [])
-            for text in documents.values():
-                found_canaries += re.findall(r"\S*CANARY-\S+", text)
             view = await run_view(run_id, str(copy), matrix, lane_on=lane_mode != "off")
             view["outbound"] = [dict(o, body=None) for o in view.get("outbound") or []]
             rules = await locality_rules(str(copy))
@@ -482,19 +528,18 @@ async def build_export(run_id: str, db_path: str, matrix, docs_root: Optional[st
             except (TypeError, ValueError, AttributeError):
                 doc_chars = 0
             want = floor_answer_chars(view.get("digest"), run["user_instruction"], doc_chars, matrix)
+            if want is None:
+                # Lead ruling: the length check always applies; nothing is exported unchecked.
+                raise ExportRefused("BRT-RPL-013", "the run has no priced floor, so its answer "
+                                                   "cannot be checked")
             if answer is None:
                 candidates = rebuilt_answers(con, run_id, lane_mode, run["user_instruction"])
-                if want is None:
-                    raise ExportRefused("BRT-RPL-013", "the answer is not stored and the run has no "
-                                                       "priced floor to check a rebuilt one against")
                 answer = next((c for c in candidates if abs(len(c) - want) < 0.5), None)
                 source = "rebuilt"
                 if answer is None:
                     raise ExportRefused("BRT-RPL-013", "the answer could not be rebuilt exactly "
                                                        "(its length does not match the stored floor)")
                 check = "matches the stored floor"
-            elif want is None:
-                check = "not checked (no priced floor)"
             elif abs(len(answer) - want) < 0.5:
                 check = "matches the stored floor"
             else:
@@ -504,6 +549,10 @@ async def build_export(run_id: str, db_path: str, matrix, docs_root: Optional[st
             con.close()
 
     start = _when(run["created_at"])
+    # Lead ruling (review of 4.5, item 4): no figure from the benchmark rides along; the
+    # receipt's ratio sentence is built from this field.
+    if isinstance(view.get("digest"), dict):
+        view["digest"]["direct_floor_ratio"] = None
     for ev in view.get("events", []):
         ev["t_ms"] = _rel(ev.get("created_at"), start)
     for env in view.get("envelopes", []) + view.get("child_envelopes", []):
@@ -520,7 +569,7 @@ async def build_export(run_id: str, db_path: str, matrix, docs_root: Optional[st
         "job": entry.get("job"),
         "title": entry.get("title"),
         "run_id": run_id,
-        "recorded_on": start.strftime("%Y-%m-%d"),
+        "recorded_on": toronto_day(start),
         "lane_mode": lane_mode,
         "redaction": "lane_viewer" if lane_mode != "off" else "viewer",
         "prompt": run["user_instruction"],

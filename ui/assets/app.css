@@ -52,6 +52,7 @@ button, input, textarea, select { font: inherit; color: inherit; }
 .topbar .spacer { flex: 1; }
 .chip { display: inline-flex; align-items: center; gap: 6px; padding: 2px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; background: var(--surface-2); color: var(--ink-2); white-space: nowrap; }
 .chip.replay { background: var(--warn-soft); color: var(--warn); }
+#replay-chip { white-space: normal; max-width: 70ch; line-height: 1.35; border-radius: 10px; padding: 4px 10px; }
 .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
 .dot.local { background: var(--brand); } .dot.cloud { background: transparent; border: 2px solid var(--cloud); }
 .dot.gold { background: var(--accent); }

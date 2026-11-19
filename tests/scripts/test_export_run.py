@@ -58,7 +58,7 @@ def _floor(instruction, doc_chars, answer):
 
 def _make_db(path, *, run_id=RUN, lane_mode="off", answer="The answer is 42.", compose_text=None,
              error_msg="step failed", documents=None, outbound_body=None, status="completed",
-             floor_answer=None):
+             floor_answer=None, no_floor=False):
     from src.db.schema import create_all
 
     asyncio.run(create_all(str(path)))
@@ -108,7 +108,8 @@ def _make_db(path, *, run_id=RUN, lane_mode="off", answer="The answer is 42.", c
             "url, left_machine, body, status, started_at, finished_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
             ("r1", run_id, None, 1, "orchestrator:plan", "cloud/planner",
              "https://openrouter.ai/api/v1/chat/completions", 1, outbound_body, "sent", "2026-11-18 10:00:05", "2026-11-18 10:00:09"))
-    floor = _floor(instruction, doc_chars, floor_answer if floor_answer is not None else answer)
+    floor = None if no_floor else _floor(instruction, doc_chars,
+                                         floor_answer if floor_answer is not None else answer)
     con.execute(
         "INSERT INTO run_digests(run_id, summary, cost_dollars, token_count, tokens_input, tokens_output, "
         "direct_floor_dollars, direct_floor_model, created_at) VALUES (?,?,?,?,?,?,?,?,?)",
@@ -261,3 +262,83 @@ def test_export_refuses_an_answer_that_does_not_match_the_stored_floor(tmp_path,
     db = tmp_path / "run.db"
     _make_db(db, answer="The answer is 42.", floor_answer="A longer answer than the one rebuilt here.")
     _refused(mod, tmp_path, capsys, monkeypatch, db, RUN, "BRT-RPL-013")
+
+
+def test_export_refuses_a_stored_answer_of_the_wrong_length(tmp_path, capsys, monkeypatch):
+    mod = _load()
+    db = tmp_path / "run.db"
+    _make_db(db, answer="The answer is 42.")
+    (tmp_path / "answers").mkdir()
+    (tmp_path / "answers" / f"{RUN}.md").write_text("The answer is 42, said at length.", encoding="utf-8")
+    _refused(mod, tmp_path, capsys, monkeypatch, db, RUN, "BRT-RPL-013")
+
+
+def test_export_refuses_a_run_with_no_priced_floor(tmp_path, capsys, monkeypatch):
+    """The length check always applies: no floor, no export (stored answer or not)."""
+    mod = _load()
+    db = tmp_path / "run.db"
+    _make_db(db, no_floor=True)
+    (tmp_path / "answers").mkdir()
+    (tmp_path / "answers" / f"{RUN}.md").write_text("The answer is 42.", encoding="utf-8")
+    _refused(mod, tmp_path, capsys, monkeypatch, db, RUN, "BRT-RPL-013")
+
+
+def test_the_export_carries_no_benchmark_ratio(tmp_path):
+    mod = _load()
+    db = tmp_path / "run.db"
+    _make_db(db)
+    doc = _export(mod, db)
+    assert doc["view"]["digest"]["direct_floor_ratio"] is None
+
+
+# --- the strong check (lead ruling: every 24-character window; canary bodies) -------------
+
+NOTE_01 = (ROOT / "demo" / "data" / "job3_notes" / "note_01.txt").read_text(encoding="utf-8")
+QUOTE = NOTE_01.splitlines()[3][:66]          # 66 characters of note_01's body line
+BODY = "7f3a91-ZEBRA-LANTERN"
+REAL_CANARY = "CANARY-" + BODY
+
+
+def _real_docs():
+    folder = ROOT / "demo" / "data" / "job3_notes"
+    return {f"job3_notes/{p.name}": p.read_text(encoding="utf-8") for p in sorted(folder.glob("*.txt"))}
+
+
+@pytest.mark.parametrize("answer,code", [
+    (f"Summary: the note says {QUOTE} and more.", "BRT-RPL-011"),       # a quote inside an answer
+    (f"SUMMARY: {QUOTE.upper()}", "BRT-RPL-011"),                       # the same, upper case
+    ("Summary: " + QUOTE.replace(" ", "\n  "), "BRT-RPL-011"),          # whitespace changed
+    (f"ref {BODY}", "BRT-RPL-010"),                                      # the bare canary body
+    (f"ref {BODY.lower()}", "BRT-RPL-010"),
+    (f"ref {REAL_CANARY}", "BRT-RPL-010"),
+])
+def test_the_strong_check_catches_quotes_case_and_bare_canaries(answer, code):
+    mod = _load()
+    assert len(QUOTE) == 66
+    codes = {c for c, _ in mod.problems({"answer": answer}, _real_docs(), [])}
+    assert code in codes
+
+
+def test_a_short_derived_field_passes_the_strong_check():
+    mod = _load()
+    assert mod.problems({"answer": "Dock repairs: Mara Quill, yes (decision by Friday)"},
+                        _real_docs(), []) == []
+
+
+@pytest.mark.parametrize("answer,code", [
+    ("Summary: " + QUOTE.upper(), "BRT-RPL-011"),
+    ("Reference " + BODY, "BRT-RPL-010"),
+])
+def test_the_export_step_refuses_to_write_a_file_that_fails_the_strong_check(
+        tmp_path, capsys, monkeypatch, answer, code):
+    """The check runs inside the export step: a failing export is never written."""
+    mod = _load()
+    root = tmp_path / "docs"
+    (root / "notes").mkdir(parents=True)
+    text = NOTE_01 + "Internal reference: " + REAL_CANARY + "\n"
+    (root / "notes" / "note_01.txt").write_text(text, encoding="utf-8")
+    docs = [{"id": "doc_001", "type": "txt", "size": len(text), "parts": 1, "chars": len(text),
+             "name": "notes/note_01.txt"}]
+    db = tmp_path / "lane.db"
+    _make_db(db, run_id=LANE_RUN, lane_mode="raw_local", documents=docs, answer=answer)
+    _refused(mod, tmp_path, capsys, monkeypatch, db, LANE_RUN, code, ["--docs-root", str(root)])

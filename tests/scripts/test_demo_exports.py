@@ -66,3 +66,22 @@ def test_an_answer_has_the_length_its_floor_was_priced_on(path):
     want = mod.floor_answer_chars(doc["view"]["digest"], doc["prompt"],
                                   sum(d["chars"] for d in docs), mod.load_matrix())
     assert want is not None and abs(len(doc["answer"]) - want) < 0.5
+
+
+@pytest.mark.parametrize("path", EXPORTS, ids=lambda p: p.name)
+def test_no_committed_export_carries_a_benchmark_figure(path):
+    """Lead ruling (review item 4): the round-1 ratio is nulled at export."""
+    doc = json.loads(path.read_text(encoding="utf-8"))
+    assert doc["view"]["digest"]["direct_floor_ratio"] is None
+    assert "round-1" not in path.read_text(encoding="utf-8").lower()
+
+
+@pytest.mark.parametrize("path", EXPORTS, ids=lambda p: p.name)
+def test_the_recorded_date_is_the_toronto_date(path):
+    from datetime import datetime
+
+    from src.api.replay import toronto_date
+
+    doc = json.loads(path.read_text(encoding="utf-8"))
+    started = datetime.fromisoformat(doc["view"]["run"]["created_at"])
+    assert doc["recorded_on"] == toronto_date(started).isoformat()

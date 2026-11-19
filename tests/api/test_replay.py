@@ -4,7 +4,12 @@ Done when: replay makes zero outbound HTTP calls (httpx patched to raise), every
 state-changing route returns 403, and a replayed run renders the same receipt totals as the
 source run. Runs at a high `replay_speed`, so no test waits for the recorded times.
 """
+import asyncio
+import asyncio.proactor_events
+import asyncio.selector_events
 import json
+import os
+import shutil
 import socket
 from pathlib import Path
 
@@ -43,6 +48,13 @@ def outbound(monkeypatch):
     monkeypatch.setattr(httpx.AsyncHTTPTransport, "handle_async_request", aboom)
     monkeypatch.setattr(httpx.AsyncClient, "send", aboom)
     monkeypatch.setattr(socket, "create_connection", boom)
+    # The event loop's own ways out (lead ruling, review item 5), on every loop class that
+    # defines them (Windows' proactor loop and the selector loop).
+    for cls in (asyncio.BaseEventLoop, asyncio.proactor_events.BaseProactorEventLoop,
+                asyncio.selector_events.BaseSelectorEventLoop):
+        for name in ("create_connection", "sock_connect"):
+            if name in vars(cls):
+                monkeypatch.setattr(cls, name, aboom)
     monkeypatch.setattr("src.pipeline.runner.run_pipeline", aboom)
     monkeypatch.setattr("src.api.chat_completions.run_pipeline", aboom)
     monkeypatch.setattr("src.agents.executor.send_outbound", aboom)
@@ -235,20 +247,18 @@ def test_live_mode_is_untouched(monkeypatch):
 node = pytest.importorskip("tests.ui.test_app_js")
 
 
-@pytest.mark.skipif(node.NODE is None, reason="node is not on PATH")
-@pytest.mark.parametrize("path", EXPORTS, ids=lambda p: p.name)
-def test_a_replayed_run_renders_the_same_receipt_totals_as_the_source(client, tmp_path, path):
-    export = json.loads(path.read_text(encoding="utf-8"))
-    _, _, run_id = _play(client, export)
-    replayed = client.get(f"/runs/{run_id}").json()
+def _receipts(tmp_path, source_view, replayed_view):
     script = (
         "const {BorgWork: W} = H.load({extra: ['workspace.js']});"
-        f"const a = {json.dumps(export['view'])}; const b = {json.dumps(replayed)};"
+        f"const a = {json.dumps(source_view)}; const b = {json.dumps(replayed_view)};"
         "const pick = (d) => { const r = W.receiptFrom(d);"
         " return {r: r, tiles: W.headerTiles(d), note: W.floorNote(r.estimate)}; };"
         "return JSON.stringify([pick(a), pick(b)]).replace(/[\\u007f-\\uffff]/g, c => '');"
     )
-    source, played = json.loads(node.run_js(tmp_path, script))
+    return json.loads(node.run_js(tmp_path, script))
+
+
+def _same_totals(source, played):
     # Lead ruling (item 4): the benchmark ratio sentence shows live, never in replay.
     assert "round-1 benchmark" in source["note"]
     assert played["note"] and "round-1 benchmark" not in played["note"]
@@ -256,4 +266,133 @@ def test_a_replayed_run_renders_the_same_receipt_totals_as_the_source(client, tm
     # Every total is as recorded: the receipt and the header tiles, the ratio aside.
     source["r"]["estimate"]["ratio"] = None
     assert played["r"] == source["r"] and played["tiles"] == source["tiles"]
+
+
+@pytest.mark.skipif(node.NODE is None, reason="node is not on PATH")
+@pytest.mark.parametrize("path", EXPORTS, ids=lambda p: p.name)
+def test_a_replayed_run_renders_the_same_receipt_totals_as_the_export(client, tmp_path, path):
+    from src.registry.cost import DIRECT_FLOOR_RATIO_RANGE
+
+    export = json.loads(path.read_text(encoding="utf-8"))
+    _, _, run_id = _play(client, export)
+    replayed = client.get(f"/runs/{run_id}").json()
+    # The export carries no ratio; the live run view adds it (get_run_state), so add it back.
+    live = json.loads(json.dumps(export["view"]))
+    live["digest"]["direct_floor_ratio"] = list(DIRECT_FLOOR_RATIO_RANGE)
+    source, played = _receipts(tmp_path, live, replayed)
+    _same_totals(source, played)
     assert source["r"]["cost"] == export["view"]["digest"]["cost_dollars"]
+
+
+def _demo_db():
+    for base in (os.environ.get("BORG_DATA_ROOT"), str(ROOT)):
+        if base and (Path(base) / "demo" / "runs" / "db" / "demo.db").exists():
+            return Path(base) / "demo" / "runs" / "db" / "demo.db"
+    return None
+
+
+@pytest.mark.skipif(node.NODE is None, reason="node is not on PATH")
+@pytest.mark.skipif(_demo_db() is None, reason="the git-ignored demo database is not here "
+                                                "(set BORG_DATA_ROOT to the main checkout)")
+@pytest.mark.parametrize("path", EXPORTS, ids=lambda p: p.name)
+def test_the_replay_receipt_equals_the_source_runs_own_run_view(client, tmp_path, monkeypatch, path):
+    """Review item 6: GET /runs/{id} of the SOURCE run, from a temp copy of demo.db opened
+    read-only, against the replayed export."""
+    import sqlite3
+
+    from src.api import tasks
+
+    export = json.loads(path.read_text(encoding="utf-8"))
+    copy = tmp_path / "demo_copy.db"
+    src = sqlite3.connect(f"file:{_demo_db().as_posix()}?mode=ro", uri=True)
+    dst = sqlite3.connect(str(copy))
+    src.backup(dst)
+    dst.close()
+    src.close()
+    lane_on = export["lane_mode"] != "off"
+
+    async def lane_is_on():
+        return lane_on
+
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("export_run", ROOT / "scripts" / "export_run.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    monkeypatch.setattr(tasks, "DB_PATH", str(copy))
+    monkeypatch.setattr(tasks, "lane_admin_allowed", lambda request=None: False)
+    monkeypatch.setattr(tasks, "_lane_is_on", lane_is_on)
+    resp = asyncio.run(tasks.get_run_state(export["run_id"], request=mod._Request(mod.load_matrix())))
+    source_view = json.loads(resp.body)
+    assert source_view["digest"]["direct_floor_ratio"]          # the live view states the ratio
+    _, _, run_id = _play(client, export)
+    replayed = client.get(f"/runs/{run_id}").json()
+    source, played = _receipts(tmp_path, source_view, replayed)
+    _same_totals(source, played)
+
+
+# --- the fixture and the startup guard ------------------------------------------------------
+
+def test_the_outbound_fixture_catches_a_real_attempt(outbound):
+    """Check the checker: each way out trips the fixture and is counted."""
+    async def attempts():
+        async with httpx.AsyncClient() as c:
+            with pytest.raises(AssertionError):
+                await c.get("http://127.0.0.1:9/")
+        with pytest.raises(AssertionError):
+            await asyncio.open_connection("127.0.0.1", 9)
+        loop = asyncio.get_running_loop()
+        s = socket.socket()
+        s.setblocking(False)
+        try:
+            with pytest.raises(AssertionError):
+                await loop.sock_connect(s, ("127.0.0.1", 9))
+        finally:
+            s.close()
+
+    asyncio.run(attempts())
+    with pytest.raises(AssertionError):
+        httpx.Client().get("http://127.0.0.1:9/")
+    with pytest.raises(AssertionError):
+        socket.create_connection(("127.0.0.1", 9))
+    assert len(outbound) >= 5
+
+
+def test_replay_startup_writes_no_database(monkeypatch, tmp_path, outbound):
+    """main.py's lifespan skips create_all in replay: no call, no file. Fails if the guard
+    is removed (the spy would be called and would create the file)."""
+    import src.db.schema as schema
+
+    real = schema.create_all
+    calls = []
+
+    async def spy(db_path=None):
+        calls.append(db_path)
+        await real(str(tmp_path / "borg_route.db"))
+
+    monkeypatch.setattr(schema, "create_all", spy)
+    monkeypatch.setenv("BORG_DEMO_MODE", "replay")
+    monkeypatch.setenv("BORG_REPLAY_DIR", str(RUNS))
+    replay.reset()
+    with TestClient(app) as c:
+        assert c.get("/replay/status").json()["mode"] == "replay"
+    assert calls == []
+    assert list(tmp_path.glob("*.db")) == []
+    # And the spy does work when the guard lets it through (live mode).
+    monkeypatch.delenv("BORG_DEMO_MODE")
+    with TestClient(app):
+        pass
+    assert len(calls) == 1 and (tmp_path / "borg_route.db").exists()
+
+
+@pytest.mark.parametrize("utc,day", [
+    ("2026-11-18 03:30:00", "2026-11-17"),     # EST, UTC-5: still the evening before
+    ("2026-11-18 05:30:00", "2026-11-18"),
+    ("2026-07-01 03:59:00", "2026-06-30"),     # EDT, UTC-4
+    ("2026-07-01 04:00:00", "2026-07-01"),
+])
+def test_the_notice_date_is_the_toronto_date(utc, day):
+    from datetime import datetime
+
+    assert replay.toronto_date(datetime.fromisoformat(utc)).isoformat() == day
+    doc = {"view": {"run": {"created_at": utc}}, "recorded_on": "1999-01-01"}
+    assert replay.notice({"r": doc}) == "Replay of a recorded run on " + replay._day(day)

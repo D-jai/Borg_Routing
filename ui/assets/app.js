@@ -350,10 +350,14 @@
   /* Replay mode (work order 4.5): GET /replay/status says whether this server only plays
    * recorded demo runs. replayNotice(status) is the line every page shows then, or null in
    * live mode. replayStatus() asks once per page and resolves {mode: 'live'} on any failure. */
+  /* Planner condition for the public replay: the banner says the data is made up, and what a
+   * private-notes (lane) run is for. */
+  var REPLAY_DATA_NOTE = 'The documents and notes in these runs are made-up demo data; in the ' +
+    'private-notes run, the point is what was not sent to a cloud model.';
   function replayNotice(status) {
     if (!status || status.mode !== 'replay') return null;
     var text = typeof status.notice === 'string' && status.notice ? status.notice : 'Replay of a recorded run';
-    return text + ' · demo run, not a benchmark result';
+    return text + ' · demo run, not a benchmark result. ' + REPLAY_DATA_NOTE;
   }
   var replayAsk = null;
   function replayStatus() {

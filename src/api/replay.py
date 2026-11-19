@@ -31,7 +31,7 @@ import os
 import time
 import uuid
 from collections import OrderedDict
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -244,6 +244,37 @@ def view_at(doc: dict, elapsed: Optional[float], session: Optional[dict] = None)
 
 # --- what the pages read ----------------------------------------------------------------------
 
+def _nth_sunday(year: int, month: int, n: int) -> date:
+    first = date(year, month, 1)
+    return first + timedelta(days=(6 - first.weekday()) % 7 + 7 * (n - 1))
+
+
+def toronto_date(utc: datetime) -> date:
+    """The calendar date in Toronto (America/Toronto) of a naive UTC time. Uses the zone
+    database when there is one, else the Eastern rule in force since 2007 (EDT, UTC-4, from
+    02:00 on the second Sunday of March to 02:00 on the first Sunday of November; else EST,
+    UTC-5): Windows has no zone database without the tzdata package."""
+    try:
+        from zoneinfo import ZoneInfo  # noqa: PLC0415
+
+        return utc.replace(tzinfo=timezone.utc).astimezone(ZoneInfo("America/Toronto")).date()
+    except Exception:
+        pass
+    y = utc.year
+    dst_start = datetime.combine(_nth_sunday(y, 3, 2), datetime.min.time()) + timedelta(hours=7)
+    dst_end = datetime.combine(_nth_sunday(y, 11, 1), datetime.min.time()) + timedelta(hours=6)
+    offset = 4 if dst_start <= utc < dst_end else 5
+    return (utc - timedelta(hours=offset)).date()
+
+
+def _recorded_day(doc: dict) -> Optional[str]:
+    """The Toronto date the run started, from its stored UTC time; else the export's own."""
+    started = _parse((doc.get("view") or {}).get("run", {}).get("created_at"))
+    if started is not None:
+        return toronto_date(started).isoformat()
+    return doc.get("recorded_on")
+
+
 def _day(iso: str) -> str:
     try:
         d = datetime.strptime(iso, "%Y-%m-%d")
@@ -253,7 +284,7 @@ def _day(iso: str) -> str:
 
 
 def notice(runs: dict) -> str:
-    dates = sorted({str(d.get("recorded_on")) for d in runs.values() if d.get("recorded_on")})
+    dates = sorted({day for day in map(_recorded_day, runs.values()) if day})
     if not dates:
         return "Replay mode: no recorded run was found"
     return "Replay of a recorded run on " + " or ".join(_day(d) for d in dates)

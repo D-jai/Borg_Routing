@@ -460,7 +460,25 @@ def test_replay_notice_names_the_date_and_says_demo_run(tmp_path):
     st = {"mode": "replay", "notice": "Replay of a recorded run on 18-Nov-2026"}
     text = call(tmp_path, "replayNotice", [st])   # the pipe's code page mangles the middle dot
     assert text.startswith("Replay of a recorded run on 18-Nov-2026 ")
-    assert text.endswith(" demo run, not a benchmark result")
+    assert " demo run, not a benchmark result. " in text
+    assert text.endswith(DATA_NOTE)
+
+
+DATA_NOTE = ("The documents and notes in these runs are made-up demo data; in the private-notes "
+             "run, the point is what was not sent to a cloud model.")
+PAGES = sorted((Path(__file__).resolve().parents[2] / "ui").glob("*.html"))
+
+
+def test_every_page_carries_the_replay_banner():
+    """Planner condition: the banner (with the made-up-data sentence) is on every page. It is
+    built by app.js's shell, so every page must load app.js and the shell must hold the chip
+    that replayNotice fills."""
+    assert len(PAGES) == 10
+    for page in PAGES:
+        assert '<script src="assets/app.js"></script>' in page.read_text(encoding="utf-8"), page.name
+    app = (Path(__file__).resolve().parents[2] / "ui" / "assets" / "app.js").read_text(encoding="utf-8")
+    assert "id: 'replay-chip'" in app and "showReplayChip();" in app
+    assert "made-up demo data" in app and "what was not sent to a cloud model" in app
 
 
 def test_no_replay_notice_in_live_mode_or_on_a_bad_answer(tmp_path):
