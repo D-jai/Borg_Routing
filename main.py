@@ -10,9 +10,15 @@ from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
-from src.registry.capability_matrix import CapabilityMatrix
+from src.paths import PROJECT_ROOT, UI_DIR, use_project_root
 
-load_dotenv()
+# Work order 5.2: the app starts from any working directory. The relative paths in src
+# (data/..., ui/) resolve from the project folder, found from this file.
+use_project_root()
+
+from src.registry.capability_matrix import CapabilityMatrix  # noqa: E402
+
+load_dotenv(PROJECT_ROOT / ".env")
 
 # Shared capability matrix — loaded at startup, reused by all API handlers.
 matrix = CapabilityMatrix()
@@ -109,7 +115,7 @@ async def site_root():
     return RedirectResponse(ASK_PAGE)
 
 
-if os.path.isdir("ui"):
+if UI_DIR.is_dir():
 
     @app.get("/ui", include_in_schema=False)
     @app.get("/ui/", include_in_schema=False)
@@ -117,7 +123,7 @@ if os.path.isdir("ui"):
     async def ui_root():
         return RedirectResponse(ASK_PAGE)
 
-    app.mount("/ui", StaticFiles(directory="ui", html=True), name="ui")
+    app.mount("/ui", StaticFiles(directory=str(UI_DIR), html=True), name="ui")
 
 # Register routers
 from src.api.models import router as models_router  # noqa: E402

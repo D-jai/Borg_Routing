@@ -30,9 +30,8 @@ Detect the platform before running any shell command:
 Slice 5 (NER worker) is parked by default. The previous install step
 `python -m spacy download en_core_web_sm` is **not required** for a
 functioning system today. Skip it. Only run it if the operator
-specifically asks for NER. (The `spacy` library itself is still a
-dependency because tests import it, but the language model download
-is optional.)
+specifically asks for NER. (`spacy` is an optional extra, `pip install -e ".[ner]"`; `.[dev]`
+includes it for the tests. The language model download is optional.)
 
 **Test counts:** on a fresh install without `en_core_web_sm`, the three NER worker tests skip automatically (TC-S5-010 / 011 / 012); installing the language model turns those skips into passes. Run `python -m pytest` and expect no failures; the total grows with the project, so do not rely on a fixed number.
 
@@ -42,6 +41,59 @@ The install is done when all of these pass:
 - `GET http://localhost:8000/health` → `{"status":"ok"}`
 - `GET http://localhost:8000/models/matrix` → returns the 12 curated OpenRouter rows (plus one row per local model, after Discover); only the two cold-start rows have `checked: true`
 - At least one row has been ticked with `PATCH /models/<id>/checked` (any one you plan to use, for example a model id as LM Studio shows it, like `your-org/your-model`)
+
+---
+
+## Docker: the demo in one command
+
+You need Docker with the Compose plugin. No key, no `.env` and no model are needed for the demo.
+
+```
+docker compose up -d --build
+```
+
+Open `http://localhost:8000` (it opens the Ask page). The first build downloads Python packages, so it takes a few minutes; later starts take seconds. The demo is in **replay mode**: it plays back runs that were recorded earlier, calls no model and writes no database. See "Replay demo" in `docs/user-guide.md`.
+
+Check it from a terminal:
+
+```
+curl -f http://localhost:8000/health
+curl -f http://localhost:8000/ui/ask.html
+```
+
+The port is bound to your own machine only (`127.0.0.1`). To reach it from another machine, change the `ports` line in `compose.yaml` on purpose, and put a login or a reverse proxy in front first.
+
+### Run it live with your own keys
+
+1. Copy `.env.example` to `.env` and fill in the values you intend to use (see "Environment Variables" below).
+2. Start with the override file, which reads `.env` and turns replay off:
+
+```
+docker compose -f compose.yaml -f compose.live.yaml up -d --build
+```
+
+A local model server on the same computer (LM Studio, Ollama) is reached from the container as `host.docker.internal` (for example `http://host.docker.internal:11434`), not `localhost`; set the matching address in `.env`.
+
+### Where data lives
+
+The folder `/app/data` inside the container (the model matrix, the skills file and, in live mode, the database `borg_route.db`) is a Docker named volume called `borg_data` (Compose prefixes it with the project folder's name). A new volume starts as a copy of the files shipped in the image. It survives `docker compose down` and rebuilds. A later image does not overwrite files already in the volume; remove the volume to start fresh.
+
+### Stop and remove
+
+```
+docker compose down          # stop and remove the container, keep the data volume
+docker compose down -v       # also delete the data volume
+```
+
+For the live setup, give the same `-f` files to `down`.
+
+### Running without Docker, from any folder
+
+`uvicorn` can be started from any working directory (for example `uvicorn main:app --app-dir /path/to/BORG_ROUTE`): the app finds `data/`, `ui/` and `demo/runs/` from where `main.py` sits and uses that folder as its working directory. A relative path you put in `.env` (such as `BORG_DOCS_ROOT`) is read from that folder, so prefer absolute paths there.
+
+### The optional entity worker (spaCy)
+
+spaCy is not installed by default. The app starts and serves without it. To use the named-entity worker: `pip install -e ".[ner]"` then `python -m spacy download en_core_web_sm`.
 
 ---
 
