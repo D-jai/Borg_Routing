@@ -11,6 +11,9 @@ Backing notation (several backings in one cell are separated by ``;``):
     test:tests/path/test_file.py::test_name
     test:tests/path/test_file.py::TestClass::test_name
     result:bench/results/run/summary.json#a.b.0.c=42.5
+    result:bench/results/run/A_1.json#quality.urgency=69.5%
+    result:demo/runs/job.json#view.digest.floor=0.0309 round down
+    text:bench/results/run/summary.md#B 120.3 70.1 3=70.1
 
 A ``test:`` backing is checked by parsing the file with ``ast``: the function
 must be a top-level def, or a method directly inside the named class (text in
@@ -19,7 +22,23 @@ JSON file, a dotted path into it (list positions are numbers) and the value
 expected there. The check reads the number written just before the marker on its line (the
 last whole number before it; a token with a letter or ``-`` attached, such as
 BRT-ORC-019, is not a number; commas, ``$`` and ``%`` are ignored) and requires
-it to equal the JSON value. Every ``result:`` backing of a row is compared.
+it to equal the value the row states. Every value backing of a row is compared.
+The row's value is checked against the source first:
+
+- ``=V`` alone: the source value equals V exactly;
+- ``=V round``: the source value rounded half up to V's decimal places equals V;
+- ``=V round down``: the source value cut to V's decimal places equals V (the UI's
+  ``floorMoney`` shows an "at least" figure this way);
+- ``V%`` with a source written without ``%``: the source is a fraction, so it is
+  multiplied by 100 first (``0.695`` backs ``69.5%``).
+
+A ``text:`` backing names any text file (a published report, a job file) and a piece
+of text that must stand on one line of it. Both sides are compared after ``|``, ``*``
+and backticks are turned into spaces and runs of spaces are made one, so a table row
+can be quoted without its pipes. One number in that text must give V by the rules
+above. The text may not hold ``;`` or ``|``.
+
+``US$`` before a number is read as part of the number (``US$0.0309``).
 Lines inside ``` fences are skipped.
 
 Exit 0 when everything holds (warnings may print). Exit 1 on any error.
@@ -34,7 +53,7 @@ import ast
 import json
 import re
 import sys
-from decimal import Decimal, InvalidOperation
+from decimal import ROUND_DOWN, ROUND_HALF_UP, Decimal, InvalidOperation
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
@@ -42,7 +61,8 @@ MARKER = re.compile(r"<!--\s*claim\s+(C\d+)\s*-->")
 ANY_CLAIM_COMMENT = re.compile(r"<!--\s*claim\b", re.I)
 ROW_START = re.compile(r"^\|\s*[Cc]")
 ID_OK = re.compile(r"^C\d+$")
-NUM_TOKEN = re.compile(r"[-+]?\$?\d[\d,]*(?:\.\d+)?%?")
+NUM_TOKEN = re.compile(r"[-+]?(?:US)?\$?\d[\d,]*(?:\.\d+)?%?")
+VALUE_SPEC = re.compile(r"^(?P<value>\S+?)(?:\s+(?P<mode>round down|round))?$")
 
 
 def default_docs(root: Path) -> list[Path]:
@@ -146,7 +166,7 @@ def json_lookup(data, dotted: str):
 
 
 def to_decimal(text: str) -> Decimal | None:
-    t = re.sub(r"[,$%\s+]", "", str(text))
+    t = re.sub(r"US|[,$%\s+]", "", str(text))
     try:
         return Decimal(t)
     except InvalidOperation:
@@ -158,12 +178,41 @@ def parse_result_spec(spec: str) -> tuple[str, str, str] | None:
     return (m.group(1).strip(), m.group(2).strip(), m.group(3).strip()) if m else None
 
 
+def parse_value(expected: str) -> tuple[Decimal, str, bool] | None:
+    """'69.5% round' -> (Decimal('69.5'), 'round', True). None when unreadable."""
+    m = VALUE_SPEC.match(expected.strip())
+    if not m or not NUM_TOKEN.fullmatch(m.group("value")):
+        return None
+    want = to_decimal(m.group("value"))
+    if want is None:
+        return None
+    return want, m.group("mode") or "exact", m.group("value").endswith("%")
+
+
+def source_gives(source_value, source_text: str, want: Decimal, mode: str, pct: bool) -> bool:
+    """Does the source number give the row's value V under the rules in the module text?"""
+    got = to_decimal(source_value)
+    if got is None:
+        return False
+    if pct and not str(source_text).endswith("%"):
+        got = got * 100
+    if mode == "exact":
+        return got == want
+    places = Decimal(1).scaleb(want.as_tuple().exponent)
+    rounding = ROUND_DOWN if mode == "round down" else ROUND_HALF_UP
+    return got.quantize(places, rounding=rounding) == want
+
+
 def check_result_value(spec: str, root: Path) -> tuple[str | None, Decimal | None]:
-    """Return (error, json_value). json_value is None on error."""
+    """Return (error, the row's value). The value is None on error."""
     parsed = parse_result_spec(spec)
     if not parsed:
         return f"bad result backing '{spec}' (want file.json#a.b=value)", None
     file_part, dotted, expected = parsed
+    val = parse_value(expected)
+    if val is None:
+        return f"bad value '{expected}' in '{spec}' (want a number, then 'round' or 'round down' if rounded)", None
+    want, mode, pct = val
     path = root / file_part
     if not path.is_file():
         return f"results file not found: {file_part}", None
@@ -171,23 +220,93 @@ def check_result_value(spec: str, root: Path) -> tuple[str | None, Decimal | Non
         value = json_lookup(json.loads(path.read_text(encoding="utf-8")), dotted)
     except (KeyError, IndexError, ValueError, TypeError) as exc:
         return f"path {dotted} not found in {file_part} ({exc!r})", None
-    got, want = to_decimal(value), to_decimal(expected)
-    if got is None or want is None:
+    if isinstance(value, bool) or to_decimal(value) is None:
         return f"{file_part}#{dotted} is not a number: {value!r} vs {expected!r}", None
-    if got != want:
+    if not source_gives(value, str(value), want, mode, pct):
         return f"{file_part}#{dotted} is {value}, but the row expects {expected}", None
-    return None, got
+    return None, want
+
+
+def _flat(text: str) -> str:
+    return " ".join(re.sub(r"[|*`]", " ", text).split())
+
+
+def _tokens(text: str) -> list[tuple[int, int, str]]:
+    """Numeric tokens as (start, end, token), with wrapping punctuation left out."""
+    out = []
+    for m in re.finditer(r"\S+", text):
+        raw = m.group(0)
+        lead = len(raw) - len(raw.lstrip("(\"'*`"))
+        tok = raw.lstrip("(\"'*`").rstrip(".,;:)\"'*`")
+        if tok and NUM_TOKEN.fullmatch(tok):
+            out.append((m.start() + lead, m.start() + lead + len(tok), tok))
+    return out
+
+
+def check_text_value(spec: str, root: Path) -> tuple[str | None, Decimal | None]:
+    """text:<file>#<text on one line>=<value>. Return (error, the row's value)."""
+    if "#" not in spec or "=" not in spec:
+        return f"bad text backing '{spec}' (want file#text=value)", None
+    file_part, rest = spec.split("#", 1)
+    quoted, expected = rest.rsplit("=", 1)
+    file_part, quoted = file_part.strip(), _flat(quoted)
+    val = parse_value(expected)
+    if val is None or not quoted:
+        return f"bad text backing '{spec}' (want file#text=value)", None
+    want, mode, pct = val
+    path = root / file_part
+    if not path.is_file():
+        return f"text file not found: {file_part}", None
+    lines = path.read_text(encoding="utf-8").splitlines()
+    if not any(quoted in _flat(ln) for ln in lines):
+        return f"{file_part} has no line holding '{quoted}'", None
+    if not any(source_gives(to_decimal(t), t, want, mode, pct) for _a, _b, t in _tokens(quoted)):
+        return f"no number in '{quoted}' ({file_part}) gives the row's {expected.strip()}", None
+    return None, want
+
+
+def value_backing(b: str, root: Path) -> tuple[str | None, Decimal | None] | None:
+    """(error, value) for a result: or text: backing; None for any other kind."""
+    if b.startswith("result:"):
+        return check_result_value(b[7:].strip(), root)
+    if b.startswith("text:"):
+        return check_text_value(b[5:].strip(), root)
+    return None
+
+
+def number_span(line: str, column: int) -> tuple[int, int, Decimal] | None:
+    """The last whole numeric token before the marker, as (start, end, value)."""
+    toks = _tokens(line[:column])
+    if not toks:
+        return None
+    a, b, tok = toks[-1]
+    return a, b, to_decimal(tok)
 
 
 def number_before(line: str, column: int) -> Decimal | None:
     """The last whole numeric token before the marker. A token with a letter
     or '-' attached (BRT-ORC-019) is not a number."""
-    last = None
-    for tok in line[:column].split():
-        tok = tok.strip("(\"'*`").rstrip(".,;:)\"'*`")
-        if NUM_TOKEN.fullmatch(tok):
-            last = to_decimal(tok)
-    return last
+    span = number_span(line, column)
+    return span[2] if span else None
+
+
+def verified_number_spans(line: str, rows: dict[str, dict], root: Path) -> list[tuple[int, int]]:
+    """Spans of the numbers on this line that a claim marker right after them backs:
+    the marker's row has at least one value backing, every value backing checks
+    against its source, and the number equals each row value. Used by the README guard."""
+    spans = []
+    for m in MARKER.finditer(line):
+        row = rows.get(m.group(1))
+        if not row:
+            continue
+        checked = [value_backing(b, root) for b in row["backings"]]
+        checked = [c for c in checked if c is not None]
+        if not checked or any(err for err, _v in checked):
+            continue
+        span = number_span(line, m.start())
+        if span and all(span[2] == v for _e, v in checked):
+            spans.append((span[0], span[1]))
+    return spans
 
 
 def check(build_path: Path, doc_paths: list[Path], root: Path) -> tuple[list[str], list[str], int]:
@@ -221,14 +340,14 @@ def check(build_path: Path, doc_paths: list[Path], root: Path) -> tuple[list[str
                 err = check_test_backing(b[5:].strip(), root)
                 if err:
                     errors.append(f"{cid}: {err}")
-            elif b.startswith("result:"):
-                err, val = check_result_value(b[7:].strip(), root)
+            elif b.startswith(("result:", "text:")):
+                err, val = value_backing(b, root)
                 if err:
                     errors.append(f"{cid}: {err}")
                 elif val is not None:
                     json_values.append(val)
             else:
-                errors.append(f"{cid}: backing '{b}' must start with 'test:' or 'result:'")
+                errors.append(f"{cid}: backing '{b}' must start with 'test:', 'result:' or 'text:'")
         if json_values:
             for mid, doc, n, line, col in markers:
                 if mid != cid:
@@ -240,7 +359,7 @@ def check(build_path: Path, doc_paths: list[Path], root: Path) -> tuple[list[str
                 for val in json_values:
                     if shown != val:
                         errors.append(f"{cid}: {doc.name}:{n}: the document says {shown}, "
-                                      f"the results file says {val}")
+                                      f"the row (checked against its source) says {val}")
         if cid not in used:
             warnings.append(f"{cid}: no document carries this claim's marker")
     return errors, warnings, len(rows)

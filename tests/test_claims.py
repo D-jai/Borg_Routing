@@ -271,8 +271,9 @@ def test_a_number_in_bold_or_code_still_counts(tree, capsys, shown):
 
 BANNED_PHRASES = (
     "twice", "half as", "a half", "a third", "a quarter", "double", "percent", "per cent",
-    "factor of", "times", "less than", "costs less", "cheaper", "saves", "saved", "saving",
+    "factor of", "less than", "costs less", "cheaper", "saves", "saved", "saving",
     "fraction", "faster", "lower cost", "lower spend", "less spend", "less cost",
+    "as good as",
 )
 NUMBER_WORDS = (
     "one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen "
@@ -280,33 +281,60 @@ NUMBER_WORDS = (
 ).split()
 
 
-def readme_problems(text: str) -> list[str]:
-    """Planner ruling 38a: the README states no result number and no saving.
+def readme_problems(text: str, rows: dict | None = None, root: Path | None = None) -> list[str]:
+    """Planner ruling 43 (replacing ruling 38a): the README states a number only when a claim
+    marker right after it backs exactly that value from a file, and states no saving.
 
-    `%` and `$` fail anywhere, inside code spans too. Other digits are checked after
-    stripping what may carry them (comments, fences, inline code, claim ids, codes, dates,
-    list numbers, local addresses). Banned phrases are whole words, any letter case.
-    "fast", "cheap" and "lower" alone are allowed."""
-    s = re.sub(r"<!--.*?-->", "", text, flags=re.S)
+    A number is freed only when the marker's row in the claims table (``rows``, from
+    ``cc.parse_table``) has value backings (``result:`` or ``text:``), every one of them checks
+    against its file under ``root``, and the number equals each row value
+    (``cc.verified_number_spans``). Freed numbers are blanked, ``US$`` and ``%`` with them.
+    Then `%` and `$` fail anywhere, inside code spans too. Other digits are checked after
+    stripping what may carry them (comments, fences, inline code, link targets, claim ids,
+    codes, dates, list numbers, local addresses, round names such as "rounds 1 and 2").
+    Banned phrases are whole words, any letter case. "fast", "cheap" and "lower" alone are
+    allowed; "times" is refused after a number word (except "tested three times") or before a
+    comparison word."""
+    rows, root = rows or {}, root or REPO
+    lines = []
+    for line in text.split("\n"):
+        for a, b in sorted(cc.verified_number_spans(line, rows, root), reverse=True):
+            line = line[:a] + " " * (b - a) + line[b:]
+        lines.append(line)
+    s = "\n".join(lines)
+    s = re.sub(r"<!--.*?-->", "", s, flags=re.S)
     s = re.sub(r"```.*?```", "", s, flags=re.S)
     problems = [f"symbol {c!r} in README" for c in "%$" if c in s]
     s = re.sub(r"`[^`]*`", "", s)
+    s = re.sub(r"\]\([^)\s]*\)", "]", s)
     s = re.sub(r"\bBRT-[A-Z]+-\d+\b|\bC\d+\b", "", s)
     s = re.sub(r"\b\d{1,2}-[A-Za-z]{3}-\d{4}\b", "", s)
     s = re.sub(r"(?m)^\s*\d+\.\s", "", s)
     s = re.sub(r"(?:localhost|127\.0\.0\.1):\d+", "", s)
+    s = re.sub(r"\b[Rr]ounds?\s+[1-9](?:\s+and\s+[1-9])?\b", "round", s)
     problems += [f"number left in prose: {m.group(0)!r}" for m in re.finditer(r".{0,12}\d+.{0,12}", s)]
     for ph in BANNED_PHRASES:
         if re.search(r"\b" + re.escape(ph) + r"\b", s, re.I):
             problems.append(f"banned phrase: {ph}")
     nums = "|".join(NUMBER_WORDS)
-    if re.search(rf"\b(?:{nums})\s+(?:times|percent|%)", s, re.I):
-        problems.append("number word before times or percent")
+    if re.search(rf"\b(?:{nums})\s+(?:percent|%)", s, re.I):
+        problems.append("number word before percent")
+    for m in re.finditer(rf"(?:\b(\w+)\s+)?\b(?:{nums})\s+times\b", s, re.I):
+        if (m.group(1) or "").lower() != "tested":
+            problems.append("number word before times")
+    if re.search(r"\btimes\s+(?:as|more|less|lower|higher|cheaper|faster|slower|smaller|bigger|over|the)\b", s, re.I):
+        problems.append("times before a comparison")
     return problems
 
 
+def _real_rows() -> dict:
+    rows, errors = cc.parse_table((REPO / "BUILD.md").read_text(encoding="utf-8"))
+    assert errors == []
+    return rows
+
+
 def test_the_readme_carries_no_result_number_or_saving_claim():
-    assert readme_problems((REPO / "README.md").read_text(encoding="utf-8")) == []
+    assert readme_problems((REPO / "README.md").read_text(encoding="utf-8"), _real_rows(), REPO) == []
 
 
 PLANTED = [
@@ -327,6 +355,10 @@ PLANTED = [
     "Runs are faster and it saves money, a real saving.",
     "It costs `$5` a run.",
     "Five % off.",
+    "It costs three times what one call costs.",
+    "It was tested three times as fast.",
+    "Round 3 cost 40 on job A.",
+    "It is as good as one call to a top model.",
 ]
 
 
@@ -346,3 +378,91 @@ def test_the_readme_guard_lets_the_routing_line_through():
             "cheap cloud model unless the private lane or the local-first setting "
             "(`borg_route:local`) is on.")
     assert readme_problems("# T\n\n" + line + "\n") == []
+
+
+
+# ---- planner ruling 43: a README number must be backed by a value row that checks ----
+
+def test_the_readme_guard_lets_the_lead_paragraph_through():
+    lead = ("BORG_ROUTE was tested three times against one call to a top model "
+            "(`anthropic/claude-opus-5.5`) on the same jobs. Rounds 1 and 2 won no job. Round 3 ran "
+            "on fresh data. All three rounds side by side: "
+            "[`bench/results/round_1_vs_round_2.md`](bench/results/round_1_vs_round_2.md).")
+    assert readme_problems("# T\n\n" + lead + "\n") == []
+
+
+GUARD_ROWS = {
+    "C03": "| C03 | Costs 42.5 | result:bench/res.json#a.b.1=42.5 |",
+    "C04": "| C04 | Share | result:bench/res.json#a.share=69.5% |",
+    "C05": "| C05 | Floor | result:bench/res.json#a.floor=0.0309 round down |",
+    "C06": "| C06 | From a report | text:bench/report.md#Median 0.2085 59.6%=59.6% |",
+    "C07": "| C07 | Test only | test:tests/test_sample.py::test_alpha |",
+    "C08": "| C08 | Wrong source | result:bench/res.json#a.b.1=40 |",
+}
+
+
+@pytest.fixture
+def guard_tree(tree):
+    (tree / "bench" / "res.json").write_text(json.dumps(
+        {"a": {"b": [10, 42.5], "share": 0.695, "floor": 0.030962}}), encoding="utf-8")
+    (tree / "bench" / "report.md").write_text("| **Median** | 0.2085 | **59.6%** |\n", encoding="utf-8")
+    rows, errors = cc.parse_table(TABLE.format(rows="\n".join(GUARD_ROWS.values())))
+    assert errors == []
+    return tree, rows
+
+
+@pytest.mark.parametrize("line", [
+    "It cost US$42.50 a run. <!-- claim C03 -->",
+    "A share of 69.5% <!-- claim C04 --> of one call.",
+    "At least US$0.0309 <!-- claim C05 --> for one pass.",
+    "| A | 59.6% <!-- claim C06 --> | x |",
+])
+def test_a_number_backed_by_a_checked_value_row_passes_the_guard(guard_tree, line):
+    tree, rows = guard_tree
+    assert readme_problems("# T\n\n" + line + "\n", rows, tree) == []
+
+
+@pytest.mark.parametrize("line", [
+    "It cost US$41 a run. <!-- claim C03 -->",          # not the row's value
+    "A share of 70% <!-- claim C04 --> of one call.",   # rounded, not the value
+    "At least US$0.0310 <!-- claim C05 --> for one pass.",
+    "It took 12 s. <!-- claim C07 -->",                 # a test-backed row frees no number
+    "It cost 40 a run. <!-- claim C08 -->",             # the row disagrees with its file
+    "It cost 40 a run. <!-- claim C99 -->",             # no row at all
+    "Runs 7 and 42.5 <!-- claim C03 -->",               # only the number right before the marker
+    "It cost US$42.50 a run.",                          # no marker
+])
+def test_a_number_without_a_checked_backing_fails_the_guard(guard_tree, line):
+    tree, rows = guard_tree
+    assert readme_problems("# T\n\n" + line + "\n", rows, tree) != []
+
+
+def test_the_guard_checks_the_source_not_only_the_row(guard_tree):
+    tree, rows = guard_tree
+    line = "A share of 69.5% <!-- claim C04 --> of one call.\n"
+    assert readme_problems(line, rows, tree) == []
+    (tree / "bench" / "res.json").write_text(json.dumps(
+        {"a": {"b": [10, 42.5], "share": 0.7, "floor": 0.030962}}), encoding="utf-8")
+    assert readme_problems(line, rows, tree) != []
+
+
+def test_a_text_backing_needs_the_text_on_one_line_and_the_number_in_it(tree, capsys):
+    (tree / "bench" / "report.md").write_text("| **Median** | 0.2085 | **59.6%** |\n", encoding="utf-8")
+    ok = "| C03 | x | text:bench/report.md#Median 0.2085 59.6%=59.6% |"
+    code, out = run(tree, [ROW1, ROW2, ok], DOC + "Share 59.6% <!-- claim C03 -->\n", capsys)
+    assert code == 0, out
+    for bad, word in [("Median 0.2086 59.6%=59.6%", "no line"), ("Median 0.2085 59.6%=59.7%", "no number")]:
+        row = f"| C03 | x | text:bench/report.md#{bad} |"
+        code, out = run(tree, [ROW1, ROW2, row], DOC + "Share 59.6% <!-- claim C03 -->\n", capsys)
+        assert code == 1 and word in out, out
+
+
+def test_rounding_must_be_named_and_goes_the_named_way(tree, capsys):
+    (tree / "bench" / "res.json").write_text(json.dumps({"v": 0.030962}), encoding="utf-8")
+    cases = [("=0.0310", 1), ("=0.0310 round", 0), ("=0.0309 round", 1),
+             ("=0.0309 round down", 0), ("=0.0310 round down", 1)]
+    for spec, want in cases:
+        shown = spec.split()[0][1:]
+        row = f"| C03 | x | result:bench/res.json#v{spec} |"
+        code, out = run(tree, [ROW1, ROW2, row], DOC + f"Floor US${shown} <!-- claim C03 -->\n", capsys)
+        assert code == want, (spec, out)

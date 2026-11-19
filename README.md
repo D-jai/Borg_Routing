@@ -28,16 +28,6 @@ $env:BORG_DEMO_MODE="replay"; python -m uvicorn main:app  # Windows PowerShell
 
 Open `http://localhost:8000`. The default compose service sets replay mode and needs no env file. <!-- claim C27 --> In replay mode the app plays back runs recorded earlier, and no model, key or network call is made. <!-- claim C28 --> Choose a recorded job on the Ask page, watch the steps appear, and read the receipt at the end. Every page says the recorded jobs are made-up demo data and not benchmark results. <!-- claim C35 --> The install guide has the details: `docs/install-guide.md`.
 
-## Results
-
-The two published benchmark rounds are in `bench/results/` (`2026_11_17` and `2026_11_18`). Each folder has a `summary.md`.
-
-<!-- TODO (planner): "where it pays" wording and any cost-saving sentence go here when the planner sends them. -->
-
-## Where it does not pay
-
-<!-- TODO (planner): the install guide ("When BORG_ROUTE Pays Off") says a short single-shot prompt costs more and takes longer than one direct call, but no test backs that sentence, so it is not repeated here with a claim id. Send the wording or name a backing test. -->
-
 ## How it works
 
 1. You send a job through an OpenAI-style chat call, a task call or an MCP tool. <!-- claim C29 --> <!-- claim C33 --> <!-- claim C30 -->
@@ -52,6 +42,33 @@ job --> planner --> step 1 --> the ticked model with the lowest effective
                 \-> step 3 --> cloud models are ranked together
                          \--> final answer + receipt
 ```
+
+## What was measured
+
+BORG_ROUTE was tested three times against one call to a top model (`anthropic/claude-opus-5.5`) on the same jobs. The rules were written before any run and all three rounds are published as they fell, in `bench/results`. Rounds 1 and 2 won no job. They exposed faults in how the final answer was assembled, which were then fixed; the causes are written up in `docs/design`. Round 3 ran on fresh data, generated from the hash of the frozen code, with cloud models only.
+
+Round 3, middle value of three runs unless noted:
+
+| Job | Cost against one call to the top model | Time, BORG_ROUTE against direct | Quality | Verdict by the bench's own rule |
+|---|---|---|---|---|
+| 200 <!-- claim C37 --> support emails, a category and an urgency score for each | 59.6% <!-- claim C38 --> | 15.8 s <!-- claim C39 --> against 47.0 s <!-- claim C40 --> | category 99% <!-- claim C41 --> right; urgency exact 69.5% <!-- claim C42 -->, within one point 99.5% <!-- claim C43 -->; the top model scored 100% <!-- claim C44 --> on both | no win: the rule asks for accuracy within 2 <!-- claim C45 --> points |
+| A small Python service written from a spec (four files) | 54.2% <!-- claim C46 --> by the rule; 98.5% <!-- claim C47 --> if the top model's first, cut-off attempt is left out | 70.1 s <!-- claim C48 --> against 120.3 s <!-- claim C49 --> | all 18 <!-- claim C50 --> checks in two runs, 16 <!-- claim C51 --> in one; the top model passed 18 <!-- claim C52 --> each time | win by the rule; the input was the same as in earlier rounds, so this result is not on fresh data |
+| Eight questions and a search for contradictions over 15 <!-- claim C53 --> documents, about 150,000 <!-- claim C54 --> tokens (one run) | 31.6% <!-- claim C55 --> | 22.3 s <!-- claim C56 --> against 9.3 s <!-- claim C57 --> | a judge model preferred the top model's answer | no win |
+| A risk label for each of 60 <!-- claim C58 --> short client notes | 87.9% <!-- claim C59 --> | 15.8 s <!-- claim C60 --> against 12.3 s <!-- claim C61 --> | 90% <!-- claim C62 --> right against 100% <!-- claim C63 --> | not judged: this job's rule compares a local model with cloud models, and no local run was made |
+
+By the bench's own rule, then: one win in round 3, on a job whose input was not fresh, and none in rounds 1 and 2. All three rounds side by side: [`bench/results/round_1_vs_round_2.md`](bench/results/round_1_vs_round_2.md).
+
+## Where it pays and where it does not
+
+**Many similar items.** Items go to a low-cost model in packs of 20. <!-- claim C64 --> In round 3 the worker calls for all 200 <!-- claim C37 --> emails cost between US$0.0208 <!-- claim C65 --> and US$0.0402 <!-- claim C66 --> per run.
+
+**A fixed cost per job.** Planning the job and writing the final answer cost US$0.0739 <!-- claim C67 --> to US$0.1034 <!-- claim C68 --> per run on the email job, 70.8% <!-- claim C69 --> to 83.3% <!-- claim C70 --> of the bill. On a small job that cost is the whole story: 60 <!-- claim C58 --> short notes cost about the same as one call to the top model (87.9% <!-- claim C59 --> of it), and the demo run in this repository, 60 <!-- claim C71 --> lines of feedback, cost US$0.0504 <!-- claim C72 --> against at least US$0.0309 <!-- claim C73 --> for one pass.
+
+**Fine judgement on a low-cost model.** Categories were 99% <!-- claim C41 --> right. Urgency, scored from one to five, was one point off on roughly three emails in ten (60 <!-- claim C74 --> of 200 <!-- claim C37 -->, the middle value of three runs). The tier floor can be raised to send such steps to a stronger model; that was not measured.
+
+**Questions that compare documents.** Each call reads one part of one document, so a contradiction between two documents is not seen by any step. On the job with 15 <!-- claim C53 --> documents a judge preferred the top model's answer.
+
+**Local models.** With the private lane on, the steps that read documents run only on local models <!-- claim C36 -->; a test (`test_a_raw_local_no_canary_reaches_a_cloud_model`) proves that no document text reaches a non-local address. <!-- claim C75 --> Cost and speed with a local model were not measured in a round: on the development laptop's CPU the local model produced about 5 <!-- claim C76 --> to 7 <!-- claim C77 --> tokens a second, and a job of 60 <!-- claim C78 --> notes answered 12 <!-- claim C79 --> of 32 <!-- claim C80 --> item calls in about 67 <!-- claim C81 --> minutes and was then stopped. No figure is given for a machine with a GPU.
 
 ## Run it for real
 
