@@ -440,9 +440,10 @@ The `\|` in the last two sentences is table escaping only; the sentences carry a
 
 Motivating reply: trial 35h, round-1 data, job A (`bench/results/trial35h_r1data`). Compose typed 10 rows of `{file, category, urgency}` in a ```` ```json ```` fence, then `  // ... (full list of all 200 entries follows the exact pattern above)` and `]`. No marker; nothing else fired (every typed value is stored, so not 041); the grader scored items_answered 0.
 
-**Fires** (`compose_checks.elided_lists`, run on the reply's chosen answer before C3) for each list step listed in the block when both hold:
+**Fires** (`compose_checks.elided_lists`, run on the reply's chosen answer before C3) for each list step listed in the block when all three hold:
 1. no valid rows marker places it (a join counts for each of its steps);
-2. compose's own text (markers removed) holds an explicit elision in, or directly after, rows it typed. A typed row is a line naming one of that step's items (an identity token of the item model, as C4 reads it). "Directly after" is the next line that is not blank, not a fence and not only brackets and commas.
+2. compose's own text does not name every item of that step (review fix: when every item is named, nothing was cut short, and a short pick list such as "Most urgent: email_003.txt, email_008.txt, ..." after a full table is not an elision);
+3. compose's own text (markers removed) holds an explicit elision in, or directly after, rows it typed. A typed row is a line naming one of that step's items (an identity token of the item model, as C4 reads it). "Directly after" is the next line that is not blank, not a fence and not only brackets and commas.
 
 **An elision** is a line with an ellipsis ("..." or "…") that is:
 - a list element: the line is only the ellipsis (bare, quoted, in braces or brackets, bulleted, with a trailing comma), a table row whose cells are all ellipses, or `, ...` / `; ...` / `[..., ` inside a line of rows;
@@ -453,16 +454,17 @@ On a line that itself names items, only the list-element form counts: an ellipsi
 
 **Does not fire:**
 - an ellipsis in ordinary prose ("The notes cover billing, shipping, ... and feedback.");
-- a quoted excerpt: text inside double quotes (straight or curly) is blanked before the test unless the quotes hold only an ellipsis, and a `>` block quote line never counts;
+- a quoted excerpt: text inside double, single or backtick quotes (straight or curly) is blanked before the test unless the quotes hold only an ellipsis, and a `>` block quote line never counts;
 - an ellipsis inside a placed block (compose's own text has the markers removed, so placed rows are never read);
+- a step whose every item compose's own text names;
 - every listed list step placed;
 - a decline (`action: fail`), as for C3 and C4.
 
-**Sentence (exact):** `The reader sees only this answer, and a shortened list is not the answer: put @@ROWS:<step id>@@ where the list belongs, and the code writes all <n> of its rows.` (n is the step's row count.) The block repeated after it already carries the asked-but-not-produced names and the spec syntax.
+**Sentence (exact):** `The reader sees only this answer, and a shortened list is not the answer: put @@ROWS:<step id> | <name>=<field>, ...@@ where the list belongs, using the names the block lists, and the code writes all <n> of its rows.` (n is the step's row count.) It points compose to the field names the block repeated after it shows (the step's fields and the asked-but-not-produced names). A second reply that obeys it literally on the trial-35h fixture, `@@ROWS:classify_emails | file=item, category=bucket, urgency@@`, is composed and grades items_answered 200.
 
 **After a second reply with a problem:** the existing salvage, S2 (and S1, as for 038, 040 and 041). With no marker in the second reply, S2 writes the step as plain rows (`item`, not `file`), which the bench grader does not read (the stated limit of A6 in 2.7); a second reply that places the step with a spec gives rows the grader reads (items_answered 200), as the tests show.
 
-**Known limits:** a list that stops short with no elision mark; an elision line that is not on or right after the typed rows; prose that holds an ellipsis and one of the words directly after typed rows (for example "Most are billing... the rest follows no pattern") fires and costs one re-ask. None occurs in the replay (section 8).
+**Known limits:** a list that stops short with no elision mark; an elision line that is not on or right after the typed rows; prose that holds an ellipsis and one of the words directly after typed rows (for example "Most are billing... the rest follows no pattern") fires and costs one re-ask; a table row that holds an ellipsis with other words, such as `| ... (190 more rows) | | |`, is not an elision (only a row whose every non-empty cell is an ellipsis is), and is not widened to (review ruling); a listed step superseded by another placed step over the same items (for example a first classify step and its placed retry) can fire on a typed preview of the first, since only the listed step itself counts as placed. None occurs in the replay (section 8).
 
 **Tests:** `tests/orchestrator/test_compose_placement_elided.py`, on `tests/fixtures/trial35h_compose_a.json` (written by `tests/fixtures/extract_trial35h_compose.py`, read-only from the DB; no D canary, no document text).
 

@@ -39,7 +39,8 @@ S_NESTED = ("@@{kw}:{target}@@ sits inside a list or table you wrote that holds 
             "Put the marker on its own line, outside any brackets, and do not type its rows "
             "yourself.")
 S_ELIDED = ("The reader sees only this answer, and a shortened list is not the answer: put "
-            "@@ROWS:{id}@@ where the list belongs, and the code writes all {n} of its rows.")
+            "@@ROWS:{id} | <name>=<field>, ...@@ where the list belongs, using the names the "
+            "block lists, and the code writes all {n} of its rows.")
 S_UNPLACED = ("Your answer points the reader to a step result they cannot see. Put "
               "@@OUTPUT:{id}@@ where that step's output belongs instead of pointing to it.")
 S_CASE1 = ("You gave values to {k} items that no step gave a value for that field (for example "
@@ -465,14 +466,15 @@ _ALONE = re.compile(rf"^(?:[-*+•]\s+)?[\"'`{{\[(]?\s*{_DOTS}\s*[\"'`}}\])]?\s*
 _INLINE = re.compile(rf"[,;]\s*[\"'{{]?\s*{_DOTS}\s*[\"'}}]?\s*(?=[,;\]]|$)"
                      rf"|\[\s*[\"'{{]?\s*{_DOTS}\s*[\"'}}]?\s*[,;]")
 _COMMENT = re.compile(r"^(?://|/\*|<!--|--\s)")
-_QUOTED = re.compile(r"\"[^\"\n]*\"|“[^”\n]*”")
+_QUOTED = re.compile(r"\"[^\"\n]*\"|“[^”\n]*”|'[^'\n]*'|‘[^’\n]*’|`[^`\n]*`")
 _FENCE = re.compile(r"^\s*(?:```|~~~)")
 _FILLER = re.compile(r"^[\s\[\]{}(),;]*$")
 
 
 def _dequote(line: str) -> str:
-    """The line with every quoted span blanked unless the span holds only an
-    ellipsis (a quoted excerpt is not compose eliding its rows)."""
+    """The line with every quoted span (double, single, curly or backtick
+    quotes) blanked unless the span holds only an ellipsis (a quoted excerpt
+    is not compose eliding its rows)."""
     return _QUOTED.sub(lambda m: m.group(0) if _ELLIPSIS.fullmatch(m.group(0)[1:-1].strip())
                        else " " * len(m.group(0)), line)
 
@@ -546,15 +548,38 @@ def _tree_elided(value: object, model: ItemModel, keys: set) -> bool:
     return False
 
 
+def _named(own: object, model: ItemModel) -> set:
+    """Every item key compose's own text names (in its strings or as a value)."""
+    found: set = set()
+
+    def walk(v) -> None:
+        if isinstance(v, str):
+            key = model.match(v)
+            if key is not None:
+                found.add(key)
+            found.update(key for _, key in model.line_tokens(v))
+        elif isinstance(v, dict):
+            for item in v.values():
+                walk(item)
+        elif isinstance(v, list):
+            for item in v:
+                walk(item)
+
+    walk(own)
+    return found
+
+
 def elided_lists(value: object, own: object, model: Optional[ItemModel], steps: dict,
                  resolver: rm.Resolver) -> list:
     """C5 (BRT-ORC-039, planner ruling 36a): the listed list steps no marker
     placed whose rows compose typed and cut short with an explicit elision,
     in or directly after those rows. An ellipsis in prose, in a quoted
-    excerpt or a block quote, or in placed rows does not count, and nothing
-    fires when every listed list step is placed."""
+    excerpt or a block quote, or in placed rows does not count; nothing fires
+    for a step whose every item compose's own text names, and nothing fires
+    when every listed list step is placed."""
     if model is None or not model.items or not steps:
         return []
+    named = _named(own, model)
     placed: set = set()
     for target in placed_targets(value, resolver):
         if target.kind != "output":
@@ -564,7 +589,7 @@ def elided_lists(value: object, own: object, model: Optional[ItemModel], steps: 
         if sid in placed or sid not in model.step_ids:
             continue
         keys = {k for k, item in model.items.items() if sid in item.states}
-        if not keys:
+        if not keys or keys <= named:           # every item named: nothing was cut short
             continue
         if (isinstance(own, (dict, list)) and _tree_elided(own, model, keys)) or any(
                 _text_elided(t, model, keys) for t in _strings(own)):

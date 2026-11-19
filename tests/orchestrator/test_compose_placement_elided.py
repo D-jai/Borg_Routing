@@ -28,8 +28,8 @@ from tests.orchestrator.test_compose_placement_replay import (
 )
 
 S39_A = ("The reader sees only this answer, and a shortened list is not the answer: put "
-         "@@ROWS:classify_emails@@ where the list belongs, and the code writes all 200 of its "
-         "rows.")
+         "@@ROWS:classify_emails | <name>=<field>, ...@@ where the list belongs, using the names "
+         "the block lists, and the code writes all 200 of its rows.")
 SPEC = "@@ROWS:classify_emails | file=item, category=bucket, urgency@@"
 GOOD = {"response": "Here is the classification for all 200 emails.\n\n" + SPEC}
 
@@ -92,6 +92,21 @@ async def test_elided_again_with_the_spec_salvages_the_placed_rows_gradeable(mon
     assert score["items_answered"] == 200
     # The stored rows' own figures (round-1 data's labels), placed unchanged.
     assert score["per_field_accuracy"] == {"category": 0.575, "urgency": 0.165}
+
+
+async def test_second_reply_obeying_the_sentence_with_the_spec_grades_200(monkeypatch):
+    """Review fix 4: the sentence points to the block's names; a second reply
+    that does what it says, with those names, is composed and fully gradeable."""
+    fx = _fixture()
+    obeys = {"response": "All 200 emails, classified:\n\n"
+                         "@@ROWS:classify_emails | file=item, category=bucket, urgency@@"}
+    run = await _replay(fx, [fx["recorded_replies"][0], obeys], monkeypatch)
+    assert run.sent == [_repair(S39_A) + "\n" + run.rows.block]
+    assert "file, category" in run.rows.block            # the names the block lists
+    assert run.kind == "composed" and "@@" not in run.answer
+    rows = max(_rows_of(run.answer), key=len)
+    assert len(rows) == 200 and set(rows[0]) == {"file", "category", "urgency"}
+    assert _score(run.answer)["items_answered"] == 200
 
 
 async def test_typed_preview_with_the_list_placed_does_not_fire(monkeypatch):
@@ -158,7 +173,8 @@ BULLETS = "\n".join(f"- {f}: billing" for f in FILES[:3])
 def test_c5_fires_on_an_elided_list(reply):
     assert _fires(reply) == [("BRT-ORC-039", (
         "The reader sees only this answer, and a shortened list is not the answer: put "
-        "@@ROWS:classify@@ where the list belongs, and the code writes all 12 of its rows."))]
+        "@@ROWS:classify | <name>=<field>, ...@@ where the list belongs, using the names the "
+        "block lists, and the code writes all 12 of its rows."))]
 
 
 @pytest.mark.parametrize("reply", [
@@ -173,9 +189,33 @@ def test_c5_fires_on_an_elided_list(reply):
     "Here is the list:\n...\n// ... remaining entries follow",
     # a typed row's own words
     "- email_001.txt: billing, refund, chargeback etc...",
+    # review fix 2: single, curly and backtick quotes are blanked like double ones
+    BULLETS + "\n  Customer wrote: 'refund the remaining balance...'",
+    BULLETS + "\n  Customer wrote: ‘refund the remaining balance…’",
+    BULLETS + "\n  Customer wrote: `refund the remaining balance...`",
+    # review fix 1: every item typed, then a short pick list
+    "| file | category |\n| --- | --- |\n"
+    + "\n".join(f"| {f} | billing |" for f in FILES)
+    + "\n\nMost urgent: email_003.txt, email_008.txt, ...",
 ])
 def test_c5_does_not_fire_on_prose_or_quotes(reply):
     assert _fires(reply) == []
+
+
+def test_c5_does_not_fire_when_all_60_rows_are_typed_then_a_pick_list():
+    """Review fix 1, job D's shape: all 60 notes typed, then the notes with no
+    result named with an ellipsis. Nothing was cut short."""
+    notes = [f"note_{n:02d}.txt" for n in range(1, 61)]
+    results = {"classify_notes": _env(_agg(notes, "low"))}
+    steps = rm.list_steps(results, None)
+    model = cc.ItemModel.build(steps, results)
+    rows = [f'  {{"file": "{n}", "risk": "low"}}' for n in notes]
+    typed = "```json\n[\n" + ",\n".join(rows) + "\n]\n```"
+    reply = typed + "\n\nNotes with no result: note_12.txt, note_31.txt, ..."
+    assert cc.check(reply, steps, {}, model, [], [], ["classify_notes"]) == []
+    cut = "```json\n[\n" + ",\n".join(rows[:59]) + ",\n  ...\n]\n```"
+    assert [c for c, _ in cc.check(cut, steps, {}, model, [], [], ["classify_notes"])] == [
+        "BRT-ORC-039"]                                    # one row missing still fires
 
 
 def test_c5_does_not_fire_inside_a_placed_block():
@@ -201,7 +241,8 @@ def test_c5_names_only_the_unplaced_step():
     reply = ("@@ROWS:classify@@\n\n- note_01.txt: low\n- note_02.txt: low\n- ...")
     assert _fires(reply, notes=(other, "low")) == [("BRT-ORC-039", (
         "The reader sees only this answer, and a shortened list is not the answer: put "
-        "@@ROWS:notes@@ where the list belongs, and the code writes all 5 of its rows."))]
+        "@@ROWS:notes | <name>=<field>, ...@@ where the list belongs, using the names the "
+        "block lists, and the code writes all 5 of its rows."))]
 
 
 def test_c5_does_not_run_on_a_decline():
