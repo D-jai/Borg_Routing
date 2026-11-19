@@ -7,7 +7,8 @@ answers every request before the app's own routes see it:
 - the pages (``/``, ``/ui/...``) and ``/health`` are served as usual;
 - ``POST /v1/chat/completions`` with a recorded prompt starts a playback and streams the
   recorded stage events at recorded speed (times divided by a ``speed`` factor:
-  ``replay_speed`` in the body, else ``BORG_REPLAY_SPEED``, else 1), then the recorded answer,
+  ``replay_speed`` in the body, else ``BORG_REPLAY_SPEED``, else ``default_speed``: a run plays
+  in at most 60 seconds), then the recorded answer,
   in the same chunks the live endpoint sends; any other prompt gets 403 (BRT-RPL-002);
 - ``GET /runs/{id}`` and ``GET /runs/{id}/stream`` serve that playback (the run view as it
   stood at that moment, envelope updates as they happened, then the end); a recorded run's own
@@ -110,7 +111,12 @@ def library() -> dict:
     return runs
 
 
-def _speed(value: object = None) -> float:
+MAX_PLAY_S = 60.0
+
+
+def _explicit_speed(value: object = None) -> Optional[float]:
+    """The speed asked for (the request's ``replay_speed``, else ``BORG_REPLAY_SPEED``),
+    clamped; None when neither is a positive number."""
     for raw in (value, os.getenv("BORG_REPLAY_SPEED")):
         try:
             speed = float(raw)
@@ -118,13 +124,26 @@ def _speed(value: object = None) -> float:
             continue
         if speed == speed and speed > 0:
             return min(max(speed, SPEED_MIN), SPEED_MAX)
-    return 1.0
+    return None
+
+
+def default_speed(doc: Optional[dict]) -> float:
+    """Lead ruling (4.5, item 7): with no speed asked for, a run plays in at most
+    ``MAX_PLAY_S`` seconds: max(1, recorded duration / 60)."""
+    end_s = ((doc or {}).get("timeline", {}).get("end_ms") or 0) / 1000.0
+    return max(1.0, end_s / MAX_PLAY_S)
+
+
+def _speed(value: object = None, doc: Optional[dict] = None) -> float:
+    explicit = _explicit_speed(value)
+    return explicit if explicit is not None else default_speed(doc)
 
 
 def start_session(run_id: str, speed: Optional[float] = None) -> str:
     """Start one playback of a recorded run; returns its own run id."""
     sid = str(uuid.uuid4())
-    _sessions[sid] = {"run_id": run_id, "t0": _now(), "speed": _speed(speed), "wall0": _utcnow()}
+    speed = _speed(speed, library().get(run_id))
+    _sessions[sid] = {"run_id": run_id, "t0": _now(), "speed": speed, "wall0": _utcnow()}
     while len(_sessions) > MAX_SESSIONS:
         _sessions.popitem(last=False)
     return sid
@@ -169,13 +188,23 @@ def _upto(t: object, elapsed: float) -> bool:
     return isinstance(t, (int, float)) and t <= elapsed
 
 
+def _no_ratio(view: dict) -> dict:
+    """Lead ruling (4.5, item 4): replay shows nothing that reads as a proof result, so the
+    digest's round-1 benchmark ratio (the receipt's "between X and Y times this floor"
+    sentence) is left out. Every total stays as recorded."""
+    digest = view.get("digest")
+    if isinstance(digest, dict):
+        digest["direct_floor_ratio"] = None
+    return view
+
+
 def view_at(doc: dict, elapsed: Optional[float], session: Optional[dict] = None) -> dict:
     """The recorded ``GET /runs/{id}`` body as it stood ``elapsed`` recorded ms after the run
     started (None: finished, as recorded). Times are moved to the playback's start so durations
     stay as recorded; the run id is the playback's own."""
     src = doc["view"]
     if elapsed is None or session is None:
-        return copy.deepcopy(src)
+        return _no_ratio(copy.deepcopy(src))
     end = doc.get("timeline", {}).get("end_ms") or 0
     done = elapsed >= end
     start = _parse(src["run"].get("created_at")) or session["wall0"]
@@ -205,7 +234,7 @@ def view_at(doc: dict, elapsed: Optional[float], session: Optional[dict] = None)
         "envelopes": [e for e in map(envelope, src.get("envelopes", [])) if e is not None],
         "child_envelopes": [e for e in map(envelope, src.get("child_envelopes", [])) if e is not None],
         "events": events,
-        "digest": copy.deepcopy(src.get("digest")) if done else None,
+        "digest": _no_ratio({"digest": copy.deepcopy(src.get("digest"))})["digest"] if done else None,
         "outbound": [own(_shifted(o, ("started_at", "finished_at"), shift))
                      for o in src.get("outbound", []) if done or _upto(o.get("t_ms"), elapsed)],
         "calls_left_machine": copy.deepcopy(src.get("calls_left_machine")) if done
@@ -237,11 +266,12 @@ def status_body() -> dict:
         "mode": "replay",
         "label": LABEL,
         "notice": notice(runs),
-        "speed": _speed(),
         "runs": [{"run_id": d["run_id"], "job": d.get("job"), "title": d.get("title"),
                   "label": d.get("label") or LABEL, "recorded_on": d.get("recorded_on"),
                   "lane_mode": d.get("lane_mode"), "prompt": d["prompt"],
-                  "seconds": (d.get("timeline", {}).get("end_ms") or 0) / 1000.0} for d in order],
+                  "seconds": (d.get("timeline", {}).get("end_ms") or 0) / 1000.0,
+                  "play_seconds": (d.get("timeline", {}).get("end_ms") or 0) / 1000.0
+                  / _speed(None, d)} for d in order],
     }
 
 
@@ -337,7 +367,7 @@ async def replay_chat(request: Request):
     if doc is None:
         raise _refuse("BRT-RPL-002", "replay mode plays recorded runs only: choose one of the "
                                      "recorded prompts on the Ask page")
-    speed = _speed(body.get("replay_speed"))
+    speed = _speed(body.get("replay_speed"), doc)
     sid = start_session(doc["run_id"], speed)
     model = str(body.get("model") or "borg_route")
     answer = doc.get("answer") or ""

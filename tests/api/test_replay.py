@@ -127,7 +127,7 @@ def test_mid_play_the_run_is_running_and_shows_only_what_had_happened(client, mo
     done = client.get(f"/runs/{session}").json()
     assert done["run"]["status"] == "completed"
     assert len(done["events"]) == len(export["view"]["events"])
-    assert done["digest"] == export["view"]["digest"]
+    assert done["digest"] == dict(export["view"]["digest"], direct_floor_ratio=None)
 
 
 def test_every_state_changing_route_returns_403(client, outbound):
@@ -185,8 +185,32 @@ def test_the_runs_list_and_the_matrix_come_from_the_exports(client):
 def test_a_recorded_run_opens_finished_by_its_own_id(client):
     export = _exports()[0]
     view = client.get(f"/runs/{export['run_id']}").json()
-    assert view["digest"] == export["view"]["digest"]
+    assert view["digest"] == dict(export["view"]["digest"], direct_floor_ratio=None)
     assert client.get("/runs/00000000-0000-0000-0000-000000000000").status_code == 404
+
+
+def test_with_no_speed_set_a_run_plays_in_at_most_60_seconds(client, monkeypatch):
+    """Lead ruling (item 7): speed = max(1, recorded duration / 60) when nothing is asked."""
+    monkeypatch.delenv("BORG_REPLAY_SPEED", raising=False)
+    for export in _exports():
+        end_s = export["timeline"]["end_ms"] / 1000
+        sid = replay.start_session(export["run_id"])
+        speed = replay._sessions[sid]["speed"]
+        assert speed == pytest.approx(max(1.0, end_s / 60))
+        assert end_s / speed <= 60.0 + 1e-9
+    assert any(e["timeline"]["end_ms"] > 60000 for e in _exports())   # the rule is exercised
+    assert replay.default_speed({"timeline": {"end_ms": 30000}}) == 1.0  # a short run: recorded speed
+    runs = client.get("/replay/status").json()["runs"]
+    assert all(r["play_seconds"] <= 60.0 + 1e-9 for r in runs)
+
+
+def test_an_explicit_speed_wins_over_the_60_second_rule(client, monkeypatch):
+    export = max(_exports(), key=lambda e: e["timeline"]["end_ms"])
+    monkeypatch.setenv("BORG_REPLAY_SPEED", "1")
+    sid = replay.start_session(export["run_id"])
+    assert replay._sessions[sid]["speed"] == 1.0                     # recorded speed, as asked
+    sid = replay.start_session(export["run_id"], speed=3.0)          # the request's replay_speed
+    assert replay._sessions[sid]["speed"] == 3.0
 
 
 def test_an_unknown_mode_value_fails_closed_to_replay(monkeypatch, outbound):
@@ -220,9 +244,16 @@ def test_a_replayed_run_renders_the_same_receipt_totals_as_the_source(client, tm
     script = (
         "const {BorgWork: W} = H.load({extra: ['workspace.js']});"
         f"const a = {json.dumps(export['view'])}; const b = {json.dumps(replayed)};"
-        "const pick = (d) => { const r = W.receiptFrom(d); return {r: r, tiles: W.headerTiles(d)}; };"
+        "const pick = (d) => { const r = W.receiptFrom(d);"
+        " return {r: r, tiles: W.headerTiles(d), note: W.floorNote(r.estimate)}; };"
         "return JSON.stringify([pick(a), pick(b)]).replace(/[\\u007f-\\uffff]/g, c => '');"
     )
     source, played = json.loads(node.run_js(tmp_path, script))
-    assert played == source
+    # Lead ruling (item 4): the benchmark ratio sentence shows live, never in replay.
+    assert "round-1 benchmark" in source["note"]
+    assert played["note"] and "round-1 benchmark" not in played["note"]
+    assert "between" not in played["note"] and played["r"]["estimate"]["ratio"] is None
+    # Every total is as recorded: the receipt and the header tiles, the ratio aside.
+    source["r"]["estimate"]["ratio"] = None
+    assert played["r"] == source["r"] and played["tiles"] == source["tiles"]
     assert source["r"]["cost"] == export["view"]["digest"]["cost_dollars"]

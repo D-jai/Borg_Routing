@@ -264,7 +264,8 @@ Borg.ready(function () {
     runs.forEach(function (r) {
       var name = (r.job ? 'Job ' + r.job + ': ' : '') + (r.title || 'recorded run');
       var btn = h('button', { class: 'btn', type: 'button', title: W.shortText(r.prompt, 300) },
-        'Play ' + name + ' (' + (r.label || 'demo run') + ', ' + W.clock(r.seconds) + ' as recorded)');
+        'Play ' + name + ' (' + (r.label || 'demo run') + ', ' + W.clock(r.seconds) + ' as recorded' +
+        (r.play_seconds && r.play_seconds < r.seconds - 0.5 ? ', plays in ' + W.clock(r.play_seconds) : '') + ')');
       btn.addEventListener('click', function () {
         if (send.disabled) return;
         send.disabled = true;
