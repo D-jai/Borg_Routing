@@ -50,3 +50,19 @@ def test_a_planning_stopped_warning_from_a_failed_call_is_kept_the_same_way():
          "err": "BRT-ORC-001: HTTP 500 from orchestrator"}
     kept = json.loads(_redact_events([{"event_type": "error", "decision_json": json.dumps(d)}])[0]["decision_json"])
     assert kept == {"code": "BRT-ORC-001", "severity": "warning", "action": "planning_stopped"}
+
+
+def test_the_plain_rows_warning_keeps_its_receipt_line_only():
+    """Ruling 39c: the BRT-ORC-037 warning of an answer kept with plain rows
+    keeps code, severity, action and the fixed receipt line; the step ids and
+    message do not leave."""
+    d = {"code": "BRT-ORC-037", "severity": "warning", "action": "rows_placed_plain",
+         "msg": "text", "steps": ["n1"], "receipt": "anything"}
+    kept = json.loads(_redact_events([{"event_type": "error", "decision_json": json.dumps(d)}])[0]["decision_json"])
+    assert kept == {"code": "BRT-ORC-037", "severity": "warning", "action": "rows_placed_plain",
+                    "receipt": "the write-up asked for columns that do not exist; all columns are shown"}
+
+
+def test_a_037_warning_without_the_plain_rows_action_is_dropped():
+    d = {"code": "BRT-ORC-037", "severity": "warning", "msg": "text"}
+    assert _redact_events([{"event_type": "error", "decision_json": json.dumps(d)}])[0]["decision_json"] is None

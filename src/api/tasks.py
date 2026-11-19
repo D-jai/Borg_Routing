@@ -327,7 +327,7 @@ def redact_event(ev: dict) -> dict:
         probe = _speed_probe_warning(ev.get("decision_json"))
         if probe is not None:
             return dict(ev, decision_json=json.dumps(probe))
-        stopped = _planning_stopped(ev.get("decision_json"))
+        stopped = _planning_stopped(ev.get("decision_json")) or _plain_rows(ev.get("decision_json"))
         if stopped is not None:
             # Reading (2) under ruling 35: code, severity and action only,
             # so the receipt can say planning stopped early.
@@ -363,6 +363,23 @@ def _planning_stopped(decision_json: object) -> Optional[dict]:
     if (isinstance(decision, dict) and decision.get("code") in ("BRT-ORC-001", "BRT-ORC-002")
             and decision.get("severity") == "warning" and decision.get("action") == "planning_stopped"):
         return {"code": decision["code"], "severity": "warning", "action": "planning_stopped"}
+    return None
+
+
+def _plain_rows(decision_json: object) -> Optional[dict]:
+    """Planner ruling 39c: the BRT-ORC-037 warning of an answer kept with a
+    step's plain rows, as a redacted viewer keeps it: code, severity, action
+    and the fixed receipt line; else None."""
+    try:
+        decision = json.loads(decision_json or "null")
+    except (TypeError, ValueError):
+        return None
+    if (isinstance(decision, dict) and decision.get("code") == "BRT-ORC-037"
+            and decision.get("severity") == "warning" and decision.get("action") == "rows_placed_plain"):
+        from src.orchestrator.engine import PLAIN_ROWS_RECEIPT  # noqa: PLC0415
+
+        return {"code": "BRT-ORC-037", "severity": "warning", "action": "rows_placed_plain",
+                "receipt": PLAIN_ROWS_RECEIPT}
     return None
 
 

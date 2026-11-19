@@ -173,7 +173,7 @@ Examples: `@@ROWS:classify_emails | file=item, category=bucket@@` and `@@ROWS:cl
 Mode: compose. Reply with the final answer.
 The reader sees only your answer. They cannot see any step, step id or step result, so never refer them to one: everything they need must be in your answer, written by you or placed by the code.
 The code can place stored results for you, exactly as stored. Do not retype rows or long outputs yourself; naming a few items in your own text is fine.
-- Rows: write @@ROWS:<step id>@@ where a step's rows belong (a JSON array, one row per line), or @@ROWS_TABLE:<step id>@@ for a Markdown table. Put the marker on its own line, outside any brackets you write: the code writes the brackets. To choose fields, their order and their names, add them after a bar: @@ROWS:<step id> | <name>=<field>, <field>@@ (for example @@ROWS:s1 | file=item, label=bucket@@). To join steps on the item, list them with +: @@ROWS:<step id> + <step id> | ...@@; when both give a field, the later step's value is used. Use only the fields listed for those steps. An item with no result keeps its error and gets no other value.
+- Rows: write @@ROWS:<step id>@@ where a step's rows belong (a JSON array, one row per line), or @@ROWS_TABLE:<step id>@@ for a Markdown table. Put the marker on its own line, outside any brackets you write: the code writes the brackets. To choose fields, their order and their names, add them after a bar: @@ROWS:<step id> | <new name>=<existing field>, <existing field>@@ (for example @@ROWS:s1 | file=item, label=bucket@@). To join steps on the item, list them with +: @@ROWS:<step id> + <step id> | ...@@; when both give a field, the later step's value is used. Use only the fields listed for those steps. An item with no result keeps its error and gets no other value.
 - Whole output: write @@OUTPUT:<step id>@@ where a step's whole output belongs; the code writes it in word for word.
 Steps with rows:
 - <id>: <n> rows, <input order|stored order>, <k> failed; fields: <item (file name)|item (document id)|item>, <field>, ..., error
@@ -428,7 +428,7 @@ Two codes, an exact sentence per case. The re-ask echoes only listed step ids an
 | ROWS or ROWS_TABLE on a long-output step | 032 | `@@ROWS:<id>@@ names a step that has a long output, not rows: use @@OUTPUT:<id>@@ for it.` |
 | a near-miss (a LOOSE hit that is not STRICT: `@@Row:x@@`, `@@OUTPUTS:x@@`) | 032 | `A marker is misspelled. Write it exactly as shown below, with two @ signs at each end.` |
 | a marker over 600 characters (a LOOSE hit whose text up to the next `@@` on its line is longer) | 032 if no listed id follows the colon, else 037 | `A marker is longer than 600 characters; name fewer fields.` |
-| unknown field (for a join, a field in no listed step) | 037 | `The marker for <target> names fields that step does not have: <names>. Its fields are: <fields>. No step produced the others; do not give values for them.` |
+| unknown field (for a join, a field in no listed step) | 037 | `The marker for <target> names fields that step does not have: <names>. Write each pair as <new name>=<field>, where the field is one of: <fields>. No step produced the others; do not give values for them.` (ruling 39b) |
 | duplicate output name | 037 | `The marker for <target> uses the name <name> twice; each name may appear once.` |
 | a bar with nothing after it | 037 | `The marker for <target> has a bar but no fields after it.` |
 | spec in brackets (`| [a, b]` or `| {a}`) | 037 | `The marker for <target> puts its fields in brackets; write them plainly after the bar: @@ROWS:<target> \| name=field, field@@.` |
@@ -803,3 +803,23 @@ US dollars per run.
 **Caveats.**
 - The stored total for C lacks its first compose call (not logged). As stored, C made two calls, so its real round-2 cost was about the "one extra" figure.
 - Outputs are the logged sizes. Placement shortens them (2.6: about -195 tokens on A and -1,030 on D), so these figures are on the high side for a compliant reply.
+
+## 10. Planner ruling 39: pairs written the other way round, and a bad spec on a good target
+
+**Evidence.** In the demo re-record (18-Nov-2026) grok-4.20 wrote `@@ROWS:n1 | item=feedback, sentiment, feature@@` (job 1) and `@@ROWS:extract_notes | item=Item, topic=Topic, owner=Owner, needs_follow_up=Needs Follow-up, follow_up_reason=Reason@@` (job 3), both times: BRT-ORC-037, one re-ask, the same marker, salvage.
+
+**What is built.**
+- **39a** (`row_markers._read_reversed_pairs`, called from `parse_target`, rows and table markers): a pair is read as written first. Only when its right side names no field of the target step or steps and its left side does (exactly, or with case ignored when exactly one field matches; `item` and `error` count) is it read reversed: the column is the right side as written, the field the real field name. A pair that fits both ways keeps the written reading; one that fits neither is still 037. The duplicate-name check runs again after the reading. Each reversed pair is kept on the `Target` (`reversed_pairs`); the `Resolver` collects them per marker, and the engine writes one `orchestrator_decision` note per placed reply, `{"action": "rows_pairs_reversed", "markers": {<marker>: ["item=feedback", ...]}}` (`engine._note_reversed_pairs`), on a composed answer and on a salvage after check alike. Nothing is refused or changed by the note.
+- **39b**: the unknown-field sentence is `The marker for <target> names fields that step does not have: <names>. Write each pair as <new name>=<field>, where the field is one of: <fields>. No step produced the others; do not give values for them.` The block's rows line reads `@@ROWS:<step id> | <new name>=<existing field>, <existing field>@@` (`row_markers.ROWS_BULLET`; code-side, no prompt file touched).
+- **39c** (`engine._handle_compose_result`, `after_repair`; `row_markers.plain_target`, `plain_fixable`, `Resolver(plain_fallback=True)`): after the one repair re-ask, when every problem left is 037 and every marker hit is a rows or table marker in the answer's text (not an object key) whose target resolves without its spec, each such marker places its step's plain rows (`@@ROWS:<target>@@`: all fields, file-name labels) where it stands, with the rows guard as for any placed block; compose's text stays; `answer_kind` is `composed`; the run gets an `error` event `{"code": "BRT-ORC-037", "severity": "warning", "action": "rows_placed_plain", "steps": [...], "receipt": "the write-up asked for columns that do not exist; all columns are shown"}`, which a redacted viewer keeps as code, severity, action and receipt (`api.tasks._plain_rows`). An unknown target, an `@@OUTPUT:` marker, a join on a stored-order list, a marker in a key, or any other check still failing salvages as before.
+
+**Replay (39d), 18-Nov-2026.** Every stored compose reply of section 8's sources (30 replies; the demo DB now also holds the re-record runs), read the old way (no reversed reading, no 39c) and the new way, by a read-only scratch script over `replay_compose_checks.context`. No marker that placed before changes meaning. Four outcomes change, all in the demo DB:
+
+| Run | Reply | Marker | Before | After |
+|---|---|---|---|---|
+| 25f028f6 (job 1) | 2 (after a 029 re-ask) | `@@ROWS:n1 \| item=feedback, sentiment, feature@@` | 037, repair re-ask | composed, rows placed (`feedback`, `sentiment`, `feature`) |
+| 25f028f6 | 3 | the same | salvaged (037) | composed, rows placed |
+| c155ec40 (job 3) | 1 | `@@ROWS:extract_notes \| topic, owner, needs_follow_up=yes, follow_up_reason@@` | 037, repair re-ask | composed, rows placed; the follow-up flag sits under a column headed `yes` |
+| c155ec40 | 2 | the job-3 marker above | salvaged (037) | composed, rows placed under the written headings |
+
+The c155ec40 first reply reads `needs_follow_up=yes` the reversed way, as 39a says; the write-up may have meant a filter ("only the notes that need follow-up"), which no marker can express. 39c fires on no stored reply: every stored 037 is now a reversed pair.

@@ -108,8 +108,9 @@ def test_the_capture_holds_600_characters():
     ("@@ROWS:s1 | " + "a" * 700 + "@@", "BRT-ORC-037", rm.S_TOO_LONG),
     ("@@ROWS:zz | " + "a" * 700 + "@@", "BRT-ORC-032", rm.S_TOO_LONG),
     ("@@ROWS:s1 | file=item, urgency@@", "BRT-ORC-037",
-     "The marker for s1 names fields that step does not have: urgency. Its fields are: item, "
-     "bucket, confidence. No step produced the others; do not give values for them."),
+     "The marker for s1 names fields that step does not have: urgency. Write each pair as "
+     "<new name>=<field>, where the field is one of: item, bucket, confidence. No step produced "
+     "the others; do not give values for them."),
     ("@@ROWS:s1 | a=item, a=bucket@@", "BRT-ORC-037",
      "The marker for s1 uses the name a twice; each name may appear once."),
     ("@@ROWS:s1 | @@", "BRT-ORC-037", "The marker for s1 has a bar but no fields after it."),
@@ -548,3 +549,125 @@ def test_the_example_marker_names_the_first_step_with_rows():
     assert "- gone (skill k): tone. The step has no rows to place, so these were not produced." in block
     assert block.endswith(rm.asked_tail("classify", "category"))
     assert "@@ROWS:classify | category=<field>, ...@@" in block
+
+
+# --- pairs written the other way round (planner ruling 39) ---------------------------------
+# The two markers grok-4.20 wrote in the demo re-record (18-Nov-2026), both times.
+
+REC_JOB1 = "@@ROWS:n1 | item=feedback, sentiment, feature@@"
+REC_JOB3 = ("@@ROWS:extract_notes | item=Item, topic=Topic, owner=Owner, "
+            "needs_follow_up=Needs Follow-up, follow_up_reason=Reason@@")
+
+
+def _feedback():
+    return _one([_ok(0, "line one", sentiment="positive", feature="sync"),
+                 _ok(1, "line two", sentiment="negative", feature="export")], sid="n1")
+
+
+def _notes():
+    return _one([_ok(0, "job/a.txt", topic="Dock repairs", owner="Mara Quill",
+                     needs_follow_up=True, follow_up_reason="parts on order"),
+                 _fail(1, "job/b.txt")], sid="extract_notes")
+
+
+def _placed_rows(value):
+    """The rows of the one ```json block placed in ``value``."""
+    return json.loads(value.split("```json", 1)[1].split("```", 1)[0])
+
+
+def test_recorded_marker_job1_places_with_the_item_headed_feedback():
+    steps = _feedback()
+    value, placed = rm.place("Counts above.\n" + REC_JOB1, steps)
+    assert placed == {"n1": 1}
+    rows = _placed_rows(value)
+    assert rows == [{"feedback": "line one", "sentiment": "positive", "feature": "sync"},
+                    {"feedback": "line two", "sentiment": "negative", "feature": "export"}]
+    assert rm.marker_problems(REC_JOB1, steps, {}, []) == []
+
+
+def test_recorded_marker_job3_places_under_the_written_headings():
+    steps = _notes()
+    value, placed = rm.place("Notes:\n" + REC_JOB3, steps)
+    assert placed == {"extract_notes": 1}
+    rows = _placed_rows(value)
+    assert rows[0] == {"Item": "job/a.txt", "Topic": "Dock repairs", "Owner": "Mara Quill",
+                       "Needs Follow-up": True, "Reason": "parts on order"}
+    assert rows[1] == {"Item": "job/b.txt", "error": "BRT-ANS-005"}
+    target, _ = rm.parse_target("ROWS", REC_JOB3[7:-2], steps)
+    assert target.reversed_pairs == [("item", "Item"), ("topic", "Topic"), ("owner", "Owner"),
+                                     ("needs_follow_up", "Needs Follow-up"),
+                                     ("follow_up_reason", "Reason")]
+
+
+def test_a_left_side_differing_only_in_case_is_read_reversed_with_the_real_field():
+    steps = _notes()
+    target, problem = rm.parse_target("ROWS", "extract_notes | Item=File, Topic=Heading", steps)
+    assert problem is None
+    assert target.spec == [("File", "item"), ("Heading", "topic")]
+    assert rm.target_rows(target, steps)[0][0] == {"File": "job/a.txt", "Heading": "Dock repairs"}
+
+
+def test_a_straight_marker_keeps_its_meaning():
+    steps = _one([_ok(0, "a", bucket="x", confidence=0.9)])
+    target, problem = rm.parse_target("ROWS", "s1 | file=item, label=bucket, confidence", steps)
+    assert problem is None and target.reversed_pairs == []
+    assert rm.target_rows(target, steps) == (
+        [{"file": "a", "label": "x", "confidence": 0.9}], ["file", "label", "confidence"])
+
+
+def test_a_pair_that_fits_both_ways_keeps_the_written_reading():
+    steps = _one([_ok(0, "a", bucket="x", confidence=0.9)])
+    target, _ = rm.parse_target("ROWS", "s1 | bucket=confidence", steps)
+    assert target.reversed_pairs == []
+    assert rm.target_rows(target, steps) == ([{"bucket": 0.9}], ["bucket"])
+    target, _ = rm.parse_target("ROWS", "s1 | item=bucket, bucket=item", steps)   # a swap
+    assert target.reversed_pairs == [] and target.spec == [("item", "bucket"), ("bucket", "item")]
+
+
+def test_failing_case_a_pair_fitting_neither_way_is_still_037():
+    steps = _one([_ok(0, "a", bucket="x")])
+    for spec in ("s1 | feedback=comment", "s1 | Heading=Topic", "s1 | item=x, x=bucket"):
+        target, problem = rm.parse_target("ROWS", spec, steps)
+        assert target is None and problem[0] == "BRT-ORC-037", spec
+
+
+def test_the_037_repair_sentence_names_the_order_and_the_steps_fields():
+    steps = _feedback()
+    problems = rm.marker_problems("@@ROWS:n1 | feedback=comment@@", steps, {}, [])
+    assert problems == [("BRT-ORC-037",
+        "The marker for n1 names fields that step does not have: comment. Write each pair as "
+        "<new name>=<field>, where the field is one of: item, sentiment, feature. No step "
+        "produced the others; do not give values for them.")]
+    block = rm.block(steps, {}, 0, [], [])
+    assert "@@ROWS:<step id> | <new name>=<existing field>, <existing field>@@" in block
+
+
+def test_the_resolver_records_reversed_pairs_for_the_plan_note():
+    steps = _feedback()
+    resolver = rm.Resolver(steps)
+    rm.place(REC_JOB1, steps, resolver=resolver)
+    assert resolver.reversed == {REC_JOB1: ["item=feedback"]}
+    resolver = rm.Resolver(steps)
+    rm.place("@@ROWS:n1 | line=item, sentiment@@", steps, resolver=resolver)
+    assert resolver.reversed == {}
+
+
+def test_plain_target_for_a_bad_spec_on_a_good_target():
+    steps = _feedback()
+    target = rm.plain_target("ROWS", "n1 | line=comment, mood", steps)
+    assert target.ids == ["n1"] and target.spec is None and target.plain
+    assert rm.plain_fixable("Text.\n@@ROWS:n1 | line=comment@@", steps, {}, [])
+    value, placed = rm.place("Text.\n@@ROWS:n1 | line=comment@@", steps,
+                             resolver=rm.Resolver(steps, plain_fallback=True))
+    assert placed == {"n1": 1} and _placed_rows(value)[0] == {
+        "item": "line one", "sentiment": "positive", "feature": "sync"}
+
+
+def test_failing_case_plain_target_needs_a_target_and_a_spec_problem():
+    steps = _feedback()
+    assert rm.plain_target("ROWS", "nope | line=comment", steps) is None      # unknown target
+    assert rm.plain_target("ROWS", "n1 | item, sentiment", steps) is None     # nothing wrong
+    assert not rm.plain_fixable("@@ROWS:nope | line=comment@@", steps, {}, [])
+    assert not rm.plain_fixable({"@@ROWS:n1 | line=x@@": 1}, steps, {}, [])   # in a key
+    assert not rm.plain_fixable("@@ROWS:n1 | a=comment@@ and @@ROWS:nope@@", steps, {}, [])
+    assert not rm.plain_fixable("no marker at all", steps, {}, [])

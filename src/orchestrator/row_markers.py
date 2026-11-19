@@ -55,7 +55,8 @@ ROWS_BULLET = (
     "- Rows: write @@ROWS:<step id>@@ where a step's rows belong (a JSON array, one row per "
     "line), or @@ROWS_TABLE:<step id>@@ for a Markdown table. Put the marker on its own line, "
     "outside any brackets you write: the code writes the brackets. To choose fields, their "
-    "order and their names, add them after a bar: @@ROWS:<step id> | <name>=<field>, <field>@@ "
+    "order and their names, add them after a bar: "
+    "@@ROWS:<step id> | <new name>=<existing field>, <existing field>@@ "
     "(for example @@ROWS:s1 | file=item, label=bucket@@). To join steps on the item, list them "
     "with +: @@ROWS:<step id> + <step id> | ...@@; when both give a field, the later step's "
     "value is used. Use only the fields listed for those steps. An item with no result keeps "
@@ -125,8 +126,11 @@ S_ROWS_ON_OUTPUT = ("@@ROWS:{id}@@ names a step that has a long output, not rows
 S_MISSPELLED = ("A marker is misspelled. Write it exactly as shown below, with two @ signs "
                 "at each end.")
 S_TOO_LONG = "A marker is longer than 600 characters; name fewer fields."
+# Planner ruling 39b: the sentence names the pair's order, with the step's own
+# fields (as the block lists them) as the choice.
 S_UNKNOWN = ("The marker for {target} names fields that step does not have: {names}. "
-             "Its fields are: {fields}. No step produced the others; do not give values for them.")
+             "Write each pair as <new name>=<field>, where the field is one of: {fields}. "
+             "No step produced the others; do not give values for them.")
 S_DUPLICATE = "The marker for {target} uses the name {name} twice; each name may appear once."
 S_EMPTY = "The marker for {target} has a bar but no fields after it."
 S_BRACKETS = ("The marker for {target} puts its fields in brackets; write them plainly after "
@@ -178,6 +182,12 @@ class Target:
     kind: str                    # "rows" | "table" | "output"
     ids: list
     spec: Optional[list]         # [(name, field)] or None
+    # Planner ruling 39a: the pairs read the other way round, as written
+    # ([(written name, written field)]); empty when none was.
+    reversed_pairs: list = field(default_factory=list)
+    # Planner ruling 39c: True for a rows marker whose spec could not be used
+    # and whose step's rows are placed whole (Resolver(plain_fallback=True)).
+    plain: bool = False
 
     @property
     def key(self) -> str:
@@ -502,6 +512,36 @@ def _parse_spec(text: str, target: str) -> tuple:
     return entries, None
 
 
+def _known_name(name: str, known: list) -> Optional[str]:
+    """The field ``name`` names: itself when it is a field, else the one field
+    equal to it with case ignored (``Topic`` for ``topic``), else None."""
+    if name in known:
+        return name
+    hits = [k for k in known if k.lower() == name.lower()]
+    return hits[0] if len(hits) == 1 else None
+
+
+def _read_reversed_pairs(entries: list, known: list) -> tuple:
+    """``(entries, reversed)`` (planner ruling 39a). A pair is read as written
+    first (``name=field``). Only when its right side names no field of the
+    target, and its left side does (case ignored, or ``item``), is it read the
+    other way round: the column is the right side as written, the field the
+    real field name. The write-up model was seen writing ``item=feedback`` and
+    ``topic=Topic`` for "the item, headed feedback" (demo re-record,
+    18-Nov-2026). A pair that fits both ways keeps the written reading; one
+    that fits neither is left for BRT-ORC-037. ``reversed`` lists the pairs
+    read the other way, as written."""
+    out: list = []
+    flipped: list = []
+    for name, fld in entries:
+        real = None if fld in known else _known_name(name, known)
+        if real is not None:
+            flipped.append((name, fld))
+            name, fld = fld, real
+        out.append((name, fld))
+    return out, flipped
+
+
 def parse_target(keyword: str, capture: str, steps: dict, outputs: Optional[dict] = None) -> tuple:
     """``(Target, None)`` or ``(None, (code, sentence))`` for one strict marker.
 
@@ -563,12 +603,46 @@ def parse_target(keyword: str, capture: str, steps: dict, outputs: Optional[dict
         return None, (CODE_SPEC, problem)
     known = _step_fields(ids, steps)
     known_set = set(known) | {"item", "error"}
+    entries, flipped = _read_reversed_pairs(
+        entries, known + [f for f in ("item", "error") if f not in known])
+    if len({n for n, _ in entries}) != len(entries):
+        dup = next(n for i, (n, _) in enumerate(entries) if n in {m for m, _ in entries[:i]})
+        return None, (CODE_SPEC, S_DUPLICATE.format(target=target, name=_cut(dup)))
     unknown = [f for _, f in entries if f not in known_set]
     if unknown:
         return None, (CODE_SPEC, S_UNKNOWN.format(
             target=target, names=", ".join(_cut(f) for f in dict.fromkeys(unknown)),
             fields=", ".join(known)))
-    return Target(kind, ids, entries), None
+    return Target(kind, ids, entries, flipped), None
+
+
+def plain_target(keyword: str, capture: str, steps: dict, outputs: Optional[dict] = None
+                 ) -> Optional[Target]:
+    """Planner ruling 39c: the step's plain rows target (all its fields,
+    file-name labels: ``@@ROWS:<target>@@``) for a rows or table marker whose
+    target resolves and whose only problem is its spec (BRT-ORC-037), else
+    None. A join that cannot be placed without a spec either, an OUTPUT
+    marker and a marker with no usable target get None (salvage)."""
+    if keyword.upper() == "OUTPUT":
+        return None
+    _, problem = parse_target(keyword, capture, steps, outputs)
+    if problem is None or problem[0] != CODE_SPEC:
+        return None
+    listed = set(steps) | set(outputs or {})
+    cap = capture.strip()
+    ids = None
+    for i, ch in enumerate(cap):
+        if ch == "|":
+            ids = _resolve_ids(cap[:i], listed)
+            if ids:
+                break
+    if not ids:
+        return None
+    target, problem = parse_target(keyword, " + ".join(ids), steps, outputs)
+    if problem is not None or target is None or target.spec is not None:
+        return None
+    target.plain = True
+    return target
 
 
 def select(step: ListStep, spec: list) -> tuple:
@@ -923,6 +997,40 @@ def marker_problems(value, steps: dict, outputs: Optional[dict], quoted) -> list
     return out
 
 
+def plain_fixable(value, steps: dict, outputs: Optional[dict], quoted) -> bool:
+    """Planner ruling 39c: True when the reply has at least one marker problem
+    and every one is a rows marker in the answer's text (never an object key)
+    whose target resolves and whose only problem is its spec, so placing the
+    step's plain rows (``plain_target``) leaves no marker behind."""
+    qhits = quoted if isinstance(quoted, set) else quoted_hits(quoted)
+    outputs = outputs or {}
+    found = False
+    ok = True
+
+    def check_text(text: str, is_key: bool) -> None:
+        nonlocal found, ok
+        for hit, _ in _text_problems(text, steps, outputs, qhits, placeable=not is_key):
+            found = True
+            m = STRICT.fullmatch(hit)
+            if is_key or m is None or plain_target(m.group(1), m.group(2), steps, outputs) is None:
+                ok = False
+
+    def walk(v) -> None:
+        if isinstance(v, str):
+            check_text(v, False)
+        elif isinstance(v, dict):
+            for k, item in v.items():
+                if isinstance(k, str):
+                    check_text(k, True)
+                walk(item)
+        elif isinstance(v, list):
+            for item in v:
+                walk(item)
+
+    walk(value)
+    return found and ok
+
+
 def invalid_hits(value, steps: dict, quoted, outputs: Optional[dict] = None) -> list:
     """Every marker-like hit text in an answer ``value`` that ``place`` would
     not replace (ruling 21's reader; see ``marker_problems``)."""
@@ -1053,14 +1161,28 @@ def _table_in_fence(b: str, a: str, at_start: bool, fence: tuple) -> tuple:
 class Resolver:
     """Resolves strict markers to what they place; each target is built once."""
 
-    def __init__(self, steps: dict, outputs: Optional[dict] = None) -> None:
+    def __init__(self, steps: dict, outputs: Optional[dict] = None,
+                 plain_fallback: bool = False) -> None:
         self.steps = steps or {}
         self.outputs = outputs or {}
         self._cache: dict = {}
         self.sizes: dict = {}
+        # Ruling 39c: a rows marker with an unusable spec on a good target
+        # places the step's plain rows; ``plain`` holds each such marker.
+        self.plain_fallback = plain_fallback
+        self.plain: dict = {}
+        # Ruling 39a: {marker text: pairs read the other way round, as written}.
+        self.reversed: dict = {}
 
     def target(self, m) -> Optional[Target]:
         target, problem = parse_target(m.group(1), m.group(2), self.steps, self.outputs)
+        if problem and self.plain_fallback:
+            target = plain_target(m.group(1), m.group(2), self.steps, self.outputs)
+            if target is not None:
+                self.plain[m.group(0)] = target.key
+            return target
+        if target is not None and target.reversed_pairs:
+            self.reversed[m.group(0)] = [f"{n}={f}" for n, f in target.reversed_pairs]
         return None if problem else target
 
     def rows(self, target: Target) -> tuple:

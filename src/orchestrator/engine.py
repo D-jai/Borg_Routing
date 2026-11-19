@@ -3726,6 +3726,7 @@ async def _handle_compose_result(
     reask=None,
     rows: Optional["_RowContext"] = None,
     reask_invalid=None,
+    after_repair: bool = False,
 ) -> str:
     """The run's final answer from a compose reply (planner ruling
     20, R2). In order:
@@ -3759,6 +3760,14 @@ async def _handle_compose_result(
     (``reask_invalid``); a second reply with problems is salvaged
     (``_salvage_after_check``). Valid markers are replaced by the stored rows
     or text; each placed block passes the lane's guards (BRT-LANE-009) first.
+
+    Planner ruling 39c: when the reply after the repair re-ask
+    (``after_repair``) still has a problem, and every problem is a rows
+    marker whose target resolves but whose spec cannot be used
+    (BRT-ORC-037), the answer is kept: each such marker places its step's
+    plain rows, compose's text stays, and the run gets a BRT-ORC-037 warning
+    with one receipt line (``PLAIN_ROWS_RECEIPT``). A pair read the other way
+    round (ruling 39a) is noted on the run (``rows_pairs_reversed``).
     """
     # Ruling 35e: the priced reply handled here is the last orchestrator call;
     # read now, before a re-ask makes another.
@@ -3776,6 +3785,11 @@ async def _handle_compose_result(
         # included, is a problem, so none is left.
         value = compose_result[field] if text else candidate
         problems = rows.problems(value, declined=not text)
+        plain = False
+        if problems and after_repair and text and all(
+                code == row_markers.CODE_SPEC for code, _ in problems) and row_markers.plain_fixable(
+                value, rows.steps, rows.outputs, rows.quoted):
+            plain, problems = True, []
         if problems:
             codes = list(dict.fromkeys(code for code, _ in problems))
             if reask_invalid is not None:
@@ -3795,10 +3809,11 @@ async def _handle_compose_result(
                     second = None
                 if second is not None:
                     return await _handle_compose_result(
-                        second, results, run_id, db_path, reask=reask, rows=rows)
+                        second, results, run_id, db_path, reask=reask, rows=rows,
+                        after_repair=True)
             return await _salvage_after_check(results, run_id, db_path, rows, value,
                                               codes, action, rejects)
-        resolver = row_markers.Resolver(rows.steps, rows.outputs)
+        resolver = row_markers.Resolver(rows.steps, rows.outputs, plain_fallback=plain)
         if text:
             placed_value, placed = row_markers.place(
                 compose_result[field], rows.steps, guard=rows.guard(),
@@ -3816,6 +3831,17 @@ async def _handle_compose_result(
                 "msg": "rows placed by code (row markers)",
                 "rows_placed": {key: resolver.sizes.get(key) for key in placed},
                 "markers": placed,
+            })
+        await _note_reversed_pairs(run_id, db_path, resolver)
+        if plain:
+            await _warn_event(run_id, db_path, {
+                "code": "BRT-ORC-037",
+                "severity": "warning",
+                "action": "rows_placed_plain",
+                "msg": "a rows marker's fields could not be used, also when asked again; "
+                       "its step's rows were placed with all their fields",
+                "steps": sorted(set(resolver.plain.values())),
+                "receipt": PLAIN_ROWS_RECEIPT,
             })
     if text:
         if wrong:
@@ -4091,6 +4117,30 @@ async def _fail_if_no_document_step(results: dict, run_id: UUID, db_path: str) -
     raise ValueError(message)
 
 
+# Planner ruling 39c: the receipt line of an answer kept with plain rows.
+PLAIN_ROWS_RECEIPT = ("the write-up asked for columns that do not exist; all columns are shown")
+
+
+async def _warn_event(run_id: UUID, db_path: str, decision: dict) -> None:
+    """An ``error`` event (a warning); a logging hiccup never fails the run."""
+    try:
+        await write_event("error", run_id=run_id, decision=decision, db_path=db_path)
+    except Exception:
+        pass
+
+
+async def _note_reversed_pairs(run_id: UUID, db_path: str, resolver) -> None:
+    """Planner ruling 39a: a plan note when a placed rows marker had a pair
+    read the other way round (``field=name``), so how often it happens can be
+    counted. Nothing is refused or changed."""
+    if resolver.reversed:
+        await _log_decision(run_id, db_path, {
+            "action": "rows_pairs_reversed",
+            "msg": "a rows marker's pairs were read the other way round (field=name)",
+            "markers": dict(resolver.reversed),
+        })
+
+
 async def _log_decision(run_id: UUID, db_path: str, decision: dict) -> None:
     """An ``orchestrator_decision`` event; a logging hiccup never fails the run."""
     try:
@@ -4221,7 +4271,7 @@ def _long_fields_text(out: object, long, rows: "_RowContext", raw: bool) -> str:
 
 
 def _salvage_after_check_text(results: dict, lane: Optional[LaneContext], rows: "_RowContext",
-                              value: object, codes: list) -> Optional[str]:
+                              value: object, codes: list, resolver=None) -> Optional[str]:
     """S2 and S1 (ruling 32e, 2.4.5): the second reply's valid markers placed
     from stored results (each under ``## <target>``, with the guards); then
     the finished steps not placed, list steps in the plain marker's form, and
@@ -4229,7 +4279,7 @@ def _salvage_after_check_text(results: dict, lane: Optional[LaneContext], rows: 
     Compose's own text is dropped."""
     from src.orchestrator import compose_checks, row_markers  # noqa: PLC0415
 
-    resolver = row_markers.Resolver(rows.steps, rows.outputs)
+    resolver = resolver or row_markers.Resolver(rows.steps, rows.outputs)
     placed: list = []
     skip: set = set()
     guard, text_guard = rows.guard(), rows.text_guard()
@@ -4264,9 +4314,13 @@ async def _salvage_after_check(results: dict, run_id: UUID, db_path: str, rows: 
     head = codes[0]
     msg = ("compose's reply could not be used, also when asked again; the answer is "
            "the finished steps' results with a note")
-    text = _salvage_after_check_text(results, current_lane(), rows, value, codes)
+    from src.orchestrator import row_markers  # noqa: PLC0415
+
+    resolver = row_markers.Resolver(rows.steps, rows.outputs)
+    text = _salvage_after_check_text(results, current_lane(), rows, value, codes, resolver)
     if not text:
         raise ValueError(f"{head}: {msg}")
+    await _note_reversed_pairs(run_id, db_path, resolver)
     try:
         await write_event(
             "error",

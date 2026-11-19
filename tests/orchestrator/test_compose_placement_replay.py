@@ -42,7 +42,8 @@ ROWS_BULLET = (
     "- Rows: write @@ROWS:<step id>@@ where a step's rows belong (a JSON array, one row per "
     "line), or @@ROWS_TABLE:<step id>@@ for a Markdown table. Put the marker on its own line, "
     "outside any brackets you write: the code writes the brackets. To choose fields, their order "
-    "and their names, add them after a bar: @@ROWS:<step id> | <name>=<field>, <field>@@ (for "
+    "and their names, add them after a bar: @@ROWS:<step id> | <new name>=<existing field>, "
+    "<existing field>@@ (for "
     "example @@ROWS:s1 | file=item, label=bucket@@). To join steps on the item, list them with +: "
     "@@ROWS:<step id> + <step id> | ...@@; when both give a field, the later step's value is "
     "used. Use only the fields listed for those steps. An item with no result keeps its error "
@@ -154,7 +155,7 @@ async def _replay(fx, replies, monkeypatch, results=None, lane="fixture", asked=
             rows=rows if rows.active else None, reask_invalid=reask if rows.active else None)
     codes = [d.get("code") for _, d in events if d.get("code")]
     warning = [d for t, d in events if t == "error" and d.get("severity") == "warning"]
-    return SimpleNamespace(answer=answer, sent=sent, codes=codes, warning=warning,
+    return SimpleNamespace(answer=answer, sent=sent, codes=codes, warning=warning, events=events,
                            kind=kinds[-1] if kinds else None, rows=rows, results=results)
 
 
@@ -234,9 +235,9 @@ async def test_a5_unknown_field_gives_037_then_composed(monkeypatch):
     first = {"response": "@@ROWS:classify_emails | file=item, category=bucket, urgency@@"}
     run = await _replay(fx, [first, A_GOOD], monkeypatch)
     assert run.sent == [_repair(
-        "The marker for classify_emails names fields that step does not have: urgency. Its "
-        "fields are: item, bucket, confidence, defer_reason, error. No step produced the others; "
-        "do not give values for them.") + "\n" + GOLDEN_A]
+        "The marker for classify_emails names fields that step does not have: urgency. Write "
+        "each pair as <new name>=<field>, where the field is one of: item, bucket, confidence, "
+        "defer_reason, error. No step produced the others; do not give values for them.") + "\n" + GOLDEN_A]
     assert run.kind == "composed"
     _usable_a(run.answer)
 
@@ -251,6 +252,65 @@ async def test_a6_nested_twice_without_a_spec_salvages_with_names(monkeypatch):
     # The grader reads "file", so it scores none of them (a stated limit).
     assert score_classification(run.answer, _key("a"), ["category", "urgency"],
                                 "file")["items_answered"] == 0
+
+
+# --- planner ruling 39: reversed pairs and a bad spec on a good target ------------------------
+
+A_SUMMARY = "Here are all 200 emails. No step produced an urgency, so none is given."
+
+
+async def test_39a_a_reversed_marker_places_and_writes_the_plan_note(monkeypatch):
+    fx = _fixture("a")
+    marker = "@@ROWS:classify_emails | item=file, bucket=category@@"
+    run = await _replay(fx, [{"response": A_SUMMARY + "\n\n" + marker}], monkeypatch)
+    assert run.sent == [] and run.kind == "composed"
+    _usable_a(run.answer)
+    notes = [d for t, d in run.events if d.get("action") == "rows_pairs_reversed"]
+    assert notes == [{"action": "rows_pairs_reversed",
+                      "msg": "a rows marker's pairs were read the other way round (field=name)",
+                      "markers": {marker: ["item=file", "bucket=category"]}}]
+
+
+async def test_39a_a_straight_marker_writes_no_plan_note(monkeypatch):
+    fx = _fixture("a")
+    run = await _replay(fx, [A_GOOD], monkeypatch)
+    assert not [d for t, d in run.events if d.get("action") == "rows_pairs_reversed"]
+
+
+async def test_39c_a_bad_spec_after_the_reask_keeps_the_answer_with_plain_rows(monkeypatch):
+    fx = _fixture("a")
+    bad = {"response": A_SUMMARY + "\n\n@@ROWS:classify_emails | file=item, category=label@@"}
+    run = await _replay(fx, [bad, bad], monkeypatch)
+    assert len(run.sent) == 1                                   # the one repair re-ask
+    assert run.kind == "composed"
+    assert run.answer.startswith(A_SUMMARY) and "@@" not in run.answer
+    rows = max(_rows_of(run.answer), key=len)
+    assert len(rows) == 200 and rows[0]["item"] == "job_a/email_001.txt"
+    assert set(rows[0]) == {"item", "bucket", "confidence", "defer_reason"}
+    assert run.warning == [{
+        "code": "BRT-ORC-037", "severity": "warning", "action": "rows_placed_plain",
+        "msg": "a rows marker's fields could not be used, also when asked again; its step's "
+               "rows were placed with all their fields",
+        "steps": ["classify_emails"],
+        "receipt": "the write-up asked for columns that do not exist; all columns are shown"}]
+
+
+async def test_39c_failing_case_an_unknown_target_still_salvages(monkeypatch):
+    fx = _fixture("a")
+    bad = {"response": A_SUMMARY + "\n\n@@ROWS:classify_mails | file=item, category=label@@"}
+    run = await _replay(fx, [bad, bad], monkeypatch)
+    assert run.kind == "salvaged" and run.warning[0]["code"] == "BRT-ORC-032"
+    assert not run.answer.startswith(A_SUMMARY)
+
+
+async def test_39c_failing_case_a_bad_spec_beside_another_problem_still_salvages(monkeypatch):
+    fx = _fixture("a")
+    first = {"response": A_SUMMARY + "\n\n@@ROWS:classify_emails | file=item, category=label@@"}
+    second = {"response": A_SUMMARY + "\n\n@@ROWS:classify_emails | file=item, category=label@@"
+                          "\n@@ROWS:nowhere@@"}
+    run = await _replay(fx, [first, second], monkeypatch)
+    assert run.kind == "salvaged"
+    assert run.warning[0]["codes"] == ["BRT-ORC-032", "BRT-ORC-037"]
 
 
 # --- job B (round 2) --------------------------------------------------------------------------
