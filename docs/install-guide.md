@@ -72,6 +72,8 @@ The port is bound to your own machine only (`127.0.0.1`). To reach it from anoth
 docker compose -f compose.yaml -f compose.live.yaml up -d --build
 ```
 
+**Set `BORG_ADMIN_TOKEN` in `.env` for the live setup.** The browser reaches the container from Docker's gateway address, not from the container's own loopback, so without a token the admin pages and key routes refuse every request (`BRT-API-046`). Set the keys in the host `.env` too: the Keys page cannot write that file from inside the container and answers `BRT-API-054`.
+
 A local model server on the same computer (LM Studio, Ollama) is reached from the container as `host.docker.internal` (for example `http://host.docker.internal:11434`), not `localhost`; set the matching address in `.env`.
 
 ### Where data lives

@@ -87,3 +87,46 @@ def test_live_override_reads_env_and_turns_replay_off():
 def test_dockerfile_serves_on_8000_from_the_app_folder():
     text = (ROOT / "Dockerfile").read_text(encoding="utf-8")
     assert "EXPOSE 8000" in text and "main:app" in text and "COPY ui" in text and "COPY demo" in text
+
+
+def test_image_copies_only_what_the_app_reads():
+    text = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+    for line in text.splitlines():
+        if line.startswith("COPY ") and "data" in line.split()[1:-1][0]:
+            assert "*" not in line and ".db" not in line
+    assert "COPY demo ./demo" not in text and "COPY data ./data" not in text
+    assert "demo/runs/*.json" in text
+    tracked = {"capability_matrix.yaml", "curated_models.yaml", "skills.yaml"}
+    assert tracked <= set(text.split())  or all(f"data/{n}" in text for n in tracked)
+    assert {p.name for p in (ROOT / "data").glob("*.yaml")} == tracked
+
+
+def test_dockerignore_matches_in_subfolders_too():
+    lines = (ROOT / ".dockerignore").read_text(encoding="utf-8").split()
+    for pat in ("**/*.db", "**/*.db-*", "**/__pycache__", "**/*.pyc"):
+        assert pat in lines
+    assert "*.db" not in lines and "__pycache__" not in lines
+
+
+def test_ci_waits_for_health_and_checks_the_live_override():
+    ci = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+    assert "up -d --build --wait" in ci and "--retry-all-errors" in ci
+    assert "-f compose.live.yaml config -q" in ci
+
+
+def test_key_save_refused_cleanly_when_env_unwritable(monkeypatch):
+    import builtins
+    from fastapi.testclient import TestClient
+    import main
+
+    real_open = builtins.open
+
+    def fake_open(file, mode="r", *a, **k):
+        if str(file) == ".env" and any(c in mode for c in "wa"):
+            raise PermissionError("read-only")
+        return real_open(file, mode, *a, **k)
+
+    monkeypatch.setattr(builtins, "open", fake_open)
+    r = TestClient(main.app).post("/keys", json={"name": "x", "base_url": "https://a.example", "api_key": "k"})
+    assert r.status_code == 409 and "BRT-API-054" in r.json()["detail"]
+    assert "compose.live.yaml" in r.json()["detail"]

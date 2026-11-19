@@ -12,9 +12,9 @@ COPY src ./src
 RUN pip install -e .
 
 COPY main.py ./
-COPY data ./data
+COPY data/capability_matrix.yaml data/curated_models.yaml data/skills.yaml ./data/
 COPY ui ./ui
-COPY demo ./demo
+COPY demo/runs/*.json ./demo/runs/
 
 # data/ is a named volume in compose: a new volume starts as a copy of this folder.
 RUN useradd --create-home borg && chown -R borg:borg /app/data

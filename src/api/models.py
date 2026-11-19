@@ -286,9 +286,12 @@ async def add_key(body: KeyRequest):
     )
 
     lines: list[str] = []
-    if os.path.exists(env_path):
-        with open(env_path, encoding="utf-8") as f:
-            lines = f.readlines()
+    try:
+        if os.path.exists(env_path):
+            with open(env_path, encoding="utf-8") as f:
+                lines = f.readlines()
+    except OSError:
+        lines = []  # unreadable: the write below reports the real problem
 
     # Remove existing entries for this provider (and any legacy alias)
     def _prefix(varname: str) -> str:
@@ -304,8 +307,20 @@ async def add_key(body: KeyRequest):
     lines.append(f"{key_var}={body.api_key}\n")
     lines.append(f"{endpoint_var}={body.base_url}\n")
 
-    with open(env_path, "w", encoding="utf-8") as f:
-        f.writelines(lines)
+    try:
+        with open(env_path, "w", encoding="utf-8") as f:
+            f.writelines(lines)
+    except OSError:
+        # Docker live mode: .env is not writable by the app's user, and a key written
+        # inside the container would be lost when it is recreated.
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "BRT-API-054: the key could not be saved because the .env file is not "
+                "writable here. Set keys in the host .env file used by compose.live.yaml, "
+                "then restart the container."
+            ),
+        )
 
     # Reload into current process environment
     os.environ[key_var] = body.api_key

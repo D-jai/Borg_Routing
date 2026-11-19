@@ -259,6 +259,7 @@
 | BRT-API-050 | Skills load failed | `src/api/skills.py` | Could not load skills.yaml. Check that data/skills.yaml exists. |
 | BRT-API-051 | Skill not found | `src/api/skills.py` | The skill_id does not exist in the library. Check the skill_id. |
 | BRT-API-052 | New-version write failed | `src/api/skills.py::create_skill_version` | Could not write the updated skills.yaml. Check file permissions. |
+| BRT-API-054 | Key not saved: `.env` is not writable | `src/api/models.py::add_key` | 409. The server could not write `.env` (in Docker live mode the file is read-only to the app's user, and a key written inside the container would be lost when it is recreated). Put the key in the host `.env` file that `compose.live.yaml` reads and restart the container. |
 | BRT-API-053 | Invalid new-version payload | `src/api/skills.py::create_skill_version` | Required fields are missing or malformed. |
 
 ## BRT-LOG — Logging Module (Slice 5 additions)

@@ -44,6 +44,7 @@ To use external AI models (like those on OpenRouter), you need to add an API key
 
 ### If something goes wrong
 - **The page says "In .env, restart needed"** — the key is written in `.env` but the running server does not have it yet. Restart the server.
+- **"BRT-API-054: the key could not be saved"** — the server cannot write `.env` (this is how Docker live mode runs). Put the key in the `.env` file on the host that `compose.live.yaml` reads, then restart the container.
 - Only the OpenRouter key is saved from this page. The Tavily key (web search) is set by adding `TAVILY_API_KEY` to `.env` and restarting.
 
 ---
