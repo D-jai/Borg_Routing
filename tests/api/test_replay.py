@@ -416,3 +416,50 @@ def test_the_notice_date_is_the_toronto_date(utc, day):
     assert replay.toronto_date(datetime.fromisoformat(utc)).isoformat() == day
     doc = {"view": {"run": {"created_at": utc}}, "recorded_on": "1999-01-01"}
     assert replay.notice({"r": doc}) == "Replay of a recorded run on " + replay._day(day)
+
+
+# ---------- planner, under ruling 38 (c): no wait plays longer than 4 s; recorded times shown ----------
+
+GAP_DOC = {"timeline": {"end_ms": 602000, "stages": [
+    {"stage": "plan", "t_ms": 0}, {"stage": "route", "t_ms": 1000}, {"stage": "compose", "t_ms": 601000}]}}
+
+
+def test_a_ten_minute_gap_plays_in_at_most_4_seconds():
+    speed = replay.default_speed(GAP_DOC)                       # 602 s recorded: about 10x
+    knots = replay.play_map(GAP_DOC, speed)
+    gap = replay.play_seconds_at(knots, 601000) - replay.play_seconds_at(knots, 1000)
+    assert gap == pytest.approx(replay.GAP_CAP_S)
+    assert replay.play_seconds_at(knots, 1000) == pytest.approx(1.0 / speed)   # short waits keep their pace
+    assert knots[-1][1] <= 60.0
+    assert replay.play_map(GAP_DOC, 1.0)[-1][1] == pytest.approx(1 + 4 + 1)    # an explicit speed is capped too
+
+
+def test_the_play_clock_maps_back_to_the_recorded_moment():
+    knots = replay.play_map(GAP_DOC, 1.0)
+    for rec in (0, 500, 1000, 300000, 601000, 601500, 602000):
+        assert replay.recorded_ms_at(knots, replay.play_seconds_at(knots, rec)) == pytest.approx(rec)
+    assert replay.recorded_ms_at(knots, knots[-1][1] + 1) > 602000             # past the end: finished
+
+
+def test_failing_case_a_run_with_no_stages_or_length_still_plays(client):
+    knots = replay.play_map({"timeline": {}}, 1.0)
+    assert knots == [(0.0, 0.0)] and replay.play_seconds_at(knots, 0) == 0.0
+    assert replay.recorded_ms_at(knots, 0.5) > 0
+
+
+def test_each_stage_carries_its_recorded_duration(client, tmp_path, monkeypatch):
+    export = _exports()[0]
+    doc = dict(export, timeline=GAP_DOC["timeline"])
+    (tmp_path / "gap.json").write_text(json.dumps(doc), encoding="utf-8")
+    monkeypatch.setenv("BORG_REPLAY_DIR", str(tmp_path))
+    replay.reset()
+    body = {"model": "borg_route", "stream": True, "replay_speed": FAST,
+            "messages": [{"role": "user", "content": doc["prompt"]}]}
+    got = []
+    with client.stream("POST", "/v1/chat/completions", json=body) as r:
+        for line in r.iter_lines():
+            if line.startswith("data:") and '"event": "stage"' in line:
+                got.append(json.loads(line[5:]))
+    assert [(g["stage"], g["recorded_ms"]) for g in got] == [("plan", 1000), ("route", 600000), ("compose", 1000)]
+    st = client.get("/replay/status").json()["runs"][0]
+    assert st["seconds"] == 602.0 and st["play_seconds"] <= 4 + 2 * 60 / 602 * 1.01

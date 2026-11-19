@@ -157,9 +157,11 @@ Borg.ready(function () {
     var tick = setInterval(function () { clock.textContent = W.clock((Date.now() - t0) / 1000); }, 1000);
     return {
       node: node,
-      set: function (stage, detail) {
+      set: function (stage, detail, recordedMs) {
         var words = W.stageWords(stage);
-        label.textContent = words + (detail && stage === 'route' ? ': ' + W.shortText(detail, 80) : '');
+        // Replay (planner, under ruling 38 (c)): a shortened wait shows the time it took when recorded.
+        var rec = typeof recordedMs === 'number' && recordedMs >= 0 ? ' (recorded: ' + B.duration(recordedMs / 1000) + ')' : '';
+        label.textContent = words + (detail && stage === 'route' ? ': ' + W.shortText(detail, 80) : '') + rec;
       },
       stop: function () { clearInterval(tick); }
     };
@@ -224,7 +226,7 @@ Borg.ready(function () {
               if (payload === '[DONE]') return;
               var chunk;
               try { chunk = JSON.parse(payload); } catch (_) { return; }
-              if (chunk.event === 'stage') { stage.set(chunk.stage, chunk.detail); return; }
+              if (chunk.event === 'stage') { stage.set(chunk.stage, chunk.detail, chunk.recorded_ms); return; }
               if (!runId && typeof chunk.id === 'string' && chunk.id.indexOf('chatcmpl-') === 0) runId = chunk.id.slice(9);
               var delta = chunk.choices && chunk.choices[0] && chunk.choices[0].delta && chunk.choices[0].delta.content;
               if (typeof delta === 'string' && delta) {

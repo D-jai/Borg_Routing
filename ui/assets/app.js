@@ -354,10 +354,12 @@
    * private-notes (lane) run is for. */
   var REPLAY_DATA_NOTE = 'The documents and notes in these runs are made-up demo data; in the ' +
     'private-notes run, the point is what was not sent to a cloud model.';
+  /* Planner, under ruling 38 (c): the banner says once that playback is shortened. */
+  var REPLAY_PACE_NOTE = 'Playback is shortened: no wait plays longer than 4 s, and each stage shows its recorded time.';
   function replayNotice(status) {
     if (!status || status.mode !== 'replay') return null;
     var text = typeof status.notice === 'string' && status.notice ? status.notice : 'Replay of a recorded run';
-    return text + ' · demo run, not a benchmark result. ' + REPLAY_DATA_NOTE;
+    return text + ' · demo run, not a benchmark result. ' + REPLAY_PACE_NOTE + ' ' + REPLAY_DATA_NOTE;
   }
   var replayAsk = null;
   function replayStatus() {

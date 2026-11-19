@@ -8,7 +8,9 @@ answers every request before the app's own routes see it:
 - ``POST /v1/chat/completions`` with a recorded prompt starts a playback and streams the
   recorded stage events at recorded speed (times divided by a ``speed`` factor:
   ``replay_speed`` in the body, else ``BORG_REPLAY_SPEED``, else ``default_speed``: a run plays
-  in at most 60 seconds), then the recorded answer,
+  in at most 60 seconds), with no single wait between two stages longer than ``GAP_CAP_S``
+  (each stage carries its recorded duration, ``recorded_ms``, so a shortened wait is shown,
+  not hidden), then the recorded answer,
   in the same chunks the live endpoint sends; any other prompt gets 403 (BRT-RPL-002);
 - ``GET /runs/{id}`` and ``GET /runs/{id}/stream`` serve that playback (the run view as it
   stood at that moment, envelope updates as they happened, then the end); a recorded run's own
@@ -112,6 +114,7 @@ def library() -> dict:
 
 
 MAX_PLAY_S = 60.0
+GAP_CAP_S = 4.0     # planner, under ruling 38 (c): no recorded wait plays longer than this
 
 
 def _explicit_speed(value: object = None) -> Optional[float]:
@@ -139,11 +142,59 @@ def _speed(value: object = None, doc: Optional[dict] = None) -> float:
     return explicit if explicit is not None else default_speed(doc)
 
 
+def _marks(doc: Optional[dict]) -> list:
+    """The recorded moments (ms) where playback may change pace: the start, every stage, the end."""
+    tl = (doc or {}).get("timeline") or {}
+    marks = {0.0, float(tl.get("end_ms") or 0)}
+    for st in tl.get("stages") or []:
+        t = st.get("t_ms") if isinstance(st, dict) else None
+        if isinstance(t, (int, float)) and t >= 0:
+            marks.add(float(t))
+    return sorted(marks)
+
+
+def play_map(doc: Optional[dict], speed: float) -> list:
+    """Knots ``[(recorded ms, play seconds)]``: each recorded wait between two marks plays at
+    ``speed`` but never longer than ``GAP_CAP_S`` (planner, under ruling 38 (c)); the 60 s rule
+    for the whole run comes from the speed and still holds, since capping only shortens."""
+    marks = _marks(doc)
+    knots, play = [(marks[0], 0.0)], 0.0
+    for a, b in zip(marks, marks[1:]):
+        play += min((b - a) / 1000.0 / speed, GAP_CAP_S)
+        knots.append((b, play))
+    return knots
+
+
+def play_seconds_at(knots: list, rec_ms: float) -> float:
+    """Play seconds at which recorded moment ``rec_ms`` is shown."""
+    prev = knots[0]
+    for k in knots[1:]:
+        if rec_ms <= k[0]:
+            span = k[0] - prev[0]
+            return prev[1] + (k[1] - prev[1]) * ((rec_ms - prev[0]) / span if span > 0 else 1.0)
+        prev = k
+    return knots[-1][1]
+
+
+def recorded_ms_at(knots: list, play_s: float) -> float:
+    """The recorded moment (ms) shown ``play_s`` seconds into a playback; past the end it
+    keeps growing, so a finished playback reads as finished."""
+    prev = knots[0]
+    for k in knots[1:]:
+        if play_s <= k[1]:
+            span = k[1] - prev[1]
+            return prev[0] + (k[0] - prev[0]) * ((play_s - prev[1]) / span if span > 0 else 1.0)
+        prev = k
+    return knots[-1][0] + (play_s - knots[-1][1]) * 1000.0 + 1.0
+
+
 def start_session(run_id: str, speed: Optional[float] = None) -> str:
     """Start one playback of a recorded run; returns its own run id."""
     sid = str(uuid.uuid4())
-    speed = _speed(speed, library().get(run_id))
-    _sessions[sid] = {"run_id": run_id, "t0": _now(), "speed": speed, "wall0": _utcnow()}
+    doc = library().get(run_id)
+    speed = _speed(speed, doc)
+    _sessions[sid] = {"run_id": run_id, "t0": _now(), "speed": speed, "wall0": _utcnow(),
+                      "knots": play_map(doc, speed)}
     while len(_sessions) > MAX_SESSIONS:
         _sessions.popitem(last=False)
     return sid
@@ -155,7 +206,7 @@ def _lookup(run_id: str) -> tuple:
     if session is not None:
         doc = library().get(session["run_id"])
         if doc is not None:
-            elapsed = (_now() - session["t0"]) * 1000.0 * session["speed"]
+            elapsed = recorded_ms_at(session["knots"], _now() - session["t0"])
             return doc, elapsed, dict(session, sid=run_id)
     doc = library().get(run_id)
     if doc is not None:
@@ -301,8 +352,7 @@ def status_body() -> dict:
                   "label": d.get("label") or LABEL, "recorded_on": d.get("recorded_on"),
                   "lane_mode": d.get("lane_mode"), "prompt": d["prompt"],
                   "seconds": (d.get("timeline", {}).get("end_ms") or 0) / 1000.0,
-                  "play_seconds": (d.get("timeline", {}).get("end_ms") or 0) / 1000.0
-                  / _speed(None, d)} for d in order],
+                  "play_seconds": play_map(d, _speed(None, d))[-1][1]} for d in order],
     }
 
 
@@ -402,7 +452,10 @@ async def replay_chat(request: Request):
     sid = start_session(doc["run_id"], speed)
     model = str(body.get("model") or "borg_route")
     answer = doc.get("answer") or ""
-    end_s = (doc.get("timeline", {}).get("end_ms") or 0) / 1000.0 / speed
+    knots = _sessions[sid]["knots"]
+    end_ms = float(doc.get("timeline", {}).get("end_ms") or 0)
+    end_s = play_seconds_at(knots, end_ms)
+    stages = [st for st in doc.get("timeline", {}).get("stages") or [] if isinstance(st, dict)]
 
     async def wait_until(t: float):
         while True:
@@ -415,11 +468,13 @@ async def replay_chat(request: Request):
 
     async def play():
         t0 = _now()
-        for st in doc.get("timeline", {}).get("stages") or []:
-            async for beat in wait_until(t0 + (st.get("t_ms") or 0) / 1000.0 / speed):
+        for i, st in enumerate(stages):
+            t_ms = float(st.get("t_ms") or 0)
+            async for beat in wait_until(t0 + play_seconds_at(knots, t_ms)):
                 yield beat
+            nxt = float(stages[i + 1].get("t_ms") or 0) if i + 1 < len(stages) else end_ms
             payload = {"event": "stage", "stage": st.get("stage"), "detail": st.get("detail") or "",
-                       "elapsed_ms": int(st.get("t_ms") or 0)}
+                       "elapsed_ms": int(t_ms), "recorded_ms": int(max(0.0, nxt - t_ms))}
             yield f"data: {json.dumps(payload)}\n\n"
         async for beat in wait_until(t0 + end_s):
             yield beat

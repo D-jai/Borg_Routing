@@ -462,6 +462,8 @@ def test_replay_notice_names_the_date_and_says_demo_run(tmp_path):
     assert text.startswith("Replay of a recorded run on 18-Nov-2026 ")
     assert " demo run, not a benchmark result. " in text
     assert text.endswith(DATA_NOTE)
+    # planner, under ruling 38 (c): said once that playback is shortened and recorded times are shown
+    assert text.count("Playback is shortened: no wait plays longer than 4 s, and each stage shows its recorded time.") == 1
 
 
 DATA_NOTE = ("The documents and notes in these runs are made-up demo data; in the private-notes "
