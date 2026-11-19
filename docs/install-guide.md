@@ -116,7 +116,7 @@ cd BORG_ROUTE                              # the folder you cloned or extracted
 copy .env.example .env
 # Edit .env — add OPENROUTER_API_KEY (and any LM Studio paths)
 
-python -m pip install -e ".[dev]"
+python -m pip install -c constraints.txt -e ".[dev]"   # constraints.txt pins the runtime versions
 python -m pytest                            # expect all tests to pass
 
 uvicorn main:app --reload
@@ -130,7 +130,7 @@ cd /path/to/BORG_ROUTE                      # wherever you cloned it
 cp .env.example .env
 # Edit .env — add OPENROUTER_API_KEY (and any LM Studio paths)
 
-python3 -m pip install -e ".[dev]"
+python3 -m pip install -c constraints.txt -e ".[dev]"
 python3 -m pytest                           # expect all tests to pass
 
 uvicorn main:app --reload
@@ -140,7 +140,7 @@ uvicorn main:app --reload
 ### Cross-platform (works everywhere including raw PowerShell)
 ```bash
 python -c "import shutil; shutil.copy('.env.example', '.env')"
-python -m pip install -e ".[dev]"
+python -m pip install -c constraints.txt -e ".[dev]"
 python -m pytest
 python -m uvicorn main:app --reload
 ```

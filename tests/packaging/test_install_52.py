@@ -130,3 +130,28 @@ def test_key_save_refused_cleanly_when_env_unwritable(monkeypatch):
     r = TestClient(main.app).post("/keys", json={"name": "x", "base_url": "https://a.example", "api_key": "k"})
     assert r.status_code == 409 and "BRT-API-054" in r.json()["detail"]
     assert "compose.live.yaml" in r.json()["detail"]
+
+
+def _pins():
+    lines = (ROOT / "constraints.txt").read_text(encoding="utf-8").splitlines()
+    return {l.split("==")[0].lower().replace("_", "-"): l.split("==")[1]
+            for l in lines if l.strip() and not l.startswith("#")}
+
+
+def test_constraints_pin_every_runtime_dependency_exactly():
+    deps = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"]["dependencies"]
+    names = {d.split("[")[0].split(">")[0].split("=")[0].split("<")[0].strip().lower() for d in deps}
+    pins = _pins()
+    assert names <= set(pins), names - set(pins)
+    assert all(v and v[0].isdigit() for v in pins.values())
+
+
+def test_constraints_hold_no_test_tools_or_the_project_itself():
+    bad = {"pytest", "pytest-asyncio", "respx", "playwright", "borg-route", "borg_route", "spacy"}
+    assert not bad & set(_pins())
+
+
+def test_dockerfile_installs_with_the_constraints():
+    text = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+    assert "constraints.txt" in text.split("COPY src")[0]
+    assert "pip install -c constraints.txt -e ." in text

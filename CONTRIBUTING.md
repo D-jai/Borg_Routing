@@ -24,6 +24,10 @@ One logical change per commit. If the message needs "and", split it. Commit only
 
 Run only the tests for the code you changed, locally. The whole suite is the CI run, once per ready batch of changes, never a local run, and never twice on one tree. Docker tests and Playwright run only in CI, never on the development laptop. CI minutes are paid: do not re-run a failed CI run without a local fix first, and put `[skip ci]` on docs-only commits, but never on the head of a push.
 
+## Pinned versions
+
+`constraints.txt` pins the runtime dependencies for the Dockerfile and the install guide. To refresh it: make a new venv, `pip install .`, `pip freeze --exclude-editable` (leave out the project itself) into `constraints.txt`, run the focused tests for anything the new versions touch, then commit it.
+
 ## Never delete
 
 Do not delete files or data. Move them to an archive folder outside the repository and record what moved, and only with the owner's agreement. Inside git, use `git rm` only after the file is archived.

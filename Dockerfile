@@ -7,9 +7,9 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /app
 
-COPY pyproject.toml ./
+COPY pyproject.toml constraints.txt ./
 COPY src ./src
-RUN pip install -e .
+RUN pip install -c constraints.txt -e .
 
 COPY main.py ./
 COPY data/capability_matrix.yaml data/curated_models.yaml data/skills.yaml ./data/
