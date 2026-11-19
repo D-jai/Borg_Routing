@@ -22,7 +22,7 @@ One logical change per commit. If the message needs "and", split it. Commit only
 
 ## Tests
 
-Run the tests for the code you changed. Run the whole suite (`python -m pytest`) before a pull request or at the end of a phase of work, not after every edit. Do not run the same full set twice on one tree.
+Run only the tests for the code you changed, locally. The whole suite is the CI run, once per ready batch of changes, never a local run, and never twice on one tree. Docker tests and Playwright run only in CI, never on the development laptop. CI minutes are paid: do not re-run a failed CI run without a local fix first, and put `[skip ci]` on docs-only commits, but never on the head of a push.
 
 ## Never delete
 
