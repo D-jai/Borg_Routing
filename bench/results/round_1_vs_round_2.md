@@ -52,6 +52,8 @@ Cost is the median of three runs for A, B and D, and the one run for C. "% of di
 | D | borg_cloud | 0.0535 (median of 3) | 87.9% of the on-request direct arm | accuracy 0.90 on all three runs (within one label 1.00); 3 canaries sent to cloud models per run, 0 in the answer | composed, all three | reported, not judged (D's rule needs the local arm) |
 | D | borg_local_workers | not run (cloud side only) | not run | not run | not run | not run (neither pass nor fail) |
 
+Job B, round 3: By the rule both attempts count. Without the cut attempt, BORG's cost is about the same as direct's: direct's median with only the finishing attempt is US$0.175432 (runs: US$0.142452, US$0.175432, US$0.181432; the cut first attempt was US$0.143232 on every run), and BORG's median US$0.172783 is 98.5% of that.
+
 No round-3 BORG answer was salvaged, `planner_only`, kept work (BRT-ORC-002) or all columns shown (BRT-ORC-037 warning), so ruling 40e bars none of them.
 
 ## Verdicts, three rounds
@@ -59,7 +61,7 @@ No round-3 BORG answer was salvaged, `planner_only`, kept work (BRT-ORC-002) or 
 | Job | Round 1 | Round 2 | Round 3 |
 |---|---|---|---|
 | A | failed, no win | no win | no win (cost held at 59.6%; quality worse) |
-| B | no win (92%, over 70%) | void (Docker not serving) | **win by the rule** (54.2%, quality held), on an input that is not fresh |
+| B | no win (92%, over 70%) | void (Docker not serving) | **win by the rule** (54.2%, quality held), on an input that is not fresh. By the rule both attempts count. Without the cut attempt, BORG's cost is about the same as direct's (98.5% of direct's US$0.175432) |
 | C | failed, direct wins by default | no win (judge chose direct) | no win (31.6%; judge chose direct; one run) |
 | D | failed | no verdict (local arm not run) | reported, not judged (cloud side only) |
 
