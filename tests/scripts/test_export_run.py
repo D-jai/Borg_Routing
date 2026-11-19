@@ -342,3 +342,41 @@ def test_the_export_step_refuses_to_write_a_file_that_fails_the_strong_check(
     db = tmp_path / "lane.db"
     _make_db(db, run_id=LANE_RUN, lane_mode="raw_local", documents=docs, answer=answer)
     _refused(mod, tmp_path, capsys, monkeypatch, db, LANE_RUN, code, ["--docs-root", str(root)])
+
+
+# --- canaries however they are separated (lead ruling, review round 2) ----------------------
+
+@pytest.mark.parametrize("doc", [
+    {"answer": "ref 7f3a91 ZEBRA LANTERN"},                     # spaces
+    {"answer": "7f3a91_ZEBRA_LANTERN"},                         # underscores
+    {"answer": "ref 7f3a91‑ZEBRA‑LANTERN"},           # non-breaking hyphens
+    {"answer": "ref ７f3a91-ZEBRA-LANTERN"},                # a full-width digit (NFKC)
+    {"answer": "ref ZEBRA-LANTERN"},                            # a part of the body
+    {"answer": "ticket 7F3A91 closed"},                         # the hex part alone
+    {"a": "7f3a91", "b": "ZEBRA-LANTERN"},                      # split across two fields
+    {"a": "note 7f3", "b": "a91zebr", "c": "alantern end"},     # split, no part whole in a field
+])
+def test_a_canary_is_refused_however_it_is_separated(doc):
+    mod = _load()
+    codes = {c for c, _ in mod.problems(doc, _real_docs(), [])}
+    assert "BRT-RPL-010" in codes
+
+
+def test_the_split_check_reads_values_in_order_and_needs_the_whole_body():
+    mod = _load()
+    forms = mod.canary_forms(["Internal reference: CANARY-7f3a91-ZEBRA-LANTERN"])
+    assert forms == [("7f3a91zebralantern", ["7f3a91", "zebralantern"])]
+    # Halves in different fields, no part of 6 or more whole in any one field: only the
+    # in-order concatenation finds it; the same pieces out of order do not.
+    assert mod.has_canary(["7f3a", "91zebralan", "tern"], forms) is True
+    assert mod.has_canary(["tern", "91zebralan", "7f3a"], forms) is False
+    # A key between the halves does not hide them (values are concatenated without keys).
+    doc = {"x": "7f3a", "key_between": "91zebr", "y": "alantern"}
+    assert {c for c, _ in mod.problems(doc, _real_docs(), [])} == {"BRT-RPL-010"}
+
+
+def test_a_canary_given_on_the_command_line_without_a_prefix_is_a_body_of_its_own():
+    mod = _load()
+    forms = mod.canary_forms([], ["ACCT-7323-7664"])
+    assert forms == [("acct73237664", ["73237664"])]          # "acct" is shorter than 6
+    assert mod.has_canary(["account 7323 7664 on file"], forms) is True

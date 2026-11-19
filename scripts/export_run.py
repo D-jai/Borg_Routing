@@ -42,6 +42,7 @@ import shutil
 import sqlite3
 import sys
 import tempfile
+import unicodedata
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -103,6 +104,28 @@ def _decoded(value: object):
             yield from _decoded(v)
 
 
+def _values(value: object):
+    """The string values in exported order, keys left out and JSON held as text read as its
+    own values: the sequence a canary split across two fields would run through."""
+    if isinstance(value, str):
+        s = value.strip()
+        if s[:1] in ("{", "[") and s[-1:] in ("}", "]"):
+            try:
+                inner = json.loads(s)
+            except ValueError:
+                inner = None
+            if isinstance(inner, (dict, list)):
+                yield from _values(inner)
+                return
+        yield value
+    elif isinstance(value, dict):
+        for v in value.values():
+            yield from _values(v)
+    elif isinstance(value, list):
+        for v in value:
+            yield from _values(v)
+
+
 def _scrub_text(text: str, stripped: dict) -> str:
     def key(_m):
         stripped["keys"] += 1
@@ -147,20 +170,61 @@ def scrub(value: object, stripped: dict) -> object:
     return value
 
 
+def stripped(text: object) -> str:
+    """Letters and digits only, lower case, after NFKC normalisation: how canaries are
+    compared, so no separator, case or look-alike character hides one."""
+    return re.sub(r"[^a-z0-9]", "", unicodedata.normalize("NFKC", str(text or "")).lower())
+
+
+def _body_parts(body: str) -> list:
+    """The parts of a canary body of ``MIN_CANARY_BODY`` or more characters: its segments
+    grouped into runs of the same kind (letters only, or holding a digit), each run stripped.
+    ``7f3a91-ZEBRA-LANTERN`` gives ``7f3a91`` and ``zebralantern``."""
+    segments = [s for s in re.split(r"[^A-Za-z0-9]+", unicodedata.normalize("NFKC", body)) if s]
+    groups: list = []
+    for seg in segments:
+        kind = any(ch.isdigit() for ch in seg)
+        if groups and groups[-1][0] == kind:
+            groups[-1][1].append(seg)
+        else:
+            groups.append((kind, [seg]))
+    return [p for p in (stripped("".join(g)) for _, g in groups) if len(p) >= MIN_CANARY_BODY]
+
+
 def canary_forms(texts: list, extra: Optional[list] = None) -> list:
-    """Every canary to refuse, lower case: each ``...CANARY-<body>`` token found in ``texts``
-    (the run's documents) or given in ``extra``, both whole and as its bare body."""
-    forms = set()
+    """``[(stripped body, [stripped parts])]`` for every canary to refuse: each
+    ``...CANARY-<body>`` token found in ``texts`` (the run's documents) or ``extra``, and each
+    ``extra`` value without a prefix as a body of its own."""
+    found: dict = {}
+
+    def add(body: str) -> None:
+        key = stripped(body)
+        if len(key) >= MIN_CANARY_BODY:
+            found.setdefault(key, _body_parts(body))
+
     for text in list(texts) + list(extra or []):
-        for m in CANARY_TOKEN.finditer(text or ""):
-            whole, body = m.group(0).strip("-_"), m.group(1).strip("-_")
-            forms.add(whole.lower())
-            if len(body) >= MIN_CANARY_BODY:
-                forms.add(body.lower())
+        for m in CANARY_TOKEN.finditer(unicodedata.normalize("NFKC", text or "")):
+            add(m.group(1))
     for c in extra or []:
-        if c and c.strip():
-            forms.add(c.strip().lower())
-    return sorted(forms)
+        if c and c.strip() and not CANARY_TOKEN.search(c):
+            add(c)
+    return sorted(found.items())
+
+
+def has_canary(leaves: list, forms: list, values: Optional[list] = None) -> bool:
+    """Lead ruling (review round 2): a leaf holds a stripped body or any stripped part of 6 or
+    more characters, or the stripped concatenation of all leaves, in exported order, holds a
+    stripped body (a canary split across two fields). The concatenation runs over ``values``
+    (the string values without keys, ``_values``) when given, so a key between two halves
+    does not hide the split; both orders are checked."""
+    flat = [stripped(s) for s in leaves]
+    whole = "".join(flat) + "\n" + "".join(stripped(s) for s in (values or []))
+    for body, parts in forms:
+        if body in whole:
+            return True
+        if any(body in s or any(p in s for p in parts) for s in flat):
+            return True
+    return False
 
 
 def _windows(text: str) -> set:
@@ -181,7 +245,7 @@ def problems(doc: dict, documents: dict, canaries: list) -> list:
     joined = "\n".join(lowered)
     found = []
     forms = canary_forms(list(documents.values()), canaries)
-    if CANARY_RE.search(joined) or any(c in joined for c in forms):
+    if CANARY_RE.search(joined) or has_canary(leaves, forms, list(_values(doc))):
         found.append(("BRT-RPL-010", "the export holds a canary"))
     owner: dict = {}
     for name, text in documents.items():
