@@ -1,6 +1,7 @@
 """The claims checker (scripts/check_claims.py), run on temp files only."""
 import importlib.util
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -264,3 +265,12 @@ def test_a_number_in_bold_or_code_still_counts(tree, capsys, shown):
     assert code == 0, out
     code, out = run(tree, [ROW1, ROW2, row], DOC + f"Costs {shown.replace('42.5', '41')} <!-- claim C03 -->\n", capsys)
     assert code == 1
+
+
+def test_the_readme_carries_no_result_number_or_saving_claim():
+    """Planner ruling 38a: until the planner sends wording, the README points to bench/results."""
+    text = (REPO / "README.md").read_text(encoding="utf-8")
+    prose = re.sub(r"<!--.*?-->", "", text, flags=re.S)
+    assert "%" not in prose
+    assert "US$" not in prose and "$" not in prose
+    assert "cheaper" not in prose.lower() and "saving" not in prose.lower() and "saves" not in prose.lower()
