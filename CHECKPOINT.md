@@ -28,7 +28,8 @@ If this session stopped abruptly: `git log` and `git status` show what landed; a
   - the README screenshot: `docs/design/screens/run_page_replay.png`, cropped from CI run 44458986061's interface check;
   - the STAGE_MEMORY row;
   - the borg_pack worktree moved to `C:\Stage\_archive\2026-11-19-borg_pack_worktree\`, with a ledger row (Deej deletes later).
-- **Waits on the planner's wording, after Deej has answered** (ruling 42c): README numbers, "where it pays" and "where it does not pay", claims rows for any measured figure, and deck numbers. No sentence about cost or savings goes anywhere before that.
+- **The README's results sections are in** (ruling 43, `ab50834` and `989ce30`, CI run 44466801655 green): "What was measured" and "Where the cost goes". Every figure is backed by a claims row and checked against its file by the README guard, and rounded against BORG_ROUTE.
+- **Waits on Deej, then on the planner's exact text:** the deck numbers (6.1) and anything for a post. No other cost or savings sentence goes anywhere.
 - **Still with Deej:** the protected-file questions the planner holds. The old locked worktree `.claude/worktrees/agent-a19a671ce8c1a100d` and the `borg_36a` worktree are untouched.
 
 ## Earlier waypoint (19-Nov-2026, about 00:40): round 3 done, report with the planner
