@@ -21,7 +21,17 @@ Lead session `borg-route-f1` (Opus 5.5) since 02:20 on 16-Nov-2026. Every work o
 
 If this session stopped abruptly: `git log` and `git status` show what landed; any uncommitted changes belong to an in-progress builder: read the diff, finish or stash it, record which in the build log.
 
-## Where I left off (19-Nov-2026, about 00:40): round 3 done, report with the planner
+## Where I left off (19-Nov-2026, about 01:10): proof work closed
+
+- **Round 3 is done and the report is accepted** (planner ruling 42). Proof work is closed by Deej's ruling 15: there are no more rounds and no trials. By the rule job B won (its input is not fresh; without direct's cut first attempt BORG costs 98.5% of direct). A and C did not win; D is reported only. Report: `bench/results/2026_11_19/summary.md`; side-by-side page: `bench/results/round_1_vs_round_2.md`.
+- **Closing chores done:**
+  - the README screenshot: `docs/design/screens/run_page_replay.png`, cropped from CI run 44458986061's interface check;
+  - the STAGE_MEMORY row;
+  - the borg_pack worktree moved to `C:\Stage\_archive\2026-11-19-borg_pack_worktree\`, with a ledger row (Deej deletes later).
+- **Waits on the planner's wording, after Deej has answered** (ruling 42c): README numbers, "where it pays" and "where it does not pay", claims rows for any measured figure, and deck numbers. No sentence about cost or savings goes anywhere before that.
+- **Still with Deej:** the protected-file questions the planner holds. The old locked worktree `.claude/worktrees/agent-a19a671ce8c1a100d` and the `borg_36a` worktree are untouched.
+
+## Earlier waypoint (19-Nov-2026, about 00:40): round 3 done, report with the planner
 
 - **Round 3 is run and reported** (rulings 40, 41): 20 runs, US$3.8507 of US$6. By the rule job B won (its input is not fresh), A and C did not, D is reported only. Report: `bench/results/2026_11_19/summary.md`; side-by-side page `bench/results/round_1_vs_round_2.md` (three rounds). README, deck and posts cite nothing until the planner sends wording after Deej has seen it.
 - **Next:** the planner's reading of the report; the README screenshot (CI run 44458986061's ui-check artifact); the STAGE_MEMORY row; remove the borg_pack worktree.

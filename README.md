@@ -2,7 +2,9 @@
 
 Breaks a job into steps and sends each step to the cheapest model that can do it, local or cloud. <!-- claim C01 --> With the private lane on (`raw_local` or `all_local`), the steps that read your documents run only on your own machines. <!-- claim C36 -->
 
-<!-- TODO (planner): add the Run-view screenshot here. the CI interface check (work order 4.6) produces the images; the lead commits one to docs/design/screens/ after the final demo re-record. -->
+![The Run page of a replayed demo run: the replay notice, the receipt and the plan of steps](docs/design/screens/run_page_replay.png)
+
+*The Run page after a replay of demo job one, from the CI interface check. The request text in the middle of the page is cut out of the picture. The documents in the demo runs are made up, and a demo run is not a benchmark result.*
 
 ## Who it is for
 
